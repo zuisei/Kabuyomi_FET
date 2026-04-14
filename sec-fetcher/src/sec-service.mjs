@@ -1,4 +1,11 @@
 const DEFAULT_USER_AGENT = "Kabuyomi admin@kabuyomi.app";
+const CACHE_TTL = {
+  tickerSnapshot: 24 * 60 * 60 * 1000,
+  submissions: 30 * 60 * 1000,
+  filing: 24 * 60 * 60 * 1000,
+  concept: 6 * 60 * 60 * 1000,
+  companyFacts: 6 * 60 * 60 * 1000
+};
 
 export function readConfig(env = process.env) {
   return {
@@ -6,89 +13,109 @@ export function readConfig(env = process.env) {
     userAgent: env.SEC_USER_AGENT ?? DEFAULT_USER_AGENT,
     rateLimitPerSecond: parsePositiveInt(env.SEC_RATE_LIMIT_PER_SECOND, 8),
     retryCount: parsePositiveInt(env.SEC_FETCHER_RETRY_COUNT, 2),
-    initialBackoffMs: parsePositiveInt(env.SEC_FETCHER_INITIAL_BACKOFF_MS, 400)
+    initialBackoffMs: parsePositiveInt(env.SEC_FETCHER_INITIAL_BACKOFF_MS, 400),
+    requestTimeoutMs: parsePositiveInt(env.SEC_FETCHER_HTTP_TIMEOUT_MS, 12_000)
   };
 }
 
 export function createSecService(config = readConfig()) {
   const limiter = createRateLimiter(config.rateLimitPerSecond);
+  const responseCache = new Map();
 
-  async function secJson(url, { allowNotFound = false } = {}) {
-    const response = await fetchWithRetry(
-      url,
-      {
-        method: "GET",
-        headers: {
-          "user-agent": config.userAgent,
-          accept: "application/json,text/html;q=0.9,*/*;q=0.8"
-        }
-      },
-      config,
-      limiter
-    );
+  async function secJson(url, { allowNotFound = false, cacheTtlMs = 0 } = {}) {
+    return withCache(responseCache, url, cacheTtlMs, async () => {
+      const response = await fetchWithRetry(
+        url,
+        {
+          method: "GET",
+          headers: {
+            "user-agent": config.userAgent,
+            accept: "application/json,text/html;q=0.9,*/*;q=0.8"
+          }
+        },
+        config,
+        limiter
+      );
 
-    if (allowNotFound && response.status === 404) {
-      return null;
-    }
+      if (allowNotFound && response.status === 404) {
+        return null;
+      }
 
-    if (!response.ok) {
-      throw new Error(`SEC request failed (${response.status}) for ${url}`);
-    }
+      if (!response.ok) {
+        throw new Error(`SEC request failed (${response.status}) for ${url}`);
+      }
 
-    return response.json();
+      return response.json();
+    });
   }
 
-  async function secText(url) {
-    const response = await fetchWithRetry(
-      url,
-      {
-        method: "GET",
-        headers: {
-          "user-agent": config.userAgent,
-          accept: "application/json,text/html;q=0.9,*/*;q=0.8"
-        }
-      },
-      config,
-      limiter
-    );
+  async function secText(url, { cacheTtlMs = 0 } = {}) {
+    return withCache(responseCache, url, cacheTtlMs, async () => {
+      const response = await fetchWithRetry(
+        url,
+        {
+          method: "GET",
+          headers: {
+            "user-agent": config.userAgent,
+            accept: "application/json,text/html;q=0.9,*/*;q=0.8"
+          }
+        },
+        config,
+        limiter
+      );
 
-    if (!response.ok) {
-      throw new Error(`SEC request failed (${response.status}) for ${url}`);
-    }
+      if (!response.ok) {
+        throw new Error(`SEC request failed (${response.status}) for ${url}`);
+      }
 
-    return response.text();
+      return response.text();
+    });
   }
 
   return {
     async fetchTickerSnapshot() {
-      return secJson("https://www.sec.gov/files/company_tickers_exchange.json");
+      return secJson("https://www.sec.gov/files/company_tickers_exchange.json", {
+        cacheTtlMs: CACHE_TTL.tickerSnapshot
+      });
     },
 
     async fetchSubmissions(cik) {
-      return secJson(`https://data.sec.gov/submissions/CIK${String(cik).padStart(10, "0")}.json`);
+      return secJson(`https://data.sec.gov/submissions/CIK${String(cik).padStart(10, "0")}.json`, {
+        cacheTtlMs: CACHE_TTL.submissions
+      });
     },
 
     async fetchFiling({ cik, accessionNumber, primaryDocument }) {
       const accessionNoDash = String(accessionNumber).replaceAll("-", "");
       const url = `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${accessionNoDash}/${primaryDocument}`;
-      const html = await secText(url);
+      const html = await secText(url, { cacheTtlMs: CACHE_TTL.filing });
       return { html, primaryDocumentUrl: url };
     },
 
     async fetchMetrics({ cik, tags }) {
-      const concepts = {};
+      const normalizedCik = String(cik).padStart(10, "0");
+      const conceptEntriesPromise = Promise.all(
+        tags.map(async (tag) => [
+          tag,
+          await secJson(
+            `https://data.sec.gov/api/xbrl/companyconcept/CIK${normalizedCik}/us-gaap/${tag}.json`,
+            {
+              allowNotFound: true,
+              cacheTtlMs: CACHE_TTL.concept
+            }
+          )
+        ])
+      );
 
-      for (const tag of tags) {
-        concepts[tag] = await secJson(
-          `https://data.sec.gov/api/xbrl/companyconcept/CIK${String(cik).padStart(10, "0")}/us-gaap/${tag}.json`,
-          { allowNotFound: true }
-        );
-      }
-
-      const companyFacts =
+      const companyFactsPromise =
         tags.length > 0
-          ? await secJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${String(cik).padStart(10, "0")}.json`)
-          : null;
+          ? secJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${normalizedCik}.json`, {
+              cacheTtlMs: CACHE_TTL.companyFacts
+            })
+          : Promise.resolve(null);
+
+      const [conceptEntries, companyFacts] = await Promise.all([conceptEntriesPromise, companyFactsPromise]);
+      const concepts = Object.fromEntries(conceptEntries);
 
       return { concepts, companyFacts };
     }
@@ -108,9 +135,15 @@ export async function fetchWithRetry(url, init, config, limiter) {
   let lastError = null;
 
   for (let attempt = 0; attempt <= config.retryCount; attempt += 1) {
+    let timeout;
     try {
       await limiter.take();
-      const response = await fetch(url, init);
+      const controller = new AbortController();
+      timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
+      const response = await fetch(url, {
+        ...init,
+        signal: controller.signal
+      });
       if (shouldRetryResponse(response) && attempt < config.retryCount) {
         await sleep(config.initialBackoffMs * (attempt + 1));
         continue;
@@ -122,10 +155,36 @@ export async function fetchWithRetry(url, init, config, limiter) {
         throw error;
       }
       await sleep(config.initialBackoffMs * (attempt + 1));
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
   throw lastError ?? new Error(`Request failed for ${url}`);
+}
+
+async function withCache(cache, key, ttlMs, loader) {
+  const now = Date.now();
+  const cached = cache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  try {
+    const value = await loader();
+    if (ttlMs > 0) {
+      cache.set(key, {
+        value,
+        expiresAt: now + ttlMs
+      });
+    }
+    return value;
+  } catch (error) {
+    if (cached) {
+      return cached.value;
+    }
+    throw error;
+  }
 }
 
 function shouldRetryResponse(response) {

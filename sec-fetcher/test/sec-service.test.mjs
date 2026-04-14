@@ -43,6 +43,34 @@ test("fetchWithRetry retries 5xx responses before succeeding", async () => {
   }
 });
 
+test("fetchWithRetry retries after timeout and then succeeds", async () => {
+  const originalFetch = global.fetch;
+  let calls = 0;
+
+  global.fetch = async (_, init) => {
+    calls += 1;
+    if (calls === 1) {
+      return new Promise((_, reject) => {
+        init.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+      });
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+
+  try {
+    const response = await fetchWithRetry(
+      "https://example.com",
+      { method: "GET" },
+      { retryCount: 1, initialBackoffMs: 1, requestTimeoutMs: 1 },
+      { take: async () => {} }
+    );
+    assert.equal(response.status, 200);
+    assert.equal(calls, 2);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test("fetchMetrics returns concept map and company facts through the shared SEC service", async () => {
   const calls = [];
   const originalFetch = global.fetch;
@@ -73,5 +101,41 @@ test("fetchMetrics returns concept map and company facts through the shared SEC 
     assert.equal(calls.length, 3);
   } finally {
     global.fetch = originalFetch;
+  }
+});
+
+test("fetchSubmissions serves cached data when the upstream later fails", async () => {
+  const originalFetch = global.fetch;
+  const originalNow = Date.now;
+  let calls = 0;
+  let now = 0;
+
+  Date.now = () => now;
+  global.fetch = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return new Response(JSON.stringify({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } }), { status: 200 });
+    }
+    throw new Error("upstream failure");
+  };
+
+  try {
+    const service = createSecService({
+      internalToken: "",
+      userAgent: "Kabuyomi admin@kabuyomi.app",
+      rateLimitPerSecond: 8,
+      retryCount: 0,
+      initialBackoffMs: 1,
+      requestTimeoutMs: 10
+    });
+    const first = await service.fetchSubmissions("0000320193");
+    now = 31 * 60 * 1000;
+    const second = await service.fetchSubmissions("0000320193");
+
+    assert.deepEqual(second, first);
+    assert.equal(calls, 2);
+  } finally {
+    global.fetch = originalFetch;
+    Date.now = originalNow;
   }
 });

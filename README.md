@@ -29,7 +29,9 @@ npm run dev
 ```
 
 For local Workers development, set `SEC_FETCHER_BASE_URL=http://127.0.0.1:8789` and the same
-`SEC_FETCHER_SHARED_SECRET` in `workers/.dev.vars`.
+`SEC_FETCHER_SHARED_SECRET` in `workers/.dev.vars`. You can also override `GEMINI_MODEL`
+there to switch between hosted Gemini/Gemma model IDs without code changes. If needed,
+`GEMINI_TIMEOUT_MS` and `SEC_FETCHER_TIMEOUT_MS` can be tuned there as well.
 
 ### iOS
 
