@@ -1,0 +1,98 @@
+import type { RemoteConfig } from "./lib/remote-config";
+
+export interface Env {
+  GEMINI_API_KEY?: string;
+  SEC_USER_AGENT: string;
+  SEC_FETCHER_BASE_URL?: string;
+  SEC_FETCHER_SHARED_SECRET?: string;
+  KABUYOMI_CACHE: KVNamespace;
+  SEC_RATE_LIMITER: DurableObjectNamespace;
+  FILING_LOCK: DurableObjectNamespace;
+  USER_QUOTA: DurableObjectNamespace;
+  ENTITLEMENT: DurableObjectNamespace;
+}
+
+export interface RemoteConfigEnvelope {
+  config: RemoteConfig;
+  updatedAt: string;
+}
+
+export interface TickerRecord {
+  ticker: string;
+  companyName: string;
+  cik: string;
+  exchange: string;
+}
+
+export interface FilingReference {
+  cik: string;
+  ticker: string;
+  companyName: string;
+  exchange: string;
+  formType: "10-K" | "10-Q";
+  accessionNumber: string;
+  primaryDocument: string;
+  filedAt: string;
+  periodOfReport: string;
+}
+
+export interface MetricSnapshot {
+  logicalName: "revenue" | "netIncome" | "epsBasic" | "operatingIncome" | "operatingCashFlow";
+  tagUsed: string;
+  value: number;
+  unit: string;
+  periodEnd: string;
+  comparisonValue?: number;
+  yoyPercent?: number;
+}
+
+export interface SourceChunkRecord {
+  sourceId: string;
+  sectionType: "md_a" | "xbrl_metric";
+  sectionTitle: string;
+  sourceLabel: string;
+  text: string;
+  startOffset: number;
+  endOffset: number;
+  tagName?: string;
+  sortOrder: number;
+}
+
+export interface SummaryLine {
+  text: string;
+  sourceIds: string[];
+}
+
+export interface SummaryRecord {
+  verdict: string;
+  highlights: SummaryLine[];
+  changes: SummaryLine[];
+}
+
+export interface FilingCacheRecord {
+  filingKey: string;
+  ticker: string;
+  companyName: string;
+  cik: string;
+  formType: "10-K" | "10-Q";
+  filedAt: string;
+  periodOfReport: string;
+  primaryDocumentUrl: string;
+  mdaText: string;
+  mdaTokenCount: number;
+  metrics: MetricSnapshot[];
+  sourceChunks: SourceChunkRecord[];
+  summary: SummaryRecord;
+  generatedAt: string;
+  extractorVersion: string;
+  promptVersion: string;
+}
+
+export interface UsageState {
+  plan: "free" | "pro";
+  chatsUsed: number;
+  chatLimit: number;
+  stocksUsed: number;
+  stockLimit: number;
+  dateJST: string;
+}

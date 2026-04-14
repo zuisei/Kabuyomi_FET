@@ -1,0 +1,36 @@
+name = "kabuyomi-api"
+main = "src/index.ts"
+compatibility_date = "2026-04-12"
+compatibility_flags = ["nodejs_compat"]
+
+kv_namespaces = [
+  { binding = "KABUYOMI_CACHE", id = "a4a32620a641471dbc404cb15d1a79e7", preview_id = "a4a32620a641471dbc404cb15d1a79e7" }
+]
+
+[vars]
+SEC_USER_AGENT = "Kabuyomi admin@kabuyomi.app"
+# Configure SEC_FETCHER_BASE_URL in .dev.vars for local wrangler dev
+# Configure SEC_FETCHER_BASE_URL and SEC_FETCHER_SHARED_SECRET in deployed environments
+
+[[durable_objects.bindings]]
+name = "SEC_RATE_LIMITER"
+class_name = "SecRateLimiterDO"
+
+[[durable_objects.bindings]]
+name = "FILING_LOCK"
+class_name = "FilingLockDO"
+
+[[durable_objects.bindings]]
+name = "USER_QUOTA"
+class_name = "UserQuotaDO"
+
+[[durable_objects.bindings]]
+name = "ENTITLEMENT"
+class_name = "EntitlementDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SecRateLimiterDO", "FilingLockDO", "UserQuotaDO", "EntitlementDO"]
+
+[triggers]
+crons = ["0 18 * * *"]
