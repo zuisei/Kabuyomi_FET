@@ -7,10 +7,25 @@ kv_namespaces = [
   { binding = "KABUYOMI_CACHE", id = "a4a32620a641471dbc404cb15d1a79e7", preview_id = "a4a32620a641471dbc404cb15d1a79e7" }
 ]
 
+d1_databases = [
+  # Remote D1 is provisioned. The schema lives under ./d1/migrations.
+  { binding = "DB", database_name = "kabuyomi-history", database_id = "027391a6-9f29-4a9b-b153-d277ad972e5f", migrations_dir = "./d1/migrations" }
+]
+
+r2_buckets = [
+  # This bucket stores heavy filing payloads so KV can stay hot-path oriented.
+  # R2 must be enabled on the Cloudflare account before remote deploys will succeed.
+  { binding = "FILINGS_BUCKET", bucket_name = "kabuyomi-filings", preview_bucket_name = "kabuyomi-filings-dev" }
+]
+
 [vars]
 SEC_USER_AGENT = "Kabuyomi admin@kabuyomi.app"
+SEC_FETCHER_BASE_URL = "https://kabuyomifet-production.up.railway.app"
+GEMINI_MODEL = "gemma-4-31b-it"
+GEMINI_TIMEOUT_MS = "12000"
+SEC_FETCHER_TIMEOUT_MS = "25000"
 # Configure SEC_FETCHER_BASE_URL in .dev.vars for local wrangler dev
-# Configure SEC_FETCHER_BASE_URL and SEC_FETCHER_SHARED_SECRET in deployed environments
+# Configure SEC_FETCHER_BASE_URL, SEC_FETCHER_SHARED_SECRET, and BACKFILL_SHARED_SECRET in deployed environments
 
 [[durable_objects.bindings]]
 name = "SEC_RATE_LIMITER"

@@ -4,8 +4,27 @@ import Observation
 @MainActor
 @Observable
 final class AppModel {
+    enum AppTab: Hashable {
+        case conversation
+        case search
+        case settings
+    }
+
+    enum CompanyTabPreference: String {
+        case chat
+        case overview
+    }
+
     static let publicMonetizationEnabled = false
     static let billingSyncEnabled = false
+
+    static let aiConsentKey = "kabuyomi.aiConsentGranted"
+    static let devUnlimitedModeKey = "kabuyomi.devUnlimitedModeEnabled"
+    static let savedTickersKey = "kabuyomi.savedTickers"
+    static let recentTickersKey = "kabuyomi.recentTickers"
+    static let lastViewedTickerKey = "kabuyomi.lastViewedTicker"
+    static let activeConversationTickerKey = "kabuyomi.activeConversationTicker"
+    static let showStarterCompaniesKey = "kabuyomi.showStarterCompanies"
 
     let apiClient: APIClient
     let persistence: PersistenceController
@@ -13,10 +32,14 @@ final class AppModel {
     let subscriptionStore: SubscriptionStore
 
     var watchlist: [WatchlistCard] = []
+    var recentCompanies: [WatchlistCard] = []
     var searchResults: [SearchItem] = []
     var usage: UsagePayload?
     var companyCache: [String: CompanyPayload] = [:]
     var chatHistoryCache: [String: [LocalChatMessage]] = [:]
+    var selectedTab: AppTab = .conversation
+    var lastViewedTicker = UserDefaults.standard.string(forKey: "kabuyomi.lastViewedTicker")
+    var activeConversationTicker = UserDefaults.standard.string(forKey: "kabuyomi.activeConversationTicker")
 
     var homeIsLoading = false
     var searchIsLoading = false
@@ -25,11 +48,18 @@ final class AppModel {
     var purchaseIsRunning = false
     var activeAlert: AppAlertState?
     var aiConsentGranted = UserDefaults.standard.bool(forKey: "kabuyomi.aiConsentGranted")
+    var showStarterCompanies = UserDefaults.standard.object(forKey: "kabuyomi.showStarterCompanies") as? Bool ?? true
+    #if DEBUG
+    var devUnlimitedModeEnabled = UserDefaults.standard.bool(forKey: "kabuyomi.devUnlimitedModeEnabled")
+    #else
+    let devUnlimitedModeEnabled = false
+    #endif
 
     private var subscriptionObservationTask: Task<Void, Never>?
     private var searchGeneration = 0
-
-    static let aiConsentKey = "kabuyomi.aiConsentGranted"
+    private var addingTickers: Set<String> = []
+    private var savedTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.savedTickers") ?? [])
+    private var recentTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.recentTickers") ?? [])
 
     init(
         apiClient: APIClient,
@@ -50,6 +80,18 @@ final class AppModel {
             deviceIdentity: .shared,
             subscriptionStore: .shared
         )
+    }
+
+    var starterCompanies: [StarterCompany] {
+        StarterCompany.defaults
+    }
+
+    var rootConversationTicker: String {
+        activeConversationTicker
+            ?? lastViewedTicker
+            ?? savedTickers.first
+            ?? starterCompanies.first?.ticker
+            ?? "AAPL"
     }
 
     func bootstrap() async {
@@ -120,18 +162,11 @@ final class AppModel {
     }
 
     func addToWatchlist(_ item: SearchItem) async {
-        do {
-            let result = try await apiClient.addToWatchlist(
-                ticker: item.ticker,
-                deviceKey: deviceIdentity.deviceKey()
-            )
-            try persistence.saveCompany(result.company, searchItem: item)
-            usage = result.usage
-            companyCache[item.ticker] = result.company
-            loadHomeFromPersistence()
-        } catch {
-            handle(error)
-        }
+        await saveTicker(item.ticker, searchItem: item, redirectToConversation: true)
+    }
+
+    func saveTicker(_ ticker: String) async {
+        await saveTicker(ticker, searchItem: nil, redirectToConversation: false)
     }
 
     func loadCompany(ticker: String, forceRefresh: Bool = false) async {
@@ -148,7 +183,7 @@ final class AppModel {
         defer { companyIsLoading = false }
 
         do {
-            let deviceKey = deviceIdentity.deviceKey()
+            let deviceKey = quotaDeviceKey(purpose: forceRefresh ? "company-refresh-\(ticker)" : "company-\(ticker)")
             let company = try await (
                 forceRefresh
                     ? apiClient.refreshCompany(ticker: ticker, deviceKey: deviceKey)
@@ -188,7 +223,7 @@ final class AppModel {
             let response = try await apiClient.sendChat(
                 filingKey: company.filingKey,
                 question: trimmed,
-                deviceKey: deviceIdentity.deviceKey()
+                deviceKey: quotaDeviceKey(purpose: "chat-\(ticker)")
             )
             try persistence.saveChat(question: trimmed, response: response, for: company)
             usage = response.usage
@@ -249,6 +284,21 @@ final class AppModel {
         UserDefaults.standard.set(value, forKey: Self.aiConsentKey)
     }
 
+    func setShowStarterCompanies(_ value: Bool) {
+        showStarterCompanies = value
+        UserDefaults.standard.set(value, forKey: Self.showStarterCompaniesKey)
+    }
+
+    #if DEBUG
+    func setDevUnlimitedMode(_ value: Bool) {
+        devUnlimitedModeEnabled = value
+        UserDefaults.standard.set(value, forKey: Self.devUnlimitedModeKey)
+        Task {
+            await refreshUsage()
+        }
+    }
+    #endif
+
     func confirmAIConsent() {
         setAIConsent(true)
         dismissAlert()
@@ -258,11 +308,84 @@ final class AppModel {
         companyCache[ticker] ?? persistence.loadCompany(ticker: ticker)?.company
     }
 
+    func openConversation(for ticker: String) {
+        let normalized = normalizedTicker(ticker)
+        activeConversationTicker = normalized
+        UserDefaults.standard.set(normalized, forKey: Self.activeConversationTickerKey)
+        selectedTab = .conversation
+    }
+
+    func companyCard(for ticker: String) -> WatchlistCard? {
+        if let saved = watchlist.first(where: { $0.ticker == ticker }) {
+            return saved
+        }
+
+        if let recent = recentCompanies.first(where: { $0.ticker == ticker }) {
+            return recent
+        }
+
+        return persistence.loadCompanyCard(ticker: ticker)
+    }
+
+    func isTickerInWatchlist(_ ticker: String) -> Bool {
+        savedTickers.contains(normalizedTicker(ticker))
+    }
+
+    func isAddingTicker(_ ticker: String) -> Bool {
+        addingTickers.contains(normalizedTicker(ticker))
+    }
+
     func chatHistory(for ticker: String) -> [LocalChatMessage] {
         if let cached = chatHistoryCache[ticker] {
             return cached
         }
         return persistence.loadCompany(ticker: ticker)?.chatHistory ?? []
+    }
+
+    func companyTabPreference(for ticker: String) -> CompanyTabPreference {
+        if let stored = UserDefaults.standard.string(forKey: companyTabKey(for: ticker)),
+           let tab = CompanyTabPreference(rawValue: stored) {
+            return tab
+        }
+        return .chat
+    }
+
+    func setCompanyTabPreference(_ preference: CompanyTabPreference, for ticker: String) {
+        UserDefaults.standard.set(preference.rawValue, forKey: companyTabKey(for: ticker))
+    }
+
+    func recordCompanyVisit(ticker: String) {
+        guard let company = companyPayload(for: ticker) else { return }
+
+        let normalized = normalizedTicker(ticker)
+        lastViewedTicker = normalized
+        UserDefaults.standard.set(normalized, forKey: Self.lastViewedTickerKey)
+        activeConversationTicker = normalized
+        UserDefaults.standard.set(normalized, forKey: Self.activeConversationTickerKey)
+        setLastSeenFilingKey(company.filingKey, for: normalized)
+
+        recentTickers.removeAll(where: { $0 == normalized })
+        recentTickers.insert(normalized, at: 0)
+        recentTickers = Array(recentTickers.prefix(10))
+        UserDefaults.standard.set(recentTickers, forKey: Self.recentTickersKey)
+
+        loadHomeFromPersistence()
+    }
+
+    func hasNewFiling(for card: WatchlistCard) -> Bool {
+        guard let lastSeen = UserDefaults.standard.string(forKey: lastSeenFilingKeyKey(for: card.ticker)) else {
+            return false
+        }
+        return lastSeen != card.filingKey
+    }
+
+    func latestSavedFilings(limit: Int) -> [WatchlistCard] {
+        Array(watchlist.sorted { $0.filedAt > $1.filedAt }.prefix(limit))
+    }
+
+    func recentCompanyCards(limit: Int, includeSaved: Bool = false) -> [WatchlistCard] {
+        let filteredTickers = includeSaved ? recentTickers : recentTickers.filter { !savedTickers.contains($0) }
+        return Array(orderedCards(for: filteredTickers).prefix(limit))
     }
 
     func dismissAlert() {
@@ -273,11 +396,28 @@ final class AppModel {
         do {
             try persistence.reset()
             watchlist = []
+            recentCompanies = []
             companyCache = [:]
             chatHistoryCache = [:]
+            savedTickers = []
+            recentTickers = []
+            lastViewedTicker = nil
+            activeConversationTicker = nil
+            UserDefaults.standard.removeObject(forKey: Self.savedTickersKey)
+            UserDefaults.standard.removeObject(forKey: Self.recentTickersKey)
+            UserDefaults.standard.removeObject(forKey: Self.lastViewedTickerKey)
+            UserDefaults.standard.removeObject(forKey: Self.activeConversationTickerKey)
+            clearCompanyNavigationState()
         } catch {
             activeAlert = AppAlertState(message: error.localizedDescription, kind: .dismissOnly)
         }
+    }
+
+    func removeFromWatchlist(_ ticker: String) {
+        let normalized = normalizedTicker(ticker)
+        savedTickers.removeAll(where: { $0 == normalized })
+        UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
+        loadHomeFromPersistence()
     }
 
     var currentPlan: String {
@@ -287,14 +427,82 @@ final class AppModel {
         return usage?.plan ?? subscriptionStore.plan
     }
 
+    var isDevUnlimitedModeActive: Bool {
+        #if DEBUG
+        return devUnlimitedModeEnabled
+        #else
+        return false
+        #endif
+    }
+
+    var devUnlimitedModeDescription: String {
+        "DEBUG 専用の無限チャット / 無限保存モードです。TestFlight / Release では必ず外してください。"
+    }
+
+    func displayPlanLabel(for usage: UsagePayload) -> String {
+        isDevUnlimitedModeActive ? "DEV∞" : usage.displayPlanLabel
+    }
+
+    func displayChatLimit(for usage: UsagePayload) -> String {
+        isDevUnlimitedModeActive ? "∞" : usage.displayChatLimit
+    }
+
+    func displayStockLimit(for usage: UsagePayload) -> String {
+        isDevUnlimitedModeActive ? "∞" : usage.displayStockLimit
+    }
+
     var shouldShowUpgradeButton: Bool {
         Self.publicMonetizationEnabled && currentPlan != "pro"
+    }
+
+    private func saveTicker(_ ticker: String, searchItem: SearchItem?, redirectToConversation: Bool) async {
+        let normalized = normalizedTicker(ticker)
+        guard !addingTickers.contains(normalized) else { return }
+
+        if isTickerInWatchlist(normalized) {
+            if redirectToConversation {
+                selectedTab = .conversation
+            }
+            activeAlert = AppAlertState(
+                message: "\(normalized) はすでに保存済みです。",
+                kind: .dismissOnly
+            )
+            return
+        }
+
+        addingTickers.insert(normalized)
+        defer { addingTickers.remove(normalized) }
+
+        do {
+            let result = try await apiClient.addToWatchlist(
+                ticker: normalized,
+                deviceKey: quotaDeviceKey(purpose: "bookmark-add-\(normalized)")
+            )
+            try persistence.saveCompany(result.company, searchItem: searchItem)
+            usage = result.usage
+            companyCache[normalized] = result.company
+            chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized)?.chatHistory ?? []
+            savedTickers.removeAll(where: { $0 == normalized })
+            savedTickers.insert(normalized, at: 0)
+            savedTickers = Array(savedTickers.prefix(25))
+            UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
+            setLastSeenFilingKey(result.company.filingKey, for: normalized)
+            activeConversationTicker = normalized
+            UserDefaults.standard.set(normalized, forKey: Self.activeConversationTickerKey)
+            loadHomeFromPersistence()
+
+            if redirectToConversation {
+                selectedTab = .conversation
+            }
+        } catch {
+            handle(error)
+        }
     }
 
     private func refreshUsage() async {
         do {
             usage = try await apiClient.fetchUsage(
-                deviceKey: deviceIdentity.deviceKey()
+                deviceKey: quotaDeviceKey(purpose: "usage")
             )
         } catch {
             guard !shouldIgnore(error) else { return }
@@ -305,14 +513,14 @@ final class AppModel {
     }
 
     private func refreshWatchlistFromServer() async {
-        let tickers = Array(Set(watchlist.map(\.ticker))).sorted()
+        let tickers = savedTickers
         guard !tickers.isEmpty else { return }
 
         for ticker in tickers {
             do {
                 let company = try await apiClient.refreshCompany(
                     ticker: ticker,
-                    deviceKey: deviceIdentity.deviceKey()
+                    deviceKey: quotaDeviceKey(purpose: "bookmark-refresh-\(ticker)")
                 )
                 try persistence.saveCompany(company, searchItem: nil)
                 companyCache[ticker] = company
@@ -361,14 +569,28 @@ final class AppModel {
     }
 
     private func presentableMessage(for error: Error) -> String {
+        let nsError = error as NSError
+        if let urlError = error as? URLError, urlError.code == .timedOut {
+            return "通信に時間がかかりすぎています。少し待ってから、もう一度試してください。"
+        }
+
+        if nsError.domain == NSURLErrorDomain && nsError.code == URLError.timedOut.rawValue {
+            return "通信に時間がかかりすぎています。少し待ってから、もう一度試してください。"
+        }
+
         let rawMessage = rawMessage(for: error)
+        let normalizedMessage = rawMessage.lowercased()
+
+        if normalizedMessage.contains("timed out") {
+            return "通信に時間がかかりすぎています。少し待ってから、もう一度試してください。"
+        }
 
         if rawMessage.contains("Daily chat quota exceeded") {
             return "本日のベータ版チャット上限に達しました。日付が変わってから再度お試しください。"
         }
 
         if rawMessage.contains("Watchlist limit exceeded") {
-            return "現在のベータ版ウォッチ銘柄上限に達しました。"
+            return "現在のベータ版保存銘柄上限に達しました。"
         }
 
         if rawMessage.contains("No supported filing found") {
@@ -440,6 +662,54 @@ final class AppModel {
     }
 
     private func loadHomeFromPersistence() {
-        watchlist = persistence.loadWatchlistCards()
+        watchlist = orderedCards(for: savedTickers)
+        recentCompanies = orderedCards(for: recentTickers.filter { !savedTickers.contains($0) })
+    }
+
+    private func orderedCards(for tickers: [String]) -> [WatchlistCard] {
+        let cards = persistence.loadCompanyCards(tickers: tickers)
+        let byTicker = Dictionary(uniqueKeysWithValues: cards.map { ($0.ticker, $0) })
+        return tickers.compactMap { byTicker[$0] }
+    }
+
+    private func companyTabKey(for ticker: String) -> String {
+        "kabuyomi.companyTab.\(normalizedTicker(ticker))"
+    }
+
+    private func lastSeenFilingKeyKey(for ticker: String) -> String {
+        "kabuyomi.lastSeenFiling.\(normalizedTicker(ticker))"
+    }
+
+    private func setLastSeenFilingKey(_ filingKey: String, for ticker: String) {
+        UserDefaults.standard.set(filingKey, forKey: lastSeenFilingKeyKey(for: ticker))
+    }
+
+    private func clearCompanyNavigationState() {
+        let defaults = UserDefaults.standard
+        for key in defaults.dictionaryRepresentation().keys {
+            if key.hasPrefix("kabuyomi.companyTab.") || key.hasPrefix("kabuyomi.lastSeenFiling.") {
+                defaults.removeObject(forKey: key)
+            }
+        }
+    }
+
+    private func normalizedTicker(_ ticker: String) -> String {
+        ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private static func normalizedTickers(_ tickers: [String]) -> [String] {
+        var seen = Set<String>()
+        return tickers.compactMap { ticker in
+            let normalized = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { return nil }
+            return normalized
+        }
+    }
+
+    private func quotaDeviceKey(purpose: String) -> String {
+        if isDevUnlimitedModeActive {
+            return "dev-unlimited-\(purpose)-\(UUID().uuidString)"
+        }
+        return deviceIdentity.deviceKey()
     }
 }

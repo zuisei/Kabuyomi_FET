@@ -49,7 +49,7 @@ export function extractMDASection(html: string, formType: "10-K" | "10-Q"): Extr
         continue;
       }
 
-      const candidate = normalizedText.slice(startMatch.index, endMatch.index).trim();
+      const candidate = stripLeadingNoise(normalizedText.slice(startMatch.index, endMatch.index).trim(), patterns.start);
       if (candidate.length < MIN_SECTION_CHARS) {
         continue;
       }
@@ -65,6 +65,31 @@ export function extractMDASection(html: string, formType: "10-K" | "10-Q"): Extr
   }
 
   return null;
+}
+
+function stripLeadingNoise(candidate: string, startPatterns: RegExp[]): string {
+  const innerMatches = findAllMatches(candidate, startPatterns);
+  if (innerMatches.length <= 1) {
+    return candidate;
+  }
+
+  const leadingWindow = candidate.slice(0, Math.min(2_500, candidate.length));
+  const itemMentions = [...leadingWindow.matchAll(/item\s+\d/gi)].length;
+  const looksLikeToc =
+    /table of contents/i.test(leadingWindow) ||
+    /pagepart/i.test(leadingWindow) ||
+    itemMentions >= 3;
+
+  if (!looksLikeToc) {
+    return candidate;
+  }
+
+  const replacement = innerMatches
+    .slice(1)
+    .reverse()
+    .find((match) => match.index >= 120 && candidate.length - match.index >= MIN_SECTION_CHARS);
+
+  return replacement ? candidate.slice(replacement.index).trim() : candidate;
 }
 
 function getPatterns(formType: "10-K" | "10-Q"): PatternPair {
@@ -90,9 +115,8 @@ function getPatterns(formType: "10-K" | "10-Q"): PatternPair {
     ],
     end: [
       /item\s+3\b[\s.: -]*quantitative and qualitative disclosures/gi,
-      /item\s+4\b[\s.: -]*controls and procedures/gi,
-      /item\s+3\b/gi,
-      /item\s+4\b/gi
+      /item\s+3\b[\s.: -]*quantitative and qualitative disclosures about market risk/gi,
+      /item\s+4\b[\s.: -]*controls and procedures/gi
     ]
   };
 }

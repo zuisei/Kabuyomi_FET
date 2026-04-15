@@ -13,6 +13,14 @@ export interface MetricsFetcherResponse {
   companyFacts: CompanyFactsResponse | null;
 }
 
+export interface FilingAssetsFetcherResponse extends MetricsFetcherResponse {
+  html: string;
+  primaryDocumentUrl: string;
+}
+
+const DEFAULT_FETCHER_TIMEOUT_MS = 25_000;
+const DEFAULT_FETCHER_RETRY_COUNT = 1;
+
 export async function fetchTickerSnapshotFromFetcher(env: Env): Promise<TickerSnapshotEnvelope> {
   return fetcherRequest(env, "/internal/sec/tickers-snapshot", {});
 }
@@ -37,6 +45,19 @@ export async function fetchMetricsFromFetcher(
   return fetcherRequest(env, "/internal/sec/metrics", { cik, tags });
 }
 
+export async function fetchFilingAssetsFromFetcher(
+  filing: FilingReference,
+  tags: string[],
+  env: Env
+): Promise<FilingAssetsFetcherResponse> {
+  return fetcherRequest(env, "/internal/sec/filing-assets", {
+    cik: filing.cik,
+    accessionNumber: filing.accessionNumber,
+    primaryDocument: filing.primaryDocument,
+    tags
+  });
+}
+
 async function fetcherRequest<ResponseType>(
   env: Env,
   path: string,
@@ -46,25 +67,80 @@ async function fetcherRequest<ResponseType>(
     throw new AppError(503, "SEC data is temporarily unavailable", "SEC fetcher base URL is not configured");
   }
 
-  const headers = new Headers({ "content-type": "application/json" });
-  if (env.SEC_FETCHER_SHARED_SECRET) {
-    headers.set("x-internal-token", env.SEC_FETCHER_SHARED_SECRET);
+  const timeoutMs = parsePositiveInt(env.SEC_FETCHER_TIMEOUT_MS, DEFAULT_FETCHER_TIMEOUT_MS);
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= DEFAULT_FETCHER_RETRY_COUNT; attempt += 1) {
+    const headers = new Headers({ "content-type": "application/json" });
+    if (env.SEC_FETCHER_SHARED_SECRET) {
+      headers.set("x-internal-token", env.SEC_FETCHER_SHARED_SECRET);
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(new URL(path, env.SEC_FETCHER_BASE_URL).toString(), {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+
+      const text = await response.text();
+      if (!response.ok) {
+        const retryable = response.status === 429 || response.status >= 500;
+        lastError = new AppError(
+          response.status >= 500 ? 503 : 502,
+          "SEC data is temporarily unavailable",
+          `SEC fetcher request failed (${response.status}) for ${path}: ${text}`
+        );
+        if (retryable && attempt < DEFAULT_FETCHER_RETRY_COUNT) {
+          continue;
+        }
+        throw lastError;
+      }
+
+      return JSON.parse(text) as ResponseType;
+    } catch (error) {
+      lastError = error;
+      const timedOut =
+        (error instanceof Error && error.name === "AbortError") ||
+        (error instanceof DOMException && error.name === "AbortError");
+      if ((timedOut || !(error instanceof AppError)) && attempt < DEFAULT_FETCHER_RETRY_COUNT) {
+        continue;
+      }
+
+      if (timedOut) {
+        throw new AppError(
+          503,
+          "SEC data is temporarily unavailable",
+          `SEC fetcher request timed out after ${timeoutMs}ms for ${path}`
+        );
+      }
+
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      throw new AppError(
+        503,
+        "SEC data is temporarily unavailable",
+        `SEC fetcher request failed for ${path}: ${String(error)}`
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
-  const response = await fetch(new URL(path, env.SEC_FETCHER_BASE_URL).toString(), {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  const text = await response.text();
-  if (!response.ok) {
-    throw new AppError(
-      response.status >= 500 ? 503 : 502,
-      "SEC data is temporarily unavailable",
-      `SEC fetcher request failed (${response.status}) for ${path}: ${text}`
-    );
+  if (lastError instanceof AppError) {
+    throw lastError;
   }
 
-  return JSON.parse(text) as ResponseType;
+  throw new AppError(503, "SEC data is temporarily unavailable", `SEC fetcher request failed for ${path}`);
+}
+
+function parsePositiveInt(rawValue: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(rawValue ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }

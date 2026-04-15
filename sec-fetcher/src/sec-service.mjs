@@ -92,6 +92,20 @@ export function createSecService(config = readConfig()) {
       return { html, primaryDocumentUrl: url };
     },
 
+    async fetchFilingAssets({ cik, accessionNumber, primaryDocument, tags }) {
+      const [filing, metrics] = await Promise.all([
+        this.fetchFiling({ cik, accessionNumber, primaryDocument }),
+        this.fetchMetrics({ cik, tags })
+      ]);
+
+      return {
+        html: filing.html,
+        primaryDocumentUrl: filing.primaryDocumentUrl,
+        concepts: metrics.concepts,
+        companyFacts: metrics.companyFacts
+      };
+    },
+
     async fetchMetrics({ cik, tags }) {
       const normalizedCik = String(cik).padStart(10, "0");
       const conceptEntriesPromise = Promise.all(
@@ -164,26 +178,52 @@ export async function fetchWithRetry(url, init, config, limiter) {
 }
 
 async function withCache(cache, key, ttlMs, loader) {
-  const now = Date.now();
   const cached = cache.get(key);
-  if (cached && cached.expiresAt > now) {
-    return cached.value;
-  }
-
-  try {
-    const value = await loader();
-    if (ttlMs > 0) {
-      cache.set(key, {
-        value,
-        expiresAt: now + ttlMs
-      });
-    }
-    return value;
-  } catch (error) {
-    if (cached) {
+  if (cached) {
+    if (cached.value !== undefined && cached.expiresAt > Date.now()) {
       return cached.value;
     }
-    throw error;
+
+    if (cached.pending) {
+      return cached.pending;
+    }
+  }
+
+  const pending = (async () => {
+    try {
+      const value = await loader();
+      if (ttlMs > 0) {
+        cache.set(key, {
+          value,
+          expiresAt: Date.now() + ttlMs
+        });
+      } else {
+        cache.delete(key);
+      }
+      return value;
+    } catch (error) {
+      if (cached?.value !== undefined) {
+        cache.set(key, cached);
+        return cached.value;
+      }
+      cache.delete(key);
+      throw error;
+    }
+  })();
+
+  cache.set(key, {
+    value: cached?.value,
+    expiresAt: cached?.expiresAt ?? 0,
+    pending
+  });
+
+  try {
+    return await pending;
+  } finally {
+    const latest = cache.get(key);
+    if (latest?.pending === pending && latest.value === undefined) {
+      cache.delete(key);
+    }
   }
 }
 

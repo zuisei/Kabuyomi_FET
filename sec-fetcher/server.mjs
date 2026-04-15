@@ -57,6 +57,18 @@ const server = http.createServer(async (request, response) => {
       return respondJson(response, 200, payload);
     }
 
+    if (request.url === "/internal/sec/filing-assets") {
+      const cik = String(body?.cik ?? "").trim();
+      const accessionNumber = String(body?.accessionNumber ?? "").trim();
+      const primaryDocument = String(body?.primaryDocument ?? "").trim();
+      const tags = Array.isArray(body?.tags) ? body.tags.map((tag) => String(tag)) : [];
+      if (!cik || !accessionNumber || !primaryDocument) {
+        return respondJson(response, 400, { error: "cik, accessionNumber, and primaryDocument are required" });
+      }
+      const payload = await service.fetchFilingAssets({ cik, accessionNumber, primaryDocument, tags });
+      return respondJson(response, 200, payload);
+    }
+
     return respondJson(response, 404, { error: "Not found" });
   } catch (error) {
     return respondJson(response, 502, { error: error instanceof Error ? error.message : "Unknown error" });

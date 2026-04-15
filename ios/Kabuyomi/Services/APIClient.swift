@@ -1,11 +1,16 @@
 import Foundation
 
 struct APIClient {
+    private enum Timeout {
+        static let request: TimeInterval = 45
+        static let resource: TimeInterval = 75
+    }
+
     private let session: URLSession
     private let baseURL: URL
 
     init(
-        session: URLSession = .shared,
+        session: URLSession = APIClient.makeSession(),
         baseURL: URL = APIClient.defaultBaseURL()
     ) {
         self.session = session
@@ -97,6 +102,7 @@ struct APIClient {
     ) throws -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = method
+        request.timeoutInterval = Timeout.request
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
         if let body {
@@ -126,6 +132,14 @@ struct APIClient {
         }
 
         return URL(string: "https://kabuyomi-api.dznqjmctk7.workers.dev")!
+    }
+
+    private static func makeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = Timeout.request
+        configuration.timeoutIntervalForResource = Timeout.resource
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
     }
 
     private static func configuredBaseURL() -> URL? {

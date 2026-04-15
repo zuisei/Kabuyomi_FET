@@ -97,6 +97,7 @@ final class ChatMessageEntity: NSManagedObject {
 @objc(MessageSourceRefEntity)
 final class MessageSourceRefEntity: NSManagedObject {
     @NSManaged var id: UUID
+    @NSManaged var sourceKindSnapshot: String?
     @NSManaged var sourceLabelSnapshot: String
     @NSManaged var excerpt: String
     @NSManaged var chatMessage: ChatMessageEntity?
@@ -258,6 +259,7 @@ enum CoreDataSchema {
         let messageSourceRef = entity(name: "MessageSourceRefEntity", className: NSStringFromClass(MessageSourceRefEntity.self))
         messageSourceRef.properties = [
             attribute("id", type: .UUIDAttributeType),
+            attribute("sourceKindSnapshot", type: .stringAttributeType, optional: true),
             attribute("sourceLabelSnapshot", type: .stringAttributeType),
             attribute("excerpt", type: .stringAttributeType)
         ]

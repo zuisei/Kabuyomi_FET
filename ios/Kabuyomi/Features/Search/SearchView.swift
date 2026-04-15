@@ -29,7 +29,11 @@ struct SearchView: View {
                         ScrollView {
                             LazyVStack(spacing: 12) {
                                 ForEach(appModel.searchResults) { item in
-                                    SearchResultCard(item: item) {
+                                    SearchResultCard(
+                                        item: item,
+                                        isAdding: appModel.isAddingTicker(item.ticker),
+                                        isAdded: appModel.isTickerInWatchlist(item.ticker)
+                                    ) {
                                         isSearchFieldFocused = false
                                         Task { await appModel.addToWatchlist(item) }
                                     }
@@ -62,10 +66,10 @@ struct SearchView: View {
 
     private var searchBar: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("SEC filing を読む企業を追加")
+            Text("質問したい銘柄を保存")
                 .font(.system(.headline, design: .rounded, weight: .bold))
 
-            Text("v1 は 10-K / 10-Q に対応しています。20-F / 6-K 企業は追加できません。")
+            Text("v1 は 10-K / 10-Q に対応しています。20-F / 6-K 企業はまだ保存できません。")
                 .font(.system(.footnote, design: .rounded))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
 
@@ -131,6 +135,8 @@ private struct SearchEmptyState: View {
 
 private struct SearchResultCard: View {
     let item: SearchItem
+    let isAdding: Bool
+    let isAdded: Bool
     let addAction: () -> Void
 
     var body: some View {
@@ -141,18 +147,60 @@ private struct SearchResultCard: View {
                 Text(item.companyName)
                     .font(.system(.body, design: .rounded))
                     .foregroundStyle(KabuyomiTheme.inkSoft)
-                Text(item.exchange)
-                    .font(.caption)
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                HStack(spacing: 8) {
+                    searchMetaPill(
+                        title: item.latestFormType.map { "最新 \($0)" } ?? "10-K / 10-Q 対応",
+                        tint: KabuyomiTheme.accent
+                    )
+                    searchMetaPill(title: item.exchange, tint: KabuyomiTheme.inkMuted)
+                }
             }
 
             Spacer()
 
-            Button("追加", action: addAction)
-                .buttonStyle(.borderedProminent)
-                .tint(KabuyomiTheme.accent)
+            Button(action: addAction) {
+                HStack(spacing: 6) {
+                    if isAdding {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                    } else if isAdded {
+                        Image(systemName: "checkmark")
+                    }
+
+                    Text(buttonTitle)
+                }
+                .frame(minWidth: 82)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(isAdded ? KabuyomiTheme.inkMuted : KabuyomiTheme.accent)
+            .disabled(isAdding || isAdded)
         }
         .padding(16)
         .kabuyomiCard(.primary, radius: 24)
+    }
+
+    private var buttonTitle: String {
+        if isAdding {
+            return "保存中"
+        }
+
+        if isAdded {
+            return "保存済み"
+        }
+
+        return "保存"
+    }
+
+    private func searchMetaPill(title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.system(.caption, design: .rounded, weight: .semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(tint.opacity(0.08))
+            )
     }
 }
