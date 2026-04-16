@@ -139,3 +139,50 @@ test("fetchSubmissions serves cached data when the upstream later fails", async 
     Date.now = originalNow;
   }
 });
+
+test("fetchFilingAssets deduplicates concurrent upstream work", async () => {
+  const originalFetch = global.fetch;
+  const calls = [];
+
+  global.fetch = async (url) => {
+    calls.push(String(url));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    if (String(url).includes("/companyfacts/")) {
+      return new Response(JSON.stringify({ facts: { "us-gaap": {} } }), { status: 200 });
+    }
+    if (String(url).includes("/companyconcept/")) {
+      return new Response(JSON.stringify({ units: { USD: [{ val: 1, form: "10-Q" }] } }), { status: 200 });
+    }
+    return new Response("<html>filing</html>", { status: 200 });
+  };
+
+  try {
+    const service = createSecService({
+      internalToken: "",
+      userAgent: "Kabuyomi admin@kabuyomi.app",
+      rateLimitPerSecond: 8,
+      retryCount: 0,
+      initialBackoffMs: 1,
+      requestTimeoutMs: 50
+    });
+
+    await Promise.all([
+      service.fetchFilingAssets({
+        cik: "0000320193",
+        accessionNumber: "0000320193-26-000057",
+        primaryDocument: "a10q.htm",
+        tags: ["Revenues"]
+      }),
+      service.fetchFilingAssets({
+        cik: "0000320193",
+        accessionNumber: "0000320193-26-000057",
+        primaryDocument: "a10q.htm",
+        tags: ["Revenues"]
+      })
+    ]);
+
+    assert.equal(calls.length, 3);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

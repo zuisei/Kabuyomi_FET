@@ -10,6 +10,7 @@ struct SearchItem: Decodable, Identifiable, Hashable {
     let companyName: String
     let cik: String
     let exchange: String
+    let latestFormType: String?
 
     var id: String { ticker }
 }
@@ -81,8 +82,47 @@ struct ChatResponse: Decodable {
     let usage: UsagePayload
 }
 
+enum MessageSourceKind: String, Decodable, Hashable {
+    case secFiling = "sec_filing"
+    case webSupplement = "web_supplement"
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = (try? container.decode(String.self)) ?? Self.secFiling.rawValue
+        self = Self(rawValue: rawValue) ?? .secFiling
+    }
+
+    var groundingCaption: String {
+        switch self {
+        case .secFiling:
+            "SEC filing 根拠"
+        case .webSupplement:
+            "外部補足"
+        }
+    }
+
+    var badgeTitle: String {
+        switch self {
+        case .secFiling:
+            "SEC"
+        case .webSupplement:
+            "Web"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .secFiling:
+            "checkmark.shield"
+        case .webSupplement:
+            "globe"
+        }
+    }
+}
+
 struct ChatSourcePayload: Decodable, Identifiable, Hashable {
     let sourceId: String
+    let sourceKind: MessageSourceKind
     let sectionType: String
     let sourceLabel: String
     let excerpt: String
@@ -129,6 +169,7 @@ struct BillingSyncResponse: Decodable {
 }
 
 struct WatchlistCard: Identifiable, Hashable {
+    let filingKey: String
     let ticker: String
     let companyName: String
     let formType: String
@@ -137,6 +178,21 @@ struct WatchlistCard: Identifiable, Hashable {
     let metrics: [MetricPayload]
 
     var id: String { ticker }
+}
+
+struct StarterCompany: Identifiable, Hashable {
+    let ticker: String
+    let companyName: String
+
+    var id: String { ticker }
+
+    static let defaults: [StarterCompany] = [
+        StarterCompany(ticker: "AAPL", companyName: "Apple Inc."),
+        StarterCompany(ticker: "MSFT", companyName: "Microsoft Corporation"),
+        StarterCompany(ticker: "NVDA", companyName: "NVIDIA Corporation"),
+        StarterCompany(ticker: "AMZN", companyName: "Amazon.com, Inc."),
+        StarterCompany(ticker: "TSLA", companyName: "Tesla, Inc.")
+    ]
 }
 
 struct LocalCompanyRecord {
@@ -155,6 +211,7 @@ struct LocalChatMessage: Identifiable, Hashable {
 
 struct LocalMessageSourceRef: Identifiable, Hashable {
     let id: UUID
+    let sourceKind: MessageSourceKind
     let sourceLabelSnapshot: String
     let excerpt: String
 }

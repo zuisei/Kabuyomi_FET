@@ -28,22 +28,27 @@ final class PersistenceController {
         container.viewContext.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
     }
 
-    func loadWatchlistCards() -> [WatchlistCard] {
+    func loadWatchlistCards(savedTickers: [String]) -> [WatchlistCard] {
+        guard !savedTickers.isEmpty else { return [] }
+
+        let cardsByTicker = Dictionary(uniqueKeysWithValues: loadCompanyCards(tickers: savedTickers).map { ($0.ticker, $0) })
+        return savedTickers.compactMap { cardsByTicker[$0] }
+    }
+
+    func loadCompanyCard(ticker: String) -> WatchlistCard? {
+        loadCompanyCards(tickers: [ticker]).first
+    }
+
+    func loadCompanyCards(tickers: [String]) -> [WatchlistCard] {
+        guard !tickers.isEmpty else { return [] }
+
         let request = StockEntity.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(key: "lastUpdatedAt", ascending: false)]
+        request.predicate = NSPredicate(format: "ticker IN %@", tickers)
 
         do {
-            return try viewContext.fetch(request).compactMap { stock in
-                guard let latest = stock.filingArray.first else { return nil }
-                return WatchlistCard(
-                    ticker: stock.ticker,
-                    companyName: stock.companyName,
-                    formType: latest.formType,
-                    filedAt: latest.filedAt,
-                    verdict: latest.summary?.verdictText ?? "",
-                    metrics: latest.metricArray.map(metricPayload(from:))
-                )
-            }
+            return try viewContext.fetch(request)
+                .compactMap(cardPayload(from:))
+                .sorted { $0.filedAt > $1.filedAt }
         } catch {
             return []
         }
@@ -90,6 +95,7 @@ final class PersistenceController {
                     sources: message.sourceRefArray.map {
                         LocalMessageSourceRef(
                             id: $0.id,
+                            sourceKind: MessageSourceKind(rawValue: $0.sourceKindSnapshot ?? "") ?? .secFiling,
                             sourceLabelSnapshot: $0.sourceLabelSnapshot,
                             excerpt: $0.excerpt
                         )
@@ -155,6 +161,7 @@ final class PersistenceController {
         for source in response.sources {
             let ref = MessageSourceRefEntity(context: viewContext)
             ref.id = UUID()
+            ref.sourceKindSnapshot = source.sourceKind.rawValue
             ref.sourceLabelSnapshot = source.sourceLabel
             ref.excerpt = source.excerpt
             ref.chatMessage = assistantMessage
@@ -181,6 +188,32 @@ final class PersistenceController {
         }
 
         try viewContext.save()
+    }
+
+    func removeStock(ticker: String) throws {
+        let request = StockEntity.fetchRequest()
+        request.fetchLimit = 1
+        request.predicate = NSPredicate(format: "ticker == %@", ticker)
+
+        guard let stock = try viewContext.fetch(request).first else {
+            return
+        }
+
+        viewContext.delete(stock)
+        try viewContext.save()
+    }
+
+    private func cardPayload(from stock: StockEntity) -> WatchlistCard? {
+        guard let latest = stock.filingArray.first else { return nil }
+        return WatchlistCard(
+            filingKey: latest.filingKey,
+            ticker: stock.ticker,
+            companyName: stock.companyName,
+            formType: latest.formType,
+            filedAt: latest.filedAt,
+            verdict: latest.summary?.verdictText ?? "",
+            metrics: latest.metricArray.map(metricPayload(from:))
+        )
     }
 
     private func fetchOrCreateStock(ticker: String) throws -> StockEntity {

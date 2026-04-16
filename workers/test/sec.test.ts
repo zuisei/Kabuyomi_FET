@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickComparisonFiling, pickLatestSupportedFiling, sortTickerSearchResults } from "../src/clients/sec";
+import { lookupTicker, pickComparisonFiling, pickLatestSupportedFiling, sortTickerSearchResults } from "../src/clients/sec";
 import { readQuotaIdentity } from "../src/lib/pipeline";
 import type { TickerRecord } from "../src/env";
 
@@ -68,6 +68,31 @@ describe("SEC filing selection", () => {
 
     expect(ranked[0]?.ticker).toBe("TSM");
     expect(ranked[1]?.ticker).toBe("TSMWF");
+  });
+
+  it("resolves exact ticker lookups from the cached snapshot without search enrichment", async () => {
+    const match = await lookupTicker("aapl", {
+      KABUYOMI_CACHE: {
+        get: async () => ({
+          updatedAt: "2026-04-15T00:00:00.000Z",
+          items: [
+            {
+              ticker: "AAPL",
+              companyName: "Apple Inc.",
+              cik: "0000320193",
+              exchange: "Nasdaq"
+            }
+          ]
+        })
+      }
+    } as never);
+
+    expect(match).toEqual({
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      cik: "0000320193",
+      exchange: "Nasdaq"
+    });
   });
 
   it("ignores client-supplied quota subjects and derives identity from device key", () => {

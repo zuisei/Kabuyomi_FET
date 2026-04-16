@@ -17,6 +17,10 @@ describe("worker routing", () => {
         KABUYOMI_CACHE: {
           get: vi.fn().mockResolvedValue(null)
         }
+      } as never,
+      {
+        waitUntil: vi.fn(),
+        passThroughOnException: vi.fn()
       } as never
     );
 

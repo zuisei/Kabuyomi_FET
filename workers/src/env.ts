@@ -2,10 +2,16 @@ import type { RemoteConfig } from "./lib/remote-config";
 
 export interface Env {
   GEMINI_API_KEY?: string;
+  GEMINI_MODEL?: string;
+  GEMINI_TIMEOUT_MS?: string;
   SEC_USER_AGENT: string;
   SEC_FETCHER_BASE_URL?: string;
   SEC_FETCHER_SHARED_SECRET?: string;
+  SEC_FETCHER_TIMEOUT_MS?: string;
+  BACKFILL_SHARED_SECRET?: string;
   KABUYOMI_CACHE: KVNamespace;
+  DB: D1Database;
+  FILINGS_BUCKET: R2Bucket;
   SEC_RATE_LIMITER: DurableObjectNamespace;
   FILING_LOCK: DurableObjectNamespace;
   USER_QUOTA: DurableObjectNamespace;
@@ -22,6 +28,7 @@ export interface TickerRecord {
   companyName: string;
   cik: string;
   exchange: string;
+  latestFormType?: "10-K" | "10-Q";
 }
 
 export interface FilingReference {

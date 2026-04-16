@@ -1,10 +1,22 @@
 import type { Env } from "./env";
-import { ChatRequestSchema, SearchQuerySchema, WatchlistAddRequestSchema } from "./lib/contracts";
-import { ensureLatestFiling, buildChatResponse, consumeChatQuota, consumeStockQuota, loadFilingByKey, loadUsage, readQuotaIdentity } from "./lib/pipeline";
+import { BackfillHistoryRequestSchema, ChatRequestSchema, SearchQuerySchema, WatchlistAddRequestSchema } from "./lib/contracts";
+import {
+  ensureLatestFiling,
+  buildChatResponse,
+  consumeChatQuota,
+  consumeStockQuota,
+  ensureHistoricalFilingStored,
+  loadFilingByKey,
+  loadUsage,
+  readQuotaIdentity
+} from "./lib/pipeline";
+import { refreshTrackedFilings } from "./lib/daily-refresh";
 import { isAppError } from "./lib/errors";
+import { backfillHistoricalFilings } from "./lib/history-store";
 import { logEvent } from "./lib/logging";
 import { loadRemoteConfig } from "./lib/remote-config";
 import { badRequest, json, notFound, serverError, unavailable } from "./lib/response";
+import { resolveTrackedTickers } from "./lib/tracked-tickers";
 import { refreshTickerSnapshot, searchTickers } from "./clients/sec";
 import { EntitlementDO } from "./durable/entitlement";
 import { FilingLockDO } from "./durable/filing-lock";
@@ -14,10 +26,33 @@ import { UserQuotaDO } from "./durable/user-quota";
 export { EntitlementDO, FilingLockDO, SecRateLimiterDO, UserQuotaDO };
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     try {
       const url = new URL(request.url);
       const config = await loadRemoteConfig(env);
+
+      if (request.method === "POST" && url.pathname === "/v1/internal/backfill/history") {
+        if (!isAuthorizedInternalRequest(request, env)) {
+          return json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        const parsed = BackfillHistoryRequestSchema.safeParse(await request.json());
+        if (!parsed.success) {
+          return badRequest("Invalid backfill payload");
+        }
+
+        const result = await backfillHistoricalFilings(
+          {
+            ...parsed.data,
+            tickers: parsed.data.tickers?.length ? parsed.data.tickers : resolveTrackedTickers(config)
+          },
+          env,
+          config,
+          ensureHistoricalFilingStored
+        );
+
+        return json(result);
+      }
 
       if (config.maintenanceMode) {
         return unavailable("Kabuyomi is under maintenance");
@@ -46,7 +81,7 @@ export default {
         }
 
         const identity = readQuotaIdentity(request, { requireDeviceKey: true });
-        const filing = await ensureLatestFiling(parsed.data.ticker, env, config);
+        const filing = await ensureLatestFiling(parsed.data.ticker, env, config, { executionContext: ctx });
         const usage = await consumeStockQuota(identity, parsed.data.ticker, env, config);
         return json({
           company: serializeCompanyResponse(filing),
@@ -59,9 +94,8 @@ export default {
         if (!ticker) {
           return badRequest("Ticker is required");
         }
-        const identity = readQuotaIdentity(request, { requireDeviceKey: true });
-        const filing = await ensureLatestFiling(ticker, env, config);
-        await consumeStockQuota(identity, ticker, env, config);
+        readQuotaIdentity(request, { requireDeviceKey: true });
+        const filing = await ensureLatestFiling(ticker, env, config, { executionContext: ctx });
         return json(serializeCompanyResponse(filing));
       }
 
@@ -70,18 +104,17 @@ export default {
         if (!ticker) {
           return badRequest("Ticker is required");
         }
-        const identity = readQuotaIdentity(request, { requireDeviceKey: true });
+        readQuotaIdentity(request, { requireDeviceKey: true });
         let filing;
         try {
-          filing = await ensureLatestFiling(ticker, env, config, { forceRemoteCheck: true });
+          filing = await ensureLatestFiling(ticker, env, config, { forceRemoteCheck: true, executionContext: ctx });
         } catch (error) {
           if (isAppError(error) && error.status >= 500) {
-            filing = await ensureLatestFiling(ticker, env, config);
+            filing = await ensureLatestFiling(ticker, env, config, { executionContext: ctx });
           } else {
             throw error;
           }
         }
-        await consumeStockQuota(identity, ticker, env, config);
         return json(serializeCompanyResponse(filing));
       }
 
@@ -102,7 +135,7 @@ export default {
 
         const identity = readQuotaIdentity(request, { requireDeviceKey: true });
         const startedAt = Date.now();
-        const answer = await buildChatResponse(filing, parsed.data.question, env);
+        const answer = await buildChatResponse(filing, parsed.data.question, env, config);
         const usage = await consumeChatQuota(identity, env, config);
         logEvent("chat_request", {
           filingKey: parsed.data.filingKey,
@@ -143,7 +176,9 @@ export default {
   },
 
   async scheduled(_: ScheduledController, env: Env): Promise<void> {
+    const config = await loadRemoteConfig(env);
     await refreshTickerSnapshot(env);
+    await refreshTrackedFilings(env, config);
   }
 };
 
@@ -162,4 +197,30 @@ function serializeCompanyResponse(filing: Awaited<ReturnType<typeof ensureLatest
     sourceChunks: filing.sourceChunks,
     lastUpdatedAt: filing.generatedAt
   };
+}
+
+function isAuthorizedInternalRequest(request: Request, env: Env): boolean {
+  const configured = env.BACKFILL_SHARED_SECRET?.trim();
+  if (!configured) {
+    return false;
+  }
+
+  const supplied = request.headers.get("x-internal-token")?.trim() ?? "";
+  return timingSafeEqual(configured, supplied);
+}
+
+function timingSafeEqual(left: string, right: string): boolean {
+  const encoder = new TextEncoder();
+  const leftBytes = encoder.encode(left);
+  const rightBytes = encoder.encode(right);
+
+  if (leftBytes.length !== rightBytes.length) {
+    return false;
+  }
+
+  let mismatch = 0;
+  for (let index = 0; index < leftBytes.length; index += 1) {
+    mismatch |= leftBytes[index]! ^ rightBytes[index]!;
+  }
+  return mismatch === 0;
 }

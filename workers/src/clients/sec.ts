@@ -1,5 +1,6 @@
 import type { Env, FilingReference, MetricSnapshot, TickerRecord } from "../env";
 import {
+  fetchFilingAssetsFromFetcher,
   fetchFilingHtmlFromFetcher,
   fetchMetricsFromFetcher,
   fetchSubmissionsFromFetcher,
@@ -71,7 +72,7 @@ export async function searchTickers(query: string, env: Env): Promise<{ items: T
   const snapshot = await getTickerSnapshot(env);
   const normalizedQuery = query.trim().toLowerCase();
 
-  const items = sortTickerSearchResults(snapshot.items, normalizedQuery);
+  const items = await enrichTickerSearchResults(sortTickerSearchResults(snapshot.items, normalizedQuery), env);
 
   return {
     items: items.slice(0, 20),
@@ -98,6 +99,33 @@ export function sortTickerSearchResults(items: TickerRecord[], normalizedQuery: 
       return left.item.ticker.localeCompare(right.item.ticker);
     })
     .map((candidate) => candidate.item);
+}
+
+const SEARCH_FORM_TYPE_ENRICH_LIMIT = 8;
+
+async function enrichTickerSearchResults(items: TickerRecord[], env: Env): Promise<TickerRecord[]> {
+  return Promise.all(
+    items.map(async (item, index) => {
+      if (index >= SEARCH_FORM_TYPE_ENRICH_LIMIT) {
+        return item;
+      }
+
+      try {
+        const submissions = await fetchSubmissions(item.cik, env);
+        const latestFiling = pickLatestSupportedFiling(item, submissions);
+        if (!latestFiling) {
+          return item;
+        }
+
+        return {
+          ...item,
+          latestFormType: latestFiling.formType
+        };
+      } catch {
+        return item;
+      }
+    })
+  );
 }
 
 function scoreTickerSearch(item: TickerRecord, query: string): number | null {
@@ -138,8 +166,13 @@ export async function refreshTickerSnapshot(env: Env): Promise<void> {
 }
 
 export async function lookupTicker(ticker: string, env: Env): Promise<TickerRecord | null> {
-  const snapshot = await searchTickers(ticker, env);
-  return snapshot.items.find((item) => item.ticker.toUpperCase() === ticker.toUpperCase()) ?? null;
+  const normalizedTicker = ticker.trim().toUpperCase();
+  if (!normalizedTicker) {
+    return null;
+  }
+
+  const snapshot = await getTickerSnapshot(env);
+  return snapshot.items.find((item) => item.ticker.toUpperCase() === normalizedTicker) ?? null;
 }
 
 export async function fetchSubmissions(cik: string, env: Env): Promise<SubmissionResponse> {
@@ -202,6 +235,10 @@ export function pickComparisonFiling(
   return sorted[0]?.filing ?? null;
 }
 
+export function listSupportedFilings(tickerRecord: TickerRecord, submissions: SubmissionResponse): FilingReference[] {
+  return allSupportedFilings(tickerRecord, submissions);
+}
+
 export function buildFilingKey(extractorVersion: string, filing: FilingReference): string {
   return `${extractorVersion}:${filing.cik}:${accessionWithoutDashes(filing.accessionNumber)}`;
 }
@@ -227,6 +264,34 @@ export async function fetchMetricSnapshots(
     [...new Set(Object.values(METRIC_TAGS).flat())],
     env
   );
+  return buildMetricSnapshotsFromFetcherPayload(filing, comparisonFiling, fetcherPayload);
+}
+
+export async function fetchFilingAssets(
+  filing: FilingReference,
+  comparisonFiling: FilingReference | null,
+  env: Env
+): Promise<FilingHtmlResponse & { metrics: MetricSnapshot[] }> {
+  const fetcherPayload = await fetchFilingAssetsFromFetcher(
+    filing,
+    [...new Set(Object.values(METRIC_TAGS).flat())],
+    env
+  );
+  return {
+    html: fetcherPayload.html,
+    primaryDocumentUrl: fetcherPayload.primaryDocumentUrl,
+    metrics: buildMetricSnapshotsFromFetcherPayload(filing, comparisonFiling, fetcherPayload)
+  };
+}
+
+function buildMetricSnapshotsFromFetcherPayload(
+  filing: FilingReference,
+  comparisonFiling: FilingReference | null,
+  fetcherPayload: {
+    concepts: Record<string, ConceptResponse | null>;
+    companyFacts: CompanyFactsResponse | null;
+  }
+): MetricSnapshot[] {
   const results: MetricSnapshot[] = [];
 
   for (const logicalName of Object.keys(METRIC_TAGS) as MetricName[]) {
