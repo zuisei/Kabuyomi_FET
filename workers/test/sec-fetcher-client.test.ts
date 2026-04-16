@@ -97,4 +97,65 @@ describe("sec fetcher client", () => {
       })
     );
   });
+
+  it("falls back to filing and metrics endpoints when filing-assets is unavailable on the fetcher", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "Not found" }), { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ html: "<html>fallback</html>", primaryDocumentUrl: "https://sec.test/fallback" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ concepts: { Revenues: null }, companyFacts: null }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await fetchFilingAssetsFromFetcher(
+      {
+        cik: "0000320193",
+        ticker: "AAPL",
+        companyName: "Apple Inc.",
+        exchange: "Nasdaq",
+        formType: "10-Q",
+        accessionNumber: "0000320193-26-000057",
+        primaryDocument: "a10q.htm",
+        filedAt: "2026-02-03",
+        periodOfReport: "2025-12-28"
+      },
+      ["Revenues"],
+      {
+        SEC_FETCHER_BASE_URL: "http://127.0.0.1:8789",
+        SEC_FETCHER_SHARED_SECRET: "secret"
+      } as never
+    );
+
+    expect(response).toEqual({
+      html: "<html>fallback</html>",
+      primaryDocumentUrl: "https://sec.test/fallback",
+      concepts: { Revenues: null },
+      companyFacts: null
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:8789/internal/sec/filing",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.any(Headers)
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:8789/internal/sec/metrics",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.any(Headers)
+      })
+    );
+  });
 });

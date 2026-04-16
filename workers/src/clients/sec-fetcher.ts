@@ -50,12 +50,36 @@ export async function fetchFilingAssetsFromFetcher(
   tags: string[],
   env: Env
 ): Promise<FilingAssetsFetcherResponse> {
-  return fetcherRequest(env, "/internal/sec/filing-assets", {
+  const payload = {
     cik: filing.cik,
     accessionNumber: filing.accessionNumber,
     primaryDocument: filing.primaryDocument,
     tags
-  });
+  };
+
+  try {
+    return await fetcherRequest(env, "/internal/sec/filing-assets", payload);
+  } catch (error) {
+    if (!(error instanceof AppError) || error.status !== 502) {
+      throw error;
+    }
+
+    if (!/failed \(404\) for \/internal\/sec\/filing-assets/i.test(error.message)) {
+      throw error;
+    }
+
+    const [filingResponse, metricsResponse] = await Promise.all([
+      fetchFilingHtmlFromFetcher(filing, env),
+      fetchMetricsFromFetcher(filing.cik, tags, env)
+    ]);
+
+    return {
+      html: filingResponse.html,
+      primaryDocumentUrl: filingResponse.primaryDocumentUrl,
+      concepts: metricsResponse.concepts,
+      companyFacts: metricsResponse.companyFacts
+    };
+  }
 }
 
 async function fetcherRequest<ResponseType>(
