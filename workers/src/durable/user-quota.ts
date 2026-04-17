@@ -1,7 +1,7 @@
 import type { DurableObjectState } from "@cloudflare/workers-types";
 
 interface QuotaBody {
-  action: "state" | "consumeChat" | "consumeStock";
+  action: "state" | "checkChat" | "checkStock" | "consumeChat" | "consumeStock";
   quotaSubject: string;
   plan: "free" | "pro";
   dateJST: string;
@@ -45,11 +45,29 @@ export class UserQuotaDO {
       current.stockLimit = body.stockLimit;
       current.trackedTickers = current.trackedTickers ?? [];
 
+      if (body.action === "checkChat") {
+        if (current.chatsUsed >= current.chatLimit) {
+          return { status: 429, payload: { error: "Daily chat quota exceeded", usage: usagePayload(current) } };
+        }
+        return { status: 200, payload: { usage: usagePayload(current) } };
+      }
+
       if (body.action === "consumeChat") {
         if (current.chatsUsed >= current.chatLimit) {
           return { status: 429, payload: { error: "Daily chat quota exceeded", usage: usagePayload(current) } };
         }
         current.chatsUsed += 1;
+      }
+
+      if (body.action === "checkStock") {
+        const normalizedTicker = body.ticker?.trim().toUpperCase();
+        const alreadyTracked = normalizedTicker ? current.trackedTickers.includes(normalizedTicker) : false;
+
+        if (!alreadyTracked && current.stocksUsed >= current.stockLimit) {
+          return { status: 429, payload: { error: "Watchlist limit exceeded", usage: usagePayload(current) } };
+        }
+
+        return { status: 200, payload: { usage: usagePayload(current) } };
       }
 
       if (body.action === "consumeStock") {

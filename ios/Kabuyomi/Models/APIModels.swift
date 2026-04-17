@@ -13,6 +13,79 @@ struct SearchItem: Decodable, Identifiable, Hashable {
     let latestFormType: String?
 
     var id: String { ticker }
+
+    enum FilingSupportStatus: Hashable {
+        case supported(formType: String)
+        case unsupported(formType: String)
+        case unknown
+    }
+
+    var filingSupportStatus: FilingSupportStatus {
+        guard let latestFormType, !latestFormType.isEmpty else {
+            return .unknown
+        }
+
+        if latestFormType == "10-K" || latestFormType == "10-Q" {
+            return .supported(formType: latestFormType)
+        }
+
+        return .unsupported(formType: latestFormType)
+    }
+
+    var hasSupportedLatestFiling: Bool {
+        if case .supported = filingSupportStatus {
+            return true
+        }
+        return false
+    }
+
+    var isSupportedInV1: Bool {
+        hasSupportedLatestFiling
+    }
+
+    var supportDisplayLabel: String {
+        switch filingSupportStatus {
+        case .supported(let formType):
+            return "最新 \(formType)"
+        case .unsupported(let formType):
+            return "\(formType) 対象"
+        case .unknown:
+            return "10-K / 10-Q 未確認"
+        }
+    }
+
+    var availabilityBadgeTitle: String {
+        switch filingSupportStatus {
+        case .supported:
+            return "保存可"
+        case .unsupported:
+            return "未対応"
+        case .unknown:
+            return "未確認"
+        }
+    }
+
+    var availabilityNote: String {
+        switch filingSupportStatus {
+        case .supported:
+            return "v1 でそのまま保存して会話できます。"
+        case .unsupported(let formType):
+            return "最新 \(formType) は v1 の対象外です。10-K / 10-Q のみ対応しています。"
+        case .unknown:
+            return "10-K / 10-Q を確認できる銘柄のみ保存できます。"
+        }
+    }
+
+    var unsupportedAlertMessage: String {
+        switch filingSupportStatus {
+        case .supported:
+            return ""
+        case .unsupported(let formType):
+            return "この銘柄の最新開示は \(formType) で、Kabuyomi v1 の対象外です。10-K / 10-Q のみ対応しています。"
+        case .unknown:
+            return "この銘柄は 10-K / 10-Q をまだ確認できないため、今は保存できません。"
+        }
+    }
 }
 
 struct CompanyPayload: Decodable, Hashable {

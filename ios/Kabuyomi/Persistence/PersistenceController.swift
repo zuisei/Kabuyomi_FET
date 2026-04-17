@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class PersistenceController {
     static let shared = PersistenceController()
+    private static let managedObjectModel = CoreDataSchema.makeModel()
 
     let container: NSPersistentContainer
 
@@ -12,7 +13,7 @@ final class PersistenceController {
     }
 
     init(inMemory: Bool = false) {
-        container = NSPersistentContainer(name: "Kabuyomi", managedObjectModel: CoreDataSchema.makeModel())
+        container = NSPersistentContainer(name: "Kabuyomi", managedObjectModel: Self.managedObjectModel)
 
         if inMemory {
             container.persistentStoreDescriptions.first?.url = URL(fileURLWithPath: "/dev/null")

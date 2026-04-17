@@ -5,6 +5,8 @@ import type { RemoteConfig } from "./remote-config";
 
 const HISTORY_YEARS = 3;
 const ARCHIVE_PREFIX = "filings";
+const DEFAULT_BACKFILL_FORMS: FilingReference["formType"][] = ["10-K"];
+const DEFAULT_BACKFILL_TOTAL_CAP = 8;
 
 type HistoricalSource = {
   sourceId: string;
@@ -22,17 +24,22 @@ export interface HistoricalChatResponse {
 export interface BackfillHistoryRequest {
   tickers?: string[];
   years: number;
+  forms?: FilingReference["formType"][];
   maxFilingsPerTicker: number;
+  maxTotalFilings?: number;
   cursorByTicker?: Record<string, number>;
 }
 
 export interface BackfillHistoryResult {
   tickers: string[];
   years: number;
+  forms: FilingReference["formType"][];
+  maxTotalFilings: number;
   processedFilings: Array<{ ticker: string; filingKey: string }>;
   skippedFilings: Array<{ ticker: string; filingKey: string; reason: string }>;
   failedTickers: Array<{ ticker: string; reason: string }>;
   nextCursorByTicker: Record<string, number>;
+  totalCapReached: boolean;
 }
 
 interface HistoricalMetricRow {
@@ -223,12 +230,23 @@ export async function backfillHistoricalFilings(
 
   const requestedTickers = normalizeTickers(request.tickers ?? []);
   const tickers = requestedTickers.length > 0 ? requestedTickers : [];
+  const requestedForms = resolveBackfillForms(request.forms);
+  const maxTotalFilings = resolveMaxTotalFilings(request.maxTotalFilings);
   const processedFilings: Array<{ ticker: string; filingKey: string }> = [];
   const skippedFilings: Array<{ ticker: string; filingKey: string; reason: string }> = [];
   const failedTickers: Array<{ ticker: string; reason: string }> = [];
   const nextCursorByTicker: Record<string, number> = {};
+  let remainingBudget = maxTotalFilings;
+  let totalCapReached = false;
 
-  for (const ticker of tickers) {
+  for (let tickerIndex = 0; tickerIndex < tickers.length; tickerIndex += 1) {
+    const ticker = tickers[tickerIndex]!;
+    if (remainingBudget <= 0) {
+      totalCapReached = true;
+      preserveRemainingTickers(nextCursorByTicker, tickers.slice(tickerIndex), request.cursorByTicker);
+      break;
+    }
+
     try {
       const tickerRecord = await lookupTicker(ticker, env as Env);
       if (!tickerRecord) {
@@ -238,17 +256,28 @@ export async function backfillHistoricalFilings(
 
       const submissions = await fetchSubmissions(tickerRecord.cik, env as Env);
       const candidates = listSupportedFilings(tickerRecord, submissions)
+        .filter((filingReference) => requestedForms.includes(filingReference.formType))
         .filter((filingReference) => filingReference.periodOfReport >= subtractYearsIsoDate(new Date().toISOString(), request.years))
         .sort((left, right) => right.periodOfReport.localeCompare(left.periodOfReport));
 
       const cursor = request.cursorByTicker?.[ticker] ?? 0;
       const batch = candidates.slice(cursor, cursor + request.maxFilingsPerTicker);
+      let consumedInBatch = 0;
 
       for (const filingReference of batch) {
+        if (remainingBudget <= 0) {
+          totalCapReached = true;
+          nextCursorByTicker[ticker] = cursor + consumedInBatch;
+          preserveRemainingTickers(nextCursorByTicker, tickers.slice(tickerIndex + 1), request.cursorByTicker);
+          break;
+        }
+
         const filingKey = filingReference.accessionNumber.replaceAll("-", "");
         const alreadyIndexed = await env.DB.prepare("SELECT filing_key FROM filings WHERE filing_key = ? LIMIT 1")
           .bind(`${config.extractorVersion}:${filingReference.cik}:${filingKey}`)
           .first<string>("filing_key");
+        consumedInBatch += 1;
+        remainingBudget -= 1;
 
         if (alreadyIndexed) {
           skippedFilings.push({
@@ -267,6 +296,10 @@ export async function backfillHistoricalFilings(
         });
       }
 
+      if (totalCapReached) {
+        break;
+      }
+
       if (cursor + batch.length < candidates.length) {
         nextCursorByTicker[ticker] = cursor + batch.length;
       }
@@ -280,19 +313,48 @@ export async function backfillHistoricalFilings(
 
   logEvent("history_backfill_completed", {
     tickerCount: tickers.length,
+    forms: requestedForms,
+    maxTotalFilings,
     processedCount: processedFilings.length,
     skippedCount: skippedFilings.length,
-    failedCount: failedTickers.length
+    failedCount: failedTickers.length,
+    totalCapReached
   });
 
   return {
     tickers,
     years: request.years,
+    forms: requestedForms,
+    maxTotalFilings,
     processedFilings,
     skippedFilings,
     failedTickers,
-    nextCursorByTicker
+    nextCursorByTicker,
+    totalCapReached
   };
+}
+
+function resolveBackfillForms(forms?: FilingReference["formType"][]): FilingReference["formType"][] {
+  const normalized = [...new Set((forms ?? DEFAULT_BACKFILL_FORMS).filter((form): form is FilingReference["formType"] => form === "10-K" || form === "10-Q"))];
+  return normalized.length > 0 ? normalized : [...DEFAULT_BACKFILL_FORMS];
+}
+
+function resolveMaxTotalFilings(value?: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_BACKFILL_TOTAL_CAP;
+  }
+
+  return Math.max(1, Math.min(DEFAULT_BACKFILL_TOTAL_CAP, Math.trunc(value ?? DEFAULT_BACKFILL_TOTAL_CAP)));
+}
+
+function preserveRemainingTickers(
+  nextCursorByTicker: Record<string, number>,
+  tickers: string[],
+  cursorByTicker?: Record<string, number>
+): void {
+  for (const ticker of tickers) {
+    nextCursorByTicker[ticker] = cursorByTicker?.[ticker] ?? 0;
+  }
 }
 
 function buildArchiveObjectKey(filingKey: string): string {

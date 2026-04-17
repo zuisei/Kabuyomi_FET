@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
+    @State private var devOptionsExpanded = false
 
     var body: some View {
         NavigationStack {
@@ -12,13 +13,13 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(spacing: 16) {
                         planCard
+                        aiCard
+                        linksCard
                         displayCard
+                        resetCard
                         #if DEBUG
                         devCard
                         #endif
-                        aiCard
-                        linksCard
-                        resetCard
                     }
                     .padding(20)
                 }
@@ -39,29 +40,33 @@ struct SettingsView: View {
     private var planCard: some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
-                Text("プラン")
+                Text("利用状況")
                     .font(.system(.headline, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.ink)
 
                 HStack {
-                    Label("BETA", systemImage: "testtube.2")
-                        .font(.system(.title3, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.55)))
+                    Label(BetaBilling.statusLabel, systemImage: "testtube.2")
+                        .font(.system(.caption2, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
                     Spacer()
                 }
 
                 if let usage = appModel.usage {
-                    Text("今日のチャット: \(usage.chatsUsed) / \(appModel.displayChatLimit(for: usage))")
-                    Text("保存銘柄: \(usage.stocksUsed) / \(appModel.displayStockLimit(for: usage))")
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("今日のチャット: \(usage.chatsUsed) / \(appModel.displayChatLimit(for: usage))")
+                        Text("保存銘柄: \(usage.stocksUsed) / \(appModel.displayStockLimit(for: usage))")
+                    }
+                    .font(.system(.body, design: .rounded, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.ink)
                 } else {
                     Text("利用状況を読み込み中です。")
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
-                Text("課金導線は現在の beta では公開していません。")
+                Text(BetaBilling.disabledMessage)
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
             }
@@ -71,35 +76,45 @@ struct SettingsView: View {
     #if DEBUG
     private var devCard: some View {
         card {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text("開発用")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                    Spacer()
-                    if appModel.isDevUnlimitedModeActive {
-                        Label("有効", systemImage: "checkmark.seal.fill")
-                            .font(.system(.footnote, design: .rounded, weight: .bold))
-                            .foregroundStyle(KabuyomiTheme.positive)
+            DisclosureGroup(isExpanded: $devOptionsExpanded) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Toggle(isOn: Binding(
+                        get: { appModel.devUnlimitedModeEnabled },
+                        set: { appModel.setDevUnlimitedMode($0) }
+                    )) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("無限チャット / 無限保存")
+                                .font(.system(.body, design: .rounded, weight: .semibold))
+                            Text(appModel.devUnlimitedModeDescription)
+                                .font(.footnote)
+                                .foregroundStyle(KabuyomiTheme.inkMuted)
+                        }
                     }
-                }
 
-                Toggle(isOn: Binding(
-                    get: { appModel.devUnlimitedModeEnabled },
-                    set: { appModel.setDevUnlimitedMode($0) }
-                )) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("無限チャット / 無限保存")
-                            .font(.system(.body, design: .rounded, weight: .semibold))
-                        Text(appModel.devUnlimitedModeDescription)
+                    if appModel.isDevUnlimitedModeActive {
+                        Text("有効時は開発用の匿名 device key を毎回切り替えて quota を回避します。利用状況の数値は実利用を表しません。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
                 }
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("開発用オプション")
+                            .font(.system(.headline, design: .rounded, weight: .bold))
+                            .foregroundStyle(KabuyomiTheme.ink)
+                        Text("通常利用では不要な DEBUG 向け設定")
+                            .font(.system(.footnote, design: .rounded))
+                            .foregroundStyle(KabuyomiTheme.inkMuted)
+                    }
 
-                if appModel.isDevUnlimitedModeActive {
-                    Text("有効時は開発用の匿名 device key を毎回切り替えて quota を回避します。利用状況の数値は実利用を表しません。")
-                        .font(.footnote)
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                    Spacer()
+
+                    if appModel.isDevUnlimitedModeActive {
+                        Label("有効", systemImage: "checkmark.seal.fill")
+                            .font(.system(.caption, design: .rounded, weight: .bold))
+                            .foregroundStyle(KabuyomiTheme.positive)
+                    }
                 }
             }
         }
@@ -141,7 +156,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("スターター銘柄を表示")
                             .font(.system(.body, design: .rounded, weight: .semibold))
-                        Text("一覧に AAPL / MSFT などのスターター銘柄を出すかを切り替えます。初回起動の AAPL 表示には影響しません。")
+                        Text("一覧に AAPL / MSFT などのスターター銘柄を出すかを切り替えます。5回目以降の起動では自動で非表示になりますが、ここで再表示できます。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
@@ -156,7 +171,7 @@ struct SettingsView: View {
                 Text("リンク")
                     .font(.system(.headline, design: .rounded, weight: .bold))
 
-                Text("beta 中は外部 URL の代わりに、アプリ内で Privacy Policy / 利用条件 / Support の内容を確認できます。")
+                Text("Privacy Policy / 利用条件 / Support はアプリ内で確認できます。")
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
 
@@ -210,6 +225,9 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("ローカルデータ")
                     .font(.system(.headline, design: .rounded, weight: .bold))
+                Text("保存銘柄、取得済み filing、チャット履歴をこの端末から削除します。")
+                    .font(.footnote)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
                 Button("データをリセット", role: .destructive) {
                     appModel.resetLocalData()
                 }
@@ -323,25 +341,37 @@ private struct LegalDocumentView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 8) {
+                        Text("App Policy")
+                            .font(.system(.caption, design: .rounded, weight: .bold))
+                            .foregroundStyle(KabuyomiTheme.heroSubtext)
                         Text(title)
-                            .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                            .font(.system(.title2, design: .rounded, weight: .bold))
                             .foregroundStyle(KabuyomiTheme.ink)
                         Text(subtitle)
-                            .font(.system(.body, design: .rounded, weight: .medium))
+                            .font(.system(.footnote, design: .rounded, weight: .medium))
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
-                    .padding(20)
-                    .kabuyomiCard(.hero, radius: 28)
-                    .foregroundStyle(KabuyomiTheme.heroText)
+                    .padding(18)
+                    .kabuyomiCard(.primary, radius: 24)
 
-                    ForEach(sections) { section in
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(section.title)
-                                .font(.system(.headline, design: .rounded, weight: .bold))
-                                .foregroundStyle(KabuyomiTheme.ink)
+                    ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 10) {
+                                Text(String(format: "%02d", index + 1))
+                                    .font(.system(.caption, design: .rounded, weight: .bold))
+                                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+
+                                Text(section.title)
+                                    .font(.system(.headline, design: .rounded, weight: .bold))
+                                    .foregroundStyle(KabuyomiTheme.ink)
+                            }
                             Text(section.body)
                                 .font(.system(.body, design: .rounded))
                                 .foregroundStyle(KabuyomiTheme.inkSoft)
+                                .lineSpacing(6)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SearchView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var searchTask: Task<Void, Never>?
     @FocusState private var isSearchFieldFocused: Bool
@@ -34,8 +35,7 @@ struct SearchView: View {
                                         isAdding: appModel.isAddingTicker(item.ticker),
                                         isAdded: appModel.isTickerInWatchlist(item.ticker)
                                     ) {
-                                        isSearchFieldFocused = false
-                                        Task { await appModel.addToWatchlist(item) }
+                                        addSearchResult(item)
                                     }
                                 }
                             }
@@ -47,8 +47,14 @@ struct SearchView: View {
                 .padding(20)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .navigationTitle("検索")
+            .navigationTitle("銘柄を検索")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("閉じる") {
+                        dismiss()
+                    }
+                }
+
                 if isSearchFieldFocused {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("閉じる") {
@@ -64,6 +70,16 @@ struct SearchView: View {
         }
     }
 
+    private func addSearchResult(_ item: SearchItem) {
+        isSearchFieldFocused = false
+        Task {
+            await appModel.addToWatchlist(item)
+            if appModel.activeConversationTicker == item.ticker {
+                dismiss()
+            }
+        }
+    }
+
     private var searchBar: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("質問したい銘柄を保存")
@@ -76,7 +92,7 @@ struct SearchView: View {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(KabuyomiTheme.inkMuted)
-                TextField("AAPL / Apple Inc.", text: $query)
+                TextField("ティッカー / 企業名で検索", text: $query)
                     .focused($isSearchFieldFocused)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
@@ -149,32 +165,53 @@ private struct SearchResultCard: View {
                     .foregroundStyle(KabuyomiTheme.inkSoft)
                 HStack(spacing: 8) {
                     searchMetaPill(
-                        title: item.latestFormType.map { "最新 \($0)" } ?? "10-K / 10-Q 対応",
-                        tint: KabuyomiTheme.accent
+                        title: item.supportDisplayLabel,
+                        tint: item.isSupportedInV1 ? KabuyomiTheme.accent : KabuyomiTheme.inkMuted
                     )
                     searchMetaPill(title: item.exchange, tint: KabuyomiTheme.inkMuted)
+                }
+                if !item.isSupportedInV1 {
+                    Text(item.availabilityNote)
+                        .font(.system(.caption, design: .rounded, weight: .medium))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
             Spacer()
 
-            Button(action: addAction) {
-                HStack(spacing: 6) {
-                    if isAdding {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.white)
-                    } else if isAdded {
-                        Image(systemName: "checkmark")
-                    }
+            if item.isSupportedInV1 {
+                Button(action: addAction) {
+                    HStack(spacing: 6) {
+                        if isAdding {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.white)
+                        } else if isAdded {
+                            Image(systemName: "checkmark")
+                        }
 
-                    Text(buttonTitle)
+                        Text(buttonTitle)
+                    }
+                    .frame(minWidth: 82)
                 }
-                .frame(minWidth: 82)
+                .buttonStyle(.borderedProminent)
+                .tint(isAdded ? KabuyomiTheme.inkMuted : KabuyomiTheme.accent)
+                .disabled(isAdding || isAdded)
+            } else {
+                VStack(alignment: .trailing, spacing: 8) {
+                    Text(item.availabilityBadgeTitle)
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
+
+                    Text(item.filingSupportStatus == .unknown ? "保存不可" : "v1 対象外")
+                        .font(.system(.caption2, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .tint(isAdded ? KabuyomiTheme.inkMuted : KabuyomiTheme.accent)
-            .disabled(isAdding || isAdded)
         }
         .padding(16)
         .kabuyomiCard(.primary, radius: 24)

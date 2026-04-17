@@ -21,11 +21,21 @@ r2_buckets = [
 [vars]
 SEC_USER_AGENT = "Kabuyomi admin@kabuyomi.app"
 SEC_FETCHER_BASE_URL = "https://kabuyomifet-production.up.railway.app"
-GEMINI_MODEL = "gemma-4-31b-it"
+# Keep local and deployed defaults aligned to avoid model drift between wrangler dev and production.
+GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_TIMEOUT_MS = "12000"
 SEC_FETCHER_TIMEOUT_MS = "25000"
 # Configure SEC_FETCHER_BASE_URL in .dev.vars for local wrangler dev
 # Configure SEC_FETCHER_BASE_URL, SEC_FETCHER_SHARED_SECRET, and BACKFILL_SHARED_SECRET in deployed environments
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+persist = true
 
 [[durable_objects.bindings]]
 name = "SEC_RATE_LIMITER"

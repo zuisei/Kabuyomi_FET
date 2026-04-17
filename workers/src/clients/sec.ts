@@ -71,11 +71,11 @@ export interface TickerSnapshotEnvelope {
 export async function searchTickers(query: string, env: Env): Promise<{ items: TickerRecord[]; updatedAt: string | null }> {
   const snapshot = await getTickerSnapshot(env);
   const normalizedQuery = query.trim().toLowerCase();
-
-  const items = await enrichTickerSearchResults(sortTickerSearchResults(snapshot.items, normalizedQuery), env);
+  const rankedItems = sortTickerSearchResults(snapshot.items, normalizedQuery).slice(0, 20);
+  const items = await enrichTickerSearchResults(rankedItems, normalizedQuery, env);
 
   return {
-    items: items.slice(0, 20),
+    items,
     updatedAt: snapshot.updatedAt
   };
 }
@@ -101,31 +101,92 @@ export function sortTickerSearchResults(items: TickerRecord[], normalizedQuery: 
     .map((candidate) => candidate.item);
 }
 
-const SEARCH_FORM_TYPE_ENRICH_LIMIT = 8;
+const SEARCH_FORM_TYPE_CACHE_TTL_SECONDS = 24 * 60 * 60;
+const SEARCH_FORM_TYPE_NEGATIVE_SENTINEL = "__none__";
+const SEARCH_FORM_TYPE_MIN_QUERY_LENGTH = 3;
 
-async function enrichTickerSearchResults(items: TickerRecord[], env: Env): Promise<TickerRecord[]> {
-  return Promise.all(
-    items.map(async (item, index) => {
-      if (index >= SEARCH_FORM_TYPE_ENRICH_LIMIT) {
-        return item;
-      }
+async function enrichTickerSearchResults(
+  items: TickerRecord[],
+  normalizedQuery: string,
+  env: Env
+): Promise<TickerRecord[]> {
+  const cachedFormTypes = await Promise.all(items.map((item) => loadCachedLatestFormType(item.ticker, env)));
+  const hydrated = items.map((item, index) => {
+    const cachedFormType = cachedFormTypes[index];
+    if (!cachedFormType) {
+      return item;
+    }
 
-      try {
-        const submissions = await fetchSubmissions(item.cik, env);
-        const latestFiling = pickLatestSupportedFiling(item, submissions);
-        if (!latestFiling) {
-          return item;
-        }
+    return {
+      ...item,
+      latestFormType: cachedFormType
+    };
+  });
 
-        return {
-          ...item,
-          latestFormType: latestFiling.formType
-        };
-      } catch {
-        return item;
-      }
-    })
+  if (normalizedQuery.length < SEARCH_FORM_TYPE_MIN_QUERY_LENGTH) {
+    return hydrated;
+  }
+
+  const primaryCandidateIndex = hydrated.findIndex((item, index) => {
+    return item.latestFormType === undefined && cachedFormTypes[index] === undefined;
+  });
+  if (primaryCandidateIndex < 0) {
+    return hydrated;
+  }
+  const primaryCandidate = hydrated[primaryCandidateIndex]!;
+
+  try {
+    const latestFormType = await fetchAndCacheLatestFormType(primaryCandidate, env);
+    if (!latestFormType) {
+      return hydrated;
+    }
+
+    return hydrated.map((item) =>
+      item.ticker === primaryCandidate.ticker
+        ? {
+            ...item,
+            latestFormType
+          }
+        : item
+    );
+  } catch {
+    return hydrated;
+  }
+}
+
+async function loadCachedLatestFormType(
+  ticker: string,
+  env: Env
+): Promise<"10-K" | "10-Q" | null | undefined> {
+  const cached = await env.KABUYOMI_CACHE.get(buildSearchFormTypeCacheKey(ticker));
+  if (!cached) {
+    return undefined;
+  }
+
+  if (cached === SEARCH_FORM_TYPE_NEGATIVE_SENTINEL) {
+    return null;
+  }
+
+  return cached === "10-K" || cached === "10-Q" ? cached : null;
+}
+
+async function fetchAndCacheLatestFormType(
+  item: TickerRecord,
+  env: Env
+): Promise<"10-K" | "10-Q" | null> {
+  const submissions = await fetchSubmissions(item.cik, env);
+  const latestFiling = pickLatestSupportedFiling(item, submissions);
+  const latestFormType = latestFiling?.formType ?? null;
+  await env.KABUYOMI_CACHE.put(
+    buildSearchFormTypeCacheKey(item.ticker),
+    latestFormType ?? SEARCH_FORM_TYPE_NEGATIVE_SENTINEL,
+    { expirationTtl: SEARCH_FORM_TYPE_CACHE_TTL_SECONDS }
   );
+  return latestFormType;
+}
+
+function buildSearchFormTypeCacheKey(ticker: string): string {
+  return `search_latest_form_type:${ticker.trim().toUpperCase()}`;
 }
 
 function scoreTickerSearch(item: TickerRecord, query: string): number | null {

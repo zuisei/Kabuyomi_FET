@@ -95,19 +95,19 @@ describe("SEC filing selection", () => {
     });
   });
 
-  it("ignores client-supplied quota subjects and derives identity from device key", () => {
-    const identity = readQuotaIdentity(
+  it("ignores client-supplied quota subjects and derives identity from Cloudflare-provided client IP", async () => {
+    const identity = await readQuotaIdentity(
       new Request("https://kabuyomi.test/v1/usage", {
         headers: {
+          "cf-connecting-ip": "203.0.113.5",
           "x-device-key": "device-123",
           "x-quota-subject": "pro:forged"
         }
       })
     );
 
-    expect(identity).toEqual({
-      quotaSubject: "free:device-123",
-      plan: "free"
-    });
+    expect(identity.plan).toBe("free");
+    expect(identity.quotaSubject).toMatch(/^free:[a-f0-9]{64}$/);
+    expect(identity.quotaSubject).not.toContain("device-123");
   });
 });

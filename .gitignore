@@ -8,3 +8,5 @@ dist
 ios/Kabuyomi.xcodeproj
 workers/.dev.vars
 sec-fetcher/.env
+.claude
+artifacts

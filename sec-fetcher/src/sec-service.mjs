@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "node:crypto";
+
 const DEFAULT_USER_AGENT = "Kabuyomi admin@kabuyomi.app";
 const CACHE_TTL = {
   tickerSnapshot: 24 * 60 * 60 * 1000,
@@ -137,12 +139,25 @@ export function createSecService(config = readConfig()) {
 }
 
 export function validateInternalToken(headers, config) {
-  if (!config.internalToken) {
-    return true;
+  const configuredToken = config.internalToken?.trim();
+  if (!configuredToken) {
+    return false;
   }
 
   const token = headers["x-internal-token"];
-  return typeof token === "string" && token === config.internalToken;
+  if (typeof token !== "string") {
+    return false;
+  }
+
+  const suppliedToken = token.trim();
+  const expectedBuffer = Buffer.from(configuredToken);
+  const actualBuffer = Buffer.from(suppliedToken);
+
+  if (expectedBuffer.length !== actualBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(expectedBuffer, actualBuffer);
 }
 
 export async function fetchWithRetry(url, init, config, limiter) {

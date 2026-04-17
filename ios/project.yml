@@ -12,7 +12,6 @@ settings:
     GENERATE_INFOPLIST_FILE: YES
     IPHONEOS_DEPLOYMENT_TARGET: 17.0
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_ASSET_PATHS: "\"Kabuyomi/Resources\""
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
 targets:
   Kabuyomi:
@@ -29,3 +28,18 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.finance
         PRODUCT_NAME: Kabuyomi
         TARGETED_DEVICE_FAMILY: "1"
+  KabuyomiTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: KabuyomiTests
+    dependencies:
+      - target: Kabuyomi
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: app.kabuyomi.ios.tests
+        PRODUCT_NAME: KabuyomiTests
+        TARGETED_DEVICE_FAMILY: "1"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Kabuyomi.app/Kabuyomi"
+        BUNDLE_LOADER: "$(TEST_HOST)"

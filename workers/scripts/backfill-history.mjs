@@ -2,7 +2,9 @@ const args = process.argv.slice(2);
 
 const options = {
   years: 3,
-  maxFilingsPerTicker: 2,
+  forms: ["10-K"],
+  maxFilingsPerTicker: 1,
+  maxTotalFilings: 8,
   tickers: []
 };
 
@@ -14,6 +16,20 @@ for (const arg of args) {
 
   if (arg.startsWith("--max-filings-per-ticker=")) {
     options.maxFilingsPerTicker = Number.parseInt(arg.slice("--max-filings-per-ticker=".length), 10);
+    continue;
+  }
+
+  if (arg.startsWith("--max-total-filings=")) {
+    options.maxTotalFilings = Number.parseInt(arg.slice("--max-total-filings=".length), 10);
+    continue;
+  }
+
+  if (arg.startsWith("--forms=")) {
+    options.forms = arg
+      .slice("--forms=".length)
+      .split(",")
+      .map((value) => value.trim().toUpperCase())
+      .filter((value) => value === "10-K" || value === "10-Q");
     continue;
   }
 
@@ -48,7 +64,9 @@ const response = await fetch(new URL("/v1/internal/backfill/history", baseUrl), 
   body: JSON.stringify({
     tickers: options.tickers.length > 0 ? options.tickers : undefined,
     years: options.years,
-    maxFilingsPerTicker: options.maxFilingsPerTicker
+    forms: options.forms,
+    maxFilingsPerTicker: options.maxFilingsPerTicker,
+    maxTotalFilings: options.maxTotalFilings
   })
 });
 

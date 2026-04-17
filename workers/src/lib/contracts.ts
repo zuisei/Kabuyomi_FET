@@ -12,7 +12,9 @@ export const ChatRequestSchema = z.object({
 export const BackfillHistoryRequestSchema = z.object({
   tickers: z.array(z.string().trim().min(1).max(16)).max(50).optional(),
   years: z.number().int().min(1).max(5).default(3),
-  maxFilingsPerTicker: z.number().int().min(1).max(8).default(2),
+  forms: z.array(z.enum(["10-K", "10-Q"])).min(1).max(2).optional(),
+  maxFilingsPerTicker: z.number().int().min(1).max(8).default(1),
+  maxTotalFilings: z.number().int().min(1).max(20).default(8),
   cursorByTicker: z.record(z.string(), z.number().int().min(0)).optional()
 });
 

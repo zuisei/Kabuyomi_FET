@@ -1,3 +1,4 @@
+# Mirror wrangler.toml unless you are intentionally testing a different Google model locally.
 SEC_FETCHER_BASE_URL=http://127.0.0.1:8789
 SEC_FETCHER_SHARED_SECRET=replace-me
 BACKFILL_SHARED_SECRET=replace-me

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "smoke:staging": "node ./smoke/staging-worker.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -20,4 +21,3 @@
     "wrangler": "^4.12.0"
   }
 }
-

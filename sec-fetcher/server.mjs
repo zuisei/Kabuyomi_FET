@@ -4,6 +4,11 @@ import { createSecService, readConfig, validateInternalToken } from "./src/sec-s
 const port = Number.parseInt(process.env.PORT ?? "8789", 10);
 const host = process.env.HOST ?? "0.0.0.0";
 const config = readConfig();
+
+if (!config.internalToken.trim()) {
+  throw new Error("SEC_FETCHER_SHARED_SECRET is required");
+}
+
 const service = createSecService(config);
 
 const server = http.createServer(async (request, response) => {

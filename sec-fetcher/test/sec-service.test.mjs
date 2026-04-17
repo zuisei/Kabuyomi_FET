@@ -12,6 +12,7 @@ test("readConfig falls back to secure defaults", () => {
 test("validateInternalToken accepts matching token", () => {
   assert.equal(validateInternalToken({ "x-internal-token": "secret" }, { internalToken: "secret" }), true);
   assert.equal(validateInternalToken({ "x-internal-token": "wrong" }, { internalToken: "secret" }), false);
+  assert.equal(validateInternalToken({ "x-internal-token": "secret" }, { internalToken: "" }), false);
 });
 
 test("fetchWithRetry retries 5xx responses before succeeding", async () => {

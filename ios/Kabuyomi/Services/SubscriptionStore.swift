@@ -2,6 +2,7 @@ import Foundation
 import StoreKit
 import OSLog
 
+// Retained for post-beta billing reactivation.
 extension Notification.Name {
     static let kabuyomiSubscriptionStateDidChange = Notification.Name("kabuyomi.subscriptionStateDidChange")
 }
