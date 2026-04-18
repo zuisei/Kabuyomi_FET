@@ -12,5 +12,6 @@ sec-fetcher/.env
 artifacts
 AGENTS.md
 CURRENT_SLICE.md
+WORKERS_AGENT_CHAT_RECOVERY.md
 docs/current_shipping_truth.md
 docs/codex/
