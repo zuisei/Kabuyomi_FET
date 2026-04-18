@@ -114,10 +114,10 @@ export async function invokeGemini(
   return {};
 }
 
-function resolveGeminiModel(env: Env): string {
+export function resolveGeminiModel(env: Env): string {
   const raw = env.GEMINI_MODEL?.trim();
   if (!raw) {
-    return "gemini-2.5-flash";
+    return "gemma-4-31b-it";
   }
 
   return raw.startsWith("models/") ? raw.slice("models/".length) : raw;

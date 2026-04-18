@@ -11,7 +11,8 @@ export async function ingestFiling(
   filing: FilingReference,
   comparisonFiling: FilingReference | null,
   env: Env,
-  config: RemoteConfig
+  config: RemoteConfig,
+  options: { summaryMode?: "default" | "fallback_only" } = {}
 ): Promise<FilingCacheRecord> {
   const { html, primaryDocumentUrl, metrics } = await fetchFilingAssets(filing, comparisonFiling, env);
   const extracted = extractMDASection(html, filing.formType);
@@ -35,7 +36,8 @@ export async function ingestFiling(
 
   const filingKey = `${config.extractorVersion}:${filing.cik}:${filing.accessionNumber.replaceAll("-", "")}`;
   const sourceChunks = buildSourceChunks(filing, extracted.text, metrics);
-  const summary = await generateSummary(env, {
+  const summaryEnv = options.summaryMode === "fallback_only" ? ({ ...env, GEMINI_API_KEY: undefined } as Env) : env;
+  const summary = await generateSummary(summaryEnv, {
     filingKey,
     ticker: filing.ticker,
     companyName: filing.companyName,

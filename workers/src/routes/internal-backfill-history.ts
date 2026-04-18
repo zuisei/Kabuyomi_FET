@@ -15,7 +15,14 @@ export const handleInternalBackfillHistoryRoute: RouteHandler = async ({ request
     return json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const parsed = BackfillHistoryRequestSchema.safeParse(await request.json());
+  let payload: unknown;
+  try {
+    payload = await request.json();
+  } catch {
+    return badRequest("Invalid backfill payload");
+  }
+
+  const parsed = BackfillHistoryRequestSchema.safeParse(payload);
   if (!parsed.success) {
     return badRequest("Invalid backfill payload");
   }

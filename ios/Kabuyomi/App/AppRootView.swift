@@ -71,7 +71,7 @@ private struct LaunchPlaceholderView: View {
                     .foregroundStyle(KabuyomiTheme.inkMuted)
             }
             .padding(24)
-            .kabuyomiCard(.primary, radius: 28)
+            .kabuyomiGlass(radius: 28, tint: Color.white.opacity(0.28), stroke: Color.white.opacity(0.62))
         }
     }
 }

@@ -88,6 +88,7 @@ struct SearchView: View {
             Text("v1 は 10-K / 10-Q に対応しています。20-F / 6-K 企業はまだ保存できません。")
                 .font(.system(.footnote, design: .rounded))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
+                .lineSpacing(2)
 
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
@@ -122,7 +123,7 @@ struct SearchView: View {
                 }
             }
             .padding(14)
-            .kabuyomiCard(.input, radius: 22)
+            .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.20), stroke: Color.white.opacity(0.58))
         }
     }
 }
@@ -145,7 +146,7 @@ private struct SearchEmptyState: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 18)
         .padding(.vertical, 56)
-        .kabuyomiCard(.muted, radius: 28)
+        .kabuyomiGlass(radius: 28, tint: Color.white.opacity(0.18), stroke: Color.white.opacity(0.58))
     }
 }
 

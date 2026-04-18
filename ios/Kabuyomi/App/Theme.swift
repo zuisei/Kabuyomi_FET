@@ -12,6 +12,7 @@ enum KabuyomiTheme {
     static let accent = Color(red: 0.82, green: 0.46, blue: 0.16)
     static let accentDeep = Color(red: 0.56, green: 0.31, blue: 0.12)
     static let accentSoft = Color(red: 0.92, green: 0.84, blue: 0.73)
+    static let accentMist = Color(red: 0.96, green: 0.90, blue: 0.82)
     static let ink = Color(red: 0.15, green: 0.12, blue: 0.10)
     static let inkSoft = Color(red: 0.27, green: 0.22, blue: 0.18)
     static let inkMuted = Color(red: 0.43, green: 0.38, blue: 0.31)
@@ -28,9 +29,9 @@ enum KabuyomiTheme {
         ZStack {
             LinearGradient(
                 colors: [
-                    Color(red: 0.99, green: 0.97, blue: 0.94),
-                    Color(red: 0.95, green: 0.92, blue: 0.86),
-                    Color(red: 0.91, green: 0.88, blue: 0.82)
+                    Color(red: 0.995, green: 0.985, blue: 0.97),
+                    Color(red: 0.97, green: 0.94, blue: 0.89),
+                    Color(red: 0.93, green: 0.90, blue: 0.84)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -38,22 +39,32 @@ enum KabuyomiTheme {
 
             RadialGradient(
                 colors: [
-                    accent.opacity(0.16),
+                    accent.opacity(0.14),
                     .clear
                 ],
                 center: .topTrailing,
                 startRadius: 20,
-                endRadius: 320
+                endRadius: 340
             )
 
             RadialGradient(
                 colors: [
-                    Color(red: 0.60, green: 0.51, blue: 0.39).opacity(0.14),
+                    Color(red: 0.60, green: 0.51, blue: 0.39).opacity(0.11),
                     .clear
                 ],
                 center: .bottomLeading,
                 startRadius: 40,
-                endRadius: 360
+                endRadius: 400
+            )
+
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0.42),
+                    Color.white.opacity(0.08),
+                    .clear
+                ],
+                startPoint: .top,
+                endPoint: .center
             )
         }
     }
@@ -73,13 +84,49 @@ enum KabuyomiTheme {
                 )
             )
         case .primary:
-            return AnyShapeStyle(Color(red: 0.98, green: 0.97, blue: 0.94))
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.92),
+                        Color(red: 0.99, green: 0.98, blue: 0.96).opacity(0.84)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
         case .secondary:
-            return AnyShapeStyle(Color(red: 0.95, green: 0.93, blue: 0.89))
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [
+                        accentMist.opacity(0.72),
+                        mist.opacity(0.70)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
         case .input:
-            return AnyShapeStyle(Color(red: 0.99, green: 0.98, blue: 0.96))
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.94),
+                        Color(red: 0.99, green: 0.98, blue: 0.96).opacity(0.88)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
         case .muted:
-            return AnyShapeStyle(Color(red: 0.93, green: 0.90, blue: 0.85))
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.60),
+                        mist.opacity(0.66)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
         }
     }
 
@@ -88,26 +135,26 @@ enum KabuyomiTheme {
         case .hero:
             return accentSoft.opacity(0.28)
         case .primary:
-            return Color.white.opacity(0.84)
+            return Color.white.opacity(0.92)
         case .secondary:
-            return Color(red: 0.75, green: 0.66, blue: 0.53).opacity(0.24)
+            return Color(red: 0.75, green: 0.66, blue: 0.53).opacity(0.20)
         case .input:
-            return Color(red: 0.72, green: 0.61, blue: 0.45).opacity(0.24)
+            return Color(red: 0.72, green: 0.61, blue: 0.45).opacity(0.20)
         case .muted:
-            return Color(red: 0.69, green: 0.60, blue: 0.46).opacity(0.18)
+            return Color(red: 0.69, green: 0.60, blue: 0.46).opacity(0.15)
         }
     }
 
     static func shadow(for surface: KabuyomiSurface) -> Color {
         switch surface {
         case .hero:
-            return Color.black.opacity(0.18)
+            return Color.black.opacity(0.16)
         case .primary:
-            return Color(red: 0.33, green: 0.25, blue: 0.17).opacity(0.10)
-        case .secondary:
             return Color(red: 0.33, green: 0.25, blue: 0.17).opacity(0.08)
+        case .secondary:
+            return Color(red: 0.33, green: 0.25, blue: 0.17).opacity(0.06)
         case .input, .muted:
-            return Color(red: 0.33, green: 0.25, blue: 0.17).opacity(0.05)
+            return Color(red: 0.33, green: 0.25, blue: 0.17).opacity(0.04)
         }
     }
 }

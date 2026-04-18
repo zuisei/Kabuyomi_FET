@@ -1,9 +1,36 @@
 import Foundation
 import Observation
 
+struct PendingChatState: Equatable {
+    let id: UUID
+    let ticker: String
+    let question: String
+    let submittedAt: Date
+
+    init(id: UUID = UUID(), ticker: String, question: String, submittedAt: Date = .now) {
+        self.id = id
+        self.ticker = ticker
+        self.question = question
+        self.submittedAt = submittedAt
+    }
+
+    var optimisticUserMessage: LocalChatMessage {
+        LocalChatMessage(
+            id: id,
+            role: "user",
+            content: question,
+            createdAt: submittedAt,
+            modelName: "local",
+            sources: []
+        )
+    }
+}
+
 @MainActor
 @Observable
 final class AppModel {
+    private let minimumPendingChatDuration: TimeInterval = 1.0
+
     static let aiConsentKey = "kabuyomi.aiConsentGranted"
     static let devUnlimitedModeKey = "kabuyomi.devUnlimitedModeEnabled"
     static let savedTickersKey = "kabuyomi.savedTickers"
@@ -28,6 +55,7 @@ final class AppModel {
     var usage: UsagePayload?
     var companyCache: [String: CompanyPayload] = [:]
     var chatHistoryCache: [String: [LocalChatMessage]] = [:]
+    var pendingChats: [String: PendingChatState] = [:]
     var lastViewedTicker = UserDefaults.standard.string(forKey: "kabuyomi.lastViewedTicker")
     var activeConversationTicker = UserDefaults.standard.string(forKey: "kabuyomi.activeConversationTicker")
 
@@ -48,6 +76,8 @@ final class AppModel {
 
     private var searchGeneration = 0
     private var addingTickers: Set<String> = []
+    private var loadingTickers: Set<String> = []
+    private var refreshedTickersThisSession: Set<String> = []
     private var savedTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.savedTickers") ?? [])
     private var recentTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.recentTickers") ?? [])
     private var pendingConversationTicker = UserDefaults.standard.string(forKey: "kabuyomi.pendingConversationTicker")
@@ -98,6 +128,7 @@ final class AppModel {
             isBootstrapped = true
         }
 
+        sanitizeRestoredConversationState()
         recordAppLaunch()
         loadHomeFromPersistence()
         await refreshUsage()
@@ -160,68 +191,74 @@ final class AppModel {
         await saveTicker(ticker, searchItem: nil, redirectToConversation: false)
     }
 
+    func prefetchCompany(ticker: String) {
+        let normalized = normalizedTicker(ticker)
+        guard companyCache[normalized] == nil, !loadingTickers.contains(normalized) else { return }
+
+        Task {
+            await loadCompany(ticker: normalized)
+        }
+    }
+
     func loadCompany(ticker: String, forceRefresh: Bool = false) async {
-        if !forceRefresh, companyCache[ticker] != nil {
+        let normalized = normalizedTicker(ticker)
+
+        if !forceRefresh, companyCache[normalized] != nil {
             return
         }
 
-        if let local = persistence.loadCompany(ticker: ticker) {
-            companyCache[ticker] = local.company
-            chatHistoryCache[ticker] = local.chatHistory
-        }
+        if let local = persistence.loadCompany(ticker: normalized) {
+            companyCache[normalized] = local.company
+            chatHistoryCache[normalized] = local.chatHistory
 
-        companyIsLoading = true
-        defer { companyIsLoading = false }
-
-        do {
-            let deviceKey = quotaDeviceKey(purpose: forceRefresh ? "company-refresh-\(ticker)" : "company-\(ticker)")
-            let company = try await (
-                forceRefresh
-                    ? apiClient.refreshCompany(ticker: ticker, deviceKey: deviceKey)
-                    : apiClient.fetchCompany(ticker: ticker, deviceKey: deviceKey)
-            )
-            try persistence.saveCompany(company, searchItem: nil)
-            companyCache[ticker] = company
-            chatHistoryCache[ticker] = persistence.loadCompany(ticker: ticker)?.chatHistory ?? []
-            loadHomeFromPersistence()
-        } catch {
-            guard !shouldIgnore(error) else { return }
-            if companyCache[ticker] == nil {
-                presentAlert(for: error)
+            if !forceRefresh {
+                refreshCompanyInBackgroundIfNeeded(ticker: normalized)
+                return
             }
         }
+
+        await fetchCompanyRemote(ticker: normalized, forceRefresh: forceRefresh)
     }
 
     func sendChat(question: String, ticker: String) async -> Bool {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
+        let normalized = normalizedTicker(ticker)
         guard aiConsentGranted else {
             activeAlert = AppAlertState(
-                message: "AI チャットの利用前に、質問内容と SEC filing コンテキストを Gemini に送信することへの同意が必要です。\n個人情報や口座情報は入力しないでください。",
+                message: "AI チャットの利用前に、質問内容と SEC filing コンテキストを Google Gemini API 上の AI モデルに送信することへの同意が必要です。\n個人情報や口座情報は入力しないでください。",
                 kind: .aiConsent
             )
             return false
         }
-        guard let company = companyCache[ticker] ?? persistence.loadCompany(ticker: ticker)?.company else {
+        guard let company = companyCache[normalized] ?? persistence.loadCompany(ticker: normalized)?.company else {
             activeAlert = AppAlertState(message: "企業データを先に読み込んでください。", kind: .dismissOnly)
             return false
         }
 
+        let pendingStartedAt = Date()
+        pendingChats[normalized] = PendingChatState(ticker: normalized, question: trimmed)
         chatIsSending = true
-        defer { chatIsSending = false }
+        defer {
+            chatIsSending = false
+            pendingChats.removeValue(forKey: normalized)
+        }
 
         do {
             let response = try await apiClient.sendChat(
                 filingKey: company.filingKey,
                 question: trimmed,
-                deviceKey: quotaDeviceKey(purpose: "chat-\(ticker)")
+                deviceKey: quotaDeviceKey(purpose: "chat-\(normalized)"),
+                debugUnlimited: isDevUnlimitedModeActive
             )
             try persistence.saveChat(question: trimmed, response: response, for: company)
             usage = response.usage
-            chatHistoryCache[ticker] = persistence.loadCompany(ticker: ticker)?.chatHistory ?? []
+            chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized)?.chatHistory ?? []
+            await ensureMinimumPendingChatDuration(since: pendingStartedAt)
             return true
         } catch {
             handle(error)
+            await ensureMinimumPendingChatDuration(since: pendingStartedAt)
             return false
         }
     }
@@ -257,13 +294,19 @@ final class AppModel {
 
     func openConversation(for ticker: String, draftQuestion: String? = nil) {
         let normalized = normalizedTicker(ticker)
+        let trimmedDraft = draftQuestion?.trimmingCharacters(in: .whitespacesAndNewlines)
         completeInitialEntry()
         activeConversationTicker = normalized
-        pendingConversationTicker = draftQuestion == nil ? nil : normalized
-        pendingConversationQuestion = draftQuestion?.trimmingCharacters(in: .whitespacesAndNewlines)
-        UserDefaults.standard.set(normalized, forKey: Self.activeConversationTickerKey)
+        pendingConversationTicker = trimmedDraft == nil ? nil : normalized
+        pendingConversationQuestion = trimmedDraft
+        if shouldPersistConversationSelection(ticker: normalized, draftQuestion: trimmedDraft) {
+            UserDefaults.standard.set(normalized, forKey: Self.activeConversationTickerKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.activeConversationTickerKey)
+        }
         UserDefaults.standard.set(pendingConversationTicker, forKey: Self.pendingConversationTickerKey)
         UserDefaults.standard.set(pendingConversationQuestion, forKey: Self.pendingConversationQuestionKey)
+        prefetchCompany(ticker: normalized)
     }
 
     func consumePendingDraftQuestion(for ticker: String) -> String? {
@@ -293,6 +336,10 @@ final class AppModel {
         return persistence.loadCompany(ticker: ticker)?.chatHistory ?? []
     }
 
+    func pendingChat(for ticker: String) -> PendingChatState? {
+        pendingChats[normalizedTicker(ticker)]
+    }
+
     func recordCompanyVisit(ticker: String) {
         guard let company = companyPayload(for: ticker) else { return }
 
@@ -310,6 +357,14 @@ final class AppModel {
         UserDefaults.standard.set(recentTickers, forKey: Self.recentTickersKey)
 
         loadHomeFromPersistence()
+    }
+
+    private func ensureMinimumPendingChatDuration(since startedAt: Date) async {
+        let elapsed = Date().timeIntervalSince(startedAt)
+        guard elapsed < minimumPendingChatDuration else { return }
+
+        let remainingNanoseconds = UInt64((minimumPendingChatDuration - elapsed) * 1_000_000_000)
+        try? await Task.sleep(nanoseconds: remainingNanoseconds)
     }
 
     func hasNewFiling(for card: WatchlistCard) -> Bool {
@@ -335,6 +390,8 @@ final class AppModel {
             recentCompanies = []
             companyCache = [:]
             chatHistoryCache = [:]
+            loadingTickers = []
+            refreshedTickersThisSession = []
             savedTickers = []
             recentTickers = []
             lastViewedTicker = nil
@@ -411,7 +468,8 @@ final class AppModel {
         do {
             let result = try await apiClient.addToWatchlist(
                 ticker: normalized,
-                deviceKey: quotaDeviceKey(purpose: "bookmark-add-\(normalized)")
+                deviceKey: quotaDeviceKey(purpose: "bookmark-add-\(normalized)"),
+                debugUnlimited: isDevUnlimitedModeActive
             )
             try persistence.saveCompany(result.company, searchItem: searchItem)
             usage = result.usage
@@ -438,11 +496,58 @@ final class AppModel {
     private func refreshUsage() async {
         do {
             usage = try await apiClient.fetchUsage(
-                deviceKey: quotaDeviceKey(purpose: "usage")
+                deviceKey: quotaDeviceKey(purpose: "usage"),
+                debugUnlimited: isDevUnlimitedModeActive
             )
         } catch {
             guard !shouldIgnore(error) else { return }
             if usage == nil {
+                presentAlert(for: error)
+            }
+        }
+    }
+
+    private func refreshCompanyInBackgroundIfNeeded(ticker: String) {
+        guard !loadingTickers.contains(ticker), !refreshedTickersThisSession.contains(ticker) else { return }
+
+        Task {
+            await fetchCompanyRemote(ticker: ticker, forceRefresh: false)
+        }
+    }
+
+    private func fetchCompanyRemote(ticker: String, forceRefresh: Bool) async {
+        guard !loadingTickers.contains(ticker) else { return }
+
+        loadingTickers.insert(ticker)
+        companyIsLoading = true
+        defer {
+            loadingTickers.remove(ticker)
+            companyIsLoading = !loadingTickers.isEmpty
+        }
+
+        do {
+            let deviceKey = quotaDeviceKey(purpose: forceRefresh ? "company-refresh-\(ticker)" : "company-\(ticker)")
+            let company = try await (
+                forceRefresh
+                    ? apiClient.refreshCompany(
+                        ticker: ticker,
+                        deviceKey: deviceKey,
+                        debugUnlimited: isDevUnlimitedModeActive
+                    )
+                    : apiClient.fetchCompany(
+                        ticker: ticker,
+                        deviceKey: deviceKey,
+                        debugUnlimited: isDevUnlimitedModeActive
+                    )
+            )
+            try persistence.saveCompany(company, searchItem: nil)
+            companyCache[ticker] = company
+            chatHistoryCache[ticker] = persistence.loadCompany(ticker: ticker)?.chatHistory ?? []
+            refreshedTickersThisSession.insert(ticker)
+            loadHomeFromPersistence()
+        } catch {
+            guard !shouldIgnore(error) else { return }
+            if companyCache[ticker] == nil {
                 presentAlert(for: error)
             }
         }
@@ -496,6 +601,10 @@ final class AppModel {
 
         if rawMessage.contains("Watchlist limit exceeded") {
             return "現在のベータ版保存銘柄上限に達しました。"
+        }
+
+        if rawMessage.contains("Ticker access requires watchlist add") {
+            return "この銘柄は先に保存してから開いてください。スターター銘柄以外の直接表示はできません。"
         }
 
         if rawMessage.contains("No supported filing found") {
@@ -569,6 +678,49 @@ final class AppModel {
     private func loadHomeFromPersistence() {
         watchlist = orderedCards(for: savedTickers)
         recentCompanies = orderedCards(for: recentTickers.filter { !savedTickers.contains($0) })
+    }
+
+    private func sanitizeRestoredConversationState() {
+        if let pendingConversationTicker {
+            self.pendingConversationTicker = normalizedTicker(pendingConversationTicker)
+        }
+
+        if let activeConversationTicker {
+            let normalized = normalizedTicker(activeConversationTicker)
+            if shouldRestoreConversationSelection(ticker: normalized) {
+                self.activeConversationTicker = normalized
+                UserDefaults.standard.set(normalized, forKey: Self.activeConversationTickerKey)
+            } else {
+                self.activeConversationTicker = nil
+                UserDefaults.standard.removeObject(forKey: Self.activeConversationTickerKey)
+            }
+        }
+    }
+
+    private func shouldRestoreConversationSelection(ticker: String) -> Bool {
+        shouldPersistConversationSelection(ticker: ticker, draftQuestion: pendingDraftQuestion(for: ticker))
+    }
+
+    private func shouldPersistConversationSelection(ticker: String, draftQuestion: String?) -> Bool {
+        if hasLocallyAvailableConversation(ticker: ticker) {
+            return true
+        }
+
+        if savedTickers.contains(ticker) || recentTickers.contains(ticker) {
+            return true
+        }
+
+        return !(draftQuestion?.isEmpty ?? true)
+    }
+
+    private func pendingDraftQuestion(for ticker: String) -> String? {
+        guard pendingConversationTicker == ticker else { return nil }
+        let trimmed = pendingConversationQuestion?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    private func hasLocallyAvailableConversation(ticker: String) -> Bool {
+        companyCache[ticker] != nil || persistence.loadCompany(ticker: ticker) != nil
     }
 
     private func orderedCards(for tickers: [String]) -> [WatchlistCard] {

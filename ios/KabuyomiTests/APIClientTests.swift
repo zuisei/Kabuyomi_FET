@@ -25,6 +25,7 @@ final class APIClientTests: XCTestCase {
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/watchlist/add")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+            XCTAssertNil(request.value(forHTTPHeaderField: "x-kabuyomi-debug-unlimited"))
             XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
 
             let body = try XCTUnwrap(Self.requestBodyData(from: request))
@@ -38,6 +39,32 @@ final class APIClientTests: XCTestCase {
 
         XCTAssertEqual(response.company.ticker, "AAPL")
         XCTAssertEqual(response.usage.stocksUsed, 1)
+    }
+
+    func testFetchUsageIncludesDebugUnlimitedHeaderWhenEnabled() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/usage")
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-debug-unlimited"), "1")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "plan": "beta",
+                    "chatsUsed": 1,
+                    "chatLimit": 20,
+                    "stocksUsed": 1,
+                    "stockLimit": 25,
+                    "dateJST": "2026-04-17"
+                ])
+            )
+        }
+
+        let usage = try await client.fetchUsage(deviceKey: "device-123", debugUnlimited: true)
+
+        XCTAssertEqual(usage.chatsUsed, 1)
+        XCTAssertEqual(usage.chatLimit, 20)
     }
 
     private func makeClient(

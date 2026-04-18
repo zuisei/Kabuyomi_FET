@@ -8,33 +8,22 @@ struct SummaryDrawer: View {
     let openOriginal: () -> Void
     let close: () -> Void
 
+    private var headlineMetrics: [MetricPayload] {
+        Array(orderedInvestorMetrics(for: company).prefix(5))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("要点")
-                        .font(.system(.title3, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                    Text("\(company.ticker) ・ \(company.formType)")
-                        .font(.system(.footnote, design: .rounded, weight: .medium))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
-
-                Spacer()
-
-                Button(action: close) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .bold))
-                        .frame(width: 36, height: 36)
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
-                        .kabuyomiCard(.secondary, radius: 18)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("要点を閉じる")
-            }
+            SummaryDrawerHeader(
+                ticker: company.ticker,
+                formType: company.formType,
+                close: close
+            )
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 20) {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    InvestorMetricMapCard(metrics: headlineMetrics)
+
                     SummaryLeadCard(
                         company: company,
                         tone: investorTone(for: company, positiveInsights: positiveInsights, negativeInsights: negativeInsights),
@@ -55,11 +44,13 @@ struct SummaryDrawer: View {
                     )
 
                     InvestorChangeBoard(
-                        company: company,
-                        changeInsights: Array(buildChangeInsights(for: company).prefix(3))
+                        metrics: headlineMetrics
                     )
 
-                    InvestorMetricMapCard(metrics: Array(orderedInvestorMetrics(for: company).prefix(5)))
+                    if let historicalOverview = company.historicalOverview,
+                       !historicalOverview.series.isEmpty {
+                        InvestorHistoricalTrendBoard(overview: historicalOverview)
+                    }
 
                     InvestorOriginalDocumentCard(openOriginal: openOriginal)
                 }
@@ -70,12 +61,74 @@ struct SummaryDrawer: View {
         .padding(20)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .overlay(Rectangle().fill(Color.white.opacity(0.28)))
-                .overlay(Rectangle().stroke(Color.white.opacity(0.55), lineWidth: 1))
-                .shadow(color: Color.black.opacity(0.12), radius: 18, x: -8, y: 0)
+            ZStack(alignment: .leading) {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.99, green: 0.98, blue: 0.96),
+                        Color(red: 0.95, green: 0.92, blue: 0.88)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .opacity(0.74)
+
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                KabuyomiTheme.accentDeep.opacity(0.34),
+                                KabuyomiTheme.accent.opacity(0.08),
+                                .clear
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 6)
+            }
+            .overlay(Rectangle().stroke(Color.white.opacity(0.55), lineWidth: 1))
+            .shadow(color: Color.black.opacity(0.12), radius: 18, x: -8, y: 0)
         )
+    }
+}
+
+private struct SummaryDrawerHeader: View {
+    let ticker: String
+    let formType: String
+    let close: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("要点")
+                    .font(.system(.caption, design: .rounded, weight: .heavy))
+                    .kerning(1.2)
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+
+                Text(ticker)
+                    .font(.system(.title2, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+
+                Text("\(formType) を会話前にざっと掴む")
+                    .font(.system(.footnote, design: .rounded, weight: .medium))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+            }
+
+            Spacer()
+
+            Button(action: close) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .bold))
+                    .frame(width: 38, height: 38)
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .kabuyomiGlass(radius: 19, tint: Color.white.opacity(0.24), stroke: Color.white.opacity(0.56))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("要点を閉じる")
+        }
     }
 }
 
@@ -87,17 +140,18 @@ private struct SummaryLeadCard: View {
     let focusCount: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("一言結論")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("まずここ")
+                        .font(.system(.caption, design: .rounded, weight: .heavy))
+                        .kerning(1.1)
+                        .foregroundStyle(tone.tint.opacity(0.92))
                     Text(company.companyName)
-                        .font(.system(.title3, design: .rounded, weight: .bold))
+                        .font(.system(.title2, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.ink)
                     Text("\(company.ticker) ・ \(company.formType)")
-                        .font(.system(.footnote, design: .rounded, weight: .medium))
+                        .font(.system(.footnote, design: .rounded, weight: .semibold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
@@ -106,31 +160,34 @@ private struct SummaryLeadCard: View {
                 InvestorToneBadge(tone: tone)
             }
 
-            if let sentence = summarySentence {
-                Text(sentence)
-                    .font(.system(.body, design: .rounded, weight: .medium))
-                    .foregroundStyle(KabuyomiTheme.inkSoft)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(summarySentence ?? "この filing の要点を短く押さえ、そのまま会話で深掘りできます。")
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text("この filing の要点を短く押さえ、そのまま会話で深掘りできます。")
-                    .font(.system(.body, design: .rounded))
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
+
+                Text(tone.supportingCopy)
+                    .font(.system(.footnote, design: .rounded, weight: .medium))
+                    .foregroundStyle(KabuyomiTheme.inkSoft)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(spacing: 8) {
-                OverviewCountBadge(title: "良かった点", count: positiveCount, tint: KabuyomiTheme.positive)
-                OverviewCountBadge(title: "気になる点", count: negativeCount, tint: KabuyomiTheme.negative)
-                OverviewCountBadge(title: "論点", count: focusCount, tint: KabuyomiTheme.accentDeep)
-            }
+            SummarySignalMeter(
+                positiveCount: positiveCount,
+                negativeCount: negativeCount,
+                focusCount: focusCount
+            )
 
-            HStack(spacing: 10) {
-                SummaryMetaPill(title: "提出日", value: company.filedAt)
-                SummaryMetaPill(title: "対象期末", value: company.periodOfReport)
-            }
+            SummaryLeadMetaGrid(
+                filedAt: company.filedAt,
+                periodOfReport: company.periodOfReport,
+                formType: company.formType
+            )
         }
         .padding(18)
-        .kabuyomiCard(.primary, radius: 26)
+        .background(background)
     }
 
     private var summarySentence: String? {
@@ -139,76 +196,420 @@ private struct SummaryLeadCard: View {
         let normalizedCompanyName = company.companyName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return normalizedSentence == normalizedCompanyName ? nil : sentence
     }
+
+    private var background: some View {
+        RoundedRectangle(cornerRadius: 28, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.96),
+                        tone.tint.opacity(0.08),
+                        KabuyomiTheme.paper
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color.white.opacity(0.92), lineWidth: 1)
+            )
+            .overlay(alignment: .topTrailing) {
+                Circle()
+                    .fill(tone.tint.opacity(0.12))
+                    .frame(width: 138, height: 138)
+                    .blur(radius: 12)
+                    .offset(x: 18, y: -24)
+            }
+            .shadow(color: tone.tint.opacity(0.12), radius: 18, x: 0, y: 10)
+    }
+}
+
+private struct SummarySignalMeter: View {
+    let positiveCount: Int
+    let negativeCount: Int
+    let focusCount: Int
+
+    private var total: Double {
+        Double(max(positiveCount + negativeCount + focusCount, 1))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                OverviewCountBadge(title: "良い", count: positiveCount, tint: KabuyomiTheme.positive)
+                OverviewCountBadge(title: "注意", count: negativeCount, tint: KabuyomiTheme.negative)
+                OverviewCountBadge(title: "論点", count: focusCount, tint: KabuyomiTheme.accentDeep)
+            }
+
+            GeometryReader { geometry in
+                HStack(spacing: 6) {
+                    SummarySignalSegment(
+                        width: geometry.size.width * CGFloat(Double(positiveCount) / total),
+                        tint: KabuyomiTheme.positive
+                    )
+                    SummarySignalSegment(
+                        width: geometry.size.width * CGFloat(Double(negativeCount) / total),
+                        tint: KabuyomiTheme.negative
+                    )
+                    SummarySignalSegment(
+                        width: geometry.size.width * CGFloat(Double(focusCount) / total),
+                        tint: KabuyomiTheme.accentDeep
+                    )
+                }
+            }
+            .frame(height: 8)
+        }
+    }
+}
+
+private struct SummarySignalSegment: View {
+    let width: CGFloat
+    let tint: Color
+
+    var body: some View {
+        Capsule()
+            .fill(tint.opacity(width > 0 ? 0.9 : 0.16))
+            .frame(width: max(width, 10))
+    }
+}
+
+private struct SummaryLeadMetaGrid: View {
+    let filedAt: String
+    let periodOfReport: String
+    let formType: String
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                SummaryMetaPill(title: "提出日", value: shortDate(filedAt))
+                SummaryMetaPill(title: "対象期末", value: shortDate(periodOfReport))
+                SummaryMetaPill(title: "フォーム", value: formType)
+            }
+
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    SummaryMetaPill(title: "提出日", value: shortDate(filedAt))
+                    SummaryMetaPill(title: "対象期末", value: shortDate(periodOfReport))
+                }
+
+                SummaryMetaPill(title: "フォーム", value: formType)
+            }
+        }
+    }
+
+    private func shortDate(_ rawValue: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        guard let date = formatter.date(from: rawValue) else { return rawValue }
+        formatter.dateFormat = "yyyy/MM/dd"
+        return formatter.string(from: date)
+    }
+}
+
+private struct SummaryMetaLabel: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.system(.caption2, design: .rounded, weight: .heavy))
+            .kerning(0.5)
+            .foregroundStyle(KabuyomiTheme.inkMuted)
+            .lineLimit(1)
+            .minimumScaleFactor(0.9)
+            .textCase(.uppercase)
+    }
+}
+
+private struct SummaryMetaValue: View {
+    let value: String
+
+    var body: some View {
+        Text(value)
+            .font(.system(.subheadline, design: .rounded, weight: .bold))
+            .monospacedDigit()
+            .foregroundStyle(KabuyomiTheme.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct SummaryMetaCardBackground: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(Color.white.opacity(0.72))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.94), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.03), radius: 10, x: 0, y: 4)
+    }
 }
 
 private struct InvestorChangeBoard: View {
-    let company: CompanyPayload
-    let changeInsights: [FilingInsight]
+    let metrics: [MetricPayload]
+
+    private var comparableMetrics: [MetricPayload] {
+        metrics.filter { $0.comparisonValue != nil }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("前回からの変化")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                    Text("数字と本文で押さえる今回の差分")
-                        .font(.system(.footnote, design: .rounded))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
-            }
-
-            if changeInsights.isEmpty {
-                Text("前回比で目立つ変化はまだ抽出されていません。")
+        SummaryBoardCard(
+            eyebrow: "比較",
+            title: "前回からの変化",
+            subtitle: "今回・前年同期・増減率を表で比較",
+            systemImage: "clock.arrow.circlepath"
+        ) {
+            if comparableMetrics.isEmpty {
+                Text("前回比で比較できる主要指標はまだ抽出されていません。")
                     .font(.system(.footnote, design: .rounded))
                     .foregroundStyle(KabuyomiTheme.inkMuted)
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .kabuyomiCard(.muted, radius: 18)
             } else {
-                ForEach(Array(changeInsights.enumerated()), id: \.element.id) { index, insight in
-                    InvestorChangeRow(company: company, index: index + 1, insight: insight)
+                VStack(spacing: 0) {
+                    InvestorChangeTableHeader()
+
+                    ForEach(Array(comparableMetrics.enumerated()), id: \.element.id) { index, metric in
+                        InvestorChangeTableRow(metric: metric, isLast: index == comparableMetrics.count - 1)
+                    }
                 }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(Color.white.opacity(0.72))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .stroke(Color.white.opacity(0.88), lineWidth: 1)
+                        )
+                )
             }
         }
-        .padding(18)
-        .kabuyomiCard(.primary, radius: 24)
     }
 }
 
-private struct InvestorChangeRow: View {
-    let company: CompanyPayload
-    let index: Int
-    let insight: FilingInsight
+private struct InvestorChangeTableHeader: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("項目")
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("今回")
+                .frame(maxWidth: .infinity, alignment: .trailing)
+
+            Text("前年")
+                .frame(maxWidth: .infinity, alignment: .trailing)
+
+            Text("YoY")
+                .frame(width: 62, alignment: .trailing)
+        }
+        .font(.system(.caption, design: .rounded, weight: .bold))
+        .foregroundStyle(KabuyomiTheme.inkMuted)
+        .padding(.bottom, 10)
+    }
+}
+
+private struct InvestorChangeTableRow: View {
+    let metric: MetricPayload
+    let isLast: Bool
+
+    private var yoyText: String {
+        metric.yoyPercent.map { formattedSignedYoY($0) } ?? "—"
+    }
+
+    private var yoyTint: Color {
+        guard let yoy = metric.yoyPercent else { return KabuyomiTheme.inkMuted }
+        return yoy >= 0 ? KabuyomiTheme.positive : KabuyomiTheme.negative
+    }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(index)")
-                .font(.system(.subheadline, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.accentDeep)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(KabuyomiTheme.accentSoft.opacity(0.72)))
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(MetricLabeler.title(for: metric.logicalName))
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text(insight.text)
-                    .font(.system(.body, design: .rounded))
+                Text(formattedMetricValue(metric))
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+
+                Text(metric.comparisonValue.map { formattedMetricValue($0, logicalName: metric.logicalName) } ?? "—")
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
                     .foregroundStyle(KabuyomiTheme.inkSoft)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
 
-                InsightSourceChips(company: company, sourceIds: insight.sourceIds)
+                Text(yoyText)
+                    .font(.system(.footnote, design: .rounded, weight: .bold))
+                    .foregroundStyle(yoyTint)
+                    .frame(width: 62, alignment: .trailing)
+            }
+            .padding(.vertical, 11)
+
+            if !isLast {
+                Divider()
+                    .overlay(Color.white.opacity(0.7))
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .kabuyomiCard(.secondary, radius: 20)
     }
+}
+
+private struct InvestorHistoricalTrendBoard: View {
+    let overview: HistoricalOverviewPayload
+
+    private var orderedPeriods: [String] {
+        let allPeriods = overview.series
+            .flatMap(\.points)
+            .map(\.periodEnd)
+
+        return Array(Set(allPeriods)).sorted()
+    }
+
+    private var subtitle: String {
+        overview.comparisonBasis == "quarterly"
+            ? "同四半期で 3 年分を横並び比較"
+            : "年次で 3 年分を横並び比較"
+    }
+
+    var body: some View {
+        SummaryBoardCard(
+            eyebrow: "3年",
+            title: overview.comparisonBasis == "quarterly" ? "3年の同四半期比較" : "3年の年次比較",
+            subtitle: subtitle,
+            systemImage: "tablecells"
+        ) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    InvestorHistoricalTableHeader(periods: orderedPeriods)
+
+                    ForEach(Array(overview.series.enumerated()), id: \.element.id) { index, series in
+                        InvestorHistoricalTableRow(
+                            series: series,
+                            periods: orderedPeriods,
+                            isLast: index == overview.series.count - 1
+                        )
+                    }
+                }
+                .padding(14)
+                .frame(minWidth: 520, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(Color.white.opacity(0.72))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .stroke(Color.white.opacity(0.88), lineWidth: 1)
+                        )
+                )
+            }
+
+            Text("履歴比較は \(overview.comparisonBasis == "quarterly" ? "同四半期ベース" : "年次ベース") です。")
+                .font(.system(.caption, design: .rounded, weight: .medium))
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+        }
+    }
+}
+
+private struct InvestorHistoricalTableHeader: View {
+    let periods: [String]
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("指標")
+                .frame(width: 90, alignment: .leading)
+
+            ForEach(periods, id: \.self) { period in
+                Text(shortHistoricalPeriod(period))
+                    .frame(width: 108, alignment: .trailing)
+            }
+
+            Text("直近YoY")
+                .frame(width: 68, alignment: .trailing)
+        }
+        .font(.system(.caption, design: .rounded, weight: .bold))
+        .foregroundStyle(KabuyomiTheme.inkMuted)
+        .padding(.bottom, 10)
+    }
+}
+
+private struct InvestorHistoricalTableRow: View {
+    let series: HistoricalMetricSeriesPayload
+    let periods: [String]
+    let isLast: Bool
+
+    private var pointsByPeriod: [String: HistoricalMetricPointPayload] {
+        Dictionary(uniqueKeysWithValues: series.points.map { ($0.periodEnd, $0) })
+    }
+
+    private var latestYoYText: String {
+        guard let latest = series.points.max(by: { $0.periodEnd < $1.periodEnd }),
+              let yoy = latest.yoyPercent else {
+            return "—"
+        }
+        return formattedSignedYoY(yoy)
+    }
+
+    private var latestYoYTint: Color {
+        guard let latest = series.points.max(by: { $0.periodEnd < $1.periodEnd }),
+              let yoy = latest.yoyPercent else {
+            return KabuyomiTheme.inkMuted
+        }
+        return yoy >= 0 ? KabuyomiTheme.positive : KabuyomiTheme.negative
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(series.label)
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                    .frame(width: 90, alignment: .leading)
+
+                ForEach(periods, id: \.self) { period in
+                    Text(periodValue(period))
+                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.inkSoft)
+                        .frame(width: 108, alignment: .trailing)
+                }
+
+                Text(latestYoYText)
+                    .font(.system(.footnote, design: .rounded, weight: .bold))
+                    .foregroundStyle(latestYoYTint)
+                    .frame(width: 68, alignment: .trailing)
+            }
+            .padding(.vertical, 11)
+
+            if !isLast {
+                Divider()
+                    .overlay(Color.white.opacity(0.7))
+            }
+        }
+    }
+
+    private func periodValue(_ period: String) -> String {
+        guard let point = pointsByPeriod[period] else { return "—" }
+
+        if series.logicalName == "epsBasic" {
+            return point.value.formatted(.number.precision(.fractionLength(2)))
+        }
+
+        return formattedMetricValue(point.value, logicalName: series.logicalName)
+    }
+}
+
+private func shortHistoricalPeriod(_ rawValue: String) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd"
+
+    guard let date = formatter.date(from: rawValue) else { return rawValue }
+    formatter.dateFormat = "yyyy/MM"
+    return formatter.string(from: date)
 }
 
 private struct InvestorOriginalDocumentCard: View {
@@ -219,28 +620,42 @@ private struct InvestorOriginalDocumentCard: View {
             HStack(spacing: 12) {
                 Image(systemName: "arrow.up.right.square")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .frame(width: 34, height: 34)
-                    .background(Circle().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+                    .foregroundStyle(Color.white)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(KabuyomiTheme.accentDeep))
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("原文を開く")
+                    Text("原文に戻る")
                         .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                    Text("最後に提出資料へ戻って確認する")
+                        .foregroundStyle(Color.white)
+                    Text("最後は提出資料で裏取りする")
                         .font(.system(.footnote, design: .rounded))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .foregroundStyle(Color.white.opacity(0.8))
                 }
 
                 Spacer()
 
-                Text("開く")
+                Text("SEC")
                     .font(.system(.subheadline, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .foregroundStyle(Color.white.opacity(0.92))
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .kabuyomiCard(.primary, radius: 24)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [KabuyomiTheme.accentDeep, KabuyomiTheme.accent],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                    )
+                    .shadow(color: KabuyomiTheme.accentDeep.opacity(0.18), radius: 14, x: 0, y: 8)
+            )
         }
         .buttonStyle(.plain)
     }
@@ -251,21 +666,14 @@ private struct SummaryMetaPill: View {
     let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(KabuyomiTheme.inkMuted)
-            Text(value)
-                .font(.caption)
-                .foregroundStyle(KabuyomiTheme.ink)
+        VStack(alignment: .leading, spacing: 7) {
+            SummaryMetaLabel(title: title)
+            SummaryMetaValue(value: value)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            Capsule()
-                .fill(KabuyomiTheme.fill(for: .secondary))
-                .overlay(Capsule().stroke(KabuyomiTheme.stroke(for: .secondary), lineWidth: 1))
-        )
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(SummaryMetaCardBackground())
     }
 }
 
@@ -297,7 +705,11 @@ private struct OverviewCountBadge: View {
         .foregroundStyle(tint)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(Capsule().fill(tint.opacity(0.12)))
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.78))
+                .overlay(Capsule().stroke(tint.opacity(0.18), lineWidth: 1))
+        )
     }
 }
 
@@ -309,24 +721,12 @@ private struct InvestorMetricMapCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "chart.bar.xaxis")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("主要指標")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                    Text("いまの値と前年同期をひと目で確認")
-                        .font(.system(.footnote, design: .rounded))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
-            }
-
+        SummaryBoardCard(
+            eyebrow: "数字",
+            title: "主要指標",
+            subtitle: "いまの値と前年同期をひと目で確認",
+            systemImage: "chart.bar.xaxis"
+        ) {
             if metrics.isEmpty {
                 Text("比較できる主要指標はまだ抽出されていません。")
                     .font(.system(.footnote, design: .rounded))
@@ -340,8 +740,6 @@ private struct InvestorMetricMapCard: View {
                 }
             }
         }
-        .padding(18)
-        .kabuyomiCard(.primary, radius: 24)
     }
 }
 
@@ -446,24 +844,12 @@ private struct InvestorDriverBoard: View {
     let negativeInsights: [FilingInsight]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("良かった点と気になる点")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                    Text("まず強さ、その次に注意点を見る")
-                        .font(.system(.footnote, design: .rounded))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
-            }
-
+        SummaryBoardCard(
+            eyebrow: "整理",
+            title: "良かった点と気になる点",
+            subtitle: "まず強さ、その次に注意点を見る",
+            systemImage: "arrow.left.arrow.right"
+        ) {
             InvestorInsightLane(
                 company: company,
                 title: "良かった点",
@@ -484,8 +870,6 @@ private struct InvestorDriverBoard: View {
                 emptyMessage: "明確に気をつけたい材料はまだ切り出されていません。"
             )
         }
-        .padding(18)
-        .kabuyomiCard(.primary, radius: 24)
     }
 }
 
@@ -573,24 +957,12 @@ private struct InvestorFocusBoard: View {
     let focusInsights: [FilingInsight]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("次に詰める論点")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                    Text("会話で深掘りする順番まで見える形に")
-                        .font(.system(.footnote, design: .rounded))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
-            }
-
+        SummaryBoardCard(
+            eyebrow: "次",
+            title: "次に詰める論点",
+            subtitle: "会話で深掘りする順番まで見える形に",
+            systemImage: "bubble.left.and.bubble.right.fill"
+        ) {
             if focusInsights.isEmpty {
                 Text("質問で深掘りしやすい論点はまだ抽出されていません。")
                     .font(.system(.footnote, design: .rounded))
@@ -623,6 +995,58 @@ private struct InvestorFocusBoard: View {
                     .kabuyomiCard(.secondary, radius: 20)
                 }
             }
+        }
+    }
+}
+
+private struct SummaryBoardCard<Content: View>: View {
+    let eyebrow: String
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let content: Content
+
+    init(
+        eyebrow: String,
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.eyebrow = eyebrow
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .fill(KabuyomiTheme.accentSoft.opacity(0.58))
+                    )
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(eyebrow)
+                        .font(.system(.caption2, design: .rounded, weight: .heavy))
+                        .kerning(0.8)
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                    Text(title)
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Text(subtitle)
+                        .font(.system(.footnote, design: .rounded))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                }
+            }
+
+            content
         }
         .padding(18)
         .kabuyomiCard(.primary, radius: 24)

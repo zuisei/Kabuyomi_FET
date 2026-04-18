@@ -9,6 +9,7 @@ final class AppModelTests: XCTestCase {
     }
 
     override func tearDown() {
+        MockAppModelURLProtocol.requestHandler = nil
         Self.clearKabuyomiDefaults()
         super.tearDown()
     }
@@ -21,9 +22,34 @@ final class AppModelTests: XCTestCase {
         model.openConversation(for: " msft ", draftQuestion: "前回決算との違いは？")
 
         XCTAssertEqual(model.activeConversationTicker, "MSFT")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey), "MSFT")
         XCTAssertFalse(model.shouldShowConversationEntry)
         XCTAssertEqual(model.consumePendingDraftQuestion(for: "MSFT"), "前回決算との違いは？")
         XCTAssertNil(model.consumePendingDraftQuestion(for: "MSFT"))
+    }
+
+    func testOpenConversationDoesNotPersistEphemeralTickerWithoutLocalData() {
+        let model = makeAppModel()
+
+        model.openConversation(for: " mu ")
+
+        XCTAssertEqual(model.activeConversationTicker, "MU")
+        XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
+    }
+
+    func testBootstrapClearsRestoredEphemeralTickerWithoutLocalData() async {
+        UserDefaults.standard.set("MU", forKey: AppModel.activeConversationTickerKey)
+        UserDefaults.standard.set("AAPL", forKey: AppModel.lastViewedTickerKey)
+        UserDefaults.standard.set(["AAPL"], forKey: AppModel.recentTickersKey)
+        UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
+
+        let model = makeAppModel()
+
+        await model.bootstrap()
+
+        XCTAssertNil(model.activeConversationTicker)
+        XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
+        XCTAssertEqual(model.rootConversationTicker, "AAPL")
     }
 
     func testResetLocalDataRestoresConversationEntryState() throws {
@@ -47,9 +73,26 @@ final class AppModelTests: XCTestCase {
     }
 
     private func makeAppModel(persistence: PersistenceController = PersistenceController(inMemory: true)) -> AppModel {
-        AppModel(
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = try TestFixtures.jsonData([
+                "plan": "beta",
+                "chatsUsed": 0,
+                "chatLimit": 20,
+                "stocksUsed": 0,
+                "stockLimit": 25,
+                "dateJST": "2026-04-18"
+            ])
+            return (response, data)
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockAppModelURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+
+        return AppModel(
             apiClient: APIClient(
-                session: URLSession(configuration: .ephemeral),
+                session: session,
                 baseURL: URL(string: "https://example.com")!
             ),
             persistence: persistence,
@@ -63,4 +106,34 @@ final class AppModelTests: XCTestCase {
             defaults.removeObject(forKey: key)
         }
     }
+}
+
+private final class MockAppModelURLProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var requestHandler: (@Sendable (URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let handler = Self.requestHandler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }

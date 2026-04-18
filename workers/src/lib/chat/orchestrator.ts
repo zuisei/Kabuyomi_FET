@@ -1,9 +1,8 @@
 import type { Env, FilingCacheRecord, SourceChunkRecord } from "../../env";
 import { generateChatAnswer } from "../../clients/gemini";
 import { AppError } from "../errors";
-import { maybeBuildHistoricalChatResponse } from "../history-store";
 import { logEvent } from "../logging";
-import type { RemoteConfig } from "../remote-config";
+import { DEFAULT_REMOTE_CONFIG, type RemoteConfig } from "../remote-config";
 import { buildDeterministicMetricAnswer, shouldRecoverFromWeakModelSources } from "./deterministic";
 import {
   buildSecFilingSource,
@@ -11,15 +10,29 @@ import {
   ensureFilingGroundedResponse,
   type ChatResponsePayload
 } from "./grounding";
+import { maybeBuildHistoricalChatResponseWithHydration } from "./historical";
 import { maybeAppendWebSupplement } from "./web-supplement";
 
 export async function buildChatResponse(
   filing: FilingCacheRecord,
   question: string,
   env: Env,
-  config?: Pick<RemoteConfig, "webSupplementEnabled">
+  config?: Partial<RemoteConfig>
 ): Promise<ChatResponsePayload> {
-  const historical = await maybeBuildHistoricalChatResponse(filing, question, env);
+  const resolvedConfig: RemoteConfig = {
+    ...DEFAULT_REMOTE_CONFIG,
+    ...config
+  };
+  let historical = null;
+  try {
+    historical = await maybeBuildHistoricalChatResponseWithHydration(filing, question, env, resolvedConfig);
+  } catch (error) {
+    logEvent("chat_historical_answer_failed", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+  }
   if (historical) {
     logEvent("chat_historical_answer_used", {
       filingKey: filing.filingKey,
@@ -40,7 +53,7 @@ export async function buildChatResponse(
       question,
       ensureFilingGroundedResponse(deterministic.response),
       env,
-      config
+      resolvedConfig
     );
   }
 
@@ -95,7 +108,7 @@ export async function buildChatResponse(
           })
         }),
         env,
-        config
+        resolvedConfig
       );
     }
   }
@@ -109,8 +122,8 @@ export async function buildChatResponse(
         const source = filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId)!;
         return buildSecFilingSource(source);
       })
-    }),
-    env,
-    config
-  );
+      }),
+      env,
+      resolvedConfig
+    );
 }

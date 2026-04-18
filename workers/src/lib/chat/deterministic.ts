@@ -3,7 +3,13 @@ import { formatMetricValue, formatYoYDelta, metricLabel } from "../metrics";
 import { buildSecFilingSource, dedupeChatSources, type ChatEvidenceSource, type ChatResponsePayload } from "./grounding";
 
 export interface DeterministicChatAnswer {
-  strategy: "margin_snapshot" | "revenue_drivers" | "contrastive_market_reaction" | "cash_generation";
+  strategy:
+    | "margin_snapshot"
+    | "revenue_drivers"
+    | "contrastive_market_reaction"
+    | "cash_generation"
+    | "change_overview"
+    | "stock_context";
   response: ChatResponsePayload;
 }
 
@@ -16,6 +22,11 @@ export function buildDeterministicMetricAnswer(
     /(株価|市場|反応|上げ|上が|下げ|下が|好感|嫌気)/.test(normalizedQuestion) &&
     (/(なのに|にもかかわらず|のに)/.test(normalizedQuestion) ||
       /(不確実|不透明|懸念|逆風|弱い|悪い|微妙|risk|uncertain|uncertainty)/.test(normalizedQuestion));
+  const asksStockContext = isBroadStockContextQuestion(normalizedQuestion);
+  const asksChangeOverview =
+    /(前回決算との違い|前回との違い|前回比|今回の一番大きい変化|何が変わった|どこが変わった|変化点|今回の変化)/.test(
+      normalizedQuestion
+    );
   const asksRevenueDrivers =
     /(売上|増収|成長|growth|revenue)/.test(normalizedQuestion) &&
     /(支え|押し上げ|牽引|ドライバ|主因|要因|理由|どの変化|何が)/.test(normalizedQuestion);
@@ -30,6 +41,16 @@ export function buildDeterministicMetricAnswer(
   if (asksContrastiveMarketReaction) {
     const response = buildContrastiveMarketReactionAnswer(filing);
     return response ? { strategy: "contrastive_market_reaction", response } : null;
+  }
+
+  if (asksStockContext) {
+    const response = buildStockContextAnswer(filing);
+    return response ? { strategy: "stock_context", response } : null;
+  }
+
+  if (asksChangeOverview) {
+    const response = buildChangeOverviewAnswer(filing, normalizedQuestion);
+    return response ? { strategy: "change_overview", response } : null;
   }
 
   if (asksRevenueDrivers) {
@@ -145,7 +166,8 @@ export function shouldRecoverFromWeakModelSources(
     ((/(売上|sales|revenue)/.test(normalized) && /(主因|要因|理由|なぜ|支え|ドライバ|牽引)/.test(normalized)) ||
       /(株価|市場|反応|好感|嫌気|織り込|織込|shareprice|stockprice|marketreaction|ガイダンス|見通し|予想|guidance|outlook|来期|次四半期|還元|自社株買い|buyback|repurchase|配当|dividend|capitalallocation|株主還元)/.test(
         normalized
-      ));
+      ) ||
+      isBroadStockContextQuestion(normalized));
 
   if (!asksBroadReasoning) {
     return false;
@@ -192,6 +214,45 @@ function buildRevenueDriversAnswer(filing: FilingCacheRecord): ChatResponsePaylo
     answerParts.push(narrative.text);
   }
   answerParts.push("ただし、どの要因がいちばん効いたかを厳密に切り分けるには追加情報が必要です。");
+
+  return {
+    answer: answerParts.join(" "),
+    sources: dedupeChatSources(sources)
+  };
+}
+
+function buildStockContextAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {
+  const performance = summarizePerformanceStrength(filing);
+  const risk = summarizeRiskContext(filing.sourceChunks);
+
+  if (!performance && !risk) {
+    return null;
+  }
+
+  const sources: ChatEvidenceSource[] = [];
+  const answerParts = [buildFilingStockContextJudgment(filing, risk)];
+
+  if (performance) {
+    for (const sourceId of performance.sourceIds) {
+      const source = filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId);
+      if (source) {
+        sources.push(buildSecFilingSource(source));
+      }
+    }
+    answerParts.push(`根拠になる直近決算の事実としては、${performance.text}`);
+  }
+
+  if (risk) {
+    for (const sourceId of risk.sourceIds) {
+      const source = filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId);
+      if (source) {
+        sources.push(buildSecFilingSource(source));
+      }
+    }
+    answerParts.push(`一方で、提出資料では${risk.text}。`);
+  }
+
+  answerParts.push("株の強弱をみるには、実際の株価推移や決算後ニュースも併せて確認する必要があります。");
 
   return {
     answer: answerParts.join(" "),
@@ -265,6 +326,69 @@ function buildCashGenerationAnswer(filing: FilingCacheRecord): ChatResponsePaylo
   return {
     answer: buildMetricObservationSentence(metric),
     sources: [buildSecFilingSource(source)]
+  };
+}
+
+function buildChangeOverviewAnswer(
+  filing: FilingCacheRecord,
+  normalizedQuestion: string
+): ChatResponsePayload | null {
+  const rankedMetrics = filing.metrics
+    .map((metric) => ({
+      metric,
+      sourceId: findMetricSourceId(filing, metric.logicalName),
+      priority: metricPriority(metric.logicalName),
+      magnitude:
+        metric.yoyPercent !== undefined
+          ? Math.abs(metric.yoyPercent)
+          : metric.comparisonValue !== undefined && metric.comparisonValue !== 0
+            ? Math.abs(((metric.value - metric.comparisonValue) / metric.comparisonValue) * 100)
+            : 0
+    }))
+    .filter((entry) => entry.sourceId)
+    .sort((left, right) => {
+      if (right.magnitude !== left.magnitude) {
+        return right.magnitude - left.magnitude;
+      }
+
+      return left.priority - right.priority;
+    })
+    .slice(0, 3);
+
+  if (rankedMetrics.length === 0) {
+    return null;
+  }
+
+  const sources = rankedMetrics.map((entry) => {
+    const source = filing.sourceChunks.find((chunk) => chunk.sourceId === entry.sourceId)!;
+    return buildSecFilingSource(source);
+  });
+
+  const answerParts: string[] = [];
+  answerParts.push(`数字で目立つのは、${buildMetricObservationSentence(rankedMetrics[0]!.metric)}`);
+
+  if (rankedMetrics.length > 1) {
+    answerParts.push(`ほかには、${rankedMetrics.slice(1).map((entry) => buildMetricObservationSentence(entry.metric)).join(" ")}`);
+  }
+
+  const drivers = summarizeRevenueDrivers(filing.sourceChunks);
+  if (drivers) {
+    for (const sourceId of drivers.sourceIds) {
+      const source = filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId);
+      if (source) {
+        sources.push(buildSecFilingSource(source));
+      }
+    }
+    answerParts.push(drivers.text);
+  }
+
+  if (/(前回決算|前回との違い|前回比)/.test(normalizedQuestion)) {
+    answerParts.push("なお、この filing でそのまま比べやすいのは直前四半期ではなく前年同期比です。");
+  }
+
+  return {
+    answer: answerParts.join(" "),
+    sources: dedupeChatSources(sources)
   };
 }
 
@@ -428,6 +552,53 @@ function summarizeRiskContext(
   };
 }
 
+function buildFilingStockContextJudgment(
+  filing: FilingCacheRecord,
+  risk: { text: string; sourceIds: string[] } | null
+): string {
+  const revenue = filing.metrics.find((metric) => metric.logicalName === "revenue");
+  const profit =
+    filing.metrics.find((metric) => metric.logicalName === "operatingIncome") ??
+    filing.metrics.find((metric) => metric.logicalName === "netIncome");
+  let score = 0;
+
+  if ((revenue?.yoyPercent ?? 0) > 0) {
+    score += 1;
+  } else if ((revenue?.yoyPercent ?? 0) < 0) {
+    score -= 1;
+  }
+
+  if ((profit?.yoyPercent ?? 0) > 0) {
+    score += 1;
+  } else if ((profit?.yoyPercent ?? 0) < 0) {
+    score -= 1;
+  }
+
+  if (risk) {
+    score -= 1;
+  }
+
+  if (score >= 1) {
+    return "filingベースで見ると、足元はやや強めです。";
+  }
+
+  if (score <= -1) {
+    return "filingベースで見ると、足元は慎重寄りです。";
+  }
+
+  return "filingベースで見ると、強弱はまだらです。";
+}
+
+function isBroadStockContextQuestion(normalizedQuestion: string): boolean {
+  return (
+    /(株の調子|株調子|株の動き|株どう|株はどう|最近株|最近の株|直近株|足元株|足元の株|stockperformance|shareperformance)/.test(
+      normalizedQuestion
+    ) ||
+    (/(最近|直近|足元|いま|今は|今の|このところ|ここのところ)/.test(normalizedQuestion) &&
+      /(株|株価|市場|stock|share)/.test(normalizedQuestion))
+  );
+}
+
 function translateDriverList(raw: string): string {
   return raw
     .replace(/\bServices\b/g, "サービス")
@@ -450,6 +621,23 @@ function buildMetricObservationSentence(metric: MetricSnapshot): string {
   }
 
   return `${label}は ${current} です。`;
+}
+
+function metricPriority(logicalName: MetricSnapshot["logicalName"]): number {
+  switch (logicalName) {
+    case "revenue":
+      return 0;
+    case "operatingIncome":
+      return 1;
+    case "netIncome":
+      return 2;
+    case "operatingCashFlow":
+      return 3;
+    case "epsBasic":
+      return 4;
+    default:
+      return 10;
+  }
 }
 
 type MarginDirection = "improved" | "deteriorated" | "flat";

@@ -6,6 +6,7 @@ struct ConversationMessageRow: View {
     let message: LocalChatMessage
     let precedingUserPrompt: String?
     let recoverySuggestions: [String]
+    let followUpSuggestions: [String]
     let applySuggestion: (String) -> Void
 
     var body: some View {
@@ -18,18 +19,16 @@ struct ConversationMessageRow: View {
                 }
 
                 VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 8) {
-                    Text(message.role == "user" ? "あなた" : company.ticker)
-                        .font(.system(.caption, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                    messageMetaLine
 
                     messageBubbleContent
                         .padding(16)
                         .background(message.role == "user" ? AnyView(userBubble) : AnyView(assistantBubble))
 
-                    if showsRecoverySuggestions {
+                    if showsSuggestionStrip {
                         ConversationRecoverySuggestions(
-                            title: recoverySuggestionTitle,
-                            suggestions: Array(recoverySuggestions.prefix(3)),
+                            title: suggestionStripTitle,
+                            suggestions: activeSuggestions,
                             applySuggestion: applySuggestion
                         )
                     }
@@ -101,12 +100,24 @@ struct ConversationMessageRow: View {
     private var groundingCaption: String? {
         let kinds = Set(message.sources.map(\.sourceKind))
 
+        if kinds.contains(.historicalFiling) && kinds.contains(.secFiling) {
+            return "最新 filing と過去提出資料を併用"
+        }
+
+        if kinds.contains(.historicalFiling) && kinds.contains(.webSupplement) {
+            return "過去提出資料を起点に外部補足あり"
+        }
+
         if kinds.contains(.secFiling) && kinds.contains(.webSupplement) {
             return "SEC filing を起点に外部補足あり"
         }
 
         if comparisonLimitationNotice != nil {
             return "比較は限定的"
+        }
+
+        if kinds.contains(.historicalFiling) {
+            return MessageSourceKind.historicalFiling.groundingCaption
         }
 
         return kinds.first?.groundingCaption
@@ -116,6 +127,30 @@ struct ConversationMessageRow: View {
         message.role != "user"
             && (isUnavailableMessage(message.content) || comparisonLimitationNotice != nil)
             && !recoverySuggestions.isEmpty
+    }
+
+    private var showsSuggestionStrip: Bool {
+        message.role != "user" && !activeSuggestions.isEmpty
+    }
+
+    private var activeSuggestions: [String] {
+        if showsRecoverySuggestions {
+            return Array(recoverySuggestions.prefix(3))
+        }
+
+        return Array(followUpSuggestions.prefix(3))
+    }
+
+    private var suggestionStripTitle: String {
+        if showsRecoverySuggestions {
+            return recoverySuggestionTitle
+        }
+
+        if let precedingUserPrompt, isHistoricalQuestionText(precedingUserPrompt) {
+            return "同じ軸で続きを見る"
+        }
+
+        return "続きを聞く"
     }
 
     @ViewBuilder
@@ -139,6 +174,9 @@ struct ConversationMessageRow: View {
 
     private var groundingIcon: String {
         let kinds = Set(message.sources.map(\.sourceKind))
+        if kinds.contains(.historicalFiling) {
+            return "clock.arrow.circlepath"
+        }
         if kinds.contains(.secFiling) {
             return "checkmark.shield"
         }
@@ -150,6 +188,8 @@ struct ConversationMessageRow: View {
         switch source.sourceKind {
         case .secFiling:
             return KabuyomiTheme.accentDeep.opacity(0.12)
+        case .historicalFiling:
+            return KabuyomiTheme.accent.opacity(0.16)
         case .webSupplement:
             return Color.white.opacity(0.72)
         }
@@ -159,6 +199,8 @@ struct ConversationMessageRow: View {
         switch source.sourceKind {
         case .secFiling:
             return KabuyomiTheme.accentDeep
+        case .historicalFiling:
+            return KabuyomiTheme.accent
         case .webSupplement:
             return KabuyomiTheme.inkMuted
         }
@@ -172,6 +214,50 @@ struct ConversationMessageRow: View {
         }
 
         return investorFacingSourceLabel(rawLabel: source.sourceLabelSnapshot, in: company)
+    }
+
+    private var messageMetaLine: some View {
+        HStack(spacing: 6) {
+            Text(message.role == "user" ? "あなた" : company.ticker)
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+
+            if message.role != "user" {
+                Text(message.createdAt, format: .dateTime.hour().minute())
+                    .font(.system(.caption2, design: .rounded, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.92))
+
+                if let compactModelLabel {
+                    Text(compactModelLabel)
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.55)))
+                }
+            }
+        }
+    }
+
+    private var compactModelLabel: String? {
+        guard message.role != "user" else { return nil }
+        let model = message.modelName.lowercased()
+
+        if model.contains("gemma-4-31b-it") {
+            return "Gemma 31B"
+        }
+
+        if model.contains("gemma-4") {
+            return "Gemma 4"
+        }
+
+        if model == "local" {
+            return nil
+        }
+
+        return message.modelName
+            .replacingOccurrences(of: "-it", with: "")
+            .replacingOccurrences(of: "-", with: " ")
     }
 
     private func avatarBubble<S: StringProtocol>(label: S, accent: Bool) -> some View {
@@ -197,16 +283,16 @@ struct ConversationMessageRow: View {
     }
 
     private var recoverySuggestionTitle: String {
-        isComparisonQuestion ? "代わりに履歴比較なら確認できます" : "代わりに次は確認できます"
+        isPeerComparisonQuestion ? "代わりに履歴比較なら確認できます" : "代わりに次は確認できます"
     }
 
-    private var isComparisonQuestion: Bool {
+    private var isPeerComparisonQuestion: Bool {
         guard let precedingUserPrompt, message.role != "user" else { return false }
-        return isComparisonQuestionText(precedingUserPrompt)
+        return isPeerComparisonQuestionText(precedingUserPrompt)
     }
 
     private var comparisonLimitationNotice: AssistantComparisonNotice? {
-        guard isComparisonQuestion,
+        guard isPeerComparisonQuestion,
               !isUnavailableMessage(message.content),
               !answerLooksComparative(message.content, for: precedingUserPrompt) else {
             return nil
@@ -219,7 +305,7 @@ struct ConversationMessageRow: View {
     }
 
     private var comparisonLimitationCopy: String? {
-        guard isComparisonQuestion else { return nil }
+        guard isPeerComparisonQuestion else { return nil }
         return "この beta では他社比較はまだ限定的です。"
     }
 
@@ -264,7 +350,7 @@ private struct AssistantComparisonNotice {
     let message: String
 }
 
-private struct AssistantMessageStructure {
+struct AssistantMessageStructure {
     let conclusion: String
     let evidence: [String]
     let limitations: [String]
@@ -288,7 +374,7 @@ private struct AssistantStructuredBubble: View {
             }
 
             AssistantSectionBlock(title: "結論", tint: KabuyomiTheme.accentDeep) {
-                Text(structure.conclusion)
+                Text(localizedAssistantDisplayText(structure.conclusion))
                     .font(.system(.body, design: .rounded, weight: .semibold))
                     .foregroundStyle(KabuyomiTheme.ink)
                     .lineSpacing(4)
@@ -399,7 +485,7 @@ private struct AssistantSentenceRow: View {
                 .frame(width: 5, height: 5)
                 .padding(.top, 7)
 
-            Text(text)
+            Text(localizedAssistantDisplayText(text))
                 .font(.system(.footnote, design: .rounded, weight: .medium))
                 .foregroundStyle(KabuyomiTheme.inkSoft)
                 .lineSpacing(3)
@@ -424,6 +510,20 @@ func isComparisonQuestionText(_ text: String) -> Bool {
     ]
 
     return patterns.contains(where: { normalized.contains($0) })
+}
+
+func isPeerComparisonQuestionText(_ text: String) -> Bool {
+    let normalized = text.lowercased()
+    let peerPatterns = [
+        "versus",
+        " vs ",
+        "他社",
+        "競合",
+        "peer",
+        "with "
+    ]
+
+    return peerPatterns.contains(where: { normalized.contains($0) })
 }
 
 private func extractComparisonTarget(from prompt: String?) -> String? {
@@ -480,25 +580,42 @@ private func answerLooksComparative(_ answer: String, for prompt: String?) -> Bo
     return comparisonMarkers.contains(where: { normalizedAnswer.contains($0.lowercased()) })
 }
 
-private func structureAssistantMessage(_ text: String) -> AssistantMessageStructure {
+func structureAssistantMessage(_ text: String) -> AssistantMessageStructure {
     let sentences = splitAssistantSentences(text)
     guard !sentences.isEmpty else {
         return AssistantMessageStructure(conclusion: text, evidence: [], limitations: [])
     }
 
-    let limitationSentences = sentences.filter(isLimitationSentence)
-    let regularSentences = sentences.filter { !isLimitationSentence($0) }
-    let baseSentences = regularSentences.isEmpty ? sentences : regularSentences
+    let normalizedSentences = sentences.compactMap(normalizeAssistantSentence)
+    guard !normalizedSentences.isEmpty else {
+        return AssistantMessageStructure(
+            conclusion: "この filing だけでは、これ以上の切り分けは難しいです。",
+            evidence: [],
+            limitations: []
+        )
+    }
+
+    let limitationSentences = normalizedSentences
+        .filter(\.isLimitation)
+        .map(\.text)
+    let regularSentences = normalizedSentences
+        .filter { !$0.isLimitation }
+        .map(\.text)
+    let baseSentences = regularSentences.isEmpty ? limitationSentences : regularSentences
 
     let firstSentenceLength = baseSentences.first?.count ?? 0
-    let conclusionCount = min(baseSentences.count, firstSentenceLength < 42 ? 2 : 1)
+    let canExtendConclusion = firstSentenceLength < 42
+        && baseSentences.count > 1
+        && isConclusionFriendlySentence(baseSentences[1])
+    let conclusionCount = canExtendConclusion ? 2 : 1
     let conclusion = baseSentences.prefix(conclusionCount).joined(separator: " ")
-    let evidence = Array(baseSentences.dropFirst(conclusionCount))
+    let evidence = regularSentences.isEmpty ? [] : Array(baseSentences.dropFirst(conclusionCount))
+    let filteredLimitations = regularSentences.isEmpty ? Array(limitationSentences.dropFirst(conclusionCount)) : limitationSentences
 
     return AssistantMessageStructure(
         conclusion: conclusion,
         evidence: evidence,
-        limitations: limitationSentences
+        limitations: filteredLimitations
     )
 }
 
@@ -534,6 +651,8 @@ private func isLimitationSentence(_ sentence: String) -> Bool {
         "十分確認できません",
         "特定できません",
         "限定的",
+        "だけでは",
+        "切り分け",
         "ただし",
         "資料では",
         "不明",
@@ -556,4 +675,122 @@ private func isUnavailableMessage(_ text: String) -> Bool {
     ]
 
     return patterns.contains(where: { normalized.contains($0.lowercased()) })
+}
+
+func localizedAssistantDisplayText(_ text: String) -> String {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return text }
+
+    let strippedEnglishBoilerplate = stripMixedEnglishBoilerplate(from: trimmed)
+    let candidate = strippedEnglishBoilerplate.isEmpty ? trimmed : strippedEnglishBoilerplate
+    let candidateNormalized = candidate.lowercased()
+
+    if containsJapaneseCharacters(candidate),
+       !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+       !looksLikePureBoilerplate(candidate) {
+        let strippedItemReference = candidate.replacingOccurrences(
+            of: #"\s*Item\s+\d+[A-Za-z]?\.\s*$"#,
+            with: "",
+            options: .regularExpression
+        )
+
+        let cleaned = strippedItemReference
+            .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !cleaned.isEmpty {
+            return cleaned
+        }
+    }
+
+    if candidateNormalized.contains("management's discussion")
+        || candidateNormalized.contains("results of operations")
+        || candidateNormalized.contains("our business risks")
+        || candidateNormalized.contains("md&a") {
+        return "提出資料の本文に、増減要因や事業上の論点の説明があります。"
+    }
+
+    if candidateNormalized.contains("forward-looking statements")
+        || candidateNormalized.contains("investors are cautioned")
+        || candidateNormalized.contains("actual results and events")
+        || candidateNormalized.contains("could cause actual results") {
+        return "この filing だけでは、これ以上の切り分けは難しいです。"
+    }
+
+    let strippedItemReference = trimmed.replacingOccurrences(
+        of: #"\s*Item\s+\d+[A-Za-z]?\.\s*$"#,
+        with: "",
+        options: .regularExpression
+    )
+
+    if strippedItemReference != trimmed, containsJapaneseCharacters(strippedItemReference) {
+        return strippedItemReference.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    if !containsJapaneseCharacters(trimmed), candidateNormalized.contains("form 10-q") || candidateNormalized.contains("form 10-k") {
+        return "提出資料の該当項目を確認してください。"
+    }
+
+    return trimmed
+}
+
+private func containsJapaneseCharacters(_ text: String) -> Bool {
+    text.range(of: #"[ぁ-んァ-ヶ一-龠]"#, options: .regularExpression) != nil
+}
+
+private struct NormalizedAssistantSentence {
+    let text: String
+    let isLimitation: Bool
+}
+
+private func normalizeAssistantSentence(_ sentence: String) -> NormalizedAssistantSentence? {
+    let localized = localizedAssistantDisplayText(sentence)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard !localized.isEmpty else { return nil }
+    guard !looksLikePureBoilerplate(localized) else { return nil }
+
+    return NormalizedAssistantSentence(
+        text: localized,
+        isLimitation: isLimitationSentence(localized)
+    )
+}
+
+private func isConclusionFriendlySentence(_ sentence: String) -> Bool {
+    guard containsJapaneseCharacters(sentence) else { return false }
+    guard !looksLikePureBoilerplate(sentence) else { return false }
+    guard !isLimitationSentence(sentence) else { return false }
+
+    let latinCount = sentence.unicodeScalars.filter(\.isASCII).count
+    return latinCount < max(18, sentence.count / 2)
+}
+
+private func stripMixedEnglishBoilerplate(from text: String) -> String {
+    guard containsJapaneseCharacters(text) else { return text }
+
+    var cleaned = text
+    let patterns = [
+        #"\bItem\s+\d+[A-Za-z]?\.\s*"#,
+        #"(?i)\b(?:Management'?s Discussion|Results of Operations|Our Business Risks|Forward-?looking statements|Investors are cautioned|Available Information)\b[^ぁ-んァ-ヶ一-龠]{0,280}"#,
+        #"(?i)\b[A-Z][A-Za-z0-9'’\-.,/:;() ]{24,}(?=(?:[ぁ-んァ-ヶ一-龠]|$))"#
+    ]
+
+    for pattern in patterns {
+        cleaned = cleaned.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+    }
+
+    return cleaned
+        .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private func looksLikePureBoilerplate(_ text: String) -> Bool {
+    let normalized = text.lowercased()
+
+    return normalized.contains("management's discussion")
+        || normalized.contains("results of operations")
+        || normalized.contains("our business risks")
+        || normalized.contains("forward-looking statements")
+        || normalized.contains("investors are cautioned")
+        || normalized.contains("available information")
 }

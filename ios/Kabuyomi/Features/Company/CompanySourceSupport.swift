@@ -30,19 +30,34 @@ func investorFacingSourceLabel(rawLabel: String, in company: CompanyPayload) -> 
     }
 
     if lowered.contains("risk factors") || lowered.contains("risk") {
-        return "\(company.formType) Risk Factors"
+        return "\(company.formType) リスク要因"
     }
 
     if let range = raw.range(of: #"Part\s+[IVXLC]+\s+Item\s+\d+[A-Za-z]?"#, options: .regularExpression) {
-        return "\(company.formType) \(String(raw[range]))"
+        return "\(company.formType) \(translatedItemLabel(from: String(raw[range])))"
     }
 
     if let range = raw.range(of: #"Item\s+\d+[A-Za-z]?"#, options: .regularExpression) {
-        return "\(company.formType) \(String(raw[range]))"
+        return "\(company.formType) \(translatedItemLabel(from: String(raw[range])))"
     }
 
     if lowered.contains("xbrl") {
         return "主要指標（XBRL）"
+    }
+
+    if let historicalMatch = raw.range(
+        of: #"(10-[KQ])\s+filed\s+(\d{4}-\d{2}-\d{2})(?:\s+·\s+period\s+(\d{4}-\d{2}-\d{2}))?"#,
+        options: .regularExpression
+    ) {
+        let label = String(raw[historicalMatch])
+        let components = label.components(separatedBy: " · period ")
+        let filed = components[0]
+            .replacingOccurrences(of: " filed ", with: " 提出日 ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if components.count > 1 {
+            return "\(filed) / 期末 \(components[1])"
+        }
+        return filed
     }
 
     if let range = raw.range(of: #"\d{4}-\d{2}-\d{2}"#, options: .regularExpression), raw.count <= 24 {
@@ -55,4 +70,15 @@ func investorFacingSourceLabel(rawLabel: String, in company: CompanyPayload) -> 
     }
 
     return raw
+}
+
+private func translatedItemLabel(from raw: String) -> String {
+    guard let match = raw.range(of: #"Item\s+\d+[A-Za-z]?"#, options: .regularExpression) else {
+        return raw
+    }
+
+    return String(raw[match])
+        .replacingOccurrences(of: "Item", with: "項目")
+        .replacingOccurrences(of: "  ", with: " ")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
 }

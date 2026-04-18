@@ -92,7 +92,7 @@ struct SettingsView: View {
                     }
 
                     if appModel.isDevUnlimitedModeActive {
-                        Text("有効時は開発用の匿名 device key を毎回切り替えて quota を回避します。利用状況の数値は実利用を表しません。")
+                        Text("有効時は DEBUG 専用ヘッダと開発用 device key を使って quota を回避します。利用状況の数値は実利用を表しません。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
@@ -132,9 +132,9 @@ struct SettingsView: View {
                     set: { appModel.setAIConsent($0) }
                 )) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Gemini 送信への同意")
+                        Text("Google AI 送信への同意")
                             .font(.system(.body, design: .rounded, weight: .semibold))
-                        Text("質問内容と SEC filing コンテキストが Google Gemini に送信されます。個人情報は入力しないでください。")
+                        Text("質問内容と SEC filing コンテキストが Google Gemini API 上の AI モデルに送信されます。個人情報は入力しないでください。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
@@ -239,7 +239,7 @@ struct SettingsView: View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(18)
-            .kabuyomiCard(.primary, radius: 26)
+            .kabuyomiGlass(radius: 26, tint: Color.white.opacity(0.20), stroke: Color.white.opacity(0.58))
     }
 
     private var privacySections: [LegalSection] {
@@ -250,11 +250,11 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "AI 利用時に送信する情報",
-                body: "AI チャットを有効化した場合、質問文、対象企業の filing metadata、抽出済み MD&A、抽出済み XBRL 指標を Google Gemini に送信します。個人情報や機密情報は入力しないでください。"
+                body: "AI チャットを有効化した場合、質問文、対象企業の filing metadata、抽出済み MD&A、抽出済み XBRL 指標を Google Gemini API 上の AI モデルに送信します。個人情報や機密情報は入力しないでください。"
             ),
             LegalSection(
                 title: "第三者サービス",
-                body: "API と利用制限管理には Cloudflare、SEC filing 取得には SEC と sec-fetcher、AI 応答には Google Gemini を利用します。beta 環境では一部の技術ログがサービス品質確認のために記録されます。"
+                body: "API と利用制限管理には Cloudflare、SEC filing 取得には SEC と sec-fetcher、AI 応答には Google Gemini API を利用します。beta 環境では一部の技術ログがサービス品質確認のために記録されます。"
             ),
             LegalSection(
                 title: "保存期間",

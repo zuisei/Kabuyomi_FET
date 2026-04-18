@@ -28,7 +28,7 @@ export interface TickerRecord {
   companyName: string;
   cik: string;
   exchange: string;
-  latestFormType?: "10-K" | "10-Q";
+  latestFormType?: string;
 }
 
 export interface FilingReference {

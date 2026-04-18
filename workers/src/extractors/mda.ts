@@ -35,8 +35,8 @@ export function normalizeFilingText(html: string): string {
 export function extractMDASection(html: string, formType: "10-K" | "10-Q"): ExtractedMDA | null {
   const normalizedText = normalizeFilingText(html);
   const patterns = getPatterns(formType);
-  const startMatches = findAllMatches(normalizedText, patterns.start);
-  const endMatches = findAllMatches(normalizedText, patterns.end);
+  const startMatches = findAllMatches(normalizedText, patterns.start, "start");
+  const endMatches = findAllMatches(normalizedText, patterns.end, "end");
 
   for (const [index, startMatch] of startMatches.entries()) {
     const nextStart = startMatches[index + 1];
@@ -68,7 +68,7 @@ export function extractMDASection(html: string, formType: "10-K" | "10-Q"): Extr
 }
 
 function stripLeadingNoise(candidate: string, startPatterns: RegExp[]): string {
-  const innerMatches = findAllMatches(candidate, startPatterns);
+  const innerMatches = findAllMatches(candidate, startPatterns, "start");
   if (innerMatches.length <= 1) {
     return candidate;
   }
@@ -96,15 +96,18 @@ function getPatterns(formType: "10-K" | "10-Q"): PatternPair {
   if (formType === "10-K") {
       return {
         start: [
-        /item\s+7\b[\s.: -]*management['’]?s discussion and analysis/gi,
-        /item\s+7\b/gi
-      ],
-      end: [
-        /item\s+7a\b[\s.: -]*quantitative and qualitative disclosures/gi,
-        /item\s+8\b[\s.: -]*financial statements/gi,
-        /item\s+8\b/gi
-      ]
-    };
+          /item\s+7\b[\s.: -]*management['’]?s discussion and analysis/gi,
+          /item\s+7\b/gi,
+          /management['’]?s discussion and analysis(?: of financial condition and results of operations)?/gi
+        ],
+        end: [
+          /item\s+7a\b[\s.: -]*quantitative and qualitative disclosures/gi,
+          /item\s+8\b[\s.: -]*financial statements/gi,
+          /item\s+8\b/gi,
+          /quantitative and qualitative disclosures about market risk/gi,
+          /financial statements and supplementary data/gi
+        ]
+      };
   }
 
   return {
@@ -121,7 +124,11 @@ function getPatterns(formType: "10-K" | "10-Q"): PatternPair {
   };
 }
 
-function findAllMatches(text: string, patterns: RegExp[]): Array<{ index: number; pattern: string }> {
+function findAllMatches(
+  text: string,
+  patterns: RegExp[],
+  boundaryType: "start" | "end"
+): Array<{ index: number; pattern: string }> {
   const matches: Array<{ index: number; pattern: string }> = [];
 
   for (const pattern of patterns) {
@@ -129,6 +136,10 @@ function findAllMatches(text: string, patterns: RegExp[]): Array<{ index: number
     let match: RegExpExecArray | null;
 
     while ((match = cloned.exec(text)) !== null) {
+      if (!isLikelySectionBoundary(text, match.index, match[0], pattern, boundaryType)) {
+        continue;
+      }
+
       matches.push({
         index: match.index,
         pattern: pattern.source
@@ -137,6 +148,64 @@ function findAllMatches(text: string, patterns: RegExp[]): Array<{ index: number
   }
 
   return matches.sort((left, right) => left.index - right.index);
+}
+
+function isLikelySectionBoundary(
+  text: string,
+  index: number,
+  matchedText: string,
+  pattern: RegExp,
+  boundaryType: "start" | "end"
+): boolean {
+  if (!isGenericBoundaryPattern(pattern)) {
+    return true;
+  }
+
+  const afterWindow = text.slice(index + matchedText.length, index + matchedText.length + 700);
+  const nearAfterWindow = afterWindow.slice(0, 240);
+
+  if (boundaryType === "start") {
+    return (
+      /our md&a begins|the following discussion|we then provide|significant events and trends impacting results/i.test(
+        afterWindow
+      ) || looksLikeNarrativeWindow(afterWindow)
+    );
+  }
+
+  return (
+    /we are affected by|we use derivative|our exposure|foreign currency|interest rates|item\s+8\b|financial statements/i.test(
+      afterWindow
+    ) || looksLikeNarrativeWindow(nearAfterWindow)
+  );
+}
+
+function isGenericBoundaryPattern(pattern: RegExp): boolean {
+  return !/item\\s\+\d|part\\s\+i\\b/i.test(pattern.source);
+}
+
+function looksLikeNarrativeWindow(text: string): boolean {
+  const sample = text.slice(0, 500);
+  if (!sample) {
+    return false;
+  }
+
+  if (looksLikeTocWindow(sample)) {
+    return false;
+  }
+
+  const lowercaseWordCount = [...sample.matchAll(/\b[a-z]{3,}\b/g)].length;
+  const sentenceSignals = [...sample.matchAll(/[.!?]/g)].length;
+  const proseSignals = [...sample.matchAll(/\b(?:we|our|the|this|these|during|results?|believe|expect|continue)\b/gi)].length;
+
+  return lowercaseWordCount >= 24 && (sentenceSignals >= 2 || proseSignals >= 4);
+}
+
+function looksLikeTocWindow(text: string): boolean {
+  const sample = text.slice(0, 320);
+  const itemMentions = [...sample.matchAll(/item\s+\d/gi)].length;
+  const pageMentions = [...sample.matchAll(/\bpages?\s*\d/gi)].length;
+
+  return /table of contents/i.test(sample) || /pagepart/i.test(sample) || itemMentions >= 3 || pageMentions >= 2;
 }
 
 function trimToTokenBudget(text: string, maxTokens: number): string {

@@ -1,6 +1,12 @@
-import type { FilingCacheRecord } from "../env";
+import type { Env, FilingCacheRecord } from "../env";
+import { loadHistoricalOverview } from "./history-store";
 
-export function serializeCompanyResponse(filing: FilingCacheRecord) {
+export async function serializeCompanyResponse(
+  filing: FilingCacheRecord,
+  env: Partial<Env> = {}
+) {
+  const historicalOverview = await loadHistoricalOverview(filing, env);
+
   return {
     filingKey: filing.filingKey,
     ticker: filing.ticker,
@@ -12,6 +18,7 @@ export function serializeCompanyResponse(filing: FilingCacheRecord) {
     primaryDocumentUrl: filing.primaryDocumentUrl,
     summary: filing.summary,
     metrics: filing.metrics,
+    historicalOverview,
     sourceChunks: filing.sourceChunks,
     lastUpdatedAt: filing.generatedAt
   };

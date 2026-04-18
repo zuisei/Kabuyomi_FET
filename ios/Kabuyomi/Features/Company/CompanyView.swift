@@ -30,6 +30,10 @@ struct CompanyView: View {
         appModel.chatHistory(for: currentTicker)
     }
 
+    private var pendingChat: PendingChatState? {
+        appModel.pendingChat(for: currentTicker)
+    }
+
     private var savedCompanies: [WatchlistCard] {
         appModel.watchlist
     }
@@ -169,13 +173,14 @@ struct CompanyView: View {
                 ConversationTimeline(
                     company: company,
                     chatHistory: chatHistory,
+                    pendingChat: pendingChat,
                     isSending: appModel.chatIsSending,
                     suggestions: buildSuggestedQuestions(for: company),
                     historicalSuggestions: buildHistoricalQuestions(for: company),
                     draftQuestion: $question
                 )
             } else {
-                ConversationLoadingState(ticker: currentTicker)
+                ConversationLoadingState(ticker: currentTicker, isLoading: appModel.companyIsLoading)
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -185,6 +190,7 @@ struct CompanyView: View {
                 isEnabled: company != nil,
                 placeholder: composerPlaceholder,
                 aiConsentGranted: appModel.aiConsentGranted,
+                applyPrompt: { question = $0 },
                 sendAction: sendCurrentQuestion
             )
         }
@@ -192,7 +198,11 @@ struct CompanyView: View {
 
     private var composerPlaceholder: String {
         guard let company else {
-            return "左上から銘柄を選択してください"
+            if appModel.companyIsLoading {
+                return "\(currentTicker) を読み込み中..."
+            }
+
+            return "\(currentTicker) を開けませんでした。左上から別の銘柄を選択してください"
         }
 
         let suggestions = buildSuggestedQuestions(for: company)
@@ -274,11 +284,14 @@ struct CompanyView: View {
     }
 
     private func sendCurrentQuestion() {
+        let prompt = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return }
+
+        question = ""
         Task {
-            let prompt = question
             let didSend = await appModel.sendChat(question: prompt, ticker: currentTicker)
-            if didSend {
-                question = ""
+            if !didSend && question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                question = prompt
             }
         }
     }
@@ -344,15 +357,19 @@ func buildSuggestedQuestions(for company: CompanyPayload) -> [String] {
 }
 
 func buildHistoricalQuestions(for company: CompanyPayload) -> [String] {
+    let isQuarterly = company.formType == "10-Q"
     var suggestions = [
-        "前回決算との違いは？",
-        "利益率の推移は？",
-        "売上ドライバーの変化は？",
-        "過去3年比較で見ると？"
+        isQuarterly ? "前回四半期との違いは？" : "前回決算との違いは？",
+        isQuarterly ? "この3年の同四半期で利益率は改善した？" : "この3年の利益率推移は？",
+        isQuarterly ? "この3年の同四半期で売上ドライバーはどう変わった？" : "この3年で売上ドライバーはどう変わった？",
+        isQuarterly ? "この3年の同四半期で見ると？" : "この3年の年次比較で見ると？"
     ]
 
     if company.metrics.contains(where: { $0.logicalName == "operatingIncome" && $0.yoyPercent != nil }) {
-        suggestions.insert("営業利益率の推移は？", at: 2)
+        suggestions.insert(
+            isQuarterly ? "この3年の同四半期で営業利益率はどう動いた？" : "この3年の営業利益率推移は？",
+            at: 2
+        )
     }
 
     return deduplicated(suggestions).prefix(4).map(\.self)
@@ -388,6 +405,48 @@ func buildRecoveryQuestions(for company: CompanyPayload, precedingUserPrompt: St
     }
 
     return deduplicated(suggestions).prefix(3).map(\.self)
+}
+
+func buildFollowUpQuestions(for company: CompanyPayload, precedingUserPrompt: String? = nil) -> [String] {
+    if let precedingUserPrompt, isPeerComparisonQuestionText(precedingUserPrompt) {
+        return Array(buildHistoricalQuestions(for: company).prefix(3))
+    }
+
+    let normalized = precedingUserPrompt?.lowercased() ?? ""
+    let isQuarterly = company.formType == "10-Q"
+    var suggestions: [String] = []
+
+    if let precedingUserPrompt, isHistoricalQuestionText(precedingUserPrompt) {
+        suggestions.append(isQuarterly ? "どの四半期が一番強かった？" : "どの年が一番強かった？")
+        suggestions.append("今回だけ特に強い / 弱い要因は？")
+    }
+
+    if containsAny(normalized, patterns: ["売上", "revenue", "成長", "growth", "driver", "ドライバー"]) {
+        suggestions.append("その要因は一時的？")
+        suggestions.append(isQuarterly ? "前回四半期と比べると？" : "前回決算と比べると？")
+    }
+
+    if containsAny(normalized, patterns: ["利益率", "margin", "profit", "採算", "営業利益"]) {
+        suggestions.append("どの費用項目が効いた？")
+        suggestions.append(isQuarterly ? "この3年の同四半期でも改善している？" : "この3年でも改善している？")
+    }
+
+    if containsAny(normalized, patterns: ["見通し", "guidance", "慎重", "risk", "リスク", "需要", "demand"]) {
+        suggestions.append("次の四半期で何を見ればいい？")
+        suggestions.append("経営陣は何を慎重視している？")
+    }
+
+    if suggestions.isEmpty {
+        suggestions.append(contentsOf: buildRecoveryQuestions(for: company, precedingUserPrompt: precedingUserPrompt))
+    } else {
+        suggestions.append(contentsOf: buildSuggestedQuestions(for: company))
+        suggestions.append(contentsOf: buildHistoricalQuestions(for: company).prefix(2))
+    }
+
+    return deduplicated(suggestions)
+        .filter { $0 != precedingUserPrompt }
+        .prefix(3)
+        .map(\.self)
 }
 
 private func buildManagementQuestion(for company: CompanyPayload) -> String? {
@@ -457,6 +516,30 @@ private func questionSnippet(from text: String) -> String {
 private func deduplicated(_ values: [String]) -> [String] {
     var seen = Set<String>()
     return values.filter { seen.insert($0).inserted }
+}
+
+func isHistoricalQuestionText(_ text: String) -> Bool {
+    let normalized = text.lowercased()
+    let patterns = [
+        "前回",
+        "前年",
+        "昨年",
+        "推移",
+        "3年",
+        "三年",
+        "同四半期",
+        "trend",
+        "history",
+        "historical"
+    ]
+
+    return containsAny(normalized, patterns: patterns)
+}
+
+private func containsAny(_ text: String, patterns: [String]) -> Bool {
+    patterns.contains { pattern in
+        text.contains(pattern.lowercased())
+    }
 }
 
 private struct EdgePullZone: View {

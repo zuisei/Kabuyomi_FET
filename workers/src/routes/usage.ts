@@ -8,7 +8,10 @@ export const handleUsageRoute: RouteHandler = async ({ request, url, env, config
     return null;
   }
 
-  const identity = await readQuotaIdentity(request, { requireDeviceKey: true });
+  const identity = await readQuotaIdentity(request, {
+    requireDeviceKey: true,
+    allowDebugUnlimited: true
+  });
   const usage = await loadUsage(identity, env, config);
   return json(usage);
 };

@@ -6,6 +6,7 @@ struct ComposerBar: View {
     let isEnabled: Bool
     let placeholder: String
     let aiConsentGranted: Bool
+    let applyPrompt: (String) -> Void
     let sendAction: () -> Void
 
     var body: some View {
@@ -13,7 +14,7 @@ struct ComposerBar: View {
             if !aiConsentGranted {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                    Text("初回送信時に Gemini 送信の同意確認が表示されます。")
+                    Text("初回送信時に Google Gemini API 送信の同意確認が表示されます。")
                         .lineLimit(2)
                 }
                 .font(.system(.footnote, design: .rounded, weight: .semibold))
@@ -35,22 +36,29 @@ struct ComposerBar: View {
                         .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.82)),
                     axis: .vertical
                 )
-                .lineLimit(1...5)
+                .lineLimit(1...6)
                 .disabled(!isEnabled)
                 .font(.system(.body, design: .rounded))
                 .foregroundStyle(KabuyomiTheme.ink)
                 .frame(minHeight: 24)
+                .submitLabel(.send)
+                .onSubmit(sendAction)
+
+                if !trimmedQuestion.isEmpty {
+                    Button {
+                        question = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.9))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("入力内容を消去")
+                }
 
                 Button(action: sendAction) {
-                    Group {
-                        if isSending {
-                            ProgressView()
-                                .tint(sendDisabled ? KabuyomiTheme.inkMuted : .white)
-                        } else {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 18, weight: .bold))
-                        }
-                    }
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 18, weight: .bold))
                     .frame(width: 44, height: 44)
                     .foregroundStyle(sendDisabled ? KabuyomiTheme.inkMuted : .white)
                     .background(sendButtonBackground)
@@ -60,25 +68,23 @@ struct ComposerBar: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(composerBackground)
+            .kabuyomiGlass(
+                radius: 28,
+                tint: Color.white.opacity(0.24),
+                stroke: Color.white.opacity(0.62)
+            )
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 12)
     }
 
-    private var sendDisabled: Bool {
-        question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending || !isEnabled
+    private var trimmedQuestion: String {
+        question.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var composerBackground: some View {
-        RoundedRectangle(cornerRadius: 26, style: .continuous)
-            .fill(Color.white.opacity(0.96))
-            .overlay(
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .stroke(Color.white.opacity(0.95), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.08), radius: 14, x: 0, y: 10)
+    private var sendDisabled: Bool {
+        trimmedQuestion.isEmpty || isSending || !isEnabled
     }
 
     private var sendButtonBackground: some View {

@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { lookupTicker, pickComparisonFiling, pickLatestSupportedFiling, sortTickerSearchResults } from "../src/clients/sec";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  lookupTicker,
+  pickComparisonFiling,
+  pickLatestSupportedFiling,
+  searchTickers,
+  sortTickerSearchResults
+} from "../src/clients/sec";
 import { readQuotaIdentity } from "../src/lib/pipeline";
 import type { TickerRecord } from "../src/env";
 
@@ -27,6 +33,10 @@ const submissions = {
     }
   }
 };
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("SEC filing selection", () => {
   it("picks the latest supported filing", () => {
@@ -95,6 +105,76 @@ describe("SEC filing selection", () => {
     });
   });
 
+  it("hydrates multiple short-query search results instead of only the first unresolved ticker", async () => {
+    const cache = new Map<string, unknown>([
+      [
+        "tickers_snapshot",
+        {
+          updatedAt: "2026-04-15T00:00:00.000Z",
+          items: [
+            { ticker: "GE", companyName: "GE Aerospace", cik: "0000040545", exchange: "NYSE" },
+            { ticker: "GEF", companyName: "Greif, Inc.", cik: "0000043920", exchange: "NYSE" }
+          ]
+        }
+      ]
+    ]);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const body = JSON.parse(String(init?.body ?? ""));
+      void url;
+      if (body.cik === "0000040545") {
+        return new Response(JSON.stringify({
+          name: "GE Aerospace",
+          filings: {
+            recent: {
+              form: ["10-K"],
+              accessionNumber: ["0000040545-26-000001"],
+              primaryDocument: ["ge10k.htm"],
+              filingDate: ["2026-02-13"],
+              reportDate: ["2025-12-31"]
+            }
+          }
+        }), { status: 200 });
+      }
+
+      if (body.cik === "0000043920") {
+        return new Response(JSON.stringify({
+          name: "Greif, Inc.",
+          filings: {
+            recent: {
+              form: ["10-Q"],
+              accessionNumber: ["0000043920-26-000002"],
+              primaryDocument: ["gef10q.htm"],
+              filingDate: ["2026-03-01"],
+              reportDate: ["2026-01-31"]
+            }
+          }
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected fetch body: ${JSON.stringify(body)}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await searchTickers("ge", {
+      KABUYOMI_CACHE: {
+        get: async (key: string) => cache.get(key),
+        put: async (key: string, value: unknown) => {
+          cache.set(key, value);
+        }
+      },
+      SEC_FETCHER_BASE_URL: "http://127.0.0.1:8789",
+      SEC_FETCHER_SHARED_SECRET: "secret"
+    } as never);
+
+    expect(result.items.map((item) => [item.ticker, item.latestFormType])).toEqual([
+      ["GE", "10-K"],
+      ["GEF", "10-Q"]
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("ignores client-supplied quota subjects and derives identity from Cloudflare-provided client IP", async () => {
     const identity = await readQuotaIdentity(
       new Request("https://kabuyomi.test/v1/usage", {
@@ -109,5 +189,21 @@ describe("SEC filing selection", () => {
     expect(identity.plan).toBe("free");
     expect(identity.quotaSubject).toMatch(/^free:[a-f0-9]{64}$/);
     expect(identity.quotaSubject).not.toContain("device-123");
+  });
+
+  it("uses the device key subject for explicit debug unlimited requests", async () => {
+    const identity = await readQuotaIdentity(
+      new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
+        headers: {
+          "cf-connecting-ip": "203.0.113.5",
+          "x-device-key": "dev-unlimited-chat-AAPL-123",
+          "x-kabuyomi-debug-unlimited": "1"
+        }
+      }),
+      { requireDeviceKey: true, allowDebugUnlimited: true }
+    );
+
+    expect(identity.plan).toBe("free");
+    expect(identity.quotaSubject).toBe("free:debug:dev-unlimited-chat-AAPL-123");
   });
 });

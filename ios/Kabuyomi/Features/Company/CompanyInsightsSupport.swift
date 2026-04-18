@@ -49,7 +49,12 @@ enum InvestorOverviewTone {
 }
 
 func buildFocusInsights(for company: CompanyPayload) -> [FilingInsight] {
-    let highlights = company.summary.highlights.map { FilingInsight(text: $0.text, sourceIds: $0.sourceIds) }
+    let highlights = company.summary.highlights.map { summaryLine in
+        FilingInsight(
+            text: localizedOverviewInsightText(summaryLine.text, sourceIds: summaryLine.sourceIds, company: company),
+            sourceIds: summaryLine.sourceIds
+        )
+    }
     if !highlights.isEmpty {
         return highlights
     }
@@ -59,7 +64,12 @@ func buildFocusInsights(for company: CompanyPayload) -> [FilingInsight] {
 func buildPositiveInsights(for company: CompanyPayload) -> [FilingInsight] {
     let positives = company.summary.changes
         .filter { sentiment(for: $0.text) == .positive }
-        .map { FilingInsight(text: $0.text, sourceIds: $0.sourceIds) }
+        .map { summaryLine in
+            FilingInsight(
+                text: localizedOverviewInsightText(summaryLine.text, sourceIds: summaryLine.sourceIds, company: company),
+                sourceIds: summaryLine.sourceIds
+            )
+        }
     if !positives.isEmpty {
         return positives
     }
@@ -70,7 +80,12 @@ func buildPositiveInsights(for company: CompanyPayload) -> [FilingInsight] {
 func buildNegativeInsights(for company: CompanyPayload) -> [FilingInsight] {
     let negatives = company.summary.changes
         .filter { sentiment(for: $0.text) == .negative }
-        .map { FilingInsight(text: $0.text, sourceIds: $0.sourceIds) }
+        .map { summaryLine in
+            FilingInsight(
+                text: localizedOverviewInsightText(summaryLine.text, sourceIds: summaryLine.sourceIds, company: company),
+                sourceIds: summaryLine.sourceIds
+            )
+        }
     if !negatives.isEmpty {
         return negatives
     }
@@ -79,7 +94,12 @@ func buildNegativeInsights(for company: CompanyPayload) -> [FilingInsight] {
 }
 
 func buildChangeInsights(for company: CompanyPayload) -> [FilingInsight] {
-    let explicitChanges = company.summary.changes.map { FilingInsight(text: $0.text, sourceIds: $0.sourceIds) }
+    let explicitChanges = company.summary.changes.map { summaryLine in
+        FilingInsight(
+            text: localizedOverviewInsightText(summaryLine.text, sourceIds: summaryLine.sourceIds, company: company),
+            sourceIds: summaryLine.sourceIds
+        )
+    }
     if !explicitChanges.isEmpty {
         return explicitChanges
     }
@@ -136,7 +156,7 @@ func formattedMetricValue(_ value: Double, logicalName: String) -> String {
     if logicalName == "epsBasic" {
         return value.formatted(.number.precision(.fractionLength(2)))
     }
-    return value.formatted(.number.notation(.compactName))
+    return formattedCurrencyLikeMetric(value)
 }
 
 func formattedYoY(_ yoyPercent: Double) -> String {
@@ -167,6 +187,38 @@ private enum InsightSentiment {
     case neutral
 }
 
+private func localizedOverviewInsightText(_ text: String, sourceIds: [String], company: CompanyPayload) -> String {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+        return "提出資料の該当箇所を確認してください。"
+    }
+
+    if containsJapaneseText(trimmed) {
+        return trimmed
+    }
+
+    if let metricText = localizedMetricInsightFromSource(sourceIds: sourceIds, company: company) {
+        return metricText
+    }
+
+    guard let chunk = sourceIds.compactMap({ sourceId in
+        company.sourceChunks.first(where: { $0.sourceId == sourceId })
+    }).first else {
+        return "提出資料の該当箇所を確認してください。"
+    }
+
+    let label = investorFacingSourceLabel(for: chunk, in: company)
+    if label.contains("MD&A") {
+        return "MD&A に、今回の増減要因や事業動向の説明があります。"
+    }
+
+    if label.contains("リスク") {
+        return "リスク要因の欄に、注意したい論点の説明があります。"
+    }
+
+    return "\(label) の記述を確認してください。"
+}
+
 private func buildMetricInsights(for company: CompanyPayload) -> [FilingInsight] {
     company.metrics.compactMap { metric in
         guard let yoy = metric.yoyPercent else { return nil }
@@ -177,6 +229,58 @@ private func buildMetricInsights(for company: CompanyPayload) -> [FilingInsight]
         let text = "\(MetricLabeler.title(for: metric.logicalName))は前年比 \(formattedYoY(yoy)) で、\(direction)が確認できます。"
         return FilingInsight(text: text, sourceIds: sourceIds)
     }
+}
+
+private func localizedMetricInsightFromSource(sourceIds: [String], company: CompanyPayload) -> String? {
+    for sourceId in sourceIds {
+        guard let chunk = company.sourceChunks.first(where: { $0.sourceId == sourceId }),
+              chunk.sectionType == "xbrl_metric",
+              let tagName = chunk.tagName,
+              let metric = company.metrics.first(where: { $0.tagUsed == tagName }) else {
+            continue
+        }
+
+        if let yoy = metric.yoyPercent {
+            let direction = yoy >= 0 ? "増加" : "減少"
+            return "\(MetricLabeler.title(for: metric.logicalName))は前年同期比 \(formattedYoY(yoy)) で、\(direction)が確認できます。"
+        }
+
+        if let comparisonValue = metric.comparisonValue {
+            return "\(MetricLabeler.title(for: metric.logicalName))は \(formattedMetricValue(metric))、比較値は \(formattedMetricValue(comparisonValue, logicalName: metric.logicalName)) です。"
+        }
+    }
+
+    return nil
+}
+
+private func containsJapaneseText(_ value: String) -> Bool {
+    value.range(of: #"[ぁ-んァ-ン一-龥]"#, options: .regularExpression) != nil
+}
+
+private func formattedCurrencyLikeMetric(_ value: Double) -> String {
+    let absolute = abs(value)
+
+    if absolute >= 1_000_000_000_000 {
+        return "\(formattedJapaneseCompact(value / 1_000_000_000_000))兆ドル"
+    }
+
+    if absolute >= 100_000_000 {
+        return "\(formattedJapaneseCompact(value / 100_000_000))億ドル"
+    }
+
+    if absolute >= 1_000_000 {
+        return "\(formattedJapaneseCompact(value / 1_000_000))百万ドル"
+    }
+
+    return "\(formattedJapaneseCompact(value))ドル"
+}
+
+private func formattedJapaneseCompact(_ value: Double) -> String {
+    value.formatted(
+        .number
+            .precision(.fractionLength(0 ... 1))
+            .grouping(.never)
+    )
 }
 
 private func sentiment(for text: String) -> InsightSentiment {

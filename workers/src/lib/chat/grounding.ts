@@ -1,7 +1,7 @@
 import type { SourceChunkRecord } from "../../env";
 import { AppError } from "../errors";
 
-export type ChatSourceKind = "sec_filing" | "web_supplement";
+export type ChatSourceKind = "sec_filing" | "historical_filing" | "web_supplement";
 
 export interface ChatEvidenceSource {
   sourceId: string;
@@ -47,7 +47,7 @@ export function ensureFilingGroundedResponse(response: ChatResponsePayload): Cha
     };
   }
 
-  if (!response.sources.some((source) => source.sourceKind === "sec_filing")) {
+  if (!response.sources.some((source) => source.sourceKind === "sec_filing" || source.sourceKind === "historical_filing")) {
     throw new AppError(502, "Chat response must cite the filing", "No SEC filing source was attached");
   }
 

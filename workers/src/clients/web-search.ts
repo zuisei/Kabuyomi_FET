@@ -69,6 +69,7 @@ type WebIntentProfile = {
   shouldSearch: boolean;
   asksDrivers: boolean;
   asksStockPrice: boolean;
+  asksStockContext: boolean;
   asksRecommendation: boolean;
   asksForecast: boolean;
   asksMargins: boolean;
@@ -86,6 +87,12 @@ function analyzeWebIntent(question: string): WebIntentProfile {
     /(支え|押し上げ|牽引|ドライバー|contributors?|drivers?|growthdrivers?|revenuegrowth)/.test(normalized) ||
     (/(主因|要因|理由|背景)/.test(normalized) && /(売上|増収|成長|growth|revenue|需要|株価|市場|反応)/.test(normalized));
   const asksStockPrice = /(株価|shareprice|stockprice|株価反応|marketreaction)/.test(normalized);
+  const asksStockContext =
+    /(株の調子|株調子|株の動き|株どう|株はどう|最近株|最近の株|直近株|足元株|足元の株|stockperformance|shareperformance)/.test(
+      normalized
+    ) ||
+    (/(最近|直近|足元|いま|今は|今の|このところ|ここのところ)/.test(normalized) &&
+      /(株|株価|市場|stock|share)/.test(normalized));
   const asksRecommendation = /(買いか|売りか|買うべき|売るべき|おすすめ|投資判断)/.test(normalized);
   const asksForecast = /(今後|この先|見通し|予想|guidance|outlook|来期|次四半期)/.test(normalized);
   const asksMargins = /(利益率|マージン|粗利|採算|pricing|margin)/.test(normalized);
@@ -101,6 +108,7 @@ function analyzeWebIntent(question: string): WebIntentProfile {
     shouldSearch:
       asksDrivers ||
       asksStockPrice ||
+      asksStockContext ||
       asksRecommendation ||
       asksForecast ||
       asksMargins ||
@@ -111,6 +119,7 @@ function analyzeWebIntent(question: string): WebIntentProfile {
       asksTariff,
     asksDrivers,
     asksStockPrice,
+    asksStockContext,
     asksRecommendation,
     asksForecast,
     asksMargins,
@@ -131,6 +140,14 @@ function buildSearchQueries(filing: FilingCacheRecord, profile: WebIntentProfile
       `${base} ${filedAt} Reuters earnings`,
       `${base} latest earnings Reuters news`,
       `${base} ${filedAt} investor relations earnings`
+    ];
+  }
+
+  if (profile.asksStockContext) {
+    return [
+      `${base} ${filedAt} Reuters shares after earnings`,
+      `${base} ${filedAt} Reuters stock reaction`,
+      `${base} recent stock performance Reuters earnings`
     ];
   }
 
@@ -383,8 +400,8 @@ function isUsableTrustedResult(result: WebSupplementRecord, profile: WebIntentPr
         return /risk|uncertainty|macro|tariff|pressure|weakness/.test(haystack);
       }
 
-      if (profile.asksStockPrice || profile.asksRecommendation) {
-        return /shares? up|shares? down|stock|forecast|outlook|beat|miss|investor/.test(haystack);
+      if (profile.asksStockContext || profile.asksStockPrice || profile.asksRecommendation) {
+        return false;
       }
     }
 
@@ -404,7 +421,7 @@ function scoreResult(result: WebSupplementRecord, profile: WebIntentProfile): nu
   if (result.publisher.includes("Investor") || result.publisher.includes("Newsroom")) {
     score += 3;
   }
-  if (profile.asksStockPrice || profile.asksRecommendation) {
+  if (profile.asksStockContext || profile.asksStockPrice || profile.asksRecommendation) {
     if (/shares? up|shares? down|stock|forecast|outlook|beats estimates|misses estimates/.test(haystack)) {
       score += 3;
     }

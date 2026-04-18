@@ -26,6 +26,7 @@ final class FilingEntity: NSManagedObject {
     @NSManaged var mdaTokenCount: Int32
     @NSManaged var extractorVersion: String
     @NSManaged var promptVersion: String
+    @NSManaged var historicalOverviewJSON: String?
     @NSManaged var stock: StockEntity?
     @NSManaged var summary: SummaryEntity?
     @NSManaged var metrics: NSSet?
@@ -200,7 +201,8 @@ enum CoreDataSchema {
             attribute("mdaText", type: .stringAttributeType),
             attribute("mdaTokenCount", type: .integer32AttributeType),
             attribute("extractorVersion", type: .stringAttributeType),
-            attribute("promptVersion", type: .stringAttributeType)
+            attribute("promptVersion", type: .stringAttributeType),
+            attribute("historicalOverviewJSON", type: .stringAttributeType, optional: true)
         ]
 
         let summary = entity(name: "SummaryEntity", className: NSStringFromClass(SummaryEntity.self))

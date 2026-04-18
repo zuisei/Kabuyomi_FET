@@ -88,7 +88,7 @@ struct SearchItem: Decodable, Identifiable, Hashable {
     }
 }
 
-struct CompanyPayload: Decodable, Hashable {
+struct CompanyPayload: Codable, Hashable {
     let filingKey: String
     let ticker: String
     let companyName: String
@@ -99,17 +99,44 @@ struct CompanyPayload: Decodable, Hashable {
     let primaryDocumentUrl: String
     let summary: SummaryPayload
     let metrics: [MetricPayload]
+    let historicalOverview: HistoricalOverviewPayload?
     let sourceChunks: [SourceChunkPayload]
     let lastUpdatedAt: String
 }
 
-struct SummaryPayload: Decodable, Hashable {
+struct HistoricalOverviewPayload: Codable, Hashable {
+    let comparisonBasis: String
+    let years: Int
+    let series: [HistoricalMetricSeriesPayload]
+}
+
+struct HistoricalMetricSeriesPayload: Codable, Identifiable, Hashable {
+    let logicalName: String
+    let label: String
+    let points: [HistoricalMetricPointPayload]
+
+    var id: String { logicalName }
+}
+
+struct HistoricalMetricPointPayload: Codable, Identifiable, Hashable {
+    let filingKey: String
+    let filedAt: String
+    let periodEnd: String
+    let value: Double
+    let unit: String
+    let yoyPercent: Double?
+    let sourceId: String
+
+    var id: String { "\(filingKey):\(periodEnd):\(sourceId)" }
+}
+
+struct SummaryPayload: Codable, Hashable {
     let verdict: String
     let highlights: [SummaryLinePayload]
     let changes: [SummaryLinePayload]
 }
 
-struct SummaryLinePayload: Decodable, Identifiable, Hashable {
+struct SummaryLinePayload: Codable, Identifiable, Hashable {
     let text: String
     let sourceIds: [String]
 
@@ -118,7 +145,7 @@ struct SummaryLinePayload: Decodable, Identifiable, Hashable {
     }
 }
 
-struct MetricPayload: Decodable, Identifiable, Hashable {
+struct MetricPayload: Codable, Identifiable, Hashable {
     let logicalName: String
     let tagUsed: String
     let value: Double
@@ -130,7 +157,7 @@ struct MetricPayload: Decodable, Identifiable, Hashable {
     var id: String { logicalName }
 }
 
-struct SourceChunkPayload: Decodable, Identifiable, Hashable {
+struct SourceChunkPayload: Codable, Identifiable, Hashable {
     let sourceId: String
     let sectionType: String
     let sectionTitle: String
@@ -152,11 +179,13 @@ struct WatchlistAddResponse: Decodable {
 struct ChatResponse: Decodable {
     let answer: String
     let sources: [ChatSourcePayload]
+    let modelName: String?
     let usage: UsagePayload
 }
 
 enum MessageSourceKind: String, Decodable, Hashable {
     case secFiling = "sec_filing"
+    case historicalFiling = "historical_filing"
     case webSupplement = "web_supplement"
 
     init(from decoder: Decoder) throws {
@@ -169,6 +198,8 @@ enum MessageSourceKind: String, Decodable, Hashable {
         switch self {
         case .secFiling:
             "SEC filing 根拠"
+        case .historicalFiling:
+            "過去提出資料根拠"
         case .webSupplement:
             "外部補足"
         }
@@ -178,6 +209,8 @@ enum MessageSourceKind: String, Decodable, Hashable {
         switch self {
         case .secFiling:
             "SEC"
+        case .historicalFiling:
+            "履歴"
         case .webSupplement:
             "Web"
         }
@@ -187,6 +220,8 @@ enum MessageSourceKind: String, Decodable, Hashable {
         switch self {
         case .secFiling:
             "checkmark.shield"
+        case .historicalFiling:
+            "clock.arrow.circlepath"
         case .webSupplement:
             "globe"
         }

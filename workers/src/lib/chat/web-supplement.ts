@@ -39,6 +39,23 @@ export async function maybeAppendWebSupplement(
     publisher: supplement.publisher || "unknown"
   });
 
+  const stockReactionAnswer = buildStockReactionMergedAnswer(response.answer, supplement, question);
+  if (stockReactionAnswer) {
+    return ensureFilingGroundedResponse({
+      answer: stockReactionAnswer,
+      sources: [
+        ...response.sources,
+        {
+          sourceId: "W1",
+          sourceKind: "web_supplement",
+          sectionType: "web_search",
+          sourceLabel: `${supplement.publisher} · ${truncateText(supplement.title, 80)}`,
+          excerpt: truncateText(supplement.snippet || supplement.title, 220)
+        }
+      ]
+    });
+  }
+
   return ensureFilingGroundedResponse({
     answer: `${response.answer} ${webSentence}`,
     sources: [
@@ -73,13 +90,39 @@ function shouldUseWebSupplement(question: string, answer: string): boolean {
   );
 }
 
+function buildStockReactionMergedAnswer(
+  filingAnswer: string,
+  supplement: WebSupplementRecord,
+  question: string
+): string | null {
+  if (!isStockReactionQuestion(question)) {
+    return null;
+  }
+
+  const reaction = extractStockReaction(supplement);
+  if (!reaction) {
+    return null;
+  }
+
+  const miniChart = buildStockReactionMiniChart(supplement);
+  const trimmedFilingAnswer = trimStockContextLimitation(filingAnswer);
+  return `${reaction}${miniChart ? ` ${miniChart}` : ""} ${trimmedFilingAnswer} 値動き自体は外部報道ベースで、なぜそう見られたかの整理は filing ベースです。`;
+}
+
 function buildWebSupplementSentence(supplement: WebSupplementRecord, question: string): string | null {
   const haystack = `${supplement.title} ${supplement.snippet}`.toLowerCase();
   const normalizedQuestion = question.replace(/\s+/g, "").toLowerCase();
+  const asksStockContext =
+    /(株の調子|株調子|株の動き|株どう|株はどう|最近株|最近の株|直近株|足元株|足元の株|stockperformance|shareperformance)/.test(
+      normalizedQuestion
+    ) ||
+    (/(最近|直近|足元|いま|今は|今の|このところ|ここのところ)/.test(normalizedQuestion) &&
+      /(株|株価|市場|stock|share)/.test(normalizedQuestion));
   const asksContrastiveReaction =
     /(株価|市場|反応|上げ|上が|下げ|下が|好感|嫌気)/.test(normalizedQuestion) &&
     (/(なのに|にもかかわらず|のに)/.test(normalizedQuestion) ||
       /(不確実|不透明|懸念|逆風|弱い|悪い|微妙|risk|uncertain|uncertainty)/.test(normalizedQuestion));
+  const isOfficialSupplement = /investor relations|newsroom/i.test(supplement.publisher);
   const points: string[] = [];
   const pushPoint = (point: string) => {
     if (!points.includes(point)) {
@@ -93,9 +136,9 @@ function buildWebSupplementSentence(supplement: WebSupplementRecord, question: s
     pushPoint("会社見通し");
   }
 
-  if (/shares? up|stock rises?|sending shares up|stock jumps?/.test(haystack)) {
+  if (/shares? up|shares? rise|shares? rose|stock rises?|sending shares up|stock jumps?/.test(haystack)) {
     pushPoint("市場では株価上昇で反応した");
-  } else if (/shares? down|stock falls?|sending shares down|stock drops?/.test(haystack)) {
+  } else if (/shares? down|shares? fall|shares? fell|stock falls?|sending shares down|stock drops?/.test(haystack)) {
     pushPoint("市場では株価下落で反応した");
   }
 
@@ -164,12 +207,12 @@ function buildWebSupplementSentence(supplement: WebSupplementRecord, question: s
     pushPoint("事業別の伸び要因");
   }
 
-  if (points.length === 0) {
-    if (!supplement.publisher) {
-      return null;
-    }
+  if (asksStockContext && isOfficialSupplement) {
+    return null;
+  }
 
-    return `外部補足では ${supplement.publisher} が、この論点に関する報道を出しています。これは filing 外の補足です。`;
+  if (points.length === 0) {
+    return null;
   }
 
   if (asksContrastiveReaction) {
@@ -185,4 +228,83 @@ function truncateText(text: string, limit: number): string {
   }
 
   return `${text.slice(0, limit).trimEnd()}...`;
+}
+
+function isStockReactionQuestion(question: string): boolean {
+  const normalized = question.replace(/\s+/g, "").toLowerCase();
+  return (
+    /(株の調子|株調子|株の動き|株どう|株はどう|最近株|最近の株|直近株|足元株|足元の株|stockperformance|shareperformance)/.test(
+      normalized
+    ) ||
+    /(株価|shareprice|stockprice|市場|反応|上げ|上が|下げ|下が|好感|嫌気|marketreaction)/.test(normalized)
+  );
+}
+
+function extractStockReaction(supplement: WebSupplementRecord): string | null {
+  const haystack = `${supplement.title} ${supplement.snippet}`;
+  const lower = haystack.toLowerCase();
+  const risePattern =
+    /(?:shares?|stock)\s+(?:rose|rise|rises|up|gained|gain|gains|jumped|jump|jumps|climbed|climb|climbs)\s+(?:as much as\s+|about\s+|around\s+|more than\s+|nearly\s+)?(\d+(?:\.\d+)?)%/i;
+  const fallPattern =
+    /(?:shares?|stock)\s+(?:fell|fall|falls|down|dropped|drop|drops|slid|slide|slides|declined|decline|declines)\s+(?:as much as\s+|about\s+|around\s+|more than\s+|nearly\s+)?(\d+(?:\.\d+)?)%/i;
+
+  const riseMatch = haystack.match(risePattern);
+  if (riseMatch?.[1]) {
+    return `外部報道ベースでは、決算後に株価は ${riseMatch[1]}% 上昇で反応しています。`;
+  }
+
+  const fallMatch = haystack.match(fallPattern);
+  if (fallMatch?.[1]) {
+    return `外部報道ベースでは、決算後に株価は ${fallMatch[1]}% 下落で反応しています。`;
+  }
+
+  if (/shares? up|shares? rise|shares? rose|stock rises?|sending shares up|stock jumps?/.test(lower)) {
+    return "外部報道ベースでは、決算後に株価は上昇で反応しています。";
+  }
+
+  if (/shares? down|shares? fall|shares? fell|stock falls?|sending shares down|stock drops?/.test(lower)) {
+    return "外部報道ベースでは、決算後に株価は下落で反応しています。";
+  }
+
+  return null;
+}
+
+function buildStockReactionMiniChart(supplement: WebSupplementRecord): string | null {
+  const haystack = `${supplement.title} ${supplement.snippet}`;
+  const risePattern =
+    /(?:shares?|stock)\s+(?:rose|rise|rises|up|gained|gain|gains|jumped|jump|jumps|climbed|climb|climbs)\s+(?:as much as\s+|about\s+|around\s+|more than\s+|nearly\s+)?(\d+(?:\.\d+)?)%/i;
+  const fallPattern =
+    /(?:shares?|stock)\s+(?:fell|fall|falls|down|dropped|drop|drops|slid|slide|slides|declined|decline|declines)\s+(?:as much as\s+|about\s+|around\s+|more than\s+|nearly\s+)?(\d+(?:\.\d+)?)%/i;
+
+  const riseMatch = haystack.match(risePattern);
+  if (riseMatch?.[1]) {
+    return `反応チャート: ${formatMiniReactionBar(Number(riseMatch[1]))}`;
+  }
+
+  const fallMatch = haystack.match(fallPattern);
+  if (fallMatch?.[1]) {
+    return `反応チャート: ${formatMiniReactionBar(-Number(fallMatch[1]))}`;
+  }
+
+  return null;
+}
+
+function formatMiniReactionBar(percent: number): string {
+  const magnitude = Math.min(Math.max(Math.round(Math.abs(percent)), 1), 5);
+  const filled = "▆".repeat(magnitude);
+  const empty = "·".repeat(5 - magnitude);
+
+  if (percent < 0) {
+    return `${filled}${empty} ↘ ${Math.abs(percent).toFixed(1)}%`;
+  }
+
+  return `${empty}${filled} ↗ ${percent.toFixed(1)}%`;
+}
+
+function trimStockContextLimitation(answer: string): string {
+  return answer
+    .replace(/株の強弱をみるには、実際の株価推移や決算後ニュースも併せて確認する必要があります。?/g, "")
+    .replace(/まず決算で確認できる数字を押さえ、そのうえで株価推移や決算後ニュースを別で見るのが安全です。?/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }

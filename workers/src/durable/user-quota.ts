@@ -1,13 +1,14 @@
 import type { DurableObjectState } from "@cloudflare/workers-types";
 
 interface QuotaBody {
-  action: "state" | "checkChat" | "checkStock" | "consumeChat" | "consumeStock";
+  action: "state" | "checkChat" | "checkStock" | "consumeChat" | "consumeStock" | "checkCompanyAccess";
   quotaSubject: string;
   plan: "free" | "pro";
   dateJST: string;
   ticker?: string;
   chatLimit: number;
   stockLimit: number;
+  previewTickers?: string[];
 }
 
 interface QuotaRecord {
@@ -44,6 +45,12 @@ export class UserQuotaDO {
       current.chatLimit = body.chatLimit;
       current.stockLimit = body.stockLimit;
       current.trackedTickers = current.trackedTickers ?? [];
+      const normalizedTicker = normalizeTicker(body.ticker);
+      const alreadyTracked = normalizedTicker ? current.trackedTickers.includes(normalizedTicker) : false;
+      const isPreviewTicker =
+        normalizedTicker && Array.isArray(body.previewTickers)
+          ? body.previewTickers.map(normalizeTicker).includes(normalizedTicker)
+          : false;
 
       if (body.action === "checkChat") {
         if (current.chatsUsed >= current.chatLimit) {
@@ -60,9 +67,6 @@ export class UserQuotaDO {
       }
 
       if (body.action === "checkStock") {
-        const normalizedTicker = body.ticker?.trim().toUpperCase();
-        const alreadyTracked = normalizedTicker ? current.trackedTickers.includes(normalizedTicker) : false;
-
         if (!alreadyTracked && current.stocksUsed >= current.stockLimit) {
           return { status: 429, payload: { error: "Watchlist limit exceeded", usage: usagePayload(current) } };
         }
@@ -70,10 +74,19 @@ export class UserQuotaDO {
         return { status: 200, payload: { usage: usagePayload(current) } };
       }
 
-      if (body.action === "consumeStock") {
-        const normalizedTicker = body.ticker?.trim().toUpperCase();
-        const alreadyTracked = normalizedTicker ? current.trackedTickers.includes(normalizedTicker) : false;
+      if (body.action === "checkCompanyAccess") {
+        if (body.plan === "pro" || alreadyTracked || isPreviewTicker) {
+          return { status: 200, payload: { usage: usagePayload(current) } };
+        }
 
+        if (current.stocksUsed >= current.stockLimit) {
+          return { status: 429, payload: { error: "Watchlist limit exceeded", usage: usagePayload(current) } };
+        }
+
+        return { status: 403, payload: { error: "Ticker access requires watchlist add", usage: usagePayload(current) } };
+      }
+
+      if (body.action === "consumeStock") {
         if (!alreadyTracked) {
           if (current.stocksUsed >= current.stockLimit) {
             return { status: 429, payload: { error: "Watchlist limit exceeded", usage: usagePayload(current) } };
@@ -112,4 +125,9 @@ function usagePayload(record: QuotaRecord) {
     stockLimit: record.stockLimit,
     updatedAt: record.updatedAt
   };
+}
+
+function normalizeTicker(value: string | undefined): string | null {
+  const normalized = value?.trim().toUpperCase();
+  return normalized ? normalized : null;
 }

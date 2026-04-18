@@ -52,7 +52,10 @@ export async function ensureHistoricalFilingStored(
       return secondArchived;
     }
 
-    const record = await ingestFiling(filing, comparisonFiling, env, config);
+    // Historical backfills only need filing-grounded metrics and MD&A chunks, so skip Gemini summary spend.
+    const record = await ingestFiling(filing, comparisonFiling, env, config, {
+      summaryMode: "fallback_only"
+    });
     await ensureHistoricalArtifacts(record, env);
     return record;
   } finally {

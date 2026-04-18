@@ -28,7 +28,7 @@ export const SearchQuerySchema = z.object({
   q: z.string().trim().min(1).max(100)
 });
 
-export const ChatSourceKindSchema = z.enum(["sec_filing", "web_supplement"]);
+export const ChatSourceKindSchema = z.enum(["sec_filing", "historical_filing", "web_supplement"]);
 
 export const SourceSchema = z.object({
   sourceId: z.string(),

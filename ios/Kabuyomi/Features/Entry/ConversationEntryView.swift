@@ -45,6 +45,10 @@ struct ConversationEntryView: View {
             if !starterCompanies.contains(where: { $0.ticker == selectedTicker }) {
                 selectedTicker = starterCompanies.first?.ticker ?? "AAPL"
             }
+            appModel.prefetchCompany(ticker: selectedTicker)
+        }
+        .onChange(of: selectedTicker) { _, newValue in
+            appModel.prefetchCompany(ticker: newValue)
         }
     }
 
@@ -57,6 +61,13 @@ struct ConversationEntryView: View {
             Text("Kabuyomi は会話から入り、今回の変化だけでなく前回比や推移もそのまま聞けます。")
                 .font(.system(.footnote, design: .rounded, weight: .medium))
                 .foregroundStyle(KabuyomiTheme.heroSubtext)
+                .lineSpacing(2)
+
+            HStack(spacing: 8) {
+                heroFeaturePill(title: "会話", systemImage: "bubble.left.and.bubble.right.fill")
+                heroFeaturePill(title: "前回比", systemImage: "arrow.left.arrow.right")
+                heroFeaturePill(title: "推移", systemImage: "chart.line.uptrend.xyaxis")
+            }
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -69,6 +80,26 @@ struct ConversationEntryView: View {
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .kabuyomiCard(.hero, radius: 26)
+    }
+
+    private func heroFeaturePill(title: String, systemImage: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .bold))
+            Text(title)
+                .font(.system(.caption, design: .rounded, weight: .bold))
+        }
+        .foregroundStyle(KabuyomiTheme.heroText)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.10))
+                .overlay(
+                    Capsule()
+                        .stroke(Color.white.opacity(0.16), lineWidth: 1)
+                )
+        )
     }
 
     private func tickerPill(for company: StarterCompany) -> some View {
@@ -129,8 +160,19 @@ struct ConversationEntryView: View {
                 .frame(maxWidth: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(KabuyomiTheme.accentDeep)
+                        .fill(
+                            LinearGradient(
+                                colors: [KabuyomiTheme.accentDeep, KabuyomiTheme.accent],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                        )
                 )
+                .shadow(color: KabuyomiTheme.accentDeep.opacity(0.18), radius: 12, x: 0, y: 8)
             }
             .buttonStyle(.plain)
 
@@ -174,16 +216,30 @@ struct ConversationEntryView: View {
         Button {
             searchPresented = true
         } label: {
-            HStack(spacing: 6) {
-                Text("自分の銘柄で始める")
-                    .font(.system(.footnote, design: .rounded, weight: .semibold))
+            HStack(spacing: 12) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("自分の銘柄で始める")
+                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                    Text("検索して保存済みの一覧に追加")
+                        .font(.system(.caption2, design: .rounded, weight: .medium))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             }
-            .foregroundStyle(KabuyomiTheme.accentDeep)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
+            .foregroundStyle(KabuyomiTheme.ink)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
             .frame(maxWidth: .infinity)
+            .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.22), stroke: Color.white.opacity(0.56))
         }
         .buttonStyle(.plain)
     }

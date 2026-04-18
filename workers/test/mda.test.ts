@@ -12,6 +12,33 @@ const tenK = `
   </body></html>
 `;
 
+const tenKBodyHeadingWithoutItemNumber = `
+  <html><body>
+    <div>
+      Item 7. Management's Discussion and Analysis of Financial Condition and Results of Operations:
+      Liquidity and capital resources Pages 29-32
+      Results of operations Pages 18-29
+      Critical accounting estimates Pages 34-36
+      Item 7A. Quantitative and Qualitative Disclosures About Market Risk Pages 33
+    </div>
+    <div>
+      Glossary MD&A Management's Discussion and Analysis Mentee Robotics Marketing, general, and administrative
+    </div>
+    <div>
+      Management's Discussion and Analysis Overview
+      Our MD&A begins with an overview of significant events and key developments that meaningfully impacted our financial results.
+      We then provide a detailed discussion of our operating segment results, followed by our consolidated results of operations and
+      liquidity and capital resources. We conclude with a discussion of our critical accounting estimates.
+      ${"Operating segment results improved due to product mix, pricing, and lower inventory charges. ".repeat(80)}
+      ${"Liquidity and capital resources remained sufficient to fund operations and investments. ".repeat(50)}
+    </div>
+    <div>
+      Quantitative and Qualitative Disclosures About Market Risk
+      We are affected by changes in currency exchange and interest rates.
+    </div>
+  </body></html>
+`;
+
 const tenQ = `
   <html><body>
     <h2>Part I - Financial Information</h2>
@@ -61,6 +88,15 @@ describe("extractMDASection", () => {
     const result = extractMDASection(tenQ, "10-Q");
     expect(result).not.toBeNull();
     expect(result?.text).toContain("Gross margin declined");
+  });
+
+  it("extracts the 10-K MD&A when the body heading omits Item 7 and the TOC keeps the item numbering", () => {
+    const result = extractMDASection(tenKBodyHeadingWithoutItemNumber, "10-K");
+    expect(result).not.toBeNull();
+    expect(result?.text).toContain("Our MD&A begins with an overview");
+    expect(result?.text).toContain("Operating segment results improved due to product mix");
+    expect(result?.text).not.toContain("Pages 29-32");
+    expect(result?.text).not.toContain("Glossary MD&A");
   });
 
   it("extracts the 10-Q MD&A when the filing uses a curly apostrophe", () => {

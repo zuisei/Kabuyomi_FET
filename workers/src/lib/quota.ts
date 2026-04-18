@@ -8,17 +8,29 @@ export interface QuotaIdentity {
   plan: "free" | "pro";
 }
 
+interface QuotaIdentityOptions {
+  requireDeviceKey?: boolean;
+  allowDebugUnlimited?: boolean;
+}
+
 interface UsageEnvelope {
   usage: UsageState;
 }
 
 export async function readQuotaIdentity(
   request: Request,
-  options: { requireDeviceKey?: boolean } = {}
+  options: QuotaIdentityOptions = {}
 ): Promise<QuotaIdentity> {
   const deviceKey = request.headers.get("x-device-key")?.trim();
   if (options.requireDeviceKey && !deviceKey) {
     throw new AppError(400, "Device key is required");
+  }
+
+  if (options.allowDebugUnlimited && isDebugUnlimitedRequest(request) && deviceKey) {
+    return {
+      quotaSubject: `free:debug:${deviceKey}`,
+      plan: "free"
+    };
   }
 
   const connectingIp = normalizeConnectingIp(request.headers.get("cf-connecting-ip"));
@@ -73,6 +85,47 @@ export async function consumeStockQuota(
   return mutateUsage(identity, env, config, "consumeStock", ticker);
 }
 
+export async function ensureCompanyAccessAllowed(
+  identity: QuotaIdentity,
+  ticker: string,
+  previewTickers: readonly string[],
+  env: Env,
+  config: RemoteConfig
+): Promise<void> {
+  const isProPlan = identity.plan === "pro";
+  if (isProPlan || identity.quotaSubject.startsWith("free:debug:")) {
+    return;
+  }
+
+  const dateJST = buildQuotaDateJST();
+  const response = await env.USER_QUOTA.getByName(identity.quotaSubject).fetch("https://do/quota", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      action: "checkCompanyAccess",
+      quotaSubject: identity.quotaSubject,
+      plan: identity.plan,
+      dateJST,
+      ticker,
+      chatLimit: isProPlan ? config.proDailyChatLimit : config.freeDailyChatLimit,
+      stockLimit: isProPlan ? Number.MAX_SAFE_INTEGER : config.freeStockLimit,
+      previewTickers: normalizePreviewTickers(previewTickers)
+    })
+  });
+
+  const payload = (await response.json()) as UsageEnvelope & { error?: string };
+  if (!response.ok || !payload.usage) {
+    logEvent("quota_denial", {
+      action: "checkCompanyAccess",
+      quotaSubject: identity.quotaSubject,
+      plan: identity.plan,
+      ticker: ticker.trim().toUpperCase(),
+      reason: payload.error ?? "Quota request failed"
+    });
+    throw new AppError(response.status, payload.error ?? "Quota request failed");
+  }
+}
+
 export async function loadUsage(
   identity: QuotaIdentity,
   env: Env,
@@ -91,6 +144,10 @@ function isLocalQuotaFallbackRequest(request: Request): boolean {
   return hostname === "127.0.0.1" || hostname === "localhost" || hostname.endsWith(".test");
 }
 
+function isDebugUnlimitedRequest(request: Request): boolean {
+  return request.headers.get("x-kabuyomi-debug-unlimited")?.trim() === "1";
+}
+
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -104,12 +161,7 @@ async function mutateUsage(
   ticker?: string
 ): Promise<UsageState> {
   const stub = env.USER_QUOTA.getByName(identity.quotaSubject);
-  const dateJST = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).format(new Date());
+  const dateJST = buildQuotaDateJST();
 
   const response = await stub.fetch("https://do/quota", {
     method: "POST",
@@ -137,4 +189,29 @@ async function mutateUsage(
   }
 
   return payload.usage;
+}
+
+function buildQuotaDateJST(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
+}
+
+function normalizePreviewTickers(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    const ticker = value.trim().toUpperCase();
+    if (!ticker || seen.has(ticker)) {
+      continue;
+    }
+    seen.add(ticker);
+    normalized.push(ticker);
+  }
+
+  return normalized;
 }

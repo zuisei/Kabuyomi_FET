@@ -24,47 +24,63 @@ struct APIClient {
         return response.items
     }
 
-    func addToWatchlist(ticker: String, deviceKey: String) async throws -> WatchlistAddResponse {
+    func addToWatchlist(
+        ticker: String,
+        deviceKey: String,
+        debugUnlimited: Bool = false
+    ) async throws -> WatchlistAddResponse {
         try await sendRequest(
             path: "/v1/watchlist/add",
             method: "POST",
-            headers: requestHeaders(deviceKey: deviceKey),
+            headers: requestHeaders(deviceKey: deviceKey, debugUnlimited: debugUnlimited),
             body: ["ticker": ticker]
         )
     }
 
-    func fetchCompany(ticker: String, deviceKey: String) async throws -> CompanyPayload {
+    func fetchCompany(
+        ticker: String,
+        deviceKey: String,
+        debugUnlimited: Bool = false
+    ) async throws -> CompanyPayload {
         try await sendRequest(
             path: "/v1/company/\(ticker)",
-            headers: requestHeaders(deviceKey: deviceKey)
+            headers: requestHeaders(deviceKey: deviceKey, debugUnlimited: debugUnlimited)
         )
     }
 
-    func refreshCompany(ticker: String, deviceKey: String) async throws -> CompanyPayload {
+    func refreshCompany(
+        ticker: String,
+        deviceKey: String,
+        debugUnlimited: Bool = false
+    ) async throws -> CompanyPayload {
         try await sendRequest(
             path: "/v1/company/\(ticker)/refresh",
             method: "POST",
-            headers: requestHeaders(deviceKey: deviceKey)
+            headers: requestHeaders(deviceKey: deviceKey, debugUnlimited: debugUnlimited)
         )
     }
 
     func sendChat(
         filingKey: String,
         question: String,
-        deviceKey: String
+        deviceKey: String,
+        debugUnlimited: Bool = false
     ) async throws -> ChatResponse {
         try await sendRequest(
             path: "/v1/chat",
             method: "POST",
-            headers: requestHeaders(deviceKey: deviceKey),
+            headers: requestHeaders(deviceKey: deviceKey, debugUnlimited: debugUnlimited),
             body: ["filingKey": filingKey, "question": question]
         )
     }
 
-    func fetchUsage(deviceKey: String) async throws -> UsagePayload {
+    func fetchUsage(
+        deviceKey: String,
+        debugUnlimited: Bool = false
+    ) async throws -> UsagePayload {
         try await sendRequest(
             path: "/v1/usage",
-            headers: requestHeaders(deviceKey: deviceKey)
+            headers: requestHeaders(deviceKey: deviceKey, debugUnlimited: debugUnlimited)
         )
     }
 
@@ -72,8 +88,14 @@ struct APIClient {
         try await sendRequest(path: "/v1/billing/sync", method: "POST", body: request)
     }
 
-    private func requestHeaders(deviceKey: String) -> [String: String] {
-        ["x-device-key": deviceKey]
+    private func requestHeaders(deviceKey: String, debugUnlimited: Bool) -> [String: String] {
+        var headers = ["x-device-key": deviceKey]
+        #if DEBUG
+        if debugUnlimited {
+            headers["x-kabuyomi-debug-unlimited"] = "1"
+        }
+        #endif
+        return headers
     }
 
     private func sendRequest<ResponseType: Decodable>(

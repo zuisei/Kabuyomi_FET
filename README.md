@@ -44,7 +44,7 @@ Local Workers development expects:
 - the same `SEC_FETCHER_SHARED_SECRET` in `workers/.dev.vars`
 - optional overrides such as `GEMINI_MODEL`, `GEMINI_TIMEOUT_MS`, `SEC_FETCHER_TIMEOUT_MS`, and `BACKFILL_SHARED_SECRET`
 
-`wrangler.toml` and `.dev.vars.example` both default to `gemini-2.5-flash`.
+`wrangler.toml` and `.dev.vars.example` both default to `gemma-4-31b-it`.
 
 ### 3. iOS
 
@@ -64,6 +64,13 @@ Unit tests live under `ios/KabuyomiTests/` and can be run with `xcodebuild test`
 
 `/v1/chat` uses KV-backed current filings by default. Only explicit history prompts such as `3年`, `比較`, `推移`, `trend`, or `compare` use the D1 path.
 
+When a user explicitly asks for a 3-year comparison and the D1 index does not yet have enough rows, chat now auto-hydrates only the minimum missing history:
+
+- `10-K`: up to 2 prior annual filings
+- `10-Q`: up to 2 prior same-quarter filings
+- historical auto-hydration uses fallback-only summaries to avoid Gemini cost for archive preparation
+- if comparable filings still are not available, chat responds explicitly that the historical window is still insufficient instead of silently falling back to a single-filing answer
+
 ### D1 Migration
 
 ```bash
@@ -78,6 +85,7 @@ npx wrangler d1 execute kabuyomi-history --remote --file ./d1/migrations/0001_hi
 - Prefer small batch runs over broad backfills.
 - Default rollout is annual `10-K` first, then narrow `10-Q` top-ups for saved or explicitly requested tickers.
 - Free-tier-safe defaults currently cap one run to annual filings with `maxFilingsPerTicker=1` and `maxTotalFilings=8`.
+- User-facing history chat stays narrow on purpose: each request hydrates at most 2 prior filings and does not do broad background sweeps.
 
 Backfill example:
 

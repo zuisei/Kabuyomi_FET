@@ -41,6 +41,45 @@ enum TestFixtures {
                     yoyPercent: 8.0
                 )
             ],
+            historicalOverview: HistoricalOverviewPayload(
+                comparisonBasis: "annual",
+                years: 3,
+                series: [
+                    HistoricalMetricSeriesPayload(
+                        logicalName: "revenue",
+                        label: "売上高",
+                        points: [
+                            HistoricalMetricPointPayload(
+                                filingKey: "v1:\(ticker):0000320193-22-000001",
+                                filedAt: "2022-11-01",
+                                periodEnd: "2022-09-30",
+                                value: 365_817_000_000,
+                                unit: "USD",
+                                yoyPercent: 7.8,
+                                sourceId: "metric-revenue-2022"
+                            ),
+                            HistoricalMetricPointPayload(
+                                filingKey: "v1:\(ticker):0000320193-23-000001",
+                                filedAt: "2023-11-01",
+                                periodEnd: "2023-09-30",
+                                value: 383_285_000_000,
+                                unit: "USD",
+                                yoyPercent: 4.8,
+                                sourceId: "metric-revenue-2023"
+                            ),
+                            HistoricalMetricPointPayload(
+                                filingKey: "v1:\(ticker):0000320193-24-000001",
+                                filedAt: "2024-11-01",
+                                periodEnd: "2024-09-30",
+                                value: 401_220_000_000,
+                                unit: "USD",
+                                yoyPercent: 4.7,
+                                sourceId: "metric-revenue-2024"
+                            )
+                        ]
+                    )
+                ]
+            ),
             sourceChunks: [
                 SourceChunkPayload(
                     sourceId: "md1",
@@ -92,6 +131,7 @@ enum TestFixtures {
                     excerpt: "123456000000"
                 )
             ],
+            modelName: "gemma-4-31b-it",
             usage: usagePayload()
         )
     }
@@ -147,6 +187,27 @@ enum TestFixtures {
                         "yoyPercent": jsonField($0.yoyPercent)
                     ]
                 },
+                "historicalOverview": [
+                    "comparisonBasis": company.historicalOverview?.comparisonBasis as Any,
+                    "years": company.historicalOverview?.years as Any,
+                    "series": company.historicalOverview?.series.map {
+                        [
+                            "logicalName": $0.logicalName,
+                            "label": $0.label,
+                            "points": $0.points.map {
+                                [
+                                    "filingKey": $0.filingKey,
+                                    "filedAt": $0.filedAt,
+                                    "periodEnd": $0.periodEnd,
+                                    "value": $0.value,
+                                    "unit": $0.unit,
+                                    "yoyPercent": jsonField($0.yoyPercent),
+                                    "sourceId": $0.sourceId
+                                ]
+                            }
+                        ]
+                    } as Any
+                ],
                 "sourceChunks": company.sourceChunks.map {
                     [
                         "sourceId": $0.sourceId,

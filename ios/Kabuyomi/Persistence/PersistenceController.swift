@@ -1,6 +1,10 @@
 import CoreData
 import Foundation
 
+private enum AIModelDefaults {
+    static let primaryRemoteModelName = "gemma-4-31b-it"
+}
+
 @MainActor
 final class PersistenceController {
     static let shared = PersistenceController()
@@ -82,6 +86,7 @@ final class PersistenceController {
                     changes: summary.itemArray.filter { $0.kind == "change" }.map(summaryItemPayload(from:))
                 ),
                 metrics: filing.metricArray.map(metricPayload(from:)),
+                historicalOverview: decodeHistoricalOverview(from: filing.historicalOverviewJSON),
                 sourceChunks: filing.sourceChunkArray.map(sourceChunkPayload(from:)),
                 lastUpdatedAt: Self.isoString(from: stock.lastUpdatedAt)
             )
@@ -130,6 +135,7 @@ final class PersistenceController {
         filing.mdaTokenCount = Int32(max(0, filing.mdaText.count / 4))
         filing.extractorVersion = company.filingKey.split(separator: ":").first.map(String.init) ?? "v1"
         filing.promptVersion = "v1"
+        filing.historicalOverviewJSON = encodeHistoricalOverview(company.historicalOverview)
 
         replaceSummary(on: filing, summary: company.summary)
         replaceMetrics(on: filing, metrics: company.metrics)
@@ -156,7 +162,7 @@ final class PersistenceController {
         assistantMessage.role = "assistant"
         assistantMessage.content = response.answer
         assistantMessage.createdAt = Date()
-        assistantMessage.modelName = "gemini-2.5-flash"
+        assistantMessage.modelName = response.modelName ?? AIModelDefaults.primaryRemoteModelName
         assistantMessage.filing = filing
 
         for source in response.sources {
@@ -276,7 +282,7 @@ final class PersistenceController {
         entity.generatedAt = Date()
         entity.verdictText = summary.verdict
         entity.comparisonLabel = ""
-        entity.modelName = "gemini-2.5-flash"
+        entity.modelName = AIModelDefaults.primaryRemoteModelName
         entity.filing = filing
 
         for (index, item) in summary.highlights.enumerated() {
@@ -339,6 +345,25 @@ final class PersistenceController {
     private func encodeSourceIds(_ sourceIds: [String]) -> String {
         let data = (try? JSONEncoder().encode(sourceIds)) ?? Data("[]".utf8)
         return String(data: data, encoding: .utf8) ?? "[]"
+    }
+
+    private func encodeHistoricalOverview(_ overview: HistoricalOverviewPayload?) -> String? {
+        guard let overview,
+              let data = try? JSONEncoder().encode(overview) else {
+            return nil
+        }
+
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func decodeHistoricalOverview(from json: String?) -> HistoricalOverviewPayload? {
+        guard let json,
+              let data = json.data(using: .utf8),
+              let overview = try? JSONDecoder().decode(HistoricalOverviewPayload.self, from: data) else {
+            return nil
+        }
+
+        return overview
     }
 
     private func decodeSourceIds(_ sourceIdsJSON: String) -> [String] {

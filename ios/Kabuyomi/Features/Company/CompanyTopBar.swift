@@ -19,27 +19,13 @@ struct ChatTopBar: View {
                     .font(.system(size: 20, weight: .semibold))
                     .frame(width: 48, height: 48)
                     .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .kabuyomiGlass(radius: 24)
+                    .kabuyomiGlass(radius: 24, interactive: true)
             }
             .buttonStyle(.plain)
 
             Spacer(minLength: 0)
 
-            VStack(spacing: 2) {
-                Text(ticker)
-                    .font(.system(.title3, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                if let companyName {
-                    Text(companyName)
-                        .font(.system(.caption, design: .rounded, weight: .medium))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                        .lineLimit(1)
-                } else if let formType {
-                    Text(formType)
-                        .font(.system(.caption, design: .rounded, weight: .medium))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
-            }
+            topBarTitle
 
             Spacer(minLength: 0)
 
@@ -80,11 +66,33 @@ struct ChatTopBar: View {
                 .accessibilityLabel("企業データを更新")
             }
             .padding(.horizontal, 4)
-            .kabuyomiGlass(radius: 24)
+            .kabuyomiGlass(radius: 24, interactive: true)
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 10)
+    }
+
+    private var topBarTitle: some View {
+        VStack(spacing: 2) {
+            Text(ticker)
+                .font(.system(.title3, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.ink)
+            if let companyName {
+                Text(companyName)
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .lineLimit(1)
+            } else if let formType {
+                Text(formType)
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: 220)
+        .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.22), stroke: Color.white.opacity(0.58))
     }
 
     private func iconButton(

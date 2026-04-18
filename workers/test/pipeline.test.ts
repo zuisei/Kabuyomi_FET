@@ -30,6 +30,19 @@ describe("buildChatResponse", () => {
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
   });
 
+  it("answers common change-overview prompts with the biggest filing-backed differences first", async () => {
+    const filing = makeTestFiling();
+
+    const response = await buildChatResponse(filing, "前回決算との違いは？", {} as never);
+
+    expect(response.answer).toContain("数字で目立つのは");
+    expect(response.answer).toContain("営業利益は 508.5億ドル");
+    expect(response.answer).toContain("売上高は 1,437.6億ドル");
+    expect(response.answer).toContain("前年同期比");
+    expect(response.sources.length).toBeGreaterThanOrEqual(2);
+    expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+  });
+
   it("keeps revenue-driver questions conversational even without model output", async () => {
     const filing = makeTestFiling();
 
@@ -91,6 +104,33 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("この3年の四半期提出資料ベース");
     expect(response.answer).toContain("2023-12-30");
     expect(response.answer).toContain("2025-12-27");
+    expect(response.sources.every((source) => source.sourceKind === "historical_filing")).toBe(true);
+  });
+
+  it("falls back to the normal chat path when historical storage is temporarily unavailable", async () => {
+    const filing = makeTestFiling();
+
+    const response = await buildChatResponse(
+      filing,
+      "この3年の売上推移は？",
+      {
+        DB: {
+          prepare() {
+            throw new Error("D1 unavailable");
+          },
+          batch: vi.fn()
+        },
+        FILINGS_BUCKET: {
+          get: vi.fn(),
+          put: vi.fn(),
+          head: vi.fn()
+        }
+      } as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.answer).toContain("売上高");
+    expect(response.sources.length).toBeGreaterThan(0);
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
   });
 
@@ -110,6 +150,24 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("営業利益は 508.5億ドル");
     expect(response.answer).toContain("不確実さはあるが、足元の業績や需要は想定より強い");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S6", "S9", "S12", "S8"]);
+    expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+  });
+
+  it("answers broad recent stock-context questions by leading with the filing limit", async () => {
+    const filing = makeMarketContrastFiling();
+
+    const response = await buildChatResponse(
+      filing,
+      "最近株の調子は？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.answer).toContain("filingベースで見ると、足元はやや強めです");
+    expect(response.answer).toContain("売上高は 1,437.6億ドル");
+    expect(response.answer).toContain("営業利益は 508.5億ドル");
+    expect(response.answer).toContain("株の強弱をみるには");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S12", "S6"]);
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
   });
 
@@ -345,6 +403,85 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("市場は懸念よりこちらを強く見た可能性があります");
     expect(response.answer).toContain("会社見通し");
     expect(response.sources.at(-1)?.sourceKind).toBe("web_supplement");
+  });
+
+  it("uses Reuters-style stock reaction context for broad recent stock questions", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.startsWith("https://html.duckduckgo.com/html/")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => `
+            <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.reuters.com%2Fbusiness%2Fapple-shares-rise-after-earnings">Apple shares rise after earnings as iPhone demand stays strong</a>
+            <a class="result__snippet">Jan 29 (Reuters) - Apple shares rose 3.2% after earnings as investors focused on stronger-than-expected demand and upbeat outlook.</a>
+          `
+        } as Response;
+      }
+
+      if (url === "https://www.reuters.com/business/apple-shares-rise-after-earnings") {
+        return {
+          ok: false,
+          status: 401,
+          text: async () => ""
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filing = makeTestFiling();
+    const response = await buildChatResponse(
+      filing,
+      "最近株の調子は？",
+      {} as never,
+      { webSupplementEnabled: true }
+    );
+
+    expect(response.answer).toContain("外部報道ベースでは、決算後に株価は 3.2% 上昇で反応しています");
+    expect(response.answer).toContain("反応チャート:");
+    expect(response.answer).toContain("↗ 3.2%");
+    expect(response.answer).toContain("filingベースで見ると、足元はやや強めです");
+    expect(response.answer).toContain("値動き自体は外部報道ベースで、なぜそう見られたかの整理は filing ベースです");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S12", "W1"]);
+    expect(response.sources.at(-1)?.sourceKind).toBe("web_supplement");
+  });
+
+  it("drops official investor-relations filler for broad recent stock questions", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.startsWith("https://html.duckduckgo.com/html/")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => `
+            <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Finvestor.apple.com%2Fnewsroom%2Fquarterly-results">Apple investor relations quarterly results</a>
+            <a class="result__snippet">Investor Relations newsroom with Apple quarterly results and press release.</a>
+          `
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filing = makeTestFiling();
+    const response = await buildChatResponse(
+      filing,
+      "最近株の調子は？",
+      {} as never,
+      { webSupplementEnabled: true }
+    );
+
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S12"]);
+    expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+    const requestedUrls = fetchMock.mock.calls.map(([input]) =>
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+    );
+    expect(requestedUrls).not.toContain("https://investor.apple.com/newsroom/quarterly-results");
   });
 
   it("ignores generic market-data pages and keeps only filing evidence when no credible article is found", async () => {

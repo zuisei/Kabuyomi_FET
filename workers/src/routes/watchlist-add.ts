@@ -10,18 +10,28 @@ export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env,
     return null;
   }
 
-  const parsed = WatchlistAddRequestSchema.safeParse(await request.json());
+  let payload: unknown;
+  try {
+    payload = await request.json();
+  } catch {
+    return badRequest("Invalid ticker payload");
+  }
+
+  const parsed = WatchlistAddRequestSchema.safeParse(payload);
   if (!parsed.success) {
     return badRequest("Invalid ticker payload");
   }
 
-  const identity = await readQuotaIdentity(request, { requireDeviceKey: true });
+  const identity = await readQuotaIdentity(request, {
+    requireDeviceKey: true,
+    allowDebugUnlimited: true
+  });
   await ensureStockQuotaAvailable(identity, parsed.data.ticker, env, config);
   const filing = await ensureLatestFiling(parsed.data.ticker, env, config, { executionContext: ctx });
   const usage = await consumeStockQuota(identity, parsed.data.ticker, env, config);
 
   return json({
-    company: serializeCompanyResponse(filing),
+    company: await serializeCompanyResponse(filing, env),
     usage
   });
 };

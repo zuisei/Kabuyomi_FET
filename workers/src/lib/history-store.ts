@@ -7,10 +7,11 @@ const HISTORY_YEARS = 3;
 const ARCHIVE_PREFIX = "filings";
 const DEFAULT_BACKFILL_FORMS: FilingReference["formType"][] = ["10-K"];
 const DEFAULT_BACKFILL_TOTAL_CAP = 8;
+const SAME_QUARTER_MATCH_WINDOW_DAYS = 45;
 
 type HistoricalSource = {
   sourceId: string;
-  sourceKind: "sec_filing";
+  sourceKind: "historical_filing";
   sectionType: string;
   sourceLabel: string;
   excerpt: string;
@@ -19,6 +20,28 @@ type HistoricalSource = {
 export interface HistoricalChatResponse {
   answer: string;
   sources: HistoricalSource[];
+}
+
+export interface HistoricalOverviewPoint {
+  filingKey: string;
+  filedAt: string;
+  periodEnd: string;
+  value: number;
+  unit: string;
+  yoyPercent: number | null;
+  sourceId: string;
+}
+
+export interface HistoricalOverviewSeries {
+  logicalName: MetricSnapshot["logicalName"];
+  label: string;
+  points: HistoricalOverviewPoint[];
+}
+
+export interface HistoricalOverviewPayload {
+  comparisonBasis: "annual" | "quarterly";
+  years: number;
+  series: HistoricalOverviewSeries[];
 }
 
 export interface BackfillHistoryRequest {
@@ -210,6 +233,78 @@ export async function maybeBuildHistoricalChatResponse(
   return {
     answer: answerParts.join(" ").trim(),
     sources: dedupedSources
+  };
+}
+
+export async function loadHistoricalOverview(
+  filing: FilingCacheRecord,
+  env: Partial<Env>
+): Promise<HistoricalOverviewPayload | null> {
+  if (!hasHistoricalBindings(env)) {
+    return null;
+  }
+
+  await ensureHistoricalArtifacts(filing, env);
+
+  const logicalNames: MetricSnapshot["logicalName"][] = [
+    "revenue",
+    "operatingIncome",
+    "netIncome",
+    "operatingCashFlow",
+    "epsBasic"
+  ];
+  const metricRows = await loadHistoricalMetricRows(
+    filing.ticker,
+    filing.formType,
+    subtractYearsIsoDate(filing.periodOfReport, HISTORY_YEARS),
+    logicalNames,
+    filing.formType === "10-Q" ? 36 : 15,
+    env
+  );
+
+  if (metricRows.length < 2) {
+    return null;
+  }
+
+  const grouped = groupMetricRows(metricRows);
+  const series = logicalNames
+    .map((logicalName) => {
+      const rows = grouped.get(logicalName) ?? [];
+      const selectedRows =
+        filing.formType === "10-Q"
+          ? selectComparableQuarterRows(rows, filing.periodOfReport)
+          : selectDistinctPeriodRows(rows, HISTORY_YEARS);
+
+      if (selectedRows.length < 2) {
+        return null;
+      }
+
+      return {
+        logicalName,
+        label: metricLabel(logicalName),
+        points: selectedRows
+          .sort((left, right) => left.periodEnd.localeCompare(right.periodEnd))
+          .map((row) => ({
+            filingKey: row.filingKey,
+            filedAt: row.filedAt,
+            periodEnd: row.periodEnd,
+            value: row.value,
+            unit: row.unit,
+            yoyPercent: row.yoyPercent,
+            sourceId: row.sourceId
+          }))
+      } satisfies HistoricalOverviewSeries;
+    })
+    .filter((value): value is HistoricalOverviewSeries => value !== null);
+
+  if (series.length === 0) {
+    return null;
+  }
+
+  return {
+    comparisonBasis: filing.formType === "10-Q" ? "quarterly" : "annual",
+    years: HISTORY_YEARS,
+    series
   };
 }
 
@@ -681,9 +776,9 @@ function buildSegmentHistorySummary(
 function buildHistoricalMetricSource(row: HistoricalMetricRow): HistoricalSource {
   return {
     sourceId: `${row.filingKey}:${row.sourceId}`,
-    sourceKind: "sec_filing",
+    sourceKind: "historical_filing",
     sectionType: "historical_metric",
-    sourceLabel: `${row.formType} filed ${row.filedAt}`,
+    sourceLabel: `${row.formType} filed ${row.filedAt} · period ${row.periodEnd}`,
     excerpt: `${metricLabel(row.logicalName)}: ${formatMetricValue(row.value, row.unit)} (${row.periodEnd})`
   };
 }
@@ -691,9 +786,9 @@ function buildHistoricalMetricSource(row: HistoricalMetricRow): HistoricalSource
 function buildSegmentSource(row: SegmentHighlightRow): HistoricalSource {
   return {
     sourceId: `${row.filingKey}:${row.sourceId ?? `${row.dimension}:${row.label}`}`,
-    sourceKind: "sec_filing",
+    sourceKind: "historical_filing",
     sectionType: "historical_segment",
-    sourceLabel: `${row.formType} filed ${row.filedAt}`,
+    sourceLabel: `${row.formType} filed ${row.filedAt} · period ${row.periodEnd}`,
     excerpt: `${row.label}: ${row.summary}`
   };
 }
@@ -710,6 +805,63 @@ function dedupeSources(sources: HistoricalSource[]): HistoricalSource[] {
     }
   }
   return deduped;
+}
+
+function selectDistinctPeriodRows(rows: HistoricalMetricRow[], count: number): HistoricalMetricRow[] {
+  const selected: HistoricalMetricRow[] = [];
+  const seenPeriods = new Set<string>();
+
+  for (const row of rows) {
+    if (seenPeriods.has(row.periodEnd)) {
+      continue;
+    }
+
+    selected.push(row);
+    seenPeriods.add(row.periodEnd);
+
+    if (selected.length >= count) {
+      break;
+    }
+  }
+
+  return selected;
+}
+
+function selectComparableQuarterRows(rows: HistoricalMetricRow[], currentPeriodEnd: string): HistoricalMetricRow[] {
+  const remaining = [...selectDistinctPeriodRows(rows, rows.length)];
+  const selected: HistoricalMetricRow[] = [];
+
+  for (let yearOffset = 0; yearOffset < HISTORY_YEARS; yearOffset += 1) {
+    const targetDate = subtractYearsIsoDate(currentPeriodEnd, yearOffset);
+    const bestIndex = findClosestHistoricalRowIndex(remaining, targetDate);
+    if (bestIndex === -1) {
+      continue;
+    }
+
+    selected.push(remaining.splice(bestIndex, 1)[0]!);
+  }
+
+  return selected;
+}
+
+function findClosestHistoricalRowIndex(rows: HistoricalMetricRow[], targetDate: string): number {
+  const targetMs = new Date(targetDate).getTime();
+  let bestIndex = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const distanceDays = Math.abs(new Date(rows[index]!.periodEnd).getTime() - targetMs) / (24 * 60 * 60 * 1000);
+    if (distanceDays > SAME_QUARTER_MATCH_WINDOW_DAYS) {
+      continue;
+    }
+
+    if (distanceDays < bestDistance) {
+      bestDistance = distanceDays;
+      bestIndex = index;
+    }
+  }
+
+  return bestIndex;
 }
 
 function normalizeTickers(values: string[]): string[] {
