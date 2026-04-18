@@ -36,7 +36,8 @@ export async function maybeAppendWebSupplement(
   logEvent("chat_web_supplement_used", {
     filingKey: filing.filingKey,
     ticker: filing.ticker,
-    publisher: supplement.publisher || "unknown"
+    publisher: supplement.publisher || "unknown",
+    sourceStrength: supplement.evidenceStrength
   });
 
   const stockReactionAnswer = buildStockReactionMergedAnswer(response.answer, supplement, question);
@@ -45,13 +46,7 @@ export async function maybeAppendWebSupplement(
       answer: stockReactionAnswer,
       sources: [
         ...response.sources,
-        {
-          sourceId: "W1",
-          sourceKind: "web_supplement",
-          sectionType: "web_search",
-          sourceLabel: `${supplement.publisher} · ${truncateText(supplement.title, 80)}`,
-          excerpt: truncateText(supplement.snippet || supplement.title, 220)
-        }
+        buildWebSupplementSource(supplement)
       ]
     });
   }
@@ -60,13 +55,7 @@ export async function maybeAppendWebSupplement(
     answer: `${response.answer} ${webSentence}`,
     sources: [
       ...response.sources,
-      {
-        sourceId: "W1",
-        sourceKind: "web_supplement",
-        sectionType: "web_search",
-        sourceLabel: `${supplement.publisher} · ${truncateText(supplement.title, 80)}`,
-        excerpt: truncateText(supplement.snippet || supplement.title, 220)
-      }
+      buildWebSupplementSource(supplement)
     ]
   });
 }
@@ -106,7 +95,11 @@ function buildStockReactionMergedAnswer(
 
   const miniChart = buildStockReactionMiniChart(supplement);
   const trimmedFilingAnswer = trimStockContextLimitation(filingAnswer);
-  return `${reaction}${miniChart ? ` ${miniChart}` : ""} ${trimmedFilingAnswer} 値動き自体は外部報道ベースで、なぜそう見られたかの整理は filing ベースです。`;
+  return `${reaction}${miniChart ? ` ${miniChart}` : ""} ${trimmedFilingAnswer} ${buildStrengthExplanation(supplement, {
+    article: "値動き自体は外部報道ベースで、なぜそう見られたかの整理は filing ベースです。",
+    snippet:
+      "値動き自体は検索 snippet ベースの弱い外部補足で、なぜそう見られたかの整理は filing ベースです。"
+  })}`;
 }
 
 function buildWebSupplementSentence(supplement: WebSupplementRecord, question: string): string | null {
@@ -216,10 +209,16 @@ function buildWebSupplementSentence(supplement: WebSupplementRecord, question: s
   }
 
   if (asksContrastiveReaction) {
-    return `外部補足では ${supplement.publisher} が、${points.join("、")}に触れており、市場は懸念よりこちらを強く見た可能性があります。これは filing 外の補足です。`;
+    return buildStrengthExplanation(supplement, {
+      article: `外部補足では ${supplement.publisher} が、${points.join("、")}に触れており、市場は懸念よりこちらを強く見た可能性があります。これは filing 外の補足です。`,
+      snippet: `検索 snippet の弱い外部補足では ${supplement.publisher} が、${points.join("、")}に触れています。記事本文までは確認できていないため、SEC 根拠より弱い補足として扱ってください。`
+    });
   }
 
-  return `外部補足では ${supplement.publisher} が、${points.join("、")}に触れています。これは filing 外の補足です。`;
+  return buildStrengthExplanation(supplement, {
+    article: `外部補足では ${supplement.publisher} が、${points.join("、")}に触れています。これは filing 外の補足です。`,
+    snippet: `検索 snippet の弱い外部補足では ${supplement.publisher} が、${points.join("、")}に触れています。記事本文までは確認できていないため、SEC 根拠より弱い補足として扱ってください。`
+  });
 }
 
 function truncateText(text: string, limit: number): string {
@@ -228,6 +227,30 @@ function truncateText(text: string, limit: number): string {
   }
 
   return `${text.slice(0, limit).trimEnd()}...`;
+}
+
+function buildWebSupplementSource(supplement: WebSupplementRecord) {
+  const labelPrefix =
+    supplement.evidenceStrength === "supplement_article"
+      ? "External supplement"
+      : "Weak external supplement (search snippet)";
+  const excerptPrefix = supplement.evidenceStrength === "supplement_article" ? "" : "Search snippet: ";
+
+  return {
+    sourceId: "W1",
+    sourceKind: "web_supplement" as const,
+    sourceStrength: supplement.evidenceStrength,
+    sectionType: "web_search",
+    sourceLabel: `${labelPrefix} · ${supplement.publisher} · ${truncateText(supplement.title, 80)}`,
+    excerpt: truncateText(`${excerptPrefix}${supplement.snippet || supplement.title}`, 220)
+  };
+}
+
+function buildStrengthExplanation(
+  supplement: WebSupplementRecord,
+  copy: { article: string; snippet: string }
+): string {
+  return supplement.evidenceStrength === "supplement_article" ? copy.article : copy.snippet;
 }
 
 function isStockReactionQuestion(question: string): boolean {

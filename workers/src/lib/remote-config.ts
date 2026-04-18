@@ -53,7 +53,10 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
   return {
     ...DEFAULT_REMOTE_CONFIG,
     ...payload,
-    trackedTickers: normalizeTrackedTickers(Array.isArray(payload.trackedTickers) ? payload.trackedTickers : []),
+    trackedTickers: normalizeTrackedTickers(Array.isArray(payload.trackedTickers) ? payload.trackedTickers : []).slice(
+      0,
+      DEFAULT_TRACKED_TICKERS.length
+    ),
     dailyRefreshEnabled:
       typeof payload.dailyRefreshEnabled === "boolean"
         ? payload.dailyRefreshEnabled

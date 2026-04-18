@@ -107,7 +107,7 @@ describe("buildChatResponse", () => {
     expect(response.sources.every((source) => source.sourceKind === "historical_filing")).toBe(true);
   });
 
-  it("falls back to the normal chat path when historical storage is temporarily unavailable", async () => {
+  it("degrades to the latest filing with a reason when historical storage is temporarily unavailable", async () => {
     const filing = makeTestFiling();
 
     const response = await buildChatResponse(
@@ -129,9 +129,12 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: false }
     );
 
-    expect(response.answer).toContain("売上高");
-    expect(response.sources.length).toBeGreaterThan(0);
-    expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+    expect(response.answer).toContain("今回は3年比較を完了できません");
+    expect(response.answer).toContain("売上高は 1,437.6億ドル");
+    expect(response.answer).toContain("前年同期比 15.7%増");
+    expect(response.answer).not.toContain("D1 unavailable");
+    expect(response.sources.length).toBe(1);
+    expect(response.sources[0]?.sourceKind).toBe("sec_filing");
   });
 
   it("explains why the stock can rise despite uncertainty by separating risks from strengths", async () => {
@@ -207,14 +210,16 @@ describe("buildChatResponse", () => {
     );
 
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
-    expect(response.answer).toContain("外部補足では Reuters が");
+    expect(response.answer).toContain("検索 snippet の弱い外部補足では Reuters が");
     expect(response.answer).toContain("iPhone需要");
     expect(response.answer).toContain("サービス事業の伸び");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7", "W1"]);
     expect(response.sources[0]?.sourceKind).toBe("sec_filing");
     expect(response.sources[1]?.sourceKind).toBe("sec_filing");
     expect(response.sources[2]?.sourceKind).toBe("web_supplement");
-    expect(response.sources[2]?.excerpt).toContain("Reuters");
+    expect(response.sources[2]?.sourceStrength).toBe("supplement_snippet");
+    expect(response.sources[2]?.sourceLabel).toContain("Weak external supplement");
+    expect(response.sources[2]?.excerpt).toContain("Search snippet:");
   });
 
   it("still appends a web supplement when Gemini returns a terse filing-only answer", async () => {
@@ -276,7 +281,7 @@ describe("buildChatResponse", () => {
     );
 
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7", "W1"]);
-    expect(response.answer).toContain("外部補足では Reuters が");
+    expect(response.answer).toContain("検索 snippet の弱い外部補足では Reuters が");
   });
 
   it("replaces weak model citations with a stronger filing-backed local fallback", async () => {
@@ -360,9 +365,10 @@ describe("buildChatResponse", () => {
     );
 
     expect(response.answer).toContain("この先を言い切ることはできません");
-    expect(response.answer).toContain("外部補足では Reuters が");
+    expect(response.answer).toContain("検索 snippet の弱い外部補足では Reuters が");
     expect(response.answer).toContain("会社見通し");
     expect(response.sources.map((source) => source.sourceKind)).toEqual(["sec_filing", "sec_filing", "web_supplement"]);
+    expect(response.sources.at(-1)?.sourceStrength).toBe("supplement_snippet");
   });
 
   it("adds a contrastive market explanation from web supplements for despite-style stock questions", async () => {
@@ -400,9 +406,10 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: true }
     );
 
-    expect(response.answer).toContain("市場は懸念よりこちらを強く見た可能性があります");
+    expect(response.answer).toContain("検索 snippet の弱い外部補足では Reuters が");
     expect(response.answer).toContain("会社見通し");
     expect(response.sources.at(-1)?.sourceKind).toBe("web_supplement");
+    expect(response.sources.at(-1)?.sourceStrength).toBe("supplement_snippet");
   });
 
   it("uses Reuters-style stock reaction context for broad recent stock questions", async () => {
@@ -444,9 +451,10 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("反応チャート:");
     expect(response.answer).toContain("↗ 3.2%");
     expect(response.answer).toContain("filingベースで見ると、足元はやや強めです");
-    expect(response.answer).toContain("値動き自体は外部報道ベースで、なぜそう見られたかの整理は filing ベースです");
+    expect(response.answer).toContain("値動き自体は検索 snippet ベースの弱い外部補足で、なぜそう見られたかの整理は filing ベースです");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S12", "W1"]);
     expect(response.sources.at(-1)?.sourceKind).toBe("web_supplement");
+    expect(response.sources.at(-1)?.sourceStrength).toBe("supplement_snippet");
   });
 
   it("drops official investor-relations filler for broad recent stock questions", async () => {

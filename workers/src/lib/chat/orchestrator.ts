@@ -1,7 +1,7 @@
-import type { Env, FilingCacheRecord, SourceChunkRecord } from "../../env";
+import type { Env, FilingCacheRecord } from "../../env";
 import { generateChatAnswer } from "../../clients/gemini";
 import { AppError } from "../errors";
-import { logEvent } from "../logging";
+import { logErrorEvent, logEvent, logWarnEvent } from "../logging";
 import { DEFAULT_REMOTE_CONFIG, type RemoteConfig } from "../remote-config";
 import { buildDeterministicMetricAnswer, shouldRecoverFromWeakModelSources } from "./deterministic";
 import {
@@ -27,25 +27,27 @@ export async function buildChatResponse(
   try {
     historical = await maybeBuildHistoricalChatResponseWithHydration(filing, question, env, resolvedConfig);
   } catch (error) {
-    logEvent("chat_historical_answer_failed", {
+    logErrorEvent("chat_historical_answer_failed", {
       filingKey: filing.filingKey,
       ticker: filing.ticker,
       reason: error instanceof Error ? error.message : String(error)
     });
   }
   if (historical) {
-    logEvent("chat_historical_answer_used", {
+    logEvent("chat_path_selected", {
       filingKey: filing.filingKey,
-      ticker: filing.ticker
+      ticker: filing.ticker,
+      path: "historical"
     });
     return ensureFilingGroundedResponse(historical);
   }
 
   const deterministic = buildDeterministicMetricAnswer(filing, question);
   if (deterministic) {
-    logEvent("chat_deterministic_answer_used", {
+    logEvent("chat_path_selected", {
       filingKey: filing.filingKey,
       ticker: filing.ticker,
+      path: "deterministic",
       strategy: deterministic.strategy
     });
     return maybeAppendWebSupplement(
@@ -62,7 +64,7 @@ export async function buildChatResponse(
   const approvedSourceIds = modelResponse.sourceIds.filter((sourceId) => validSourceIds.has(sourceId));
 
   if (approvedSourceIds.length !== modelResponse.sourceIds.length) {
-    logEvent("chat_grounding_repair_used", {
+    logWarnEvent("chat_grounding_repair_used", {
       filingKey: filing.filingKey,
       ticker: filing.ticker,
       reason: "filtered_invalid_source_ids",
@@ -71,7 +73,7 @@ export async function buildChatResponse(
   }
 
   if (approvedSourceIds.length === 0 && modelResponse.answer === CONTEXT_UNAVAILABLE_ANSWER) {
-    logEvent("chat_unsupported_due_to_source_gap", {
+    logWarnEvent("chat_unsupported_due_to_source_gap", {
       filingKey: filing.filingKey,
       ticker: filing.ticker,
       reason: "model_context_unavailable"
@@ -91,9 +93,15 @@ export async function buildChatResponse(
     const fallbackApprovedSourceIds = fallback.sourceIds.filter((sourceId) => validSourceIds.has(sourceId));
 
     if (fallbackApprovedSourceIds.length > 0) {
-      logEvent("chat_grounding_repair_used", {
+      logWarnEvent("chat_grounding_repair_used", {
         filingKey: filing.filingKey,
         ticker: filing.ticker,
+        reason: "weak_model_sources"
+      });
+      logEvent("chat_path_selected", {
+        filingKey: filing.filingKey,
+        ticker: filing.ticker,
+        path: "fallback",
         reason: "weak_model_sources"
       });
 
@@ -113,6 +121,13 @@ export async function buildChatResponse(
     }
   }
 
+  logEvent("chat_path_selected", {
+    filingKey: filing.filingKey,
+    ticker: filing.ticker,
+    path: "gemini",
+    sourceCount: approvedSourceIds.length
+  });
+
   return maybeAppendWebSupplement(
     filing,
     question,
@@ -122,8 +137,8 @@ export async function buildChatResponse(
         const source = filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId)!;
         return buildSecFilingSource(source);
       })
-      }),
-      env,
-      resolvedConfig
-    );
+    }),
+    env,
+    resolvedConfig
+  );
 }

@@ -1,6 +1,7 @@
-const DEFAULT_BATCH_SIZE = 50;
+const MAX_TRACKED_TICKERS = 25;
+const DEFAULT_BATCH_SIZE = MAX_TRACKED_TICKERS;
 const DEFAULT_CONCURRENCY = 4;
-const MAX_BATCH_SIZE = 200;
+const MAX_BATCH_SIZE = MAX_TRACKED_TICKERS;
 const MAX_CONCURRENCY = 8;
 
 export const DEFAULT_TRACKED_TICKERS = [
@@ -28,32 +29,7 @@ export const DEFAULT_TRACKED_TICKERS = [
   "ABBV",
   "CRM",
   "CVX",
-  "AMD",
-  "MRK",
-  "CSCO",
-  "WFC",
-  "IBM",
-  "MCD",
-  "ABT",
-  "GE",
-  "TMO",
-  "LIN",
-  "PM",
-  "CAT",
-  "GS",
-  "DIS",
-  "INTU",
-  "QCOM",
-  "AMGN",
-  "ISRG",
-  "TXN",
-  "RTX",
-  "NOW",
-  "PEP",
-  "ADBE",
-  "SPGI",
-  "BKNG",
-  "BLK"
+  "AMD"
 ] as const;
 
 const TICKER_PATTERN = /^[A-Z][A-Z0-9.-]{0,15}$/;
@@ -87,7 +63,7 @@ export function normalizeTrackedTickers(values: readonly unknown[]): string[] {
 
 export function resolveTrackedTickers(settings: TrackedTickerSettings): string[] {
   const configured = normalizeTrackedTickers(settings.trackedTickers ?? []);
-  const source = configured.length > 0 ? configured : [...DEFAULT_TRACKED_TICKERS];
+  const source = (configured.length > 0 ? configured : [...DEFAULT_TRACKED_TICKERS]).slice(0, MAX_TRACKED_TICKERS);
   return source.slice(0, resolveDailyRefreshBatchSize(settings.dailyRefreshBatchSize, source.length));
 }
 

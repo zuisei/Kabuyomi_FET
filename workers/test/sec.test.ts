@@ -175,9 +175,9 @@ describe("SEC filing selection", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("ignores client-supplied quota subjects and derives identity from Cloudflare-provided client IP", async () => {
+  it("prefers the device key over the shared client IP for quota identity", async () => {
     const identity = await readQuotaIdentity(
-      new Request("https://kabuyomi.test/v1/usage", {
+      new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
         headers: {
           "cf-connecting-ip": "203.0.113.5",
           "x-device-key": "device-123",
@@ -187,6 +187,38 @@ describe("SEC filing selection", () => {
     );
 
     expect(identity.plan).toBe("free");
+    expect(identity.identityKind).toBe("device_key");
+    expect(identity.quotaSubject).toMatch(/^free:device:[a-f0-9]{64}$/);
+    expect(identity.quotaSubject).not.toContain("203.0.113.5");
+  });
+
+  it("keeps the local-device override for localhost and test hosts", async () => {
+    const identity = await readQuotaIdentity(
+      new Request("https://kabuyomi.test/v1/usage", {
+        headers: {
+          "cf-connecting-ip": "203.0.113.5",
+          "x-device-key": "device-123"
+        }
+      })
+    );
+
+    expect(identity.plan).toBe("free");
+    expect(identity.identityKind).toBe("local_device");
+    expect(identity.quotaSubject).toBe("free:local:device-123");
+  });
+
+  it("falls back to the hashed client IP when no device key is present", async () => {
+    const identity = await readQuotaIdentity(
+      new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
+        headers: {
+          "cf-connecting-ip": "203.0.113.5"
+        }
+      }),
+      { requireDeviceKey: true }
+    );
+
+    expect(identity.plan).toBe("free");
+    expect(identity.identityKind).toBe("ip_hash");
     expect(identity.quotaSubject).toMatch(/^free:[a-f0-9]{64}$/);
     expect(identity.quotaSubject).not.toContain("device-123");
   });
@@ -204,6 +236,7 @@ describe("SEC filing selection", () => {
     );
 
     expect(identity.plan).toBe("free");
+    expect(identity.identityKind).toBe("debug_device");
     expect(identity.quotaSubject).toBe("free:debug:dev-unlimited-chat-AAPL-123");
   });
 });

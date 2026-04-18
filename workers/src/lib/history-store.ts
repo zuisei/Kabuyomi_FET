@@ -12,6 +12,7 @@ const SAME_QUARTER_MATCH_WINDOW_DAYS = 45;
 type HistoricalSource = {
   sourceId: string;
   sourceKind: "historical_filing";
+  sourceStrength: "filing_primary";
   sectionType: string;
   sourceLabel: string;
   excerpt: string;
@@ -777,6 +778,7 @@ function buildHistoricalMetricSource(row: HistoricalMetricRow): HistoricalSource
   return {
     sourceId: `${row.filingKey}:${row.sourceId}`,
     sourceKind: "historical_filing",
+    sourceStrength: "filing_primary",
     sectionType: "historical_metric",
     sourceLabel: `${row.formType} filed ${row.filedAt} · period ${row.periodEnd}`,
     excerpt: `${metricLabel(row.logicalName)}: ${formatMetricValue(row.value, row.unit)} (${row.periodEnd})`
@@ -787,6 +789,7 @@ function buildSegmentSource(row: SegmentHighlightRow): HistoricalSource {
   return {
     sourceId: `${row.filingKey}:${row.sourceId ?? `${row.dimension}:${row.label}`}`,
     sourceKind: "historical_filing",
+    sourceStrength: "filing_primary",
     sectionType: "historical_segment",
     sourceLabel: `${row.formType} filed ${row.filedAt} · period ${row.periodEnd}`,
     excerpt: `${row.label}: ${row.summary}`

@@ -72,6 +72,39 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.recentCompanies.isEmpty)
     }
 
+    func testSendChatPresentsLocalizedTemporaryBackendFailure() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let company = TestFixtures.companyPayload()
+        try persistence.saveCompany(company, searchItem: nil)
+
+        let model = makeAppModel(persistence: persistence)
+        model.setAIConsent(true)
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            if request.url?.path == "/v1/chat" {
+                let response = HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!
+                let data = try TestFixtures.jsonData(["error": "Chat response is temporarily unavailable"])
+                return (response, data)
+            }
+
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = try TestFixtures.jsonData([
+                "plan": "beta",
+                "chatsUsed": 0,
+                "chatLimit": 20,
+                "stocksUsed": 0,
+                "stockLimit": 25,
+                "dateJST": "2026-04-18"
+            ])
+            return (response, data)
+        }
+
+        let sent = await model.sendChat(question: "今回の変化は？", ticker: "AAPL")
+
+        XCTAssertFalse(sent)
+        XCTAssertEqual(model.activeAlert?.message, "チャット応答を現在生成できません。少し待ってから、もう一度お試しください。")
+    }
+
     private func makeAppModel(persistence: PersistenceController = PersistenceController(inMemory: true)) -> AppModel {
         MockAppModelURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!

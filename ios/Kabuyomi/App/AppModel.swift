@@ -623,6 +623,26 @@ final class AppModel {
             return "本文抽出に失敗しました。時間を置いて再試行するか、原文を直接確認してください。"
         }
 
+        if rawMessage.contains("Chat response is temporarily unavailable") || rawMessage.contains("Internal server error") {
+            return "チャット応答を現在生成できません。少し待ってから、もう一度お試しください。"
+        }
+
+        if rawMessage.contains("Chat is temporarily disabled") {
+            return "現在チャット機能を一時停止しています。しばらくしてから再度お試しください。"
+        }
+
+        if rawMessage.contains("Filing cache not found") {
+            return "表示中の決算データが古くなりました。企業画面を再読み込みしてから、もう一度お試しください。"
+        }
+
+        if rawMessage.contains("Device key is required") || rawMessage.contains("Client identity is unavailable") {
+            return "端末識別情報の初期化に失敗しました。アプリを再起動してから、もう一度お試しください。"
+        }
+
+        if rawMessage.contains("Quota request failed") {
+            return "利用状況の確認に失敗しました。少し待ってから、もう一度お試しください。"
+        }
+
         if rawMessage.contains("under maintenance") {
             return "現在メンテナンス中です。しばらくしてから再度お試しください。"
         }

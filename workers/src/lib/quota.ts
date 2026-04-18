@@ -6,6 +6,7 @@ import type { RemoteConfig } from "./remote-config";
 export interface QuotaIdentity {
   quotaSubject: string;
   plan: "free" | "pro";
+  identityKind: "device_key" | "ip_hash" | "local_device" | "debug_device";
 }
 
 interface QuotaIdentityOptions {
@@ -22,14 +23,27 @@ export async function readQuotaIdentity(
   options: QuotaIdentityOptions = {}
 ): Promise<QuotaIdentity> {
   const deviceKey = request.headers.get("x-device-key")?.trim();
-  if (options.requireDeviceKey && !deviceKey) {
-    throw new AppError(400, "Device key is required");
-  }
-
   if (options.allowDebugUnlimited && isDebugUnlimitedRequest(request) && deviceKey) {
     return {
       quotaSubject: `free:debug:${deviceKey}`,
-      plan: "free"
+      plan: "free",
+      identityKind: "debug_device"
+    };
+  }
+
+  if (isLocalQuotaFallbackRequest(request) && deviceKey) {
+    return {
+      quotaSubject: `free:local:${deviceKey}`,
+      plan: "free",
+      identityKind: "local_device"
+    };
+  }
+
+  if (deviceKey) {
+    return {
+      quotaSubject: `free:device:${await sha256Hex(`free-device:${deviceKey}`)}`,
+      plan: "free",
+      identityKind: "device_key"
     };
   }
 
@@ -37,15 +51,13 @@ export async function readQuotaIdentity(
   if (connectingIp) {
     return {
       quotaSubject: `free:${await sha256Hex(`free-ip:${connectingIp}`)}`,
-      plan: "free"
+      plan: "free",
+      identityKind: "ip_hash"
     };
   }
 
-  if (isLocalQuotaFallbackRequest(request) && deviceKey) {
-    return {
-      quotaSubject: `free:local:${deviceKey}`,
-      plan: "free"
-    };
+  if (options.requireDeviceKey) {
+    throw new AppError(400, "Device key is required");
   }
 
   throw new AppError(400, "Client identity is unavailable");

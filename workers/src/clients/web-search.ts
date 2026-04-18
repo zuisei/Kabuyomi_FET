@@ -10,6 +10,7 @@ export interface WebSupplementRecord {
   url: string;
   snippet: string;
   publisher: string;
+  evidenceStrength: "supplement_article" | "supplement_snippet";
 }
 
 export async function findTrustedWebSupplement(
@@ -253,7 +254,8 @@ function parseDuckDuckGoResults(html: string): WebSupplementRecord[] {
       title,
       url,
       snippet,
-      publisher: inferPublisher(url, title)
+      publisher: inferPublisher(url, title),
+      evidenceStrength: "supplement_snippet"
     });
   }
 
@@ -474,7 +476,8 @@ async function enrichResult(result: WebSupplementRecord, env: Env): Promise<WebS
   return {
     ...result,
     title: cleanHtmlFragment(title),
-    snippet: description ? cleanHtmlFragment(description) : result.snippet
+    snippet: description ? cleanHtmlFragment(description) : result.snippet,
+    evidenceStrength: "supplement_article"
   };
 }
 

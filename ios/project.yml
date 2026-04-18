@@ -13,7 +13,30 @@ settings:
     GENERATE_INFOPLIST_FILE: YES
     IPHONEOS_DEPLOYMENT_TARGET: 17.0
     CODE_SIGN_STYLE: Automatic
+    ENABLE_CODE_COVERAGE: NO
+    CLANG_COVERAGE_MAPPING: NO
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+schemes:
+  Kabuyomi:
+    build:
+      targets:
+        Kabuyomi: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - name: KabuyomiTests
+          parallelizable: true
+          randomExecutionOrder: true
+    analyze:
+      config: Debug
+    profile:
+      config: Release
+    archive:
+      config: Release
+      revealArchiveInOrganizer: false
 targets:
   Kabuyomi:
     type: application

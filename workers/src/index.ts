@@ -6,6 +6,7 @@ import { SecRateLimiterDO } from "./durable/sec-rate-limiter";
 import { UserQuotaDO } from "./durable/user-quota";
 import { refreshTrackedFilings } from "./lib/daily-refresh";
 import { isAppError } from "./lib/errors";
+import { logErrorEvent, logEvent } from "./lib/logging";
 import { loadRemoteConfig } from "./lib/remote-config";
 import { json, notFound, serverError, unavailable } from "./lib/response";
 import { handleBillingSyncRoute } from "./routes/billing-sync";
@@ -67,7 +68,15 @@ export default {
 
   async scheduled(_: ScheduledController, env: Env): Promise<void> {
     const config = await loadRemoteConfig(env);
-    await refreshTickerSnapshot(env);
+    try {
+      await refreshTickerSnapshot(env);
+      logEvent("search_snapshot_refresh_success");
+    } catch (error) {
+      logErrorEvent("search_snapshot_refresh_failure", {
+        reason: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
     await refreshTrackedFilings(env, config);
   }
 };

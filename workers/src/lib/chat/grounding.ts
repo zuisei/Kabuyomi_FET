@@ -2,10 +2,12 @@ import type { SourceChunkRecord } from "../../env";
 import { AppError } from "../errors";
 
 export type ChatSourceKind = "sec_filing" | "historical_filing" | "web_supplement";
+export type ChatSourceStrength = "filing_primary" | "supplement_article" | "supplement_snippet";
 
 export interface ChatEvidenceSource {
   sourceId: string;
   sourceKind: ChatSourceKind;
+  sourceStrength: ChatSourceStrength;
   sectionType: string;
   sourceLabel: string;
   excerpt: string;
@@ -33,6 +35,7 @@ export function buildSecFilingSource(source: SourceChunkRecord): ChatEvidenceSou
   return {
     sourceId: source.sourceId,
     sourceKind: "sec_filing",
+    sourceStrength: "filing_primary",
     sectionType: source.sectionType,
     sourceLabel: source.sourceLabel,
     excerpt: source.text.slice(0, 220)

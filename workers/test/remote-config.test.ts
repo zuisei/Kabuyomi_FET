@@ -11,13 +11,43 @@ describe("remote config", () => {
 
     expect(config.trackedTickers).toEqual(DEFAULT_REMOTE_CONFIG.trackedTickers);
     expect(config.dailyRefreshBatchSize).toBe(DEFAULT_REMOTE_CONFIG.dailyRefreshBatchSize);
+    expect(config.trackedTickers).toHaveLength(25);
   });
 
-  it("normalizes tracked tickers and refresh settings from KV", async () => {
+  it("normalizes tracked tickers and caps the beta warm set at 25 tickers", async () => {
     const config = await loadRemoteConfig({
       KABUYOMI_CACHE: {
         get: async () => ({
-          trackedTickers: [" msft ", "aapl", "AAPL", "bad symbol!", 100],
+          trackedTickers: [
+            " msft ",
+            "aapl",
+            "AAPL",
+            "bad symbol!",
+            100,
+            "NVDA",
+            "AMZN",
+            "GOOGL",
+            "META",
+            "AVGO",
+            "TSLA",
+            "JPM",
+            "WMT",
+            "V",
+            "XOM",
+            "COST",
+            "NFLX",
+            "MA",
+            "PG",
+            "JNJ",
+            "ORCL",
+            "HD",
+            "BAC",
+            "KO",
+            "ABBV",
+            "CRM",
+            "CVX",
+            "AMD"
+          ],
           dailyRefreshBatchSize: 999,
           dailyRefreshConcurrency: 0,
           dailyRefreshEnabled: false
@@ -25,8 +55,11 @@ describe("remote config", () => {
       }
     } as never);
 
-    expect(config.trackedTickers).toEqual(["MSFT", "AAPL"]);
-    expect(config.dailyRefreshBatchSize).toBe(200);
+    expect(config.trackedTickers).toHaveLength(25);
+    expect(config.trackedTickers[0]).toBe("MSFT");
+    expect(config.trackedTickers[1]).toBe("AAPL");
+    expect(config.trackedTickers.at(-1)).toBe("AMD");
+    expect(config.dailyRefreshBatchSize).toBe(25);
     expect(config.dailyRefreshConcurrency).toBe(DEFAULT_REMOTE_CONFIG.dailyRefreshConcurrency);
     expect(config.dailyRefreshEnabled).toBe(false);
   });

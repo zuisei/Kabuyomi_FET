@@ -1,6 +1,6 @@
 import { searchTickers } from "../clients/sec";
 import { SearchQuerySchema } from "../lib/contracts";
-import { logEvent } from "../lib/logging";
+import { logErrorEvent, logEvent } from "../lib/logging";
 import { badRequest, json } from "../lib/response";
 import type { RouteHandler } from "./types";
 
@@ -14,14 +14,22 @@ export const handleSearchRoute: RouteHandler = async ({ request, url, env }) => 
     return badRequest("Invalid search query");
   }
 
-  const result = await searchTickers(parsed.data.q, env);
-  logEvent("search_query", {
-    query: parsed.data.q,
-    resultCount: result.items.length
-  });
+  try {
+    const result = await searchTickers(parsed.data.q, env);
+    logEvent("search_success", {
+      query: parsed.data.q,
+      resultCount: result.items.length
+    });
 
-  return json({
-    items: result.items,
-    snapshotUpdatedAt: result.updatedAt
-  });
+    return json({
+      items: result.items,
+      snapshotUpdatedAt: result.updatedAt
+    });
+  } catch (error) {
+    logErrorEvent("search_failure", {
+      query: parsed.data.q,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
 };

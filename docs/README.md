@@ -4,6 +4,7 @@ Project documentation that used to sit in the repository root is grouped here.
 
 ## Current References
 
+- [testflight_readiness_checklist.md](./testflight_readiness_checklist.md): practical checklist for shipping the current build to TestFlight
 - [specs/kabuyomi_spec_v3.md](./specs/kabuyomi_spec_v3.md): broad product and technical spec
 - [specs/kabuyomi_as_built_spec.md](./specs/kabuyomi_as_built_spec.md): code-derived snapshot of the current implementation
 - [specs/kabuyomi_positioning_spec_v1.md](./specs/kabuyomi_positioning_spec_v1.md): product positioning direction
@@ -17,8 +18,9 @@ Project documentation that used to sit in the repository root is grouped here.
 
 ## Suggested Reading Order
 
-1. `specs/kabuyomi_spec_v3.md`
-2. `specs/kabuyomi_positioning_spec_v1.md`
-3. `specs/kabuyomi_engagement_spec_v1.md`
-4. `specs/kabuyomi_conversational_ui_spec_v1.md`
-5. `specs/kabuyomi_as_built_spec.md`
+1. `testflight_readiness_checklist.md`
+2. `specs/kabuyomi_spec_v3.md`
+3. `specs/kabuyomi_positioning_spec_v1.md`
+4. `specs/kabuyomi_engagement_spec_v1.md`
+5. `specs/kabuyomi_conversational_ui_spec_v1.md`
+6. `specs/kabuyomi_as_built_spec.md`

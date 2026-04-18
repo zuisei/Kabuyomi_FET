@@ -1,5 +1,6 @@
 import type { Env, FilingReference } from "../env";
 import { AppError } from "../lib/errors";
+import { logErrorEvent } from "../lib/logging";
 import type {
   CompanyFactsResponse,
   ConceptResponse,
@@ -119,6 +120,13 @@ async function fetcherRequest<ResponseType>(
           "SEC data is temporarily unavailable",
           `SEC fetcher request failed (${response.status}) for ${path}: ${text}`
         );
+        logErrorEvent("sec_fetcher_failure", {
+          path,
+          attempt,
+          status: response.status,
+          retryable,
+          reason: `http_${response.status}`
+        });
         if (retryable && attempt < DEFAULT_FETCHER_RETRY_COUNT) {
           continue;
         }
@@ -136,6 +144,12 @@ async function fetcherRequest<ResponseType>(
       }
 
       if (timedOut) {
+        logErrorEvent("sec_fetcher_failure", {
+          path,
+          attempt,
+          reason: "timeout",
+          timeoutMs
+        });
         throw new AppError(
           503,
           "SEC data is temporarily unavailable",
@@ -147,6 +161,11 @@ async function fetcherRequest<ResponseType>(
         throw error;
       }
 
+      logErrorEvent("sec_fetcher_failure", {
+        path,
+        attempt,
+        reason: String(error)
+      });
       throw new AppError(
         503,
         "SEC data is temporarily unavailable",

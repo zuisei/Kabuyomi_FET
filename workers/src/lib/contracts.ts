@@ -29,10 +29,12 @@ export const SearchQuerySchema = z.object({
 });
 
 export const ChatSourceKindSchema = z.enum(["sec_filing", "historical_filing", "web_supplement"]);
+export const ChatSourceStrengthSchema = z.enum(["filing_primary", "supplement_article", "supplement_snippet"]);
 
 export const SourceSchema = z.object({
   sourceId: z.string(),
   sourceKind: ChatSourceKindSchema.default("sec_filing"),
+  sourceStrength: ChatSourceStrengthSchema.default("filing_primary"),
   sectionType: z.string(),
   sourceLabel: z.string(),
   excerpt: z.string()
