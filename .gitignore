@@ -10,3 +10,7 @@ workers/.dev.vars
 sec-fetcher/.env
 .claude
 artifacts
+AGENTS.md
+CURRENT_SLICE.md
+docs/current_shipping_truth.md
+docs/codex/
