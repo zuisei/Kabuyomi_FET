@@ -14,7 +14,7 @@ struct ComposerBar: View {
             if !aiConsentGranted {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                    Text("初回送信時に Google Gemini API 送信の同意確認が表示されます。")
+                    Text("初回送信時に AI 利用の同意確認が表示されます。")
                         .lineLimit(2)
                 }
                 .font(.system(.footnote, design: .rounded, weight: .semibold))

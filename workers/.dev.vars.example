@@ -1,7 +1,11 @@
-# Mirror wrangler.toml unless you are intentionally testing a different Google model locally.
+# Local model override is optional. If omitted, Workers use DEFAULT_GEMINI_MODEL
+# from workers/src/clients/gemini/request.ts.
 SEC_FETCHER_BASE_URL=http://127.0.0.1:8789
 SEC_FETCHER_SHARED_SECRET=replace-me
 BACKFILL_SHARED_SECRET=replace-me
-GEMINI_MODEL=gemma-4-31b-it
+# Enable only for local wrangler dev when you intentionally want the iOS DEBUG
+# header to bypass quota checks. Never set this in deployed environments.
+DEBUG_UNLIMITED_ENABLED=true
+# GEMINI_MODEL=gemini-2.5-flash
 GEMINI_TIMEOUT_MS=12000
 SEC_FETCHER_TIMEOUT_MS=25000

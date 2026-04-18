@@ -61,6 +61,9 @@ struct SettingsView: View {
                     }
                     .font(.system(.body, design: .rounded, weight: .semibold))
                     .foregroundStyle(KabuyomiTheme.ink)
+                } else if appModel.isUsageSynchronizing {
+                    Text("利用状況を同期中です。")
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 } else {
                     Text("利用状況を読み込み中です。")
                         .foregroundStyle(KabuyomiTheme.inkMuted)
@@ -92,7 +95,7 @@ struct SettingsView: View {
                     }
 
                     if appModel.isDevUnlimitedModeActive {
-                        Text("有効時は DEBUG 専用ヘッダと開発用 device key を使って quota を回避します。利用状況の数値は実利用を表しません。")
+                        Text("有効時は DEBUG 専用ヘッダと開発用 device key を送ります。quota bypass は `DEBUG_UNLIMITED_ENABLED=true` を入れたローカル / 開発 Worker でだけ有効です。利用状況の数値は実利用を表しません。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
@@ -132,9 +135,9 @@ struct SettingsView: View {
                     set: { appModel.setAIConsent($0) }
                 )) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Google AI 送信への同意")
+                        Text("AI 利用への同意")
                             .font(.system(.body, design: .rounded, weight: .semibold))
-                        Text("質問内容と SEC filing コンテキストが Google Gemini API 上の AI モデルに送信されます。個人情報は入力しないでください。")
+                        Text("質問内容と SEC filing コンテキストが外部 AI モデルに送信されます。個人情報は入力しないでください。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
@@ -225,11 +228,11 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("ローカルデータ")
                     .font(.system(.headline, design: .rounded, weight: .bold))
-                Text("保存銘柄、取得済み filing、チャット履歴をこの端末から削除します。")
+                Text("保存銘柄、取得済み filing、チャット履歴をこの端末から削除し、端末識別情報も再生成します。")
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
                 Button("データをリセット", role: .destructive) {
-                    appModel.resetLocalData()
+                    appModel.requestResetLocalDataConfirmation()
                 }
             }
         }
@@ -250,11 +253,11 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "AI 利用時に送信する情報",
-                body: "AI チャットを有効化した場合、質問文、対象企業の filing metadata、抽出済み MD&A、抽出済み XBRL 指標を Google Gemini API 上の AI モデルに送信します。個人情報や機密情報は入力しないでください。"
+                body: "AI チャットを有効化した場合、質問文、対象企業の filing metadata、抽出済み MD&A、抽出済み XBRL 指標を外部 AI モデルに送信します。個人情報や機密情報は入力しないでください。"
             ),
             LegalSection(
                 title: "第三者サービス",
-                body: "API と利用制限管理には Cloudflare、SEC filing 取得には SEC と sec-fetcher、AI 応答には Google Gemini API を利用します。beta 環境では一部の技術ログがサービス品質確認のために記録されます。"
+                body: "API と利用制限管理には Cloudflare、SEC filing 取得には SEC と sec-fetcher、AI 応答には外部 AI モデルを利用します。beta 環境では一部の技術ログがサービス品質確認のために記録されます。"
             ),
             LegalSection(
                 title: "保存期間",

@@ -3,6 +3,7 @@ import { logEvent } from "../../lib/logging";
 import { parseJsonishText } from "./normalize";
 import { chatResponseJsonSchema, summaryResponseJsonSchema } from "./prompts";
 
+export const DEFAULT_GEMINI_MODEL = "gemma-4-31b-it";
 const DEFAULT_GEMINI_TIMEOUT_MS = 12_000;
 
 export async function invokeGemini(
@@ -117,7 +118,7 @@ export async function invokeGemini(
 export function resolveGeminiModel(env: Env): string {
   const raw = env.GEMINI_MODEL?.trim();
   if (!raw) {
-    return "gemma-4-31b-it";
+    return DEFAULT_GEMINI_MODEL;
   }
 
   return raw.startsWith("models/") ? raw.slice("models/".length) : raw;

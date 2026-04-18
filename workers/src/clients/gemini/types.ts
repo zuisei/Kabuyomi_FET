@@ -19,4 +19,5 @@ export interface ChatPromptInput {
 export interface GeminiChatAnswer {
   answer: string;
   sourceIds: string[];
+  usedRemoteModel?: boolean;
 }

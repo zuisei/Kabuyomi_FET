@@ -1,8 +1,11 @@
 import { z } from "zod";
 
-export const WatchlistAddRequestSchema = z.object({
+export const WatchlistTickerRequestSchema = z.object({
   ticker: z.string().trim().min(1).max(16)
 });
+
+export const WatchlistAddRequestSchema = WatchlistTickerRequestSchema;
+export const WatchlistRemoveRequestSchema = WatchlistTickerRequestSchema;
 
 export const ChatRequestSchema = z.object({
   filingKey: z.string().min(1),
@@ -22,6 +25,19 @@ export const BillingSyncRequestSchema = z.object({
   originalTransactionId: z.string().trim().min(1),
   productId: z.string().trim().min(1).optional(),
   active: z.boolean().default(false)
+});
+
+export const EntitlementRequestSchema = BillingSyncRequestSchema;
+
+export const QuotaRequestSchema = z.object({
+  action: z.enum(["state", "checkChat", "checkStock", "consumeChat", "consumeStock", "removeTicker", "checkCompanyAccess"]),
+  quotaSubject: z.string().trim().min(1),
+  plan: z.enum(["free", "pro"]),
+  dateJST: z.string().trim().min(1),
+  ticker: z.string().trim().min(1).max(16).optional(),
+  chatLimit: z.number().int().min(0),
+  stockLimit: z.number().int().min(0),
+  previewTickers: z.array(z.string().trim().min(1).max(16)).optional()
 });
 
 export const SearchQuerySchema = z.object({

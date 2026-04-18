@@ -3,6 +3,7 @@ const deviceKey = process.env.KABUYOMI_SMOKE_DEVICE_KEY?.trim() || "smoke-device
 const ticker = process.env.KABUYOMI_SMOKE_TICKER?.trim().toUpperCase() || "AAPL";
 const searchQuery = process.env.KABUYOMI_SMOKE_SEARCH_QUERY?.trim() || ticker;
 const chatQuestion = process.env.KABUYOMI_SMOKE_CHAT_QUESTION?.trim() || "売上高は？";
+const historyQuestion = process.env.KABUYOMI_SMOKE_HISTORY_QUESTION?.trim() || "この3年の売上推移は？";
 
 if (!baseURL) {
   console.error(
@@ -18,6 +19,7 @@ async function main() {
   const filingKey = company?.filingKey;
   await runStep("company", () => checkCompany(filingKey));
   await runStep("chat", () => checkChat(filingKey));
+  await runStep("chat-history", () => checkHistoricalChat(filingKey));
   await runStep("billing/sync", checkBillingDisabled);
   console.log("Kabuyomi staging smoke passed");
 }
@@ -137,6 +139,33 @@ async function checkChat(filingKey) {
   const payload = await response.json();
   if (typeof payload?.answer !== "string" || !Array.isArray(payload?.sources)) {
     throw new Error("/v1/chat returned an unexpected payload");
+  }
+}
+
+async function checkHistoricalChat(filingKey) {
+  if (!filingKey) {
+    throw new Error("historical chat smoke requires a filingKey from company/watchlist");
+  }
+
+  const response = await fetch(`${baseURL}/v1/chat`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-device-key": deviceKey
+    },
+    body: JSON.stringify({
+      filingKey,
+      question: historyQuestion
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`/v1/chat historical flow failed with ${response.status}`);
+  }
+
+  const payload = await response.json();
+  if (typeof payload?.answer !== "string" || !Array.isArray(payload?.sources)) {
+    throw new Error("/v1/chat historical flow returned an unexpected payload");
   }
 }
 

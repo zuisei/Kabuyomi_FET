@@ -4,6 +4,7 @@ export {
   ensureStockQuotaAvailable,
   consumeChatQuota,
   consumeStockQuota,
+  removeTickerFromSavedQuota,
   loadUsage,
   type QuotaIdentity
 } from "./quota";

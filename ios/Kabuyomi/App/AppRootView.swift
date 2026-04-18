@@ -44,6 +44,11 @@ struct AppRootView: View {
                         appModel.confirmAIConsent()
                     }
                 }
+                if alert.kind == .resetConfirmation {
+                    Button("リセットする", role: .destructive) {
+                        appModel.confirmResetLocalData()
+                    }
+                }
                 Button("閉じる", role: .cancel) {}
             },
             message: { alert in

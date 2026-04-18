@@ -37,6 +37,19 @@ struct APIClient {
         )
     }
 
+    func removeFromWatchlist(
+        ticker: String,
+        deviceKey: String,
+        debugUnlimited: Bool = false
+    ) async throws -> WatchlistRemoveResponse {
+        try await sendRequest(
+            path: "/v1/watchlist/remove",
+            method: "POST",
+            headers: requestHeaders(deviceKey: deviceKey, debugUnlimited: debugUnlimited),
+            body: ["ticker": ticker]
+        )
+    }
+
     func fetchCompany(
         ticker: String,
         deviceKey: String,
@@ -125,6 +138,7 @@ struct APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = Timeout.request
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
         if let body {
@@ -157,10 +171,12 @@ struct APIClient {
     }
 
     private static func makeSession() -> URLSession {
-        let configuration = URLSessionConfiguration.default
+        let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = Timeout.request
         configuration.timeoutIntervalForResource = Timeout.resource
         configuration.waitsForConnectivity = false
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
         return URLSession(configuration: configuration)
     }
 
@@ -183,7 +199,7 @@ private struct APIErrorPayload: Decodable {
     let error: String
 }
 
-enum APIError: LocalizedError {
+enum APIError: LocalizedError, Equatable {
     case invalidResponse
     case server(String)
 

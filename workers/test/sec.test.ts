@@ -183,7 +183,8 @@ describe("SEC filing selection", () => {
           "x-device-key": "device-123",
           "x-quota-subject": "pro:forged"
         }
-      })
+      }),
+      {} as never
     );
 
     expect(identity.plan).toBe("free");
@@ -199,7 +200,8 @@ describe("SEC filing selection", () => {
           "cf-connecting-ip": "203.0.113.5",
           "x-device-key": "device-123"
         }
-      })
+      }),
+      {} as never
     );
 
     expect(identity.plan).toBe("free");
@@ -207,14 +209,31 @@ describe("SEC filing selection", () => {
     expect(identity.quotaSubject).toBe("free:local:device-123");
   });
 
-  it("falls back to the hashed client IP when no device key is present", async () => {
+  it("rejects requests without a device key when the route requires one", async () => {
+    await expect(
+      readQuotaIdentity(
+        new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
+          headers: {
+            "cf-connecting-ip": "203.0.113.5"
+          }
+        }),
+        {} as never,
+        { requireDeviceKey: true }
+      )
+    ).rejects.toMatchObject({
+      status: 400,
+      publicMessage: "Device key is required"
+    });
+  });
+
+  it("falls back to the hashed client IP only when the route does not require a device key", async () => {
     const identity = await readQuotaIdentity(
       new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
         headers: {
           "cf-connecting-ip": "203.0.113.5"
         }
       }),
-      { requireDeviceKey: true }
+      {} as never
     );
 
     expect(identity.plan).toBe("free");
@@ -225,6 +244,42 @@ describe("SEC filing selection", () => {
 
   it("uses the device key subject for explicit debug unlimited requests", async () => {
     const identity = await readQuotaIdentity(
+      new Request("https://kabuyomi.test/v1/usage", {
+        headers: {
+          "cf-connecting-ip": "203.0.113.5",
+          "x-device-key": "dev-unlimited-chat-AAPL-123",
+          "x-kabuyomi-debug-unlimited": "1"
+        }
+      }),
+      { DEBUG_UNLIMITED_ENABLED: "true" } as never,
+      { requireDeviceKey: true, allowDebugUnlimited: true }
+    );
+
+    expect(identity.plan).toBe("free");
+    expect(identity.identityKind).toBe("debug_device");
+    expect(identity.quotaSubject).toBe("free:debug:dev-unlimited-chat-AAPL-123");
+  });
+
+  it("ignores the debug unlimited header when the server-side gate is disabled", async () => {
+    const identity = await readQuotaIdentity(
+      new Request("https://kabuyomi.test/v1/usage", {
+        headers: {
+          "cf-connecting-ip": "203.0.113.5",
+          "x-device-key": "dev-unlimited-chat-AAPL-123",
+          "x-kabuyomi-debug-unlimited": "1"
+        }
+      }),
+      {} as never,
+      { requireDeviceKey: true, allowDebugUnlimited: true }
+    );
+
+    expect(identity.plan).toBe("free");
+    expect(identity.identityKind).toBe("local_device");
+    expect(identity.quotaSubject).toBe("free:local:dev-unlimited-chat-AAPL-123");
+  });
+
+  it("ignores the debug unlimited header for non-local worker hosts even when enabled", async () => {
+    const identity = await readQuotaIdentity(
       new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
         headers: {
           "cf-connecting-ip": "203.0.113.5",
@@ -232,11 +287,12 @@ describe("SEC filing selection", () => {
           "x-kabuyomi-debug-unlimited": "1"
         }
       }),
+      { DEBUG_UNLIMITED_ENABLED: "true" } as never,
       { requireDeviceKey: true, allowDebugUnlimited: true }
     );
 
     expect(identity.plan).toBe("free");
-    expect(identity.identityKind).toBe("debug_device");
-    expect(identity.quotaSubject).toBe("free:debug:dev-unlimited-chat-AAPL-123");
+    expect(identity.identityKind).toBe("device_key");
+    expect(identity.quotaSubject).toMatch(/^free:device:[a-f0-9]{64}$/);
   });
 });

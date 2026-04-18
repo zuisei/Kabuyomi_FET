@@ -33,7 +33,7 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config 
       return notFound("Filing cache not found");
     }
 
-    const identity = await readQuotaIdentity(request, {
+    const identity = await readQuotaIdentity(request, env, {
       requireDeviceKey: true,
       allowDebugUnlimited: true
     });
@@ -53,7 +53,8 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config 
     return json({
       answer: answer.answer,
       sources: answer.sources,
-      modelName: resolveGeminiModel(env),
+      responsePath: answer.responsePath,
+      modelName: answer.responsePath === "gemini" ? resolveGeminiModel(env) : null,
       usage
     });
   } catch (error) {

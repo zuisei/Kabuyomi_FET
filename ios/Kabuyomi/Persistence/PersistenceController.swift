@@ -1,10 +1,6 @@
 import CoreData
 import Foundation
 
-private enum AIModelDefaults {
-    static let primaryRemoteModelName = "gemma-4-31b-it"
-}
-
 @MainActor
 final class PersistenceController {
     static let shared = PersistenceController()
@@ -162,7 +158,7 @@ final class PersistenceController {
         assistantMessage.role = "assistant"
         assistantMessage.content = response.answer
         assistantMessage.createdAt = Date()
-        assistantMessage.modelName = response.modelName ?? AIModelDefaults.primaryRemoteModelName
+        assistantMessage.modelName = storedMessageModelName(for: response)
         assistantMessage.filing = filing
 
         for source in response.sources {
@@ -282,7 +278,7 @@ final class PersistenceController {
         entity.generatedAt = Date()
         entity.verdictText = summary.verdict
         entity.comparisonLabel = ""
-        entity.modelName = AIModelDefaults.primaryRemoteModelName
+        entity.modelName = AIModelName.remoteFallback
         entity.filing = filing
 
         for (index, item) in summary.highlights.enumerated() {
@@ -321,6 +317,14 @@ final class PersistenceController {
             entity.yoyPercent = metric.yoyPercent.map(NSNumber.init(value:))
             entity.filing = filing
         }
+    }
+
+    private func storedMessageModelName(for response: ChatResponse) -> String {
+        if let responsePath = response.responsePath {
+            return responsePath == .gemini ? AIModelName.storedRemoteModelName(response.modelName) : ""
+        }
+
+        return AIModelName.storedRemoteModelName(response.modelName)
     }
 
     private func replaceSourceChunks(on filing: FilingEntity, sourceChunks: [SourceChunkPayload]) {

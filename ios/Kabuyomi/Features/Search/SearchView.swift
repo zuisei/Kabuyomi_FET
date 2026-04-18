@@ -25,7 +25,7 @@ struct SearchView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     } else if appModel.searchResults.isEmpty {
                         SearchEmptyState()
-                        .frame(maxHeight: .infinity)
+                            .frame(maxHeight: .infinity)
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 12) {

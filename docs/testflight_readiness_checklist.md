@@ -11,6 +11,7 @@ Treat the current code as the source of truth over older specs. The ship target 
 - Supported filings: `10-K` and `10-Q` only
 - Starter preview tickers: `AAPL`, `MSFT`, `NVDA`, `AMZN`, `TSLA`
 - Beta billing disabled
+- Beta default is filing-grounded only. External web supplements stay disabled unless explicitly re-enabled for a controlled test.
 - Default free beta limits: `3` saved tickers and `3` chats per JST day
 - Historical chat is narrow on purpose: explicit `3年` / `比較` / `推移` style prompts only
 
@@ -43,6 +44,7 @@ Treat the current code as the source of truth over older specs. The ship target 
 - [ ] Confirm `SEC_FETCHER_SHARED_SECRET` matches between Workers and `sec-fetcher`.
 - [ ] Confirm Gemini API key and model config are set for the beta environment.
 - [ ] Confirm `maintenanceMode = false` and `chatEnabled = true`.
+- [ ] Confirm `webSupplementEnabled = false` unless you are intentionally running an external-supplement test.
 - [ ] Decide whether the default free beta limits stay at `3 / 3` or are raised before inviting testers.
 - [ ] Confirm `dailyRefreshEnabled` and the tracked ticker list are intentional for the beta load.
 - [ ] Run remote D1 migration if the target environment is fresh.
@@ -98,7 +100,7 @@ If the local simulator name or OS differs, adjust only the `xcodebuild test` des
 
 ## 4. Release-Safety Checks In The iOS App
 
-- [ ] `DEBUG`-only unlimited mode is not reachable in TestFlight or Release.
+- [ ] `DEBUG`-only unlimited mode is not reachable in TestFlight or Release, and the Worker honors it only for local/dev runs with `DEBUG_UNLIMITED_ENABLED=true`.
 - [ ] Settings copy for Privacy Policy / Terms / Support is present and readable.
 - [ ] AI consent flow appears before first chat send.
 - [ ] Unsupported filing copy is consistent with the actual backend behavior.
@@ -110,6 +112,7 @@ Explicitly recheck these current product rules:
 - [ ] Unsaved non-starter tickers are blocked until the user saves them.
 - [ ] Starter tickers open without consuming watchlist quota.
 - [ ] Search shows unsupported tickers as unsupported instead of allowing save.
+- [ ] Filing-grounded beta mode stays on by default, and no external supplement copy leaks into the main happy path unless intentionally enabled.
 - [ ] Billing UI remains beta-disabled and does not expose dead purchase flows.
 
 ## 5. Manual QA Matrix

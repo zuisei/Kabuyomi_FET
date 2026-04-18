@@ -22,7 +22,7 @@ export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env,
     return badRequest("Invalid ticker payload");
   }
 
-  const identity = await readQuotaIdentity(request, {
+  const identity = await readQuotaIdentity(request, env, {
     requireDeviceKey: true,
     allowDebugUnlimited: true
   });

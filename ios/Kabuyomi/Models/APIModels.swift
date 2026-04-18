@@ -176,9 +176,21 @@ struct WatchlistAddResponse: Decodable {
     let usage: UsagePayload
 }
 
+struct WatchlistRemoveResponse: Decodable {
+    let usage: UsagePayload
+}
+
+enum ChatResponsePath: String, Decodable, Hashable {
+    case historical
+    case deterministic
+    case fallback
+    case gemini
+}
+
 struct ChatResponse: Decodable {
     let answer: String
     let sources: [ChatSourcePayload]
+    let responsePath: ChatResponsePath?
     let modelName: String?
     let usage: UsagePayload
 }

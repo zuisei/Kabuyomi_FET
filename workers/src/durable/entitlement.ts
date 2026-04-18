@@ -1,16 +1,23 @@
 import type { DurableObjectState } from "@cloudflare/workers-types";
-
-interface EntitlementBody {
-  originalTransactionId: string;
-  active: boolean;
-  productId?: string;
-}
+import { EntitlementRequestSchema } from "../lib/contracts";
 
 export class EntitlementDO {
   constructor(private readonly state: DurableObjectState) {}
 
   async fetch(request: Request): Promise<Response> {
-    const body = (await request.json()) as EntitlementBody;
+    let requestBody: unknown;
+    try {
+      requestBody = await request.json();
+    } catch {
+      return this.reply({ error: "Invalid entitlement payload" }, 400);
+    }
+
+    const parsed = EntitlementRequestSchema.safeParse(requestBody);
+    if (!parsed.success) {
+      return this.reply({ error: "Invalid entitlement payload" }, 400);
+    }
+
+    const body = parsed.data;
     const digest = await crypto.subtle.digest(
       "SHA-256",
       new TextEncoder().encode(body.originalTransactionId)
@@ -24,9 +31,13 @@ export class EntitlementDO {
     };
 
     await this.state.storage.put(hex, payload);
+    return this.reply(payload, 200);
+  }
+
+  private reply(payload: unknown, status: number): Response {
     return new Response(JSON.stringify(payload), {
+      status,
       headers: { "content-type": "application/json" }
     });
   }
 }
-

@@ -269,7 +269,7 @@ struct CompanyView: View {
     private func toggleSavedState() {
         Task {
             if isCurrentTickerSaved {
-                appModel.removeFromWatchlist(currentTicker)
+                await appModel.removeFromWatchlist(currentTicker)
             } else {
                 await appModel.saveTicker(currentTicker)
             }
@@ -315,7 +315,19 @@ struct CompanyView: View {
             )
             return
         }
-        selectTicker(item.ticker)
+
+        let normalized = item.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if appModel.isTickerInWatchlist(normalized) {
+            selectTicker(normalized)
+            return
+        }
+
+        Task {
+            await appModel.addToWatchlist(item)
+            if appModel.isTickerInWatchlist(normalized) {
+                selectTicker(normalized)
+            }
+        }
     }
 
     private func openPrimaryDocument(urlString: String) {

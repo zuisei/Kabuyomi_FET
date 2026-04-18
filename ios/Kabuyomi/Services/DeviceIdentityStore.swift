@@ -18,14 +18,14 @@ final class DeviceIdentityStore {
         return newValue
     }
 
+    func reset() {
+        SecItemDelete(queryAttributes as CFDictionary)
+    }
+
     private func readValue() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
+        var query = queryAttributes
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
@@ -40,14 +40,18 @@ final class DeviceIdentityStore {
 
     private func saveValue(_ value: String) {
         let data = Data(value.utf8)
-        let attributes: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: data
-        ]
+        var attributes = queryAttributes
+        attributes[kSecValueData as String] = data
 
         SecItemDelete(attributes as CFDictionary)
         SecItemAdd(attributes as CFDictionary, nil)
+    }
+
+    private var queryAttributes: [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
     }
 }

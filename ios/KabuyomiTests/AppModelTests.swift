@@ -6,11 +6,13 @@ final class AppModelTests: XCTestCase {
     override func setUp() {
         super.setUp()
         Self.clearKabuyomiDefaults()
+        DeviceIdentityStore().reset()
     }
 
     override func tearDown() {
         MockAppModelURLProtocol.requestHandler = nil
         Self.clearKabuyomiDefaults()
+        DeviceIdentityStore().reset()
         super.tearDown()
     }
 
@@ -52,6 +54,31 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.rootConversationTicker, "AAPL")
     }
 
+    func testBootstrapDoesNotBlockOnUsageRefresh() async {
+        MockAppModelURLProtocol.requestHandler = { request in
+            Thread.sleep(forTimeInterval: 1.0)
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = try TestFixtures.jsonData([
+                "plan": "beta",
+                "chatsUsed": 0,
+                "chatLimit": 20,
+                "stocksUsed": 0,
+                "stockLimit": 25,
+                "dateJST": "2026-04-18"
+            ])
+            return (response, data)
+        }
+
+        let model = makeAppModel()
+        let startedAt = ContinuousClock.now
+
+        await model.bootstrap()
+
+        let elapsed = startedAt.duration(to: .now)
+        XCTAssertTrue(model.isBootstrapped)
+        XCTAssertLessThan(elapsed, .seconds(0.5))
+    }
+
     func testResetLocalDataRestoresConversationEntryState() throws {
         let persistence = PersistenceController(inMemory: true)
         let company = TestFixtures.companyPayload()
@@ -70,6 +97,61 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.lastViewedTicker)
         XCTAssertTrue(model.watchlist.isEmpty)
         XCTAssertTrue(model.recentCompanies.isEmpty)
+        XCTAssertTrue(model.showStarterCompanies)
+    }
+
+    func testResetLocalDataClearsRecentStateAndRotatesDeviceIdentity() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let company = TestFixtures.companyPayload()
+        try persistence.saveCompany(company, searchItem: nil)
+
+        let deviceIdentity = DeviceIdentityStore()
+        deviceIdentity.reset()
+        let originalDeviceKey = deviceIdentity.deviceKey()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            Thread.sleep(forTimeInterval: 0.05)
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = try TestFixtures.jsonData([
+                "plan": "beta",
+                "chatsUsed": 0,
+                "chatLimit": 20,
+                "stocksUsed": 0,
+                "stockLimit": 25,
+                "dateJST": "2026-04-18"
+            ])
+            return (response, data)
+        }
+
+        let model = AppModel(
+            apiClient: APIClient(
+                session: {
+                    let configuration = URLSessionConfiguration.ephemeral
+                    configuration.protocolClasses = [MockAppModelURLProtocol.self]
+                    return URLSession(configuration: configuration)
+                }(),
+                baseURL: URL(string: "https://example.com")!
+            ),
+            persistence: persistence,
+            deviceIdentity: deviceIdentity
+        )
+        model.usage = TestFixtures.usagePayload()
+        model.openConversation(for: "AAPL", draftQuestion: "前回決算との違いは？")
+        model.recordCompanyVisit(ticker: "AAPL")
+
+        model.resetLocalData()
+
+        XCTAssertNil(model.usage)
+        XCTAssertTrue(model.recentCompanies.isEmpty)
+        XCTAssertNil(model.lastViewedTicker)
+        XCTAssertNil(model.activeConversationTicker)
+        XCTAssertTrue(model.shouldShowConversationEntry)
+        XCTAssertTrue(model.showStarterCompanies)
+
+        try? await Task.sleep(nanoseconds: 150_000_000)
+
+        XCTAssertNotEqual(deviceIdentity.deviceKey(), originalDeviceKey)
+        XCTAssertEqual(model.usage?.stocksUsed, 0)
     }
 
     func testSendChatPresentsLocalizedTemporaryBackendFailure() async throws {

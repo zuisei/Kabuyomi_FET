@@ -12,6 +12,7 @@ describe("remote config", () => {
     expect(config.trackedTickers).toEqual(DEFAULT_REMOTE_CONFIG.trackedTickers);
     expect(config.dailyRefreshBatchSize).toBe(DEFAULT_REMOTE_CONFIG.dailyRefreshBatchSize);
     expect(config.trackedTickers).toHaveLength(25);
+    expect(config.webSupplementEnabled).toBe(false);
   });
 
   it("normalizes tracked tickers and caps the beta warm set at 25 tickers", async () => {
@@ -50,7 +51,8 @@ describe("remote config", () => {
           ],
           dailyRefreshBatchSize: 999,
           dailyRefreshConcurrency: 0,
-          dailyRefreshEnabled: false
+          dailyRefreshEnabled: false,
+          webSupplementEnabled: true
         })
       }
     } as never);
@@ -62,5 +64,6 @@ describe("remote config", () => {
     expect(config.dailyRefreshBatchSize).toBe(25);
     expect(config.dailyRefreshConcurrency).toBe(DEFAULT_REMOTE_CONFIG.dailyRefreshConcurrency);
     expect(config.dailyRefreshEnabled).toBe(false);
+    expect(config.webSupplementEnabled).toBe(true);
   });
 });

@@ -1,9 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateChatAnswer } from "../src/clients/gemini";
+import { DEFAULT_GEMINI_MODEL, resolveGeminiModel } from "../src/clients/gemini/request";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("resolveGeminiModel", () => {
+  it("falls back to the repo default when GEMINI_MODEL is unset", () => {
+    expect(resolveGeminiModel({} as never)).toBe(DEFAULT_GEMINI_MODEL);
+  });
+
+  it("normalizes Google model resource prefixes", () => {
+    expect(resolveGeminiModel({ GEMINI_MODEL: "models/gemini-2.5-flash" } as never)).toBe("gemini-2.5-flash");
+  });
 });
 
 describe("Gemini local chat fallback", () => {

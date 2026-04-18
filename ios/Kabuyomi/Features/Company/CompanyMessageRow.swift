@@ -241,23 +241,7 @@ struct ConversationMessageRow: View {
 
     private var compactModelLabel: String? {
         guard message.role != "user" else { return nil }
-        let model = message.modelName.lowercased()
-
-        if model.contains("gemma-4-31b-it") {
-            return "Gemma 31B"
-        }
-
-        if model.contains("gemma-4") {
-            return "Gemma 4"
-        }
-
-        if model == "local" {
-            return nil
-        }
-
-        return message.modelName
-            .replacingOccurrences(of: "-it", with: "")
-            .replacingOccurrences(of: "-", with: " ")
+        return AIModelName.compactLabel(for: message.modelName)
     }
 
     private func avatarBubble<S: StringProtocol>(label: S, accent: Bool) -> some View {

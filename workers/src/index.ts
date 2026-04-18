@@ -17,6 +17,7 @@ import { handleSearchRoute } from "./routes/search";
 import type { RouteHandler } from "./routes/types";
 import { handleUsageRoute } from "./routes/usage";
 import { handleWatchlistAddRoute } from "./routes/watchlist-add";
+import { handleWatchlistRemoveRoute } from "./routes/watchlist-remove";
 
 export { EntitlementDO, FilingLockDO, SecRateLimiterDO, UserQuotaDO };
 
@@ -24,6 +25,7 @@ const preMaintenanceRoutes: RouteHandler[] = [handleInternalBackfillHistoryRoute
 const apiRoutes: RouteHandler[] = [
   handleSearchRoute,
   handleWatchlistAddRoute,
+  handleWatchlistRemoveRoute,
   handleCompanyRoute,
   handleChatRoute,
   handleUsageRoute,

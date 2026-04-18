@@ -12,7 +12,10 @@ final class APIClientTests: XCTestCase {
         let client = makeClient { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/search?q=MSFT")
             XCTAssertEqual(request.httpMethod, "GET")
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, try TestFixtures.searchResponseData())
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.searchResponseData()
+            )
         }
 
         let items = try await client.search(query: "MSFT")
@@ -32,7 +35,10 @@ final class APIClientTests: XCTestCase {
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
             XCTAssertEqual(json["ticker"], "AAPL")
 
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, try TestFixtures.watchlistAddResponseData())
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.watchlistAddResponseData()
+            )
         }
 
         let response = try await client.addToWatchlist(ticker: "AAPL", deviceKey: "device-123")
@@ -47,6 +53,7 @@ final class APIClientTests: XCTestCase {
             XCTAssertEqual(request.httpMethod, "GET")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-debug-unlimited"), "1")
+            XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
 
             return (
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
@@ -65,6 +72,36 @@ final class APIClientTests: XCTestCase {
 
         XCTAssertEqual(usage.chatsUsed, 1)
         XCTAssertEqual(usage.chatLimit, 20)
+    }
+
+    func testRemoveFromWatchlistSendsDeviceHeaderAndJSONBody() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/watchlist/remove")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+
+            let body = try XCTUnwrap(Self.requestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+            XCTAssertEqual(json["ticker"], "AAPL")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "usage": [
+                        "plan": "beta",
+                        "chatsUsed": 0,
+                        "chatLimit": 20,
+                        "stocksUsed": 0,
+                        "stockLimit": 25,
+                        "dateJST": "2026-04-18"
+                    ]
+                ])
+            )
+        }
+
+        let response = try await client.removeFromWatchlist(ticker: "AAPL", deviceKey: "device-123")
+
+        XCTAssertEqual(response.usage.stocksUsed, 0)
     }
 
     private func makeClient(

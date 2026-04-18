@@ -16,6 +16,7 @@ Kabuyomi is an iOS + Cloudflare Workers app for reading SEC filings in Japanese 
 - `SearchView` is now a utility sheet for ticker discovery, not the app root.
 - `CompanyView` is split into focused subcomponents under `ios/Kabuyomi/Features/Company/`.
 - Beta billing code remains in the codebase, but the current UX does not depend on it.
+- Beta chat is filing-grounded by default. External web supplements stay off unless you intentionally re-enable them for testing via Worker remote config.
 - Workers routes live under `workers/src/routes/`; shared logic is split across `workers/src/lib/` and `workers/src/clients/gemini/`.
 
 ## Quick Start
@@ -43,8 +44,10 @@ Local Workers development expects:
 - `SEC_FETCHER_BASE_URL=http://127.0.0.1:8789`
 - the same `SEC_FETCHER_SHARED_SECRET` in `workers/.dev.vars`
 - optional overrides such as `GEMINI_MODEL`, `GEMINI_TIMEOUT_MS`, `SEC_FETCHER_TIMEOUT_MS`, and `BACKFILL_SHARED_SECRET`
+- `DEBUG_UNLIMITED_ENABLED=true` only when you intentionally want a local Worker to honor the iOS DEBUG quota-bypass header
 
-`wrangler.toml` and `.dev.vars.example` both default to `gemma-4-31b-it`.
+The repo default model lives in `workers/src/clients/gemini/request.ts` as `DEFAULT_GEMINI_MODEL`.
+Set `GEMINI_MODEL` only when you want a local or deployed override, so model swaps do not require iOS code changes.
 
 ### 3. iOS
 
@@ -108,6 +111,8 @@ KABUYOMI_SMOKE_BASE_URL=https://your-staging-worker.example.workers.dev \
 npm run smoke:staging
 ```
 
+The smoke path covers `usage -> search -> watchlist/add -> company -> chat -> chat-history -> billing-disabled`.
+
 ## Consolidated Notes
 
 ### Old UI Archive
@@ -133,4 +138,5 @@ Screenshot notes are consolidated at `artifacts/README.md` instead of keeping RE
 ### Specs And Handoffs
 
 Project docs that were previously scattered in the repository root now live under `docs/`.
-Start with `docs/README.md` to find the current spec or handoff you want.
+For the current ship target, start with `docs/current_shipping_truth.md` and `docs/testflight_readiness_checklist.md`.
+Older specs and handoffs remain as reference material only and may describe superseded routes or assumptions.

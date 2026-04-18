@@ -26,6 +26,13 @@ struct PendingChatState: Equatable {
     }
 }
 
+enum UsageLoadState {
+    case idle
+    case loading
+    case loaded
+    case failed
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -53,6 +60,7 @@ final class AppModel {
     var recentCompanies: [WatchlistCard] = []
     var searchResults: [SearchItem] = []
     var usage: UsagePayload?
+    var usageLoadState: UsageLoadState = .idle
     var companyCache: [String: CompanyPayload] = [:]
     var chatHistoryCache: [String: [LocalChatMessage]] = [:]
     var pendingChats: [String: PendingChatState] = [:]
@@ -124,14 +132,16 @@ final class AppModel {
 
     func bootstrap() async {
         isBootstrapped = false
-        defer {
-            isBootstrapped = true
-        }
 
         sanitizeRestoredConversationState()
         recordAppLaunch()
         loadHomeFromPersistence()
-        await refreshUsage()
+        isBootstrapped = true
+        usageLoadState = .loading
+
+        Task { [weak self] in
+            await self?.refreshUsage()
+        }
     }
 
     func search(query: String) async {
@@ -226,7 +236,7 @@ final class AppModel {
         let normalized = normalizedTicker(ticker)
         guard aiConsentGranted else {
             activeAlert = AppAlertState(
-                message: "AI チャットの利用前に、質問内容と SEC filing コンテキストを Google Gemini API 上の AI モデルに送信することへの同意が必要です。\n個人情報や口座情報は入力しないでください。",
+                message: "AI 利用前に、質問内容と filing コンテキストを外部 AI モデルへ送信することへの同意が必要です。\n個人情報や口座情報は入力しないでください。",
                 kind: .aiConsent
             )
             return false
@@ -383,19 +393,42 @@ final class AppModel {
         activeAlert = nil
     }
 
+    func requestResetLocalDataConfirmation() {
+        activeAlert = AppAlertState(
+            message: """
+保存済みデータと取得済み filing、会話履歴を削除します。
+端末識別情報も再生成されるため、利用状況が新規ユーザー扱いに戻る可能性があります。
+""",
+            kind: .resetConfirmation
+        )
+    }
+
+    func confirmResetLocalData() {
+        dismissAlert()
+        resetLocalData()
+    }
+
     func resetLocalData() {
         do {
             try persistence.reset()
+            deviceIdentity.reset()
             watchlist = []
             recentCompanies = []
+            searchResults = []
+            usage = nil
+            usageLoadState = .loading
             companyCache = [:]
             chatHistoryCache = [:]
+            pendingChats = [:]
             loadingTickers = []
             refreshedTickersThisSession = []
             savedTickers = []
             recentTickers = []
             lastViewedTicker = nil
             activeConversationTicker = nil
+            searchIsLoading = false
+            companyIsLoading = false
+            chatIsSending = false
             UserDefaults.standard.removeObject(forKey: Self.savedTickersKey)
             UserDefaults.standard.removeObject(forKey: Self.recentTickersKey)
             UserDefaults.standard.removeObject(forKey: Self.lastViewedTickerKey)
@@ -403,24 +436,47 @@ final class AppModel {
             UserDefaults.standard.removeObject(forKey: Self.hasCompletedInitialEntryKey)
             UserDefaults.standard.removeObject(forKey: Self.appLaunchCountKey)
             UserDefaults.standard.removeObject(forKey: Self.starterCompaniesAutoHiddenKey)
+            UserDefaults.standard.set(true, forKey: Self.showStarterCompaniesKey)
             hasCompletedInitialEntry = false
             appLaunchCount = 0
+            showStarterCompanies = true
             pendingConversationTicker = nil
             pendingConversationQuestion = nil
             starterCompaniesAutoHidden = false
             UserDefaults.standard.removeObject(forKey: Self.pendingConversationTickerKey)
             UserDefaults.standard.removeObject(forKey: Self.pendingConversationQuestionKey)
             clearCompanyNavigationState()
+            loadHomeFromPersistence()
+
+            Task {
+                await refreshUsage()
+            }
         } catch {
+            usageLoadState = .failed
             activeAlert = AppAlertState(message: error.localizedDescription, kind: .dismissOnly)
         }
     }
 
-    func removeFromWatchlist(_ ticker: String) {
+    func removeFromWatchlist(_ ticker: String) async {
         let normalized = normalizedTicker(ticker)
-        savedTickers.removeAll(where: { $0 == normalized })
-        UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
-        loadHomeFromPersistence()
+        guard !addingTickers.contains(normalized) else { return }
+
+        addingTickers.insert(normalized)
+        defer { addingTickers.remove(normalized) }
+
+        do {
+            let result = try await apiClient.removeFromWatchlist(
+                ticker: normalized,
+                deviceKey: quotaDeviceKey(purpose: "bookmark-remove-\(normalized)"),
+                debugUnlimited: isDevUnlimitedModeActive
+            )
+            usage = result.usage
+            savedTickers.removeAll(where: { $0 == normalized })
+            UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
+            loadHomeFromPersistence()
+        } catch {
+            handle(error)
+        }
     }
 
     var isDevUnlimitedModeActive: Bool {
@@ -432,7 +488,7 @@ final class AppModel {
     }
 
     var devUnlimitedModeDescription: String {
-        "DEBUG 専用の無限チャット / 無限保存モードです。TestFlight / Release では必ず外してください。"
+        "DEBUG 専用の無限チャット / 無限保存モードです。ローカル / 開発 Worker でだけ有効にしてください。TestFlight / Release では必ず外してください。"
     }
 
     func displayPlanLabel(for usage: UsagePayload) -> String {
@@ -494,13 +550,16 @@ final class AppModel {
     }
 
     private func refreshUsage() async {
+        usageLoadState = .loading
         do {
             usage = try await apiClient.fetchUsage(
                 deviceKey: quotaDeviceKey(purpose: "usage"),
                 debugUnlimited: isDevUnlimitedModeActive
             )
+            usageLoadState = .loaded
         } catch {
             guard !shouldIgnore(error) else { return }
+            usageLoadState = .failed
             if usage == nil {
                 presentAlert(for: error)
             }
@@ -804,5 +863,9 @@ final class AppModel {
             return "dev-unlimited-\(purpose)-\(UUID().uuidString)"
         }
         return deviceIdentity.deviceKey()
+    }
+
+    var isUsageSynchronizing: Bool {
+        usage == nil && usageLoadState == .loading
     }
 }

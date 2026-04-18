@@ -20,10 +20,11 @@ interface UsageEnvelope {
 
 export async function readQuotaIdentity(
   request: Request,
+  env: Pick<Env, "DEBUG_UNLIMITED_ENABLED"> = {},
   options: QuotaIdentityOptions = {}
 ): Promise<QuotaIdentity> {
   const deviceKey = request.headers.get("x-device-key")?.trim();
-  if (options.allowDebugUnlimited && isDebugUnlimitedRequest(request) && deviceKey) {
+  if (shouldHonorDebugUnlimited(request, env, options) && deviceKey) {
     return {
       quotaSubject: `free:debug:${deviceKey}`,
       plan: "free",
@@ -47,6 +48,10 @@ export async function readQuotaIdentity(
     };
   }
 
+  if (options.requireDeviceKey) {
+    throw new AppError(400, "Device key is required");
+  }
+
   const connectingIp = normalizeConnectingIp(request.headers.get("cf-connecting-ip"));
   if (connectingIp) {
     return {
@@ -54,10 +59,6 @@ export async function readQuotaIdentity(
       plan: "free",
       identityKind: "ip_hash"
     };
-  }
-
-  if (options.requireDeviceKey) {
-    throw new AppError(400, "Device key is required");
   }
 
   throw new AppError(400, "Client identity is unavailable");
@@ -95,6 +96,15 @@ export async function consumeStockQuota(
   config: RemoteConfig
 ): Promise<UsageState> {
   return mutateUsage(identity, env, config, "consumeStock", ticker);
+}
+
+export async function removeTickerFromSavedQuota(
+  identity: QuotaIdentity,
+  ticker: string,
+  env: Env,
+  config: RemoteConfig
+): Promise<UsageState> {
+  return mutateUsage(identity, env, config, "removeTicker", ticker);
 }
 
 export async function ensureCompanyAccessAllowed(
@@ -156,8 +166,26 @@ function isLocalQuotaFallbackRequest(request: Request): boolean {
   return hostname === "127.0.0.1" || hostname === "localhost" || hostname.endsWith(".test");
 }
 
+function shouldHonorDebugUnlimited(
+  request: Request,
+  env: Pick<Env, "DEBUG_UNLIMITED_ENABLED">,
+  options: QuotaIdentityOptions
+): boolean {
+  return Boolean(
+    options.allowDebugUnlimited &&
+      isDebugUnlimitedEnvEnabled(env.DEBUG_UNLIMITED_ENABLED) &&
+      isLocalQuotaFallbackRequest(request) &&
+      isDebugUnlimitedRequest(request)
+  );
+}
+
 function isDebugUnlimitedRequest(request: Request): boolean {
   return request.headers.get("x-kabuyomi-debug-unlimited")?.trim() === "1";
+}
+
+function isDebugUnlimitedEnvEnabled(rawValue: string | undefined): boolean {
+  const normalized = rawValue?.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -169,7 +197,7 @@ async function mutateUsage(
   identity: QuotaIdentity,
   env: Env,
   config: RemoteConfig,
-  action: "state" | "checkChat" | "checkStock" | "consumeChat" | "consumeStock",
+  action: "state" | "checkChat" | "checkStock" | "consumeChat" | "consumeStock" | "removeTicker",
   ticker?: string
 ): Promise<UsageState> {
   const stub = env.USER_QUOTA.getByName(identity.quotaSubject);

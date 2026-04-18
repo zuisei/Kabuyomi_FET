@@ -131,7 +131,8 @@ enum TestFixtures {
                     excerpt: "123456000000"
                 )
             ],
-            modelName: "gemma-4-31b-it",
+            responsePath: .gemini,
+            modelName: AIModelName.remoteFallback,
             usage: usagePayload()
         )
     }

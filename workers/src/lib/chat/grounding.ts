@@ -3,6 +3,7 @@ import { AppError } from "../errors";
 
 export type ChatSourceKind = "sec_filing" | "historical_filing" | "web_supplement";
 export type ChatSourceStrength = "filing_primary" | "supplement_article" | "supplement_snippet";
+export type ChatResponsePath = "historical" | "deterministic" | "fallback" | "gemini";
 
 export interface ChatEvidenceSource {
   sourceId: string;
@@ -16,6 +17,7 @@ export interface ChatEvidenceSource {
 export interface ChatResponsePayload {
   answer: string;
   sources: ChatEvidenceSource[];
+  responsePath?: ChatResponsePath;
 }
 
 export const CONTEXT_UNAVAILABLE_ANSWER = "この filing の提供コンテキストでは確認できません。";

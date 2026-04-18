@@ -381,8 +381,14 @@ private struct DrawerCompanyRow: View {
 }
 
 private struct DrawerSearchRow: View {
+    @Environment(AppModel.self) private var appModel
+
     let item: SearchItem
     let action: () -> Void
+
+    private var isSaved: Bool {
+        appModel.isTickerInWatchlist(item.ticker)
+    }
 
     var body: some View {
         Button(action: action) {
@@ -407,7 +413,11 @@ private struct DrawerSearchRow: View {
 
                 Spacer()
 
-                Text(item.isSupportedInV1 ? "開く" : item.availabilityBadgeTitle)
+                Text(
+                    item.isSupportedInV1
+                        ? (isSaved ? "開く" : "保存")
+                        : item.availabilityBadgeTitle
+                )
                     .font(.system(.caption, design: .rounded, weight: .bold))
                     .foregroundStyle(item.isSupportedInV1 ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
                     .padding(.horizontal, 10)

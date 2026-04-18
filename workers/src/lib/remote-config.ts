@@ -28,7 +28,7 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   proDailyChatLimit: 50,
   adsEnabled: true,
   chatEnabled: true,
-  webSupplementEnabled: true,
+  webSupplementEnabled: false,
   maintenanceMode: false,
   extractorVersion: "v1",
   promptVersion: "v1",

@@ -43,7 +43,10 @@ export function normalizeSummaryResponse(payload: unknown): SummaryRecord | null
 export function normalizeChatResponse(payload: unknown): GeminiChatAnswer | null {
   const parsed = ChatModelResponseSchema.safeParse(payload);
   if (parsed.success) {
-    return parsed.data;
+    return {
+      ...parsed.data,
+      usedRemoteModel: true
+    };
   }
 
   if (!isRecord(payload)) {
@@ -54,7 +57,12 @@ export function normalizeChatResponse(payload: unknown): GeminiChatAnswer | null
   const sourceIds = normalizeSourceIds(payload.sourceIds ?? payload.sources ?? payload.citations ?? payload.sourceId);
   const normalized = { answer, sourceIds };
   const normalizedParsed = ChatModelResponseSchema.safeParse(normalized);
-  return normalizedParsed.success ? normalizedParsed.data : null;
+  return normalizedParsed.success
+    ? {
+        ...normalizedParsed.data,
+        usedRemoteModel: true
+      }
+    : null;
 }
 
 export function polishJapaneseText(text: string): string {

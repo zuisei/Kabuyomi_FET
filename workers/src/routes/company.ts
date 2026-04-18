@@ -19,7 +19,7 @@ export const handleCompanyRoute: RouteHandler = async ({ request, url, env, conf
 
   if (request.method === "GET") {
     try {
-      const identity = await readQuotaIdentity(request, {
+      const identity = await readQuotaIdentity(request, env, {
         requireDeviceKey: true,
         allowDebugUnlimited: true
       });
@@ -44,7 +44,7 @@ export const handleCompanyRoute: RouteHandler = async ({ request, url, env, conf
 
   if (request.method === "POST" && url.pathname.endsWith("/refresh")) {
     try {
-      const identity = await readQuotaIdentity(request, {
+      const identity = await readQuotaIdentity(request, env, {
         requireDeviceKey: true,
         allowDebugUnlimited: true
       });

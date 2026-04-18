@@ -74,6 +74,27 @@ describe("worker routing", () => {
     });
   });
 
+  it("returns 400 for invalid watchlist remove JSON instead of bubbling a 500", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/watchlist/remove", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{"
+      }),
+      {
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid ticker payload"
+    });
+  });
+
   it("returns 400 for invalid internal backfill JSON instead of bubbling a 500", async () => {
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/v1/internal/backfill/history", {
@@ -96,6 +117,28 @@ describe("worker routing", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Invalid backfill payload"
+    });
+  });
+
+  it("requires x-device-key on routes that opt into device-bound quota", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
+        method: "GET",
+        headers: {
+          "cf-connecting-ip": "203.0.113.5"
+        }
+      }),
+      {
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Device key is required"
     });
   });
 

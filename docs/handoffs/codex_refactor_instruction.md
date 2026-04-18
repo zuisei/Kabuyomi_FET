@@ -1,5 +1,8 @@
 # Codex 実装指示書
 
+> Status (2026-04-18): historical handoff. Parts of this brief describe work that has already landed and should not be treated as the current source of truth.
+> Use `docs/current_shipping_truth.md` plus the current code before following any instruction here literally.
+
 Kabuyomi の現行コードベースを整理し、会話主役プロダクトとしての完成度を上げるためのリファクタリングと機能改善をまとめて実施してください。
 
 この指示は「調査して提案する」ためのものではなく、「実装して、必要な整理まで完了する」ためのものです。曖昧な箇所は以下の方針を正として進めてください。
@@ -233,4 +236,3 @@ Workers 側で以下を追えるようにしてください。
 - 課金コードをどう整理したか
 - 実行したテストとビルド結果
 - まだ残るリスクや次の改善余地
-

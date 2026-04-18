@@ -39,7 +39,10 @@ export async function buildChatResponse(
       ticker: filing.ticker,
       path: "historical"
     });
-    return ensureFilingGroundedResponse(historical);
+    return {
+      ...ensureFilingGroundedResponse(historical),
+      responsePath: "historical"
+    };
   }
 
   const deterministic = buildDeterministicMetricAnswer(filing, question);
@@ -50,13 +53,17 @@ export async function buildChatResponse(
       path: "deterministic",
       strategy: deterministic.strategy
     });
-    return maybeAppendWebSupplement(
+    const response = await maybeAppendWebSupplement(
       filing,
       question,
       ensureFilingGroundedResponse(deterministic.response),
       env,
       resolvedConfig
     );
+    return {
+      ...response,
+      responsePath: "deterministic"
+    };
   }
 
   const modelResponse = await generateChatAnswer(env, { filing, question });
@@ -80,7 +87,8 @@ export async function buildChatResponse(
     });
     return {
       answer: modelResponse.answer,
-      sources: []
+      sources: [],
+      responsePath: modelResponse.usedRemoteModel === true ? "gemini" : "fallback"
     };
   }
 
@@ -105,7 +113,7 @@ export async function buildChatResponse(
         reason: "weak_model_sources"
       });
 
-      return maybeAppendWebSupplement(
+      const response = await maybeAppendWebSupplement(
         filing,
         question,
         ensureFilingGroundedResponse({
@@ -118,6 +126,10 @@ export async function buildChatResponse(
         env,
         resolvedConfig
       );
+      return {
+        ...response,
+        responsePath: "fallback"
+      };
     }
   }
 
@@ -128,7 +140,7 @@ export async function buildChatResponse(
     sourceCount: approvedSourceIds.length
   });
 
-  return maybeAppendWebSupplement(
+  const response = await maybeAppendWebSupplement(
     filing,
     question,
     ensureFilingGroundedResponse({
@@ -141,4 +153,8 @@ export async function buildChatResponse(
     env,
     resolvedConfig
   );
+  return {
+    ...response,
+    responsePath: modelResponse.usedRemoteModel === true ? "gemini" : "fallback"
+  };
 }

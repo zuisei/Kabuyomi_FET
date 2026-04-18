@@ -4,6 +4,7 @@ export interface Env {
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
   GEMINI_TIMEOUT_MS?: string;
+  DEBUG_UNLIMITED_ENABLED?: string;
   SEC_USER_AGENT: string;
   SEC_FETCHER_BASE_URL?: string;
   SEC_FETCHER_SHARED_SECRET?: string;
