@@ -21,7 +21,6 @@ interface SavedTickerRecord {
 const SAVED_TICKERS_KEY = "saved_tickers";
 const DAILY_KEY_PREFIX = "daily:";
 const LEGACY_DAILY_KEY_LIMIT = 30;
-const LEGACY_DAILY_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}:/;
 
 export class UserQuotaDO {
   constructor(private readonly state: DurableObjectState) {}
@@ -175,15 +174,12 @@ export class UserQuotaDO {
 
   private async findLegacyTrackedTickers(): Promise<string[]> {
     const entries = await this.state.storage.list<QuotaRecord>({
+      prefix: DAILY_KEY_PREFIX,
       reverse: true,
       limit: LEGACY_DAILY_KEY_LIMIT
     });
 
-    for (const [key, record] of entries) {
-      if (!LEGACY_DAILY_KEY_PATTERN.test(key)) {
-        continue;
-      }
-
+    for (const [, record] of entries) {
       const normalized = normalizeTickerList(record?.trackedTickers ?? []);
       if (normalized.length > 0) {
         return normalized;

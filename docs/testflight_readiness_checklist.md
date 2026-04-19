@@ -10,9 +10,11 @@ Treat the current code as the source of truth over older specs. The ship target 
 - Conversation-first flow: entry -> company conversation -> drawers/settings
 - Supported filings: `10-K` and `10-Q` only
 - Starter preview tickers: `AAPL`, `MSFT`, `NVDA`, `AMZN`, `TSLA`
-- Beta billing disabled
+- Billing remains disabled in the beta path
 - Beta default is filing-grounded only. External web supplements stay disabled unless explicitly re-enabled for a controlled test.
-- Default free beta limits: `3` saved tickers and `3` chats per JST day
+- Saved tickers are persistent server-side; chat quota resets daily on JST boundaries
+- Current free beta limits: `3` saved tickers and `3` chats per JST day
+- Chat metadata should follow `responsePath`; remote model naming should appear only for real remote Gemini execution
 - Historical chat is narrow on purpose: explicit `3年` / `比較` / `推移` style prompts only
 
 ## Not In Scope For This TestFlight
@@ -26,8 +28,8 @@ Treat the current code as the source of truth over older specs. The ship target 
 
 - A Release archive builds successfully.
 - Workers and `sec-fetcher` are deployed with the expected secrets and storage bindings.
-- The app copy consistently states the current beta limits and unsupported cases.
-- Manual QA covers the main happy paths plus the common limit/error paths.
+- The app copy consistently states saved tickers vs daily chat quota, billing-disabled beta status, and unsupported cases.
+- Manual QA covers the main happy paths plus saved/remove/reset/limit/error paths.
 - TestFlight metadata and tester notes explain that this is a limited beta, not investment advice.
 
 ## 1. Freeze The Beta Scope
@@ -46,7 +48,9 @@ Treat the current code as the source of truth over older specs. The ship target 
 - [ ] Confirm `maintenanceMode = false` and `chatEnabled = true`.
 - [ ] Confirm `webSupplementEnabled = false` unless you are intentionally running an external-supplement test.
 - [ ] Decide whether the default free beta limits stay at `3 / 3` or are raised before inviting testers.
-- [ ] Confirm `dailyRefreshEnabled` and the tracked ticker list are intentional for the beta load.
+- [ ] Confirm `dailyRefreshEnabled` and any background tracked ticker list are intentional for beta load, and are not being described as the user saved ticker source of truth.
+- [ ] Confirm `/v1/watchlist/add` and `/v1/watchlist/remove` return updated usage with the current saved ticker semantics.
+- [ ] Confirm `/v1/billing/sync` still returns the beta-disabled response in the target environment.
 - [ ] Run remote D1 migration if the target environment is fresh.
 
 Reference commands:
@@ -70,6 +74,7 @@ npm test
 - [ ] `workers` tests pass.
 - [ ] `workers` typecheck passes.
 - [ ] `sec-fetcher` tests pass.
+- [ ] Target-environment smoke passes after deploy.
 - [ ] Xcode project is regenerated from `project.yml`.
 - [ ] iOS unit tests pass on a real simulator destination.
 - [ ] Release build succeeds.
@@ -102,15 +107,19 @@ If the local simulator name or OS differs, adjust only the `xcodebuild test` des
 
 - [ ] `DEBUG`-only unlimited mode is not reachable in TestFlight or Release, and the Worker honors it only for local/dev runs with `DEBUG_UNLIMITED_ENABLED=true`.
 - [ ] Settings copy for Privacy Policy / Terms / Support is present and readable.
+- [ ] Settings usage copy clearly separates persistent saved ticker count from today's chat count.
 - [ ] AI consent flow appears before first chat send.
 - [ ] Unsupported filing copy is consistent with the actual backend behavior.
-- [ ] Error copy for chat limit, watchlist limit, unsupported filing, and unsaved ticker access is clear.
-- [ ] Reset local data works and does not leave stale UI state behind.
+- [ ] Error copy for daily chat limit, saved ticker limit, unsupported filing, and unsaved ticker access is clear.
+- [ ] Response metadata shows a remote model badge only when the response actually used the remote Gemini path.
+- [ ] Reset confirmation clearly states that saved data and chat history will be deleted, device identity will be regenerated, and usage may return to a new-user state.
+- [ ] Reset local data returns the app to the entry/start state and does not leave stale UI state behind.
+- [ ] Usage is re-fetched after reset and does not stay pinned to the pre-reset device identity.
 
 Explicitly recheck these current product rules:
 
 - [ ] Unsaved non-starter tickers are blocked until the user saves them.
-- [ ] Starter tickers open without consuming watchlist quota.
+- [ ] Starter tickers open without consuming saved ticker quota.
 - [ ] Search shows unsupported tickers as unsupported instead of allowing save.
 - [ ] Filing-grounded beta mode stays on by default, and no external supplement copy leaks into the main happy path unless intentionally enabled.
 - [ ] Billing UI remains beta-disabled and does not expose dead purchase flows.
@@ -119,14 +128,17 @@ Explicitly recheck these current product rules:
 
 - [ ] First launch -> starter ticker selection -> company conversation opens.
 - [ ] Search for a supported ticker and save it.
+- [ ] Confirm the saved ticker count increases while the daily chat count does not change on save.
 - [ ] Search for an unsupported ticker and confirm it cannot be saved.
 - [ ] Open a saved ticker, send a normal filing question, and confirm grounded sources appear.
 - [ ] Ask a `3年比較` style question and confirm the historical path behaves correctly.
 - [ ] Hit chat quota and confirm the app shows the intended message.
-- [ ] Hit watchlist quota and confirm the app shows the intended message.
+- [ ] Hit saved ticker quota and confirm the app shows the intended message.
+- [ ] Remove a saved non-starter ticker and confirm the saved ticker count decrements without changing today's chat count.
 - [ ] Try to open an unsaved non-starter ticker and confirm the app blocks it cleanly.
 - [ ] Use manual refresh on a company screen.
 - [ ] Visit Settings and read Privacy / Terms / Support.
+- [ ] Run Reset Local Data from Settings and confirm the app returns to the first-run entry state with refreshed usage.
 - [ ] Submit one TestFlight feedback report from the app flow as a dry run.
 
 Recommended QA seed set:
@@ -150,6 +162,7 @@ Suggested tester note baseline:
 
 - This is a limited beta for reading SEC `10-K / 10-Q` filings in Japanese.
 - `20-F / 6-K` companies are not yet supported.
+- Saved tickers are capped separately from the daily chat quota, and billing is disabled in this beta.
 - The app is not investment advice and may contain summary or chat errors.
 - Use TestFlight feedback with the ticker, question, screenshot, and repro steps.
 
@@ -177,5 +190,8 @@ Suggested tester note baseline:
 - DEBUG unlimited mode warning: `ios/Kabuyomi/App/AppModel.swift`
 - Search support gating: `ios/Kabuyomi/Models/APIModels.swift`
 - Company access gating: `workers/src/routes/company.ts` and `workers/src/lib/quota.ts`
-- Watchlist add flow: `workers/src/routes/watchlist-add.ts`
+- Saved ticker quota semantics: `workers/src/durable/user-quota.ts`
+- Watchlist add/remove flows: `workers/src/routes/watchlist-add.ts` and `workers/src/routes/watchlist-remove.ts`
+- Chat response metadata: `workers/src/routes/chat.ts` and `ios/Kabuyomi/Persistence/PersistenceController.swift`
+- Reset behavior: `ios/Kabuyomi/App/AppModel.swift`
 - Beta limits and remote defaults: `workers/src/lib/remote-config.ts`

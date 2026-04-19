@@ -329,6 +329,52 @@ describe("buildChatResponse", () => {
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
   });
 
+  it("recovers to filing-first fallback when Gemini returns only invalid sourceIds", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.startsWith("https://generativelanguage.googleapis.com/")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        answer: "会社見通しは強そうです。",
+                        sourceIds: ["BAD1"]
+                      })
+                    }
+                  ]
+                }
+              }
+            ]
+          })
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filing = makeTestFiling();
+    const response = await buildChatResponse(
+      filing,
+      "ガイダンスや今後の見通しは強い？",
+      { GEMINI_API_KEY: "test-key" } as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.answer).toContain("売上高は 1,437.6億ドル");
+    expect(response.answer).toContain("この先を言い切ることはできません");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
+    expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+  });
+
   it("appends investor-style outlook context for guidance questions", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -620,6 +666,23 @@ describe("buildChatResponse", () => {
     );
 
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
+    expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not search for supplements when the filing answer is already exact and sufficient", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filing = makeTestFiling();
+    const response = await buildChatResponse(
+      filing,
+      "利益率は改善した？",
+      {} as never,
+      { webSupplementEnabled: true }
+    );
+
+    expect(response.answer).toContain("利益率は改善しています");
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
   });

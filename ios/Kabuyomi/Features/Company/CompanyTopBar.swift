@@ -22,6 +22,9 @@ struct ChatTopBar: View {
                     .kabuyomiGlass(radius: 24, interactive: true)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("一覧を開く")
+            .accessibilityHint("保存済みや最近の会話から銘柄を切り替えます")
+            .accessibilityIdentifier("company.libraryButton")
 
             Spacer(minLength: 0)
 

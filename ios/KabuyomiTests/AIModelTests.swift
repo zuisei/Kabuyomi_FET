@@ -22,4 +22,10 @@ final class AIModelTests: XCTestCase {
         XCTAssertEqual(AIModelName.storedRemoteModelName(nil), AIModelName.remoteFallback)
         XCTAssertEqual(AIModelName.storedRemoteModelName("  "), AIModelName.remoteFallback)
     }
+
+    func testStoredLegacyModelNameKeepsMissingModelBlank() {
+        XCTAssertEqual(AIModelName.storedLegacyModelName(nil), "")
+        XCTAssertEqual(AIModelName.storedLegacyModelName("  "), "")
+        XCTAssertEqual(AIModelName.storedLegacyModelName(" gemini-2.5-flash "), "gemini-2.5-flash")
+    }
 }

@@ -28,7 +28,10 @@ export function buildSummaryPrompt(input: SummaryPromptInput): string {
 export function buildChatPrompt(input: ChatPromptInput): string {
   return [
     "You answer user questions strictly from the provided SEC filing context.",
-    "If no material part of the answer is supported by the provided context, reply with: この filing の提供コンテキストでは確認できません。",
+    "Use the explicit unavailable answer only as a true last resort.",
+    "Before refusing, first look for the closest supported filing facts such as metrics, MD&A explanations, demand comments, risk language, liquidity or capital return comments, and any outlook language that is actually present in the provided context.",
+    "If the exact question is broader than the filing but related facts exist, answer with those closest supported filing facts first, then say what remains outside the filing.",
+    "If no material part of the answer is supported anywhere in the provided context, reply with: この filing の提供コンテキストでは確認できません。",
     "Never provide investment advice, price targets, or analyst comparisons.",
     "Write the answer in natural Japanese.",
     "Assume the user may be new to U.S. stocks and does not want to read English filings directly.",

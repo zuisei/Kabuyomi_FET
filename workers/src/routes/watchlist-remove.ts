@@ -1,3 +1,4 @@
+import { lookupTicker } from "../clients/sec";
 import { WatchlistRemoveRequestSchema } from "../lib/contracts";
 import { readQuotaIdentity, removeTickerFromSavedQuota } from "../lib/quota";
 import { badRequest, json } from "../lib/response";
@@ -24,7 +25,13 @@ export const handleWatchlistRemoveRoute: RouteHandler = async ({ request, url, e
     requireDeviceKey: true,
     allowDebugUnlimited: true
   });
-  const usage = await removeTickerFromSavedQuota(identity, parsed.data.ticker, env, config);
+  const tickerRecord = await lookupTicker(parsed.data.ticker, env);
+  const usage = await removeTickerFromSavedQuota(
+    identity,
+    tickerRecord?.ticker ?? parsed.data.ticker.trim().toUpperCase(),
+    env,
+    config
+  );
 
   return json({ usage });
 };

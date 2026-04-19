@@ -80,6 +80,33 @@ export async function buildChatResponse(
   }
 
   if (approvedSourceIds.length === 0 && modelResponse.answer === CONTEXT_UNAVAILABLE_ANSWER) {
+    const recovered = await buildFallbackResponse(filing, question, env, validSourceIds);
+    if (recovered) {
+      logWarnEvent("chat_grounding_repair_used", {
+        filingKey: filing.filingKey,
+        ticker: filing.ticker,
+        reason: "model_context_unavailable_recovered"
+      });
+      logEvent("chat_path_selected", {
+        filingKey: filing.filingKey,
+        ticker: filing.ticker,
+        path: "fallback",
+        reason: "model_context_unavailable"
+      });
+
+      const response = await maybeAppendWebSupplement(
+        filing,
+        question,
+        ensureFilingGroundedResponse(recovered),
+        env,
+        resolvedConfig
+      );
+      return {
+        ...response,
+        responsePath: "fallback"
+      };
+    }
+
     logWarnEvent("chat_unsupported_due_to_source_gap", {
       filingKey: filing.filingKey,
       ticker: filing.ticker,
@@ -93,14 +120,39 @@ export async function buildChatResponse(
   }
 
   if (approvedSourceIds.length === 0) {
+    const recovered = await buildFallbackResponse(filing, question, env, validSourceIds);
+    if (recovered) {
+      logWarnEvent("chat_grounding_repair_used", {
+        filingKey: filing.filingKey,
+        ticker: filing.ticker,
+        reason: "missing_valid_source_ids"
+      });
+      logEvent("chat_path_selected", {
+        filingKey: filing.filingKey,
+        ticker: filing.ticker,
+        path: "fallback",
+        reason: "missing_valid_source_ids"
+      });
+
+      const response = await maybeAppendWebSupplement(
+        filing,
+        question,
+        ensureFilingGroundedResponse(recovered),
+        env,
+        resolvedConfig
+      );
+      return {
+        ...response,
+        responsePath: "fallback"
+      };
+    }
+
     throw new AppError(502, "Chat response is temporarily unavailable", "Model returned no valid sourceIds");
   }
 
   if (shouldRecoverFromWeakModelSources(filing, question, approvedSourceIds)) {
-    const fallback = await generateChatAnswer({ ...env, GEMINI_API_KEY: undefined } as Env, { filing, question });
-    const fallbackApprovedSourceIds = fallback.sourceIds.filter((sourceId) => validSourceIds.has(sourceId));
-
-    if (fallbackApprovedSourceIds.length > 0) {
+    const recovered = await buildFallbackResponse(filing, question, env, validSourceIds);
+    if (recovered) {
       logWarnEvent("chat_grounding_repair_used", {
         filingKey: filing.filingKey,
         ticker: filing.ticker,
@@ -116,13 +168,7 @@ export async function buildChatResponse(
       const response = await maybeAppendWebSupplement(
         filing,
         question,
-        ensureFilingGroundedResponse({
-          answer: fallback.answer,
-          sources: fallbackApprovedSourceIds.map((sourceId) => {
-            const source = filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId)!;
-            return buildSecFilingSource(source);
-          })
-        }),
+        ensureFilingGroundedResponse(recovered),
         env,
         resolvedConfig
       );
@@ -156,5 +202,27 @@ export async function buildChatResponse(
   return {
     ...response,
     responsePath: modelResponse.usedRemoteModel === true ? "gemini" : "fallback"
+  };
+}
+
+async function buildFallbackResponse(
+  filing: FilingCacheRecord,
+  question: string,
+  env: Env,
+  validSourceIds: Set<string>
+): Promise<ChatResponsePayload | null> {
+  const fallback = await generateChatAnswer({ ...env, GEMINI_API_KEY: undefined } as Env, { filing, question });
+  const approvedSourceIds = fallback.sourceIds.filter((sourceId) => validSourceIds.has(sourceId));
+
+  if (approvedSourceIds.length === 0) {
+    return null;
+  }
+
+  return {
+    answer: fallback.answer,
+    sources: approvedSourceIds.map((sourceId) => {
+      const source = filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId)!;
+      return buildSecFilingSource(source);
+    })
   };
 }

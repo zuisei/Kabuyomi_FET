@@ -321,10 +321,10 @@ final class PersistenceController {
 
     private func storedMessageModelName(for response: ChatResponse) -> String {
         if let responsePath = response.responsePath {
-            return responsePath == .gemini ? AIModelName.storedRemoteModelName(response.modelName) : ""
+            return responsePath.usesRemoteModel ? AIModelName.storedRemoteModelName(response.modelName) : ""
         }
 
-        return AIModelName.storedRemoteModelName(response.modelName)
+        return AIModelName.storedLegacyModelName(response.modelName)
     }
 
     private func replaceSourceChunks(on filing: FilingEntity, sourceChunks: [SourceChunkPayload]) {

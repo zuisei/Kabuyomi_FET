@@ -154,6 +154,256 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.usage?.stocksUsed, 0)
     }
 
+    func testResetLocalDataIgnoresStaleUsageRefreshFromPreviousDeviceIdentity() async {
+        let deviceIdentity = DeviceIdentityStore()
+        deviceIdentity.reset()
+        let originalDeviceKey = deviceIdentity.deviceKey()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let deviceKey = request.value(forHTTPHeaderField: "x-device-key")
+
+            if deviceKey == originalDeviceKey {
+                Thread.sleep(forTimeInterval: 0.2)
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "beta",
+                        "chatsUsed": 3,
+                        "chatLimit": 20,
+                        "stocksUsed": 9,
+                        "stockLimit": 25,
+                        "dateJST": "2026-04-18"
+                    ])
+                )
+            }
+
+            Thread.sleep(forTimeInterval: 0.05)
+            return (
+                response,
+                try TestFixtures.jsonData([
+                    "plan": "beta",
+                    "chatsUsed": 0,
+                    "chatLimit": 20,
+                    "stocksUsed": 0,
+                    "stockLimit": 25,
+                    "dateJST": "2026-04-18"
+                ])
+            )
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockAppModelURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+
+        let model = AppModel(
+            apiClient: APIClient(
+                session: session,
+                baseURL: URL(string: "https://example.com")!
+            ),
+            persistence: PersistenceController(inMemory: true),
+            deviceIdentity: deviceIdentity
+        )
+
+        await model.bootstrap()
+        await Task.yield()
+        model.resetLocalData()
+
+        try? await Task.sleep(nanoseconds: 350_000_000)
+
+        XCTAssertNotEqual(deviceIdentity.deviceKey(), originalDeviceKey)
+        XCTAssertEqual(model.usage?.stocksUsed, 0)
+        XCTAssertEqual(model.usage?.chatsUsed, 0)
+    }
+
+    func testResetLocalDataKeepsCurrentCompanyLoadIndicatorWhenOldRequestFinishesLater() async {
+        let deviceIdentity = DeviceIdentityStore()
+        deviceIdentity.reset()
+        let originalDeviceKey = deviceIdentity.deviceKey()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            switch request.url?.path {
+            case "/v1/usage":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "beta",
+                        "chatsUsed": 0,
+                        "chatLimit": 20,
+                        "stocksUsed": 0,
+                        "stockLimit": 25,
+                        "dateJST": "2026-04-18"
+                    ])
+                )
+            case "/v1/company/AAPL":
+                if request.value(forHTTPHeaderField: "x-device-key") == originalDeviceKey {
+                    Thread.sleep(forTimeInterval: 0.15)
+                } else {
+                    Thread.sleep(forTimeInterval: 0.30)
+                }
+
+                let company = TestFixtures.companyPayload()
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "filingKey": company.filingKey,
+                        "ticker": company.ticker,
+                        "companyName": company.companyName,
+                        "cik": company.cik,
+                        "formType": company.formType,
+                        "filedAt": company.filedAt,
+                        "periodOfReport": company.periodOfReport,
+                        "primaryDocumentUrl": company.primaryDocumentUrl,
+                        "summary": [
+                            "verdict": company.summary.verdict,
+                            "highlights": company.summary.highlights.map {
+                                ["text": $0.text, "sourceIds": $0.sourceIds]
+                            },
+                            "changes": company.summary.changes.map {
+                                ["text": $0.text, "sourceIds": $0.sourceIds]
+                            }
+                        ],
+                        "metrics": company.metrics.map {
+                            [
+                                "logicalName": $0.logicalName,
+                                "tagUsed": $0.tagUsed,
+                                "value": $0.value,
+                                "unit": $0.unit,
+                                "periodEnd": $0.periodEnd,
+                                "comparisonValue": $0.comparisonValue as Any? ?? NSNull(),
+                                "yoyPercent": $0.yoyPercent as Any? ?? NSNull()
+                            ]
+                        },
+                        "historicalOverview": [
+                            "comparisonBasis": company.historicalOverview?.comparisonBasis as Any? ?? NSNull(),
+                            "years": company.historicalOverview?.years as Any? ?? NSNull(),
+                            "series": company.historicalOverview?.series.map {
+                                [
+                                    "logicalName": $0.logicalName,
+                                    "label": $0.label,
+                                    "points": $0.points.map {
+                                        [
+                                            "filingKey": $0.filingKey,
+                                            "filedAt": $0.filedAt,
+                                            "periodEnd": $0.periodEnd,
+                                            "value": $0.value,
+                                            "unit": $0.unit,
+                                            "yoyPercent": $0.yoyPercent as Any? ?? NSNull(),
+                                            "sourceId": $0.sourceId
+                                        ]
+                                    }
+                                ]
+                            } as Any? ?? NSNull()
+                        ],
+                        "sourceChunks": company.sourceChunks.map {
+                            [
+                                "sourceId": $0.sourceId,
+                                "sectionType": $0.sectionType,
+                                "sectionTitle": $0.sectionTitle,
+                                "sourceLabel": $0.sourceLabel,
+                                "text": $0.text,
+                                "startOffset": $0.startOffset,
+                                "endOffset": $0.endOffset,
+                                "tagName": $0.tagName as Any? ?? NSNull(),
+                                "sortOrder": $0.sortOrder
+                            ]
+                        },
+                        "lastUpdatedAt": company.lastUpdatedAt
+                    ])
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockAppModelURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let model = AppModel(
+            apiClient: APIClient(
+                session: session,
+                baseURL: URL(string: "https://example.com")!
+            ),
+            persistence: PersistenceController(inMemory: true),
+            deviceIdentity: deviceIdentity
+        )
+
+        let firstLoad = Task { await model.loadCompany(ticker: "AAPL") }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        model.resetLocalData()
+        let secondLoad = Task { await model.loadCompany(ticker: "AAPL") }
+
+        try? await Task.sleep(nanoseconds: 180_000_000)
+        XCTAssertTrue(model.companyIsLoading)
+
+        await firstLoad.value
+        await secondLoad.value
+
+        XCTAssertFalse(model.companyIsLoading)
+        XCTAssertEqual(model.companyCache["AAPL"]?.ticker, "AAPL")
+    }
+
+    func testSearchPreservesClassTickerAliasPriorityFromAPIResults() async {
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            if request.url?.path == "/v1/search" {
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "items": [
+                            [
+                                "ticker": "BRK-B",
+                                "companyName": "Berkshire Hathaway Class B",
+                                "cik": "0001067983",
+                                "exchange": "NYSE",
+                                "latestFormType": "10-K"
+                            ],
+                            [
+                                "ticker": "BRK-A",
+                                "companyName": "Berkshire Hathaway Class A",
+                                "cik": "0001067983",
+                                "exchange": "NYSE",
+                                "latestFormType": "10-K"
+                            ]
+                        ],
+                        "snapshotUpdatedAt": NSNull()
+                    ])
+                )
+            }
+
+            return (
+                response,
+                try TestFixtures.jsonData([
+                    "plan": "beta",
+                    "chatsUsed": 0,
+                    "chatLimit": 20,
+                    "stocksUsed": 0,
+                    "stockLimit": 25,
+                    "dateJST": "2026-04-18"
+                ])
+            )
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockAppModelURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let model = AppModel(
+            apiClient: APIClient(
+                session: session,
+                baseURL: URL(string: "https://example.com")!
+            ),
+            persistence: PersistenceController(inMemory: true),
+            deviceIdentity: DeviceIdentityStore()
+        )
+
+        await model.search(query: "BRK.B")
+
+        XCTAssertEqual(model.searchResults.map(\.ticker), ["BRK-B", "BRK-A"])
+    }
+
     func testSendChatPresentsLocalizedTemporaryBackendFailure() async throws {
         let persistence = PersistenceController(inMemory: true)
         let company = TestFixtures.companyPayload()

@@ -10,6 +10,10 @@ export function buildTickerAliasKey(extractorVersion: string, ticker: string): s
   return `latest_filing_by_ticker:${extractorVersion}:${ticker.toUpperCase()}`;
 }
 
+export function buildTickerAliasKeys(extractorVersion: string, ticker: string): string[] {
+  return classTickerVariants(ticker).map((variant) => buildTickerAliasKey(extractorVersion, variant));
+}
+
 export function isCurrentCacheRecord(record: FilingCacheRecord, config: RemoteConfig): boolean {
   return record.extractorVersion === config.extractorVersion && record.promptVersion === config.promptVersion;
 }
@@ -39,10 +43,27 @@ export async function loadCachedLatestFiling(
   env: Env,
   config: RemoteConfig
 ): Promise<FilingCacheRecord | null> {
-  const filingKey = await env.KABUYOMI_CACHE.get(buildTickerAliasKey(config.extractorVersion, ticker));
-  if (!filingKey) {
-    return null;
+  for (const aliasKey of buildTickerAliasKeys(config.extractorVersion, ticker)) {
+    const filingKey = await env.KABUYOMI_CACHE.get(aliasKey);
+    if (!filingKey) {
+      continue;
+    }
+
+    const record = await loadFilingByKey(filingKey, env);
+    if (record) {
+      return record;
+    }
   }
 
-  return loadFilingByKey(filingKey, env);
+  return null;
+}
+
+function classTickerVariants(ticker: string): string[] {
+  const normalized = ticker.trim().toUpperCase().replace(/\s+/g, " ");
+  const match = normalized.match(/^([A-Z0-9]+)[.\-\s]+([A-Z0-9]+)$/);
+  if (!match?.[1] || !match[2]) {
+    return [normalized];
+  }
+
+  return [...new Set([`${match[1]}-${match[2]}`, `${match[1]}.${match[2]}`, `${match[1]} ${match[2]}`])];
 }

@@ -16,13 +16,17 @@ function createState(initialEntries: Record<string, unknown> = {}) {
         storage.delete(key);
       },
       async list<T>({
+        prefix,
         reverse,
         limit
       }: {
+        prefix?: string;
         reverse?: boolean;
         limit?: number;
       } = {}) {
-        const entries = [...storage.entries()].sort(([left], [right]) => left.localeCompare(right));
+        const entries = [...storage.entries()]
+          .filter(([key]) => (prefix ? key.startsWith(prefix) : true))
+          .sort(([left], [right]) => left.localeCompare(right));
         if (reverse) {
           entries.reverse();
         }
@@ -193,7 +197,7 @@ describe("UserQuotaDO", () => {
 
   it("migrates legacy tracked tickers into saved_tickers once and does not overwrite the marker", async () => {
     const state = createState({
-      "2026-04-15:free:test-device": {
+      "daily:2026-04-15": {
         plan: "free",
         dateJST: "2026-04-15",
         chatsUsed: 0,
@@ -203,7 +207,7 @@ describe("UserQuotaDO", () => {
         trackedTickers: ["AAPL"],
         updatedAt: "2026-04-15T00:00:00.000Z"
       },
-      "2026-04-14:free:test-device": {
+      "daily:2026-04-14": {
         plan: "free",
         dateJST: "2026-04-14",
         chatsUsed: 0,
@@ -266,7 +270,7 @@ describe("UserQuotaDO", () => {
         updatedAt: "2026-04-16T00:00:00.000Z",
         migratedFromLegacyAt: "2026-04-16T00:00:00.000Z"
       },
-      "2026-04-15:free:test-device": {
+      "daily:2026-04-15": {
         plan: "free",
         dateJST: "2026-04-15",
         chatsUsed: 0,
@@ -301,7 +305,7 @@ describe("UserQuotaDO", () => {
 
   it("does not re-read legacy tracked tickers after removeTicker", async () => {
     const state = createState({
-      "2026-04-15:free:test-device": {
+      "daily:2026-04-15": {
         plan: "free",
         dateJST: "2026-04-15",
         chatsUsed: 0,
@@ -392,6 +396,40 @@ describe("UserQuotaDO", () => {
       usage: {
         chatsUsed: 0,
         stocksUsed: 1
+      }
+    });
+  });
+
+  it("only scans the latest 30 daily records during legacy migration", async () => {
+    const initialEntries: Record<string, unknown> = {};
+
+    for (let day = 1; day <= 31; day += 1) {
+      const dateJST = `2026-03-${String(day).padStart(2, "0")}`;
+      initialEntries[`daily:${dateJST}`] = {
+        plan: "free",
+        dateJST,
+        chatsUsed: 0,
+        chatLimit: 3,
+        updatedAt: `${dateJST}T00:00:00.000Z`,
+        trackedTickers: day === 1 ? ["AAPL"] : []
+      };
+    }
+
+    const quota = new UserQuotaDO(createState(initialEntries) as never);
+
+    const response = await postQuota(quota, {
+      action: "state",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      usage: {
+        stocksUsed: 0
       }
     });
   });

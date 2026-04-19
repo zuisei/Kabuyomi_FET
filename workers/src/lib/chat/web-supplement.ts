@@ -65,17 +65,27 @@ function shouldUseWebSupplement(question: string, answer: string): boolean {
   const asksGrowthDrivers =
     /(支え|押し上げ|牽引|ドライバー|contributors?|drivers?)/.test(normalized) ||
     (/(主因|要因|理由|背景)/.test(normalized) && /(売上|増収|成長|growth|revenue|需要|株価|市場|反応)/.test(normalized));
-  const asksBroadContext =
-    /(株価|shareprice|stockprice|買いか|売りか|投資判断|おすすめ|今後|この先|見通し|予想|guidance|outlook|最近|直近|市場|反応|ニュース|報道|話題|関税|tariff|還元|自社株買い|buyback|repurchase|配当|dividend|capital allocation|株主還元|リスク|懸念|逆風|risk)/.test(
+  const asksCurrentOrMarketContext =
+    /(株価|shareprice|stockprice|買いか|売りか|投資判断|おすすめ|最近|直近|市場|反応|ニュース|報道|話題)/.test(
       normalized
     );
+  const asksBroaderFilingAdjacentContext =
+    /(今後|この先|見通し|予想|guidance|outlook|関税|tariff|還元|自社株買い|buyback|repurchase|配当|dividend|capital allocation|株主還元|リスク|懸念|逆風|risk)/.test(
+      normalized
+    );
+  const hasFilingLimitSignal =
+    answer.includes("この filing だけでは") ||
+    answer.includes("この filing 以外") ||
+    answer.includes("この先を言い切ることはできません") ||
+    answer.includes("断定できません") ||
+    answer.includes("切り分けられません") ||
+    answer.includes("追加情報が必要です") ||
+    answer.includes("別情報で確認");
 
   return (
-    asksBroadContext ||
-    asksGrowthDrivers ||
-    answer.includes("この filing だけでは") ||
-    answer.includes("断定できません") ||
-    answer.includes("切り分けられません")
+    asksCurrentOrMarketContext ||
+    (asksGrowthDrivers && hasFilingLimitSignal) ||
+    (asksBroaderFilingAdjacentContext && hasFilingLimitSignal)
   );
 }
 

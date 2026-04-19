@@ -22,8 +22,6 @@ struct SummaryDrawer: View {
 
             ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    InvestorMetricMapCard(metrics: headlineMetrics)
-
                     SummaryLeadCard(
                         company: company,
                         tone: investorTone(for: company, positiveInsights: positiveInsights, negativeInsights: negativeInsights),
@@ -31,6 +29,8 @@ struct SummaryDrawer: View {
                         negativeCount: negativeInsights.count,
                         focusCount: focusInsights.count
                     )
+
+                    InvestorMetricMapCard(metrics: headlineMetrics)
 
                     InvestorDriverBoard(
                         company: company,
@@ -60,38 +60,48 @@ struct SummaryDrawer: View {
         }
         .padding(20)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(
-            ZStack(alignment: .leading) {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.99, green: 0.98, blue: 0.96),
-                        Color(red: 0.95, green: 0.92, blue: 0.88)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+        .background(drawerShell)
+    }
 
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .opacity(0.74)
+    private var drawerShell: some View {
+        drawerShellBackground
+            .compositingGroup()
+            .mask(CompanyDrawerShellFadeMask(topFade: 28, bottomFade: 34))
+    }
 
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                KabuyomiTheme.accentDeep.opacity(0.34),
-                                KabuyomiTheme.accent.opacity(0.08),
-                                .clear
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
+    private var drawerShellBackground: some View {
+        ZStack(alignment: .leading) {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.99, green: 0.98, blue: 0.96),
+                    Color(red: 0.95, green: 0.92, blue: 0.88)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .opacity(0.74)
+
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            KabuyomiTheme.accentDeep.opacity(0.34),
+                            KabuyomiTheme.accent.opacity(0.08),
+                            .clear
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
                     )
-                    .frame(width: 6)
-            }
-            .overlay(Rectangle().stroke(Color.white.opacity(0.55), lineWidth: 1))
-            .shadow(color: Color.black.opacity(0.12), radius: 18, x: -8, y: 0)
-        )
+                )
+                .frame(width: 6)
+
+            Rectangle()
+                .stroke(Color.white.opacity(0.55), lineWidth: 1)
+        }
+        .shadow(color: Color.black.opacity(0.12), radius: 18, x: -8, y: 0)
     }
 }
 

@@ -185,6 +185,10 @@ enum ChatResponsePath: String, Decodable, Hashable {
     case deterministic
     case fallback
     case gemini
+
+    var usesRemoteModel: Bool {
+        self == .gemini
+    }
 }
 
 struct ChatResponse: Decodable {

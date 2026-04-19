@@ -1,7 +1,7 @@
 # Kabuyomi 実装実態仕様書 (as-built)
 
 > Status (2026-04-18): historical reference only. This file is not the current shipping contract.
-> Use `docs/current_shipping_truth.md`, `docs/testflight_readiness_checklist.md`, and the live code as the authoritative source.
+> The local coordination docs (`docs/current_shipping_truth.md`, `CURRENT_SLICE.md`) are intentionally not tracked in Git. Use `docs/testflight_readiness_checklist.md` and the live code as the authoritative source.
 
 本仕様書は、`README.md` や既存の `kabuyomi_*_spec_v1.md` を参照せず、
 `ios/`, `workers/`, `sec-fetcher/` のソースコードのみを読んで、

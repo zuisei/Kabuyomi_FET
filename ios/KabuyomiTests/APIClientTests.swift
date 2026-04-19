@@ -74,6 +74,89 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(usage.chatLimit, 20)
     }
 
+    func testSendChatDecodesResponsePathWhenPresent() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/chat")
+            XCTAssertEqual(request.httpMethod, "POST")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "answer": "営業利益率は改善しました。",
+                    "sources": [
+                        [
+                            "sourceId": "metric-op",
+                            "sourceKind": "sec_filing",
+                            "sectionType": "xbrl_metric",
+                            "sourceLabel": "OperatingIncomeLoss",
+                            "excerpt": "123456000000"
+                        ]
+                    ],
+                    "responsePath": "gemini",
+                    "modelName": "gemini-2.5-flash",
+                    "usage": [
+                        "plan": "beta",
+                        "chatsUsed": 1,
+                        "chatLimit": 20,
+                        "stocksUsed": 1,
+                        "stockLimit": 25,
+                        "dateJST": "2026-04-18"
+                    ]
+                ])
+            )
+        }
+
+        let response = try await client.sendChat(
+            filingKey: "v1:AAPL:0000320193-24-000001",
+            question: "今回の変化は？",
+            deviceKey: "device-123"
+        )
+
+        XCTAssertEqual(response.responsePath, .gemini)
+        XCTAssertEqual(response.modelName, "gemini-2.5-flash")
+    }
+
+    func testSendChatDecodesLegacyResponseWithoutResponsePath() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/chat")
+            XCTAssertEqual(request.httpMethod, "POST")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "answer": "営業利益率は改善しました。",
+                    "sources": [
+                        [
+                            "sourceId": "metric-op",
+                            "sourceKind": "sec_filing",
+                            "sectionType": "xbrl_metric",
+                            "sourceLabel": "OperatingIncomeLoss",
+                            "excerpt": "123456000000"
+                        ]
+                    ],
+                    "modelName": NSNull(),
+                    "usage": [
+                        "plan": "beta",
+                        "chatsUsed": 1,
+                        "chatLimit": 20,
+                        "stocksUsed": 1,
+                        "stockLimit": 25,
+                        "dateJST": "2026-04-18"
+                    ]
+                ])
+            )
+        }
+
+        let response = try await client.sendChat(
+            filingKey: "v1:AAPL:0000320193-24-000001",
+            question: "今回の変化は？",
+            deviceKey: "device-123"
+        )
+
+        XCTAssertNil(response.responsePath)
+        XCTAssertNil(response.modelName)
+    }
+
     func testRemoveFromWatchlistSendsDeviceHeaderAndJSONBody() async throws {
         let client = makeClient { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/watchlist/remove")

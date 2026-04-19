@@ -82,8 +82,8 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
     return buildNarrativeFallbackAnswer(narrative, profile);
   }
 
-  const firstSource = input.filing.sourceChunks[0];
-  if (!firstSource) {
+  const anchorSource = selectFallbackAnchorSource(input.filing.sourceChunks);
+  if (!anchorSource) {
     return {
       answer: "この filing の提供コンテキストでは確認できません。",
       sourceIds: []
@@ -91,8 +91,8 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
   }
 
   return {
-    answer: `提出資料では「${truncateExcerpt(firstSource.text, 150)}」と触れています。少なくとも、この論点に関係する記述はここです。`,
-    sourceIds: [firstSource.sourceId]
+    answer: `この論点を直接言い切れる材料は薄いですが、提出資料の近い記述としては「${truncateExcerpt(anchorSource.text, 150)}」があります。`,
+    sourceIds: [anchorSource.sourceId]
   };
 }
 
@@ -207,13 +207,36 @@ function selectRelevantNarrative(
   const findNarrative = (pattern: RegExp) => narratives.find((chunk) => pattern.test(chunk.text.toLowerCase()));
   const driverNarrative =
     findNarrative(/iphone|services|cloud|ads|americas|china|japan|asia|higher net sales|demand/) ?? narratives[0];
+  const marginNarrative = findNarrative(
+    /margin|pricing|gross margin|profitability|cost|inflation|component|supply chain|販促|コスト/
+  );
+  const riskNarrative = findNarrative(/risk|uncertain|uncertainty|macro|tariff|pressure|weakness|slowdown|adverse impact/);
+  const guidanceNarrative = findNarrative(/guidance|outlook|forecast|expect|cautious|慎重/);
+  const cashFlowNarrative = findNarrative(/cash flow|free cash flow|liquidity|cash generation|operating cash flow/);
+  const capitalNarrative = findNarrative(/buyback|share repurchase|repurchase|dividend|capital allocation|capital return|shareholder/);
 
   if (profile.asksTariff) {
-    return findNarrative(/tariff|関税/);
+    return findNarrative(/tariff|関税/) ?? riskNarrative;
+  }
+
+  if (profile.asksCapitalAllocation) {
+    return capitalNarrative ?? cashFlowNarrative ?? driverNarrative;
+  }
+
+  if (profile.asksCashFlow) {
+    return cashFlowNarrative ?? capitalNarrative ?? driverNarrative;
   }
 
   if (profile.asksGuidance || profile.asksForecast) {
-    return findNarrative(/guidance|outlook|forecast|expect|cautious|慎重/) ?? driverNarrative;
+    return guidanceNarrative ?? riskNarrative ?? driverNarrative;
+  }
+
+  if (profile.asksRisk) {
+    return riskNarrative ?? driverNarrative;
+  }
+
+  if (profile.asksProfitability) {
+    return marginNarrative ?? driverNarrative;
   }
 
   if (profile.asksRevenue || profile.asksCause || profile.asksRegion || profile.asksProductMix) {
@@ -224,10 +247,9 @@ function selectRelevantNarrative(
     profile.asksStockPrice ||
     profile.asksRecommendation ||
     profile.asksStockContext ||
-    profile.asksRisk ||
     profile.asksMarketReaction
   ) {
-    return driverNarrative ?? findNarrative(/risk|uncertain|uncertainty|macro|tariff|demand/);
+    return riskNarrative ?? driverNarrative ?? findNarrative(/demand/);
   }
 
   return narratives[0];
@@ -285,8 +307,9 @@ function buildClosestContextFallbackAnswer(
 }
 
 function buildNarrativeFallbackAnswer(narrative: SourceChunkRecord, profile: QuestionProfile): GeminiChatAnswer {
+  const limitation = buildNarrativeFallbackLimitation(profile);
   return {
-    answer: summarizeNarrativeEvidence(narrative, profile),
+    answer: limitation ? `${summarizeNarrativeEvidence(narrative, profile)} ${limitation}` : summarizeNarrativeEvidence(narrative, profile),
     sourceIds: [narrative.sourceId]
   };
 }
@@ -369,8 +392,20 @@ function buildMetricLimitation(profile: QuestionProfile): string {
     return "どの事業や地域が売上高を押し上げたかまでは分かりません。";
   }
 
+  if (profile.asksRisk || profile.asksTariff) {
+    return "どのリスクがどこまで業績に効くかは、この filing だけでは断定できません。";
+  }
+
   if (profile.asksCashFlow && profile.asksCapitalAllocation) {
     return "配当や自社株買いが十分かどうかは、この filing だけでは分かりません。";
+  }
+
+  if (profile.asksCapitalAllocation) {
+    return "還元方針の十分性や今後の水準は、この filing だけでは言い切れません。";
+  }
+
+  if (profile.asksCashFlow) {
+    return "現金創出の持続性までは、この filing だけでは断定できません。";
   }
 
   if (profile.asksGuidance || profile.asksForecast) {
@@ -410,6 +445,39 @@ function buildClosestContextLimitation(profile: QuestionProfile): string {
   }
 
   return "この filing だけではここから先は断定できません。";
+}
+
+function buildNarrativeFallbackLimitation(profile: QuestionProfile): string | null {
+  if (
+    profile.asksStockPrice ||
+    profile.asksRecommendation ||
+    profile.asksStockContext ||
+    profile.asksMarketReaction
+  ) {
+    return buildClosestContextLimitation(profile);
+  }
+
+  if (profile.asksGuidance || profile.asksForecast) {
+    return "具体的な数値見通しや外部予想との比較は、この filing 以外の情報も必要です。";
+  }
+
+  if (profile.asksRisk || profile.asksTariff) {
+    return "どのリスクが実際に表面化するかは、この filing だけでは断定できません。";
+  }
+
+  if (profile.asksCapitalAllocation) {
+    return "還元余力や今後の方針までは、この filing 断片だけでは言い切れません。";
+  }
+
+  if (profile.asksRevenue && (profile.asksCause || profile.asksDetail)) {
+    return "どの要因がいちばん効いたかの厳密な切り分けは、この filing 断片だけでは難しいです。";
+  }
+
+  if (profile.asksProfitability && profile.asksCause) {
+    return "利益率に最も効いた要因を断定するには、追加の filing 記述も見たいところです。";
+  }
+
+  return null;
 }
 
 function buildStockContextLeadFromFallback(
@@ -518,6 +586,22 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
 
   const excerpt = truncateExcerpt(trimmed, 140).replace(/^「|」$/g, "");
   return excerpt.match(/[。！？]$/) ? excerpt : `${excerpt}。`;
+}
+
+function selectFallbackAnchorSource(sourceChunks: SourceChunkRecord[]): SourceChunkRecord | undefined {
+  const substantiveNarrative = sourceChunks.find(
+    (chunk) => chunk.sectionType === "md_a" && chunk.text.trim() && !isLowSignalNarrative(chunk)
+  );
+  if (substantiveNarrative) {
+    return substantiveNarrative;
+  }
+
+  const metricSource = sourceChunks.find((chunk) => chunk.sectionType === "xbrl_metric" && chunk.text.trim());
+  if (metricSource) {
+    return metricSource;
+  }
+
+  return sourceChunks.find((chunk) => chunk.text.trim());
 }
 
 function translateDriverList(raw: string): string {

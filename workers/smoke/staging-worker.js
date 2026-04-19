@@ -1,9 +1,11 @@
 const baseURL = process.env.KABUYOMI_SMOKE_BASE_URL?.trim();
-const deviceKey = process.env.KABUYOMI_SMOKE_DEVICE_KEY?.trim() || "smoke-device";
+const customDeviceKey = process.env.KABUYOMI_SMOKE_DEVICE_KEY?.trim();
+const deviceKey = customDeviceKey || `smoke-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const ticker = process.env.KABUYOMI_SMOKE_TICKER?.trim().toUpperCase() || "AAPL";
 const searchQuery = process.env.KABUYOMI_SMOKE_SEARCH_QUERY?.trim() || ticker;
 const chatQuestion = process.env.KABUYOMI_SMOKE_CHAT_QUESTION?.trim() || "売上高は？";
 const historyQuestion = process.env.KABUYOMI_SMOKE_HISTORY_QUESTION?.trim() || "この3年の売上推移は？";
+const validResponsePaths = new Set(["historical", "deterministic", "fallback", "gemini"]);
 
 if (!baseURL) {
   console.error(
@@ -13,13 +15,18 @@ if (!baseURL) {
 }
 
 async function main() {
-  await runStep("usage", checkUsage);
+  const initialUsage = await runStep("usage-baseline", checkUsageBaseline);
   await runStep("search", checkSearch);
-  const company = await runStep("watchlist/add", checkWatchlistAdd);
-  const filingKey = company?.filingKey;
+  const addResult = await runStep("watchlist/add", () => checkWatchlistAdd(initialUsage));
+  const filingKey = addResult?.company?.filingKey;
   await runStep("company", () => checkCompany(filingKey));
-  await runStep("chat", () => checkChat(filingKey));
-  await runStep("chat-history", () => checkHistoricalChat(filingKey));
+  const afterChat = await runStep("chat", () => checkChat(filingKey, addResult.usage));
+  const afterHistoricalChat = await runStep("chat-history", () => checkHistoricalChat(filingKey, afterChat));
+  if (addResult.savedTickerAdded) {
+    await runStep("watchlist/remove", () => checkWatchlistRemove(afterHistoricalChat));
+  } else {
+    console.log("[smoke] watchlist/remove ... skipped (ticker was already saved for the custom smoke device)");
+  }
   await runStep("billing/sync", checkBillingDisabled);
   console.log("Kabuyomi staging smoke passed");
 }
@@ -37,6 +44,22 @@ async function runStep(name, fn) {
 }
 
 async function checkUsage() {
+  const payload = await fetchUsage();
+  assertUsagePayload(payload, "/v1/usage");
+  return payload;
+}
+
+async function checkUsageBaseline() {
+  const payload = await checkUsage();
+
+  if (!customDeviceKey && (payload.chatsUsed !== 0 || payload.stocksUsed !== 0)) {
+    throw new Error("auto-generated smoke device should start at 0 chats and 0 saved tickers");
+  }
+
+  return payload;
+}
+
+async function fetchUsage() {
   const response = await fetch(`${baseURL}/v1/usage`, {
     headers: {
       "x-device-key": deviceKey
@@ -47,9 +70,17 @@ async function checkUsage() {
     throw new Error(`/v1/usage failed with ${response.status}`);
   }
 
-  const payload = await response.json();
-  if (typeof payload?.chatsUsed !== "number" || typeof payload?.stocksUsed !== "number") {
-    throw new Error("/v1/usage returned an unexpected payload");
+  return response.json();
+}
+
+function assertUsagePayload(payload, label) {
+  if (
+    typeof payload?.chatsUsed !== "number" ||
+    typeof payload?.chatLimit !== "number" ||
+    typeof payload?.stocksUsed !== "number" ||
+    typeof payload?.stockLimit !== "number"
+  ) {
+    throw new Error(`${label} returned an unexpected usage payload`);
   }
 }
 
@@ -70,7 +101,7 @@ async function checkSearch() {
   }
 }
 
-async function checkWatchlistAdd() {
+async function checkWatchlistAdd(previousUsage) {
   const response = await fetch(`${baseURL}/v1/watchlist/add`, {
     method: "POST",
     headers: {
@@ -88,8 +119,29 @@ async function checkWatchlistAdd() {
   if (payload?.company?.ticker !== ticker || typeof payload?.company?.filingKey !== "string") {
     throw new Error("/v1/watchlist/add returned an unexpected payload");
   }
+  assertUsagePayload(payload?.usage, "/v1/watchlist/add");
 
-  return payload.company;
+  if (payload.usage.chatsUsed !== previousUsage.chatsUsed) {
+    throw new Error("/v1/watchlist/add changed chatsUsed unexpectedly");
+  }
+
+  if (customDeviceKey) {
+    if (payload.usage.stocksUsed < previousUsage.stocksUsed || payload.usage.stocksUsed > previousUsage.stocksUsed + 1) {
+      throw new Error("/v1/watchlist/add returned an unexpected saved ticker delta for a custom smoke device");
+    }
+  } else if (payload.usage.stocksUsed !== previousUsage.stocksUsed + 1) {
+    throw new Error("/v1/watchlist/add did not increment saved ticker count");
+  }
+
+  const usage = await checkUsage();
+  if (usage.chatsUsed !== payload.usage.chatsUsed || usage.stocksUsed !== payload.usage.stocksUsed) {
+    throw new Error("/v1/watchlist/add usage did not match /v1/usage");
+  }
+
+  return {
+    ...payload,
+    savedTickerAdded: payload.usage.stocksUsed === previousUsage.stocksUsed + 1
+  };
 }
 
 async function checkCompany(expectedFilingKey) {
@@ -115,7 +167,7 @@ async function checkCompany(expectedFilingKey) {
   return payload;
 }
 
-async function checkChat(filingKey) {
+async function checkChat(filingKey, previousUsage) {
   if (!filingKey) {
     throw new Error("chat smoke requires a filingKey from company/watchlist");
   }
@@ -140,9 +192,17 @@ async function checkChat(filingKey) {
   if (typeof payload?.answer !== "string" || !Array.isArray(payload?.sources)) {
     throw new Error("/v1/chat returned an unexpected payload");
   }
+  assertUsagePayload(payload?.usage, "/v1/chat");
+  assertChatMetadata(payload, "/v1/chat");
+  assertUsageDelta(payload.usage, {
+    chatsUsed: previousUsage.chatsUsed + 1,
+    stocksUsed: previousUsage.stocksUsed
+  }, "/v1/chat");
+
+  return payload.usage;
 }
 
-async function checkHistoricalChat(filingKey) {
+async function checkHistoricalChat(filingKey, previousUsage) {
   if (!filingKey) {
     throw new Error("historical chat smoke requires a filingKey from company/watchlist");
   }
@@ -166,6 +226,66 @@ async function checkHistoricalChat(filingKey) {
   const payload = await response.json();
   if (typeof payload?.answer !== "string" || !Array.isArray(payload?.sources)) {
     throw new Error("/v1/chat historical flow returned an unexpected payload");
+  }
+  assertUsagePayload(payload?.usage, "/v1/chat historical");
+  assertChatMetadata(payload, "/v1/chat historical");
+  assertUsageDelta(payload.usage, {
+    chatsUsed: previousUsage.chatsUsed + 1,
+    stocksUsed: previousUsage.stocksUsed
+  }, "/v1/chat historical");
+
+  return payload.usage;
+}
+
+async function checkWatchlistRemove(previousUsage) {
+  const response = await fetch(`${baseURL}/v1/watchlist/remove`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-device-key": deviceKey
+    },
+    body: JSON.stringify({ ticker })
+  });
+
+  if (!response.ok) {
+    throw new Error(`/v1/watchlist/remove failed with ${response.status}`);
+  }
+
+  const payload = await response.json();
+  assertUsagePayload(payload?.usage, "/v1/watchlist/remove");
+  assertUsageDelta(payload.usage, {
+    chatsUsed: previousUsage.chatsUsed,
+    stocksUsed: previousUsage.stocksUsed - 1
+  }, "/v1/watchlist/remove");
+
+  const usage = await checkUsage();
+  if (usage.chatsUsed !== payload.usage.chatsUsed || usage.stocksUsed !== payload.usage.stocksUsed) {
+    throw new Error("/v1/watchlist/remove usage did not match /v1/usage");
+  }
+}
+
+function assertChatMetadata(payload, label) {
+  if (!validResponsePaths.has(payload?.responsePath)) {
+    throw new Error(`${label} returned an unexpected responsePath`);
+  }
+
+  if (payload.responsePath === "gemini") {
+    if (typeof payload.modelName !== "string" || payload.modelName.trim().length === 0) {
+      throw new Error(`${label} should return a modelName for the gemini path`);
+    }
+    return;
+  }
+
+  if (payload.modelName !== null) {
+    throw new Error(`${label} should return modelName=null for non-gemini paths`);
+  }
+}
+
+function assertUsageDelta(currentUsage, expectedUsage, label) {
+  if (currentUsage.chatsUsed !== expectedUsage.chatsUsed || currentUsage.stocksUsed !== expectedUsage.stocksUsed) {
+    throw new Error(
+      `${label} returned unexpected usage delta (got chats=${currentUsage.chatsUsed}, stocks=${currentUsage.stocksUsed})`
+    );
   }
 }
 

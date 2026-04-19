@@ -15,7 +15,7 @@ Kabuyomi is an iOS + Cloudflare Workers app for reading SEC filings in Japanese 
 - Main iOS flow is `AppRootView -> ConversationEntryView -> CompanyView`.
 - `SearchView` is now a utility sheet for ticker discovery, not the app root.
 - `CompanyView` is split into focused subcomponents under `ios/Kabuyomi/Features/Company/`.
-- Beta billing code remains in the codebase, but the current UX does not depend on it.
+- Kabuyomi is currently a free beta. Billing / monetization remains intentionally disabled even though StoreKit and Worker scaffolding still exist in the repo.
 - Beta chat is filing-grounded by default. External web supplements stay off unless you intentionally re-enable them for testing via Worker remote config.
 - Workers routes live under `workers/src/routes/`; shared logic is split across `workers/src/lib/` and `workers/src/clients/gemini/`.
 
@@ -24,7 +24,7 @@ Kabuyomi is an iOS + Cloudflare Workers app for reading SEC filings in Japanese 
 ### 1. SEC Fetcher
 
 ```bash
-cd /Users/0xt4/Desktop/Kabuyomi/sec-fetcher
+cd /Users/0xt4/t4dano/Kabuyomi/sec-fetcher
 npm install
 SEC_FETCHER_SHARED_SECRET=replace-me npm run dev
 ```
@@ -32,7 +32,7 @@ SEC_FETCHER_SHARED_SECRET=replace-me npm run dev
 ### 2. Workers
 
 ```bash
-cd /Users/0xt4/Desktop/Kabuyomi/workers
+cd /Users/0xt4/t4dano/Kabuyomi/workers
 npm install
 cp .dev.vars.example .dev.vars
 npm run test
@@ -52,12 +52,21 @@ Set `GEMINI_MODEL` only when you want a local or deployed override, so model swa
 ### 3. iOS
 
 ```bash
-cd /Users/0xt4/Desktop/Kabuyomi/ios
+cd /Users/0xt4/t4dano/Kabuyomi/ios
 xcodegen generate
 open Kabuyomi.xcodeproj
 ```
 
 Unit tests live under `ios/KabuyomiTests/` and can be run with `xcodebuild test` after generating the project.
+
+## Current Beta Semantics
+
+- Saved tickers are persistent on the server. In `/v1/usage`, `stocksUsed` means the current saved ticker count, not "today's stock consumption".
+- Daily quota currently applies only to chats and resets on JST day boundaries.
+- `/v1/watchlist/add` saves a ticker. `/v1/watchlist/remove` removes it and returns updated usage.
+- `/v1/chat` returns `responsePath`; `modelName` is populated only when the answer actually used the remote Gemini path.
+- `resetLocalData()` is a full "start over" reset: local saved data and chat history are cleared, device identity is regenerated, and usage may come back in a new-user state.
+- `/v1/billing/sync` is intentionally disabled during beta and should return the beta-disabled response.
 
 ## Storage And History
 
@@ -77,7 +86,7 @@ When a user explicitly asks for a 3-year comparison and the D1 index does not ye
 ### D1 Migration
 
 ```bash
-cd /Users/0xt4/Desktop/Kabuyomi/workers
+cd /Users/0xt4/t4dano/Kabuyomi/workers
 npx wrangler d1 execute kabuyomi-history --local --file ./d1/migrations/0001_history.sql
 npx wrangler d1 execute kabuyomi-history --remote --file ./d1/migrations/0001_history.sql
 ```
@@ -93,50 +102,33 @@ npx wrangler d1 execute kabuyomi-history --remote --file ./d1/migrations/0001_hi
 Backfill example:
 
 ```bash
-cd /Users/0xt4/Desktop/Kabuyomi/workers
+cd /Users/0xt4/t4dano/Kabuyomi/workers
 BACKFILL_URL=http://127.0.0.1:8787 \
 BACKFILL_SHARED_SECRET=replace-me \
 node ./scripts/backfill-history.mjs AAPL MSFT --years=3
 ```
 
 If no tickers are supplied, the worker uses the configured tracked tickers list.
+That tracked ticker list is background ops config for refresh/backfill, not the user saved ticker source of truth.
 
 ## Ops Notes
 
 Staging smoke calls the deployed Worker instead of carrying a second implementation:
 
 ```bash
-cd /Users/0xt4/Desktop/Kabuyomi/workers
+cd /Users/0xt4/t4dano/Kabuyomi/workers
 KABUYOMI_SMOKE_BASE_URL=https://your-staging-worker.example.workers.dev \
 npm run smoke:staging
 ```
 
-The smoke path covers `usage -> search -> watchlist/add -> company -> chat -> chat-history -> billing-disabled`.
+The smoke path covers `usage-baseline -> search -> watchlist/add -> company -> chat -> chat-history -> watchlist/remove -> billing-disabled`.
+It also validates the current chat metadata contract: `responsePath` must be present, and `modelName` must be non-null only for the remote Gemini path.
 
-## Consolidated Notes
+## Historical Docs
 
-### Old UI Archive
-
-The pre-conversation-first UI note that used to live under `ios/oldui/README.md` is folded into this root README.
-
-- Snapshot target: `2026-04-15`
-- Previous root was `AppRootView` with `TabView`
-- Previous tabs were `Home`, `Search`, and `Settings`
-- Previous `Company` screen defaulted to summary first and treated chat as secondary
-
-If you need to revert toward that shape, the main levers are:
-
-1. Restore a `TabView` root in `AppRootView`
-2. Switch `CompanyView` default focus back to summary
-3. Reintroduce the hero + watchlist home layout
-4. Remove the current conversation drawers and overview-card-first flow
-
-### Screenshot Archives
-
-Screenshot notes are consolidated at `artifacts/README.md` instead of keeping README files inside dated capture folders.
-
-### Specs And Handoffs
+- Older specs and handoffs under `docs/` are reference-only. Some still describe Home/Tab roots, monetization-forward work, or pre-slice quota language.
+- Local coordination docs such as `docs/current_shipping_truth.md` and `CURRENT_SLICE.md` are intentionally kept out of Git.
+- For the tracked repository, use `docs/testflight_readiness_checklist.md` and the current code as the current-behavior reference.
+- Screenshot notes are consolidated at `artifacts/README.md` instead of keeping README files inside dated capture folders.
 
 Project docs that were previously scattered in the repository root now live under `docs/`.
-For the current ship target, start with `docs/current_shipping_truth.md` and `docs/testflight_readiness_checklist.md`.
-Older specs and handoffs remain as reference material only and may describe superseded routes or assumptions.

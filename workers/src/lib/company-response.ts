@@ -3,13 +3,14 @@ import { loadHistoricalOverview } from "./history-store";
 
 export async function serializeCompanyResponse(
   filing: FilingCacheRecord,
-  env: Partial<Env> = {}
+  env: Partial<Env> = {},
+  options: { displayTicker?: string } = {}
 ) {
   const historicalOverview = await loadHistoricalOverview(filing, env);
 
   return {
     filingKey: filing.filingKey,
-    ticker: filing.ticker,
+    ticker: options.displayTicker ?? filing.ticker,
     companyName: filing.companyName,
     cik: filing.cik,
     formType: filing.formType,

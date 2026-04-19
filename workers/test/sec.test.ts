@@ -105,6 +105,84 @@ describe("SEC filing selection", () => {
     });
   });
 
+  it("resolves separator aliases for class tickers without crossing into other symbols", async () => {
+    const match = await lookupTicker("BRK.B", {
+      KABUYOMI_CACHE: {
+        get: async () => ({
+          updatedAt: "2026-04-19T00:00:00.000Z",
+          items: [
+            {
+              ticker: "BRK-A",
+              companyName: "Berkshire Hathaway Inc. Class A",
+              cik: "0001067983",
+              exchange: "NYSE"
+            },
+            {
+              ticker: "BRK-B",
+              companyName: "Berkshire Hathaway Inc. Class B",
+              cik: "0001067983",
+              exchange: "NYSE"
+            }
+          ]
+        })
+      }
+    } as never);
+
+    expect(match?.ticker).toBe("BRK-B");
+  });
+
+  it("does not misresolve unknown separator aliases to a different ticker family member", async () => {
+    const match = await lookupTicker("BARK A", {
+      KABUYOMI_CACHE: {
+        get: async () => ({
+          updatedAt: "2026-04-19T00:00:00.000Z",
+          items: [
+            {
+              ticker: "BARK",
+              companyName: "BARK, Inc.",
+              cik: "0001823529",
+              exchange: "NYSE"
+            },
+            {
+              ticker: "BARKW",
+              companyName: "BARK, Inc. Warrant",
+              cik: "0001823529",
+              exchange: "NYSE"
+            }
+          ]
+        })
+      }
+    } as never);
+
+    expect(match).toBeNull();
+  });
+
+  it("keeps exact family ticker lookups distinct", async () => {
+    const match = await lookupTicker("GOOG", {
+      KABUYOMI_CACHE: {
+        get: async () => ({
+          updatedAt: "2026-04-19T00:00:00.000Z",
+          items: [
+            {
+              ticker: "GOOG",
+              companyName: "Alphabet Inc. Class C",
+              cik: "0001652044",
+              exchange: "Nasdaq"
+            },
+            {
+              ticker: "GOOGL",
+              companyName: "Alphabet Inc. Class A",
+              cik: "0001652044",
+              exchange: "Nasdaq"
+            }
+          ]
+        })
+      }
+    } as never);
+
+    expect(match?.ticker).toBe("GOOG");
+  });
+
   it("hydrates multiple short-query search results instead of only the first unresolved ticker", async () => {
     const cache = new Map<string, unknown>([
       [
@@ -173,6 +251,28 @@ describe("SEC filing selection", () => {
       ["GEF", "10-Q"]
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("ranks separator-alias class ticker queries against the resolved ticker", () => {
+    const ranked = sortTickerSearchResults(
+      [
+        {
+          ticker: "BRK-A",
+          companyName: "Berkshire Hathaway Inc. Class A",
+          cik: "0001067983",
+          exchange: "NYSE"
+        },
+        {
+          ticker: "BRK-B",
+          companyName: "Berkshire Hathaway Inc. Class B",
+          cik: "0001067983",
+          exchange: "NYSE"
+        }
+      ],
+      "BRK.B"
+    );
+
+    expect(ranked[0]?.ticker).toBe("BRK-B");
   });
 
   it("prefers the device key over the shared client IP for quota identity", async () => {

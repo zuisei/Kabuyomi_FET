@@ -36,13 +36,27 @@ struct ConversationLibraryDrawer: View {
         }
         .padding(18)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(
+        .background(drawerShell)
+    }
+
+    private var drawerShell: some View {
+        drawerShellBackground
+            .compositingGroup()
+            .mask(CompanyDrawerShellFadeMask(topFade: 28, bottomFade: 34))
+    }
+
+    private var drawerShellBackground: some View {
+        ZStack {
             Rectangle()
                 .fill(.ultraThinMaterial)
-                .overlay(Rectangle().fill(Color.white.opacity(0.28)))
-                .overlay(Rectangle().stroke(Color.white.opacity(0.55), lineWidth: 1))
-                .shadow(color: Color.black.opacity(0.12), radius: 18, x: 8, y: 0)
-        )
+
+            Rectangle()
+                .fill(Color.white.opacity(0.28))
+
+            Rectangle()
+                .stroke(Color.white.opacity(0.55), lineWidth: 1)
+        }
+        .shadow(color: Color.black.opacity(0.12), radius: 18, x: 8, y: 0)
     }
 
     @ViewBuilder
@@ -196,6 +210,11 @@ struct ConversationLibraryDrawer: View {
             .kabuyomiCard(.secondary, radius: 22)
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("設定を開く")
+        .accessibilityHint("表示、AI、利用状況、法務を確認します")
+        .accessibilityIdentifier("library.settingsButton")
     }
 
     @ViewBuilder

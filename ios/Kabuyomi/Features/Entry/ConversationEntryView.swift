@@ -242,5 +242,10 @@ struct ConversationEntryView: View {
             .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.22), stroke: Color.white.opacity(0.56))
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("自分の銘柄で始める")
+        .accessibilityHint("検索画面を開きます")
+        .accessibilityIdentifier("entry.searchButton")
     }
 }

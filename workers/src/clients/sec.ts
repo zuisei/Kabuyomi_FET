@@ -70,7 +70,7 @@ export interface TickerSnapshotEnvelope {
 
 export async function searchTickers(query: string, env: Env): Promise<{ items: TickerRecord[]; updatedAt: string | null }> {
   const snapshot = await getTickerSnapshot(env);
-  const normalizedQuery = query.trim().toLowerCase();
+  const normalizedQuery = query.trim();
   const rankedItems = sortTickerSearchResults(snapshot.items, normalizedQuery).slice(0, 20);
   const items = await enrichTickerSearchResults(rankedItems, normalizedQuery, env);
 
@@ -194,31 +194,47 @@ function normalizeLatestRawForm(forms: readonly string[]): string | null {
 }
 
 function scoreTickerSearch(item: TickerRecord, query: string): number | null {
+  const normalizedQuery = query.trim();
+  const lowerQuery = normalizedQuery.toLowerCase();
   const ticker = item.ticker.toLowerCase();
   const companyName = item.companyName.toLowerCase();
+  const queryAlias = normalizeClassTickerAlias(normalizedQuery);
+  const tickerAlias = normalizeClassTickerAlias(item.ticker);
 
-  if (ticker === query) {
+  if (ticker === lowerQuery) {
     return 0;
   }
 
-  if (ticker.startsWith(query)) {
+  if (queryAlias && tickerAlias === queryAlias) {
     return 1;
   }
 
-  if (companyName === query) {
+  if (ticker.startsWith(lowerQuery)) {
     return 2;
   }
 
-  if (companyName.startsWith(query)) {
+  if (queryAlias && tickerAlias?.startsWith(queryAlias)) {
     return 3;
   }
 
-  if (ticker.includes(query)) {
+  if (companyName === lowerQuery) {
     return 4;
   }
 
-  if (companyName.includes(query)) {
+  if (companyName.startsWith(lowerQuery)) {
     return 5;
+  }
+
+  if (ticker.includes(lowerQuery)) {
+    return 6;
+  }
+
+  if (queryAlias && tickerAlias?.includes(queryAlias)) {
+    return 7;
+  }
+
+  if (companyName.includes(lowerQuery)) {
+    return 8;
   }
 
   return null;
@@ -231,13 +247,19 @@ export async function refreshTickerSnapshot(env: Env): Promise<void> {
 }
 
 export async function lookupTicker(ticker: string, env: Env): Promise<TickerRecord | null> {
-  const normalizedTicker = ticker.trim().toUpperCase();
+  const normalizedTicker = normalizeTickerInput(ticker);
   if (!normalizedTicker) {
     return null;
   }
 
   const snapshot = await getTickerSnapshot(env);
-  return snapshot.items.find((item) => item.ticker.toUpperCase() === normalizedTicker) ?? null;
+  const exactMatch = snapshot.items.find((item) => normalizeTickerInput(item.ticker) === normalizedTicker);
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const aliasMatch = snapshot.items.find((item) => matchesClassTickerAlias(normalizedTicker, item.ticker));
+  return aliasMatch ?? null;
 }
 
 export async function fetchSubmissions(cik: string, env: Env): Promise<SubmissionResponse> {
@@ -561,4 +583,24 @@ async function getTickerSnapshot(env: Env): Promise<{ updatedAt: string; items: 
   await refreshTickerSnapshot(env);
   const refreshed = await env.KABUYOMI_CACHE.get("tickers_snapshot", "json");
   return normalizeTickerSnapshot(refreshed);
+}
+
+function normalizeTickerInput(value: string): string {
+  return value.trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+function normalizeClassTickerAlias(value: string): string | null {
+  const normalized = normalizeTickerInput(value);
+  const match = normalized.match(/^([A-Z0-9]+)[.\-\s]+([A-Z0-9]+)$/);
+  if (!match?.[1] || !match[2]) {
+    return null;
+  }
+
+  return `${match[1]}.${match[2]}`;
+}
+
+function matchesClassTickerAlias(input: string, candidateTicker: string): boolean {
+  const inputAlias = normalizeClassTickerAlias(input);
+  const candidateAlias = normalizeClassTickerAlias(candidateTicker);
+  return Boolean(inputAlias && candidateAlias && inputAlias === candidateAlias);
 }

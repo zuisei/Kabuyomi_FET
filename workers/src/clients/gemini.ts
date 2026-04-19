@@ -100,6 +100,10 @@ function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: strin
 
   const asksAboutFilingStructure =
     /(item|md&a|risk factors|form 10-q|form 10-k|項目|どこ|どの欄|section|パート)/.test(normalizedQuestion);
+  const asksContextualReasoning =
+    /(ガイダンス|見通し|予想|guidance|outlook|来期|次四半期|リスク|懸念|逆風|不確実|不透明|risk|uncertain|uncertainty|関税|tariff|還元|自社株買い|buyback|repurchase|配当|dividend|株主還元|キャッシュフロー|cash flow|株価|市場|反応|支え|押し上げ|牽引|主因|要因|理由|なぜ)/.test(
+      normalizedQuestion
+    );
 
   if (
     !asksAboutFilingStructure &&
@@ -119,6 +123,20 @@ function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: strin
       /(売上高|営業利益|純利益|前年比|前年同期比|revenue|operating income|net income)/.test(normalizedAnswer);
 
     if (leansOnMetricsOnly && !mentionsStockContext) {
+      return true;
+    }
+  }
+
+  if (asksContextualReasoning) {
+    const answerLooksMetricOnly =
+      /(売上高|営業利益|純利益|営業cf|キャッシュフロー|前年比|前年同期比|revenue|operating income|net income|cash flow)/.test(
+        normalizedAnswer
+      ) &&
+      !/(本文|提出資料|外部補足|この filing だけでは|この filing 以外|断定できません|切り分け|会社見通し|リスク|不確実|需要|iPhone|サービス|自社株買い|配当|株価|市場|反応|安全です)/.test(
+        normalizedAnswer
+      );
+
+    if (answerLooksMetricOnly) {
       return true;
     }
   }

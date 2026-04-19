@@ -228,7 +228,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("ローカルデータ")
                     .font(.system(.headline, design: .rounded, weight: .bold))
-                Text("保存銘柄、取得済み filing、チャット履歴をこの端末から削除し、端末識別情報も再生成します。")
+                Text("保存銘柄、取得済み filing、チャット履歴をこの端末から削除し、端末識別情報を再生成して最初からやり直す状態に戻します。利用状況は新規ユーザー状態に戻る可能性があります。")
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
                 Button("データをリセット", role: .destructive) {

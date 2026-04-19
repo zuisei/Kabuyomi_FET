@@ -80,7 +80,9 @@ struct ConversationTimeline: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .onAppear {
-                scrollToBottom(proxy)
+                if hasStartedConversation {
+                    scrollToBottom(proxy)
+                }
             }
             .onChange(of: chatHistory.count) { _, _ in
                 scrollToBottom(proxy)
@@ -107,6 +109,8 @@ struct ConversationTimeline: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        guard hasStartedConversation else { return }
+
         DispatchQueue.main.async {
             withAnimation(.easeOut(duration: 0.22)) {
                 proxy.scrollTo("conversation-bottom", anchor: .bottom)

@@ -9,6 +9,10 @@ enum AIModelName {
         return trimmed.isEmpty ? remoteFallback : trimmed
     }
 
+    static func storedLegacyModelName(_ responseModelName: String?) -> String {
+        responseModelName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
     static func compactLabel(for rawModelName: String) -> String? {
         let normalized = normalize(rawModelName)
         guard !normalized.isEmpty, normalized != local else { return nil }

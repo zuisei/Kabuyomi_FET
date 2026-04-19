@@ -57,9 +57,13 @@ struct SearchView: View {
 
                 if isSearchFieldFocused {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("閉じる") {
+                        Button {
                             isSearchFieldFocused = false
+                        } label: {
+                            Image(systemName: "keyboard.chevron.compact.down")
+                                .font(.system(size: 18, weight: .semibold))
                         }
+                        .accessibilityLabel("キーボードを閉じる")
                     }
                 }
             }

@@ -561,6 +561,94 @@ describe("Gemini local chat fallback", () => {
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
   });
 
+  it("recovers metric-only guidance answers into filing-first context", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer: "売上高は 1,437.6億ドル で、前年同期比 15.7%増 です。",
+                      sourceIds: ["S9"]
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        })
+      })
+    );
+
+    const response = await generateChatAnswer({ GEMINI_API_KEY: "test-key" } as never, {
+      question: "ガイダンスや今後の見通しは強い？",
+      filing: {
+        filingKey: "v2:0000000000:000000000000000004",
+        ticker: "TEST",
+        companyName: "Test Corp",
+        cik: "0000000000",
+        formType: "10-Q",
+        filedAt: "2026-04-14",
+        periodOfReport: "2026-03-31",
+        primaryDocumentUrl: "https://example.com",
+        mdaText: "",
+        mdaTokenCount: 0,
+        metrics: [
+          {
+            logicalName: "revenue",
+            tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+            value: 143756000000,
+            unit: "USD",
+            periodEnd: "2026-03-31",
+            comparisonValue: 124300000000,
+            yoyPercent: 15.7
+          }
+        ],
+        generatedAt: "2026-04-14T00:00:00.000Z",
+        extractorVersion: "v2",
+        promptVersion: "v1",
+        summary: {
+          verdict: "",
+          highlights: [],
+          changes: []
+        },
+        sourceChunks: [
+          {
+            sourceId: "S7",
+            sectionType: "md_a",
+            sectionTitle: "Part I, Item 2",
+            sourceLabel: "10-Q Part I Item 2",
+            text: "Demand remained resilient across several customer groups despite a volatile macro environment.",
+            startOffset: 0,
+            endOffset: 87,
+            sortOrder: 1
+          },
+          {
+            sourceId: "S9",
+            sectionType: "xbrl_metric",
+            sectionTitle: "売上高",
+            sourceLabel: "XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)",
+            text: "売上高: 143756000000 USD / 比較値: 124300000000 / YoY: 15.7%",
+            startOffset: 0,
+            endOffset: 0,
+            tagName: "RevenueFromContractWithCustomerExcludingAssessedTax",
+            sortOrder: 9
+          }
+        ]
+      }
+    });
+
+    expect(response.sourceIds).toEqual(["S9", "S7"]);
+    expect(response.answer).toContain("売上高は 1,437.6億ドル");
+    expect(response.answer).toContain("この先を言い切ることはできません");
+  });
+
   it("falls back locally when Gemini times out", async () => {
     vi.stubGlobal(
       "fetch",

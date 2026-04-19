@@ -75,21 +75,26 @@ struct CompanyView: View {
 
             if activePanel == .library {
                 HStack(spacing: 0) {
-                    ConversationLibraryDrawer(
-                        query: $libraryQuery,
-                        currentTicker: currentTicker,
-                        savedCompanies: filteredSavedCompanies,
-                        recentCompanies: filteredRecentCompanies,
-                        starterCompanies: filteredStarterCompanies,
-                        searchResults: appModel.searchResults,
-                        isSearchLoading: appModel.searchIsLoading,
-                        selectTicker: selectTicker,
-                        openSearchResult: openSearchResult,
-                        openSettings: openSettingsScreen,
-                        close: closePanels
-                    )
-                    .id(libraryPanelID)
-                    .frame(maxWidth: 356)
+                    ZStack(alignment: .leading) {
+                        ConversationLibraryDrawer(
+                            query: $libraryQuery,
+                            currentTicker: currentTicker,
+                            savedCompanies: filteredSavedCompanies,
+                            recentCompanies: filteredRecentCompanies,
+                            starterCompanies: filteredStarterCompanies,
+                            searchResults: appModel.searchResults,
+                            isSearchLoading: appModel.searchIsLoading,
+                            selectTicker: selectTicker,
+                            openSearchResult: openSearchResult,
+                            openSettings: openSettingsScreen,
+                            close: closePanels
+                        )
+                        .id(libraryPanelID)
+                        .frame(maxWidth: 356)
+
+                        CompanyDrawerEdgeBlendLayer(style: .library)
+                    }
+                    .frame(maxWidth: 356, maxHeight: .infinity)
                     Spacer(minLength: 0)
                 }
                 .transition(.move(edge: .leading).combined(with: .opacity))
@@ -98,16 +103,21 @@ struct CompanyView: View {
             if activePanel == .summary, let company {
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
-                    SummaryDrawer(
-                        company: company,
-                        positiveInsights: buildPositiveInsights(for: company),
-                        negativeInsights: buildNegativeInsights(for: company),
-                        focusInsights: buildFocusInsights(for: company),
-                        openOriginal: { openPrimaryDocument(urlString: company.primaryDocumentUrl) },
-                        close: closePanels
-                    )
-                    .id(summaryPanelID)
-                    .frame(maxWidth: 372)
+                    ZStack(alignment: .trailing) {
+                        SummaryDrawer(
+                            company: company,
+                            positiveInsights: buildPositiveInsights(for: company),
+                            negativeInsights: buildNegativeInsights(for: company),
+                            focusInsights: buildFocusInsights(for: company),
+                            openOriginal: { openPrimaryDocument(urlString: company.primaryDocumentUrl) },
+                            close: closePanels
+                        )
+                        .id(summaryPanelID)
+                        .frame(maxWidth: 372)
+
+                        CompanyDrawerEdgeBlendLayer(style: .summary)
+                    }
+                    .frame(maxWidth: 372, maxHeight: .infinity)
                 }
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
@@ -576,5 +586,141 @@ private struct EdgePullZone: View {
                         }
                     }
             )
+    }
+}
+
+struct CompanyDrawerShellFadeMask: View {
+    let topFade: CGFloat
+    let bottomFade: CGFloat
+
+    init(topFade: CGFloat = 22, bottomFade: CGFloat = 30) {
+        self.topFade = topFade
+        self.bottomFade = bottomFade
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let height = max(proxy.size.height, 1)
+            let topStop = min(topFade / height, 0.22)
+            let bottomStart = max(1 - (bottomFade / height), topStop)
+
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black, location: topStop),
+                    .init(color: .black, location: bottomStart),
+                    .init(color: .clear, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+}
+
+private enum CompanyDrawerBlendStyle {
+    case library
+    case summary
+}
+
+private struct CompanyDrawerEdgeBlendLayer: View {
+    let style: CompanyDrawerBlendStyle
+
+    var body: some View {
+        VStack(spacing: 0) {
+            edgeBand(top: true)
+            Spacer(minLength: 0)
+            edgeBand(top: false)
+        }
+        .compositingGroup()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func edgeBand(top: Bool) -> some View {
+        let bandHeight = top ? 36.0 : 42.0
+
+        ZStack {
+            Rectangle()
+                .fill(sceneGradient(top: top))
+
+            Rectangle()
+                .fill(shellGradient(top: top))
+        }
+        .mask(edgeMask(top: top))
+        .frame(height: bandHeight)
+        .blur(radius: top ? 8 : 10)
+        .opacity(top ? 0.58 : 0.5)
+    }
+
+    private func sceneGradient(top: Bool) -> LinearGradient {
+        let anchorColors = top
+            ? [
+                Color(red: 0.995, green: 0.985, blue: 0.97).opacity(0.62),
+                Color.white.opacity(0.34),
+                Color(red: 0.97, green: 0.94, blue: 0.89).opacity(0.08)
+            ]
+            : [
+                Color(red: 0.93, green: 0.90, blue: 0.84).opacity(0.08),
+                Color(red: 0.97, green: 0.94, blue: 0.89).opacity(0.26),
+                Color(red: 0.995, green: 0.985, blue: 0.97).opacity(0.56)
+            ]
+
+        return LinearGradient(
+            colors: anchorColors,
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private func shellGradient(top: Bool) -> LinearGradient {
+        let leadColor: Color = switch style {
+        case .library:
+            Color.white.opacity(top ? 0.44 : 0.36)
+        case .summary:
+            KabuyomiTheme.paper.opacity(top ? 0.54 : 0.44)
+        }
+
+        let materialTint: Color = switch style {
+        case .library:
+            Color.white.opacity(top ? 0.12 : 0.08)
+        case .summary:
+            KabuyomiTheme.accentMist.opacity(top ? 0.16 : 0.12)
+        }
+
+        return LinearGradient(
+            stops: top
+                ? [
+                    .init(color: leadColor, location: 0),
+                    .init(color: materialTint, location: 0.42),
+                    .init(color: .clear, location: 1)
+                ]
+                : [
+                    .init(color: .clear, location: 0),
+                    .init(color: materialTint, location: 0.58),
+                    .init(color: leadColor, location: 1)
+                ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private func edgeMask(top: Bool) -> LinearGradient {
+        LinearGradient(
+            stops: top
+                ? [
+                    .init(color: .black, location: 0),
+                    .init(color: .black.opacity(0.84), location: 0.34),
+                    .init(color: .clear, location: 1)
+                ]
+                : [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black.opacity(0.84), location: 0.66),
+                    .init(color: .black, location: 1)
+                ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 }

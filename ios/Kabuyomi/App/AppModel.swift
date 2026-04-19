@@ -83,6 +83,7 @@ final class AppModel {
     #endif
 
     private var searchGeneration = 0
+    private var stateGeneration = 0
     private var addingTickers: Set<String> = []
     private var loadingTickers: Set<String> = []
     private var refreshedTickersThisSession: Set<String> = []
@@ -145,11 +146,12 @@ final class AppModel {
     }
 
     func search(query: String) async {
+        let stateGeneration = self.stateGeneration
         searchGeneration += 1
         let generation = searchGeneration
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            if generation == searchGeneration {
+            if stateGeneration == self.stateGeneration, generation == searchGeneration {
                 searchResults = []
                 searchIsLoading = false
             }
@@ -174,14 +176,14 @@ final class AppModel {
 
                     return left.ticker.localizedCaseInsensitiveCompare(right.ticker) == .orderedAscending
                 })
-            guard generation == searchGeneration else { return }
+            guard stateGeneration == self.stateGeneration, generation == searchGeneration else { return }
             searchResults = results
         } catch {
-            guard generation == searchGeneration else { return }
+            guard stateGeneration == self.stateGeneration, generation == searchGeneration else { return }
             handle(error)
         }
 
-        if generation == searchGeneration {
+        if stateGeneration == self.stateGeneration, generation == searchGeneration {
             searchIsLoading = false
         }
     }
@@ -234,6 +236,7 @@ final class AppModel {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         let normalized = normalizedTicker(ticker)
+        let stateGeneration = self.stateGeneration
         guard aiConsentGranted else {
             activeAlert = AppAlertState(
                 message: "AI 利用前に、質問内容と filing コンテキストを外部 AI モデルへ送信することへの同意が必要です。\n個人情報や口座情報は入力しないでください。",
@@ -250,8 +253,7 @@ final class AppModel {
         pendingChats[normalized] = PendingChatState(ticker: normalized, question: trimmed)
         chatIsSending = true
         defer {
-            chatIsSending = false
-            pendingChats.removeValue(forKey: normalized)
+            finishPendingChat(ticker: normalized, stateGeneration: stateGeneration)
         }
 
         do {
@@ -261,12 +263,20 @@ final class AppModel {
                 deviceKey: quotaDeviceKey(purpose: "chat-\(normalized)"),
                 debugUnlimited: isDevUnlimitedModeActive
             )
+            guard stateGeneration == self.stateGeneration else {
+                await ensureMinimumPendingChatDuration(since: pendingStartedAt)
+                return false
+            }
             try persistence.saveChat(question: trimmed, response: response, for: company)
             usage = response.usage
             chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized)?.chatHistory ?? []
             await ensureMinimumPendingChatDuration(since: pendingStartedAt)
             return true
         } catch {
+            guard stateGeneration == self.stateGeneration else {
+                await ensureMinimumPendingChatDuration(since: pendingStartedAt)
+                return false
+            }
             handle(error)
             await ensureMinimumPendingChatDuration(since: pendingStartedAt)
             return false
@@ -396,8 +406,9 @@ final class AppModel {
     func requestResetLocalDataConfirmation() {
         activeAlert = AppAlertState(
             message: """
-保存済みデータと取得済み filing、会話履歴を削除します。
-端末識別情報も再生成されるため、利用状況が新規ユーザー扱いに戻る可能性があります。
+保存済みデータと会話履歴をこの端末から削除します。
+取得済み filing も消え、利用状況は新規ユーザー状態に戻る可能性があります。
+端末識別情報は再生成され、最初からやり直す状態に戻ります。
 """,
             kind: .resetConfirmation
         )
@@ -410,6 +421,8 @@ final class AppModel {
 
     func resetLocalData() {
         do {
+            stateGeneration += 1
+            searchGeneration += 1
             try persistence.reset()
             deviceIdentity.reset()
             watchlist = []
@@ -420,6 +433,7 @@ final class AppModel {
             companyCache = [:]
             chatHistoryCache = [:]
             pendingChats = [:]
+            addingTickers = []
             loadingTickers = []
             refreshedTickersThisSession = []
             savedTickers = []
@@ -460,9 +474,10 @@ final class AppModel {
     func removeFromWatchlist(_ ticker: String) async {
         let normalized = normalizedTicker(ticker)
         guard !addingTickers.contains(normalized) else { return }
+        let stateGeneration = self.stateGeneration
 
         addingTickers.insert(normalized)
-        defer { addingTickers.remove(normalized) }
+        defer { finishTickerMutation(ticker: normalized, stateGeneration: stateGeneration) }
 
         do {
             let result = try await apiClient.removeFromWatchlist(
@@ -470,11 +485,13 @@ final class AppModel {
                 deviceKey: quotaDeviceKey(purpose: "bookmark-remove-\(normalized)"),
                 debugUnlimited: isDevUnlimitedModeActive
             )
+            guard stateGeneration == self.stateGeneration else { return }
             usage = result.usage
             savedTickers.removeAll(where: { $0 == normalized })
             UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
             loadHomeFromPersistence()
         } catch {
+            guard stateGeneration == self.stateGeneration else { return }
             handle(error)
         }
     }
@@ -506,6 +523,7 @@ final class AppModel {
     private func saveTicker(_ ticker: String, searchItem: SearchItem?, redirectToConversation: Bool) async {
         let normalized = normalizedTicker(ticker)
         guard !addingTickers.contains(normalized) else { return }
+        let stateGeneration = self.stateGeneration
 
         if isTickerInWatchlist(normalized) {
             if redirectToConversation {
@@ -519,7 +537,7 @@ final class AppModel {
         }
 
         addingTickers.insert(normalized)
-        defer { addingTickers.remove(normalized) }
+        defer { finishTickerMutation(ticker: normalized, stateGeneration: stateGeneration) }
 
         do {
             let result = try await apiClient.addToWatchlist(
@@ -527,6 +545,7 @@ final class AppModel {
                 deviceKey: quotaDeviceKey(purpose: "bookmark-add-\(normalized)"),
                 debugUnlimited: isDevUnlimitedModeActive
             )
+            guard stateGeneration == self.stateGeneration else { return }
             try persistence.saveCompany(result.company, searchItem: searchItem)
             usage = result.usage
             companyCache[normalized] = result.company
@@ -545,19 +564,24 @@ final class AppModel {
                 openConversation(for: normalized)
             }
         } catch {
+            guard stateGeneration == self.stateGeneration else { return }
             handle(error)
         }
     }
 
     private func refreshUsage() async {
+        let stateGeneration = self.stateGeneration
         usageLoadState = .loading
         do {
-            usage = try await apiClient.fetchUsage(
+            let usage = try await apiClient.fetchUsage(
                 deviceKey: quotaDeviceKey(purpose: "usage"),
                 debugUnlimited: isDevUnlimitedModeActive
             )
+            guard stateGeneration == self.stateGeneration else { return }
+            self.usage = usage
             usageLoadState = .loaded
         } catch {
+            guard stateGeneration == self.stateGeneration else { return }
             guard !shouldIgnore(error) else { return }
             usageLoadState = .failed
             if usage == nil {
@@ -576,12 +600,12 @@ final class AppModel {
 
     private func fetchCompanyRemote(ticker: String, forceRefresh: Bool) async {
         guard !loadingTickers.contains(ticker) else { return }
+        let stateGeneration = self.stateGeneration
 
         loadingTickers.insert(ticker)
         companyIsLoading = true
         defer {
-            loadingTickers.remove(ticker)
-            companyIsLoading = !loadingTickers.isEmpty
+            finishCompanyLoad(ticker: ticker, stateGeneration: stateGeneration)
         }
 
         do {
@@ -599,12 +623,14 @@ final class AppModel {
                         debugUnlimited: isDevUnlimitedModeActive
                     )
             )
+            guard stateGeneration == self.stateGeneration else { return }
             try persistence.saveCompany(company, searchItem: nil)
             companyCache[ticker] = company
             chatHistoryCache[ticker] = persistence.loadCompany(ticker: ticker)?.chatHistory ?? []
             refreshedTickersThisSession.insert(ticker)
             loadHomeFromPersistence()
         } catch {
+            guard stateGeneration == self.stateGeneration else { return }
             guard !shouldIgnore(error) else { return }
             if companyCache[ticker] == nil {
                 presentAlert(for: error)
@@ -615,6 +641,23 @@ final class AppModel {
     private func handle(_ error: Error) {
         guard !shouldIgnore(error) else { return }
         presentAlert(for: error)
+    }
+
+    private func finishPendingChat(ticker: String, stateGeneration: Int) {
+        guard stateGeneration == self.stateGeneration else { return }
+        pendingChats.removeValue(forKey: ticker)
+        chatIsSending = !pendingChats.isEmpty
+    }
+
+    private func finishTickerMutation(ticker: String, stateGeneration: Int) {
+        guard stateGeneration == self.stateGeneration else { return }
+        addingTickers.remove(ticker)
+    }
+
+    private func finishCompanyLoad(ticker: String, stateGeneration: Int) {
+        guard stateGeneration == self.stateGeneration else { return }
+        loadingTickers.remove(ticker)
+        companyIsLoading = !loadingTickers.isEmpty
     }
 
     private func presentAlert(for error: Error) {
@@ -726,32 +769,64 @@ final class AppModel {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let ticker = item.ticker.lowercased()
         let companyName = item.companyName.lowercased()
+        let queryAlias = normalizedClassTickerAlias(query)
+        let tickerAlias = normalizedClassTickerAlias(item.ticker)
 
         if ticker == normalizedQuery {
             return 0
         }
 
-        if ticker.hasPrefix(normalizedQuery) {
+        if let queryAlias, tickerAlias == queryAlias {
             return 1
         }
 
-        if companyName == normalizedQuery {
+        if ticker.hasPrefix(normalizedQuery) {
             return 2
         }
 
-        if companyName.hasPrefix(normalizedQuery) {
+        if let queryAlias, let tickerAlias, tickerAlias.hasPrefix(queryAlias) {
             return 3
         }
 
-        if ticker.contains(normalizedQuery) {
+        if companyName == normalizedQuery {
             return 4
         }
 
-        if companyName.contains(normalizedQuery) {
+        if companyName.hasPrefix(normalizedQuery) {
             return 5
         }
 
-        return 6
+        if ticker.contains(normalizedQuery) {
+            return 6
+        }
+
+        if let queryAlias, let tickerAlias, tickerAlias.contains(queryAlias) {
+            return 7
+        }
+
+        if companyName.contains(normalizedQuery) {
+            return 8
+        }
+
+        return 9
+    }
+
+    private func normalizedClassTickerAlias(_ value: String) -> String? {
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        let components = normalized
+            .components(separatedBy: CharacterSet(charactersIn: ".- "))
+            .filter { !$0.isEmpty }
+        guard components.count == 2 else {
+            return nil
+        }
+        guard normalized.rangeOfCharacter(from: CharacterSet(charactersIn: ".- ")) != nil else {
+            return nil
+        }
+
+        return "\(components[0]).\(components[1])"
     }
 
     private func loadHomeFromPersistence() {

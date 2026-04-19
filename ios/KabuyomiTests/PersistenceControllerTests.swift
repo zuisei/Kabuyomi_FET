@@ -65,6 +65,35 @@ final class PersistenceControllerTests: XCTestCase {
         XCTAssertEqual(loaded.chatHistory.last?.modelName, "gemini-2.5-flash")
     }
 
+    func testSaveChatKeepsBadgeHiddenForLegacyResponseWithoutModelName() throws {
+        let persistence = PersistenceController(inMemory: true)
+        let company = TestFixtures.companyPayload()
+
+        try persistence.saveCompany(company, searchItem: nil)
+        try persistence.saveChat(
+            question: "今回の変化は？",
+            response: ChatResponse(
+                answer: "売上高は増加しました。",
+                sources: [
+                    ChatSourcePayload(
+                        sourceId: "metric-revenue",
+                        sourceKind: .secFiling,
+                        sectionType: "xbrl_metric",
+                        sourceLabel: "Revenue",
+                        excerpt: "Revenue increased"
+                    )
+                ],
+                responsePath: nil,
+                modelName: nil,
+                usage: TestFixtures.usagePayload()
+            ),
+            for: company
+        )
+
+        let loaded = try XCTUnwrap(persistence.loadCompany(ticker: "AAPL"))
+        XCTAssertEqual(loaded.chatHistory.last?.modelName, "")
+    }
+
     func testSaveChatClearsModelBadgeForNonRemoteResponsePath() throws {
         let persistence = PersistenceController(inMemory: true)
         let company = TestFixtures.companyPayload()
