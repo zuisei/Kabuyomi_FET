@@ -1,5 +1,9 @@
 import type { DurableObjectState } from "@cloudflare/workers-types";
 import { QuotaRequestSchema } from "../lib/contracts";
+import { isAppError } from "../lib/errors";
+import { parseJsonBody } from "../lib/request";
+
+const QUOTA_PAYLOAD_MAX_BYTES = 8_192;
 
 interface QuotaRecord {
   plan: "free" | "pro";
@@ -26,19 +30,20 @@ export class UserQuotaDO {
   constructor(private readonly state: DurableObjectState) {}
 
   async fetch(request: Request): Promise<Response> {
-    let payload: unknown;
+    let body;
     try {
-      payload = await request.json();
-    } catch {
-      return this.reply({ error: "Invalid quota payload" }, 400);
+      body = await parseJsonBody(request, QuotaRequestSchema, {
+        invalidMessage: "Invalid quota payload",
+        maxBytes: QUOTA_PAYLOAD_MAX_BYTES,
+        tooLargeMessage: "Quota payload is too large"
+      });
+    } catch (error) {
+      if (!isAppError(error)) {
+        throw error;
+      }
+      return this.reply({ error: error.publicMessage }, error.status);
     }
 
-    const parsed = QuotaRequestSchema.safeParse(payload);
-    if (!parsed.success) {
-      return this.reply({ error: "Invalid quota payload" }, 400);
-    }
-
-    const body = parsed.data;
     const result = await this.state.blockConcurrencyWhile(async () => {
       const [dailyRecord, savedTickerRecord] = await Promise.all([
         this.loadDailyRecord(body.dateJST, body.plan, body.chatLimit),
@@ -215,7 +220,11 @@ export class UserQuotaDO {
   private reply(payload: unknown, status: number): Response {
     return new Response(JSON.stringify(payload), {
       status,
-      headers: { "content-type": "application/json" }
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff"
+      }
     });
   }
 }

@@ -27,8 +27,34 @@ describe("worker routing", () => {
     );
 
     expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     await expect(response.json()).resolves.toEqual({
       error: "Billing sync is disabled during beta"
+    });
+  });
+
+  it("returns 415 for chat requests without a JSON content type", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "利益率は改善した？"
+        })
+      }),
+      {
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(415);
+    await expect(response.json()).resolves.toEqual({
+      error: "Content-Type must be application/json"
     });
   });
 
@@ -50,6 +76,30 @@ describe("worker routing", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Invalid chat payload"
+    });
+  });
+
+  it("returns 413 for oversized chat payloads before parsing the body", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "a".repeat(5_000)
+        })
+      }),
+      {
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Chat payload is too large"
     });
   });
 

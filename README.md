@@ -63,6 +63,7 @@ Unit tests live under `ios/KabuyomiTests/` and can be run with `xcodebuild test`
 
 - Saved tickers are persistent on the server. In `/v1/usage`, `stocksUsed` means the current saved ticker count, not "today's stock consumption".
 - Daily quota currently applies only to chats and resets on JST day boundaries.
+- Free-plan quota identity currently trusts the client-provided `x-device-key`. That is acceptable for the current beta, but it is not abuse-resistant because rotating keys can evade the beta limits; production hardening would need a server-issued identity or attestation.
 - `/v1/watchlist/add` saves a ticker. `/v1/watchlist/remove` removes it and returns updated usage.
 - `/v1/chat` returns `responsePath`; `modelName` is populated only when the answer actually used the remote Gemini path.
 - `resetLocalData()` is a full "start over" reset: local saved data and chat history are cleared, device identity is regenerated, and usage may come back in a new-user state.

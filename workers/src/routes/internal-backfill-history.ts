@@ -2,9 +2,12 @@ import { BackfillHistoryRequestSchema } from "../lib/contracts";
 import { backfillHistoricalFilings } from "../lib/history-store";
 import { isAuthorizedInternalRequest } from "../lib/internal-auth";
 import { ensureHistoricalFilingStored } from "../lib/pipeline";
-import { badRequest, json } from "../lib/response";
+import { json } from "../lib/response";
+import { parseJsonBody } from "../lib/request";
 import { resolveTrackedTickersForExecution } from "../lib/tracked-tickers";
 import type { RouteHandler } from "./types";
+
+const INTERNAL_BACKFILL_PAYLOAD_MAX_BYTES = 32_768;
 
 export const handleInternalBackfillHistoryRoute: RouteHandler = async ({ request, url, env, config }) => {
   if (!(request.method === "POST" && url.pathname === "/v1/internal/backfill/history")) {
@@ -15,24 +18,18 @@ export const handleInternalBackfillHistoryRoute: RouteHandler = async ({ request
     return json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return badRequest("Invalid backfill payload");
-  }
-
-  const parsed = BackfillHistoryRequestSchema.safeParse(payload);
-  if (!parsed.success) {
-    return badRequest("Invalid backfill payload");
-  }
+  const payload = await parseJsonBody(request, BackfillHistoryRequestSchema, {
+    invalidMessage: "Invalid backfill payload",
+    maxBytes: INTERNAL_BACKFILL_PAYLOAD_MAX_BYTES,
+    tooLargeMessage: "Backfill payload is too large"
+  });
 
   const result = await backfillHistoricalFilings(
     {
-      ...parsed.data,
+      ...payload,
       tickers:
-        parsed.data.tickers?.length
-          ? await resolveTrackedTickersForExecution({ trackedTickers: parsed.data.tickers }, env)
+        payload.tickers?.length
+          ? await resolveTrackedTickersForExecution({ trackedTickers: payload.tickers }, env)
           : await resolveTrackedTickersForExecution(config, env)
     },
     env,

@@ -1,9 +1,11 @@
 import http from "node:http";
+import { RequestBodyError, readJsonRequestBody } from "./src/request-body.mjs";
 import { createSecService, readConfig, validateInternalToken } from "./src/sec-service.mjs";
 
 const port = Number.parseInt(process.env.PORT ?? "8789", 10);
 const host = process.env.HOST ?? "0.0.0.0";
 const config = readConfig();
+const INTERNAL_REQUEST_MAX_BODY_BYTES = 16 * 1024;
 
 if (!config.internalToken.trim()) {
   throw new Error("SEC_FETCHER_SHARED_SECRET is required");
@@ -25,7 +27,7 @@ const server = http.createServer(async (request, response) => {
       return respondJson(response, 401, { error: "Unauthorized" });
     }
 
-    const body = await readJson(request);
+    const body = await readJsonRequestBody(request, { maxBytes: INTERNAL_REQUEST_MAX_BODY_BYTES });
 
     if (request.url === "/internal/sec/tickers-snapshot") {
       const payload = await service.fetchTickerSnapshot();
@@ -76,6 +78,9 @@ const server = http.createServer(async (request, response) => {
 
     return respondJson(response, 404, { error: "Not found" });
   } catch (error) {
+    if (error instanceof RequestBodyError) {
+      return respondJson(response, error.statusCode, { error: error.message });
+    }
     return respondJson(response, 502, { error: error instanceof Error ? error.message : "Unknown error" });
   }
 });
@@ -85,26 +90,10 @@ server.listen(port, host, () => {
 });
 
 function respondJson(response, statusCode, payload) {
-  response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
-  response.end(JSON.stringify(payload));
-}
-
-function readJson(request) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    request.on("data", (chunk) => chunks.push(chunk));
-    request.on("end", () => {
-      if (chunks.length === 0) {
-        resolve({});
-        return;
-      }
-
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-      } catch (error) {
-        reject(error);
-      }
-    });
-    request.on("error", reject);
+  response.writeHead(statusCode, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff"
   });
+  response.end(JSON.stringify(payload));
 }

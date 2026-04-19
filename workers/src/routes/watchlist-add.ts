@@ -3,34 +3,31 @@ import { WatchlistAddRequestSchema } from "../lib/contracts";
 import { logErrorEvent } from "../lib/logging";
 import { ensureLatestFiling } from "../lib/pipeline";
 import { consumeStockQuotaWithMutation, promoteSavedTickerAlias, readQuotaIdentity, refundStockQuota } from "../lib/quota";
-import { badRequest, json, notFound } from "../lib/response";
+import { json, notFound } from "../lib/response";
+import { parseJsonBody } from "../lib/request";
 import { serializeCompanyResponse } from "../lib/company-response";
 import type { RouteHandler } from "./types";
+
+const WATCHLIST_PAYLOAD_MAX_BYTES = 1_024;
 
 export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env, config, ctx }) => {
   if (!(request.method === "POST" && url.pathname === "/v1/watchlist/add")) {
     return null;
   }
 
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return badRequest("Invalid ticker payload");
-  }
-
-  const parsed = WatchlistAddRequestSchema.safeParse(payload);
-  if (!parsed.success) {
-    return badRequest("Invalid ticker payload");
-  }
+  const payload = await parseJsonBody(request, WatchlistAddRequestSchema, {
+    invalidMessage: "Invalid ticker payload",
+    maxBytes: WATCHLIST_PAYLOAD_MAX_BYTES,
+    tooLargeMessage: "Ticker payload is too large"
+  });
 
   const identity = await readQuotaIdentity(request, env, {
     requireDeviceKey: true,
     allowDebugUnlimited: true
   });
-  const tickerRecord = await lookupTicker(parsed.data.ticker, env);
+  const tickerRecord = await lookupTicker(payload.ticker, env);
   if (!tickerRecord) {
-    return notFound(`Ticker not found: ${parsed.data.ticker}`);
+    return notFound(`Ticker not found: ${payload.ticker}`);
   }
   const relatedTickers = await listTickersByCik(tickerRecord.cik, env);
 

@@ -4,10 +4,13 @@ import { ChatRequestSchema } from "../lib/contracts";
 import { isCurrentCacheRecord, loadFilingByKey } from "../lib/filings/cache";
 import { buildChatResponse } from "../lib/pipeline";
 import { consumeChatQuota, ensureCompanyAccessAllowed, readQuotaIdentity, refundChatQuota } from "../lib/quota";
+import { parseJsonBody } from "../lib/request";
 import { logErrorEvent, logEvent } from "../lib/logging";
-import { badRequest, json, notFound, unavailable } from "../lib/response";
+import { json, notFound, unavailable } from "../lib/response";
 import { STARTER_TICKERS } from "../lib/starter-tickers";
 import type { RouteHandler } from "./types";
+
+const CHAT_PAYLOAD_MAX_BYTES = 4_096;
 
 export const handleChatRoute: RouteHandler = async ({ request, url, env, config, ctx }) => {
   if (!(request.method === "POST" && url.pathname === "/v1/chat")) {
@@ -18,20 +21,14 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
     return unavailable("Chat is temporarily disabled");
   }
 
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return badRequest("Invalid chat payload");
-  }
-
-  const parsed = ChatRequestSchema.safeParse(payload);
-  if (!parsed.success) {
-    return badRequest("Invalid chat payload");
-  }
+  const payload = await parseJsonBody(request, ChatRequestSchema, {
+    invalidMessage: "Invalid chat payload",
+    maxBytes: CHAT_PAYLOAD_MAX_BYTES,
+    tooLargeMessage: "Chat payload is too large"
+  });
 
   try {
-    const requestedFiling = await loadFilingByKey(parsed.data.filingKey, env);
+    const requestedFiling = await loadFilingByKey(payload.filingKey, env);
     if (!requestedFiling || !isCurrentCacheRecord(requestedFiling, config)) {
       return notFound("Filing cache not found");
     }
@@ -46,7 +43,7 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
     const startedAt = Date.now();
     const answer = await (async () => {
       try {
-        return await buildChatResponse(requestedFiling, parsed.data.question, env, config);
+        return await buildChatResponse(requestedFiling, payload.question, env, config);
       } catch (error) {
         try {
           await refundChatQuota(identity, env, config);
@@ -78,7 +75,7 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
     });
   } catch (error) {
     logErrorEvent("chat_request_failed", {
-      filingKey: parsed.data.filingKey,
+      filingKey: payload.filingKey,
       reason: error instanceof Error ? error.message : String(error)
     });
     throw error;
