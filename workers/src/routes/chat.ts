@@ -1,3 +1,4 @@
+import { listTickersByCik } from "../clients/sec";
 import { resolveGeminiModel } from "../clients/gemini/request";
 import { ChatRequestSchema } from "../lib/contracts";
 import { isCurrentCacheRecord, loadFilingByKey } from "../lib/filings/cache";
@@ -39,7 +40,8 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
       requireDeviceKey: true,
       allowDebugUnlimited: true
     });
-    await ensureCompanyAccessAllowed(identity, requestedFiling.ticker, STARTER_TICKERS, env, config);
+    const relatedTickers = await listTickersByCik(requestedFiling.cik, env);
+    await ensureCompanyAccessAllowed(identity, requestedFiling.ticker, STARTER_TICKERS, env, config, { relatedTickers });
     const usage = await consumeChatQuota(identity, env, config);
     const startedAt = Date.now();
     const answer = await (async () => {

@@ -1,4 +1,4 @@
-import { lookupTicker } from "../clients/sec";
+import { listTickersByCik, lookupTicker } from "../clients/sec";
 import { ensureLatestFiling } from "../lib/pipeline";
 import { ensureCompanyAccessAllowed, readQuotaIdentity } from "../lib/quota";
 import { badRequest, json, notFound } from "../lib/response";
@@ -28,14 +28,15 @@ export const handleCompanyRoute: RouteHandler = async ({ request, url, env, conf
       if (!tickerRecord) {
         return notFound(`Ticker not found: ${ticker}`);
       }
+      const relatedTickers = await listTickersByCik(tickerRecord.cik, env);
       const normalizedRequestedTicker = ticker.trim().toUpperCase();
       const needsAliasResolution = /[.\-\s]/.test(normalizedRequestedTicker);
       if (!needsAliasResolution) {
-        await ensureCompanyAccessAllowed(identity, normalizedRequestedTicker, STARTER_TICKERS, env, config);
+        await ensureCompanyAccessAllowed(identity, normalizedRequestedTicker, STARTER_TICKERS, env, config, { relatedTickers });
       }
 
       if (needsAliasResolution || tickerRecord.ticker !== normalizedRequestedTicker) {
-        await ensureCompanyAccessAllowed(identity, tickerRecord.ticker, STARTER_TICKERS, env, config);
+        await ensureCompanyAccessAllowed(identity, tickerRecord.ticker, STARTER_TICKERS, env, config, { relatedTickers });
       }
       const filing = await ensureLatestFiling(tickerRecord.ticker, env, config, {
         executionContext: ctx,
@@ -68,14 +69,15 @@ export const handleCompanyRoute: RouteHandler = async ({ request, url, env, conf
       if (!tickerRecord) {
         return notFound(`Ticker not found: ${ticker}`);
       }
+      const relatedTickers = await listTickersByCik(tickerRecord.cik, env);
       const normalizedRequestedTicker = ticker.trim().toUpperCase();
       const needsAliasResolution = /[.\-\s]/.test(normalizedRequestedTicker);
       if (!needsAliasResolution) {
-        await ensureCompanyAccessAllowed(identity, normalizedRequestedTicker, STARTER_TICKERS, env, config);
+        await ensureCompanyAccessAllowed(identity, normalizedRequestedTicker, STARTER_TICKERS, env, config, { relatedTickers });
       }
 
       if (needsAliasResolution || tickerRecord.ticker !== normalizedRequestedTicker) {
-        await ensureCompanyAccessAllowed(identity, tickerRecord.ticker, STARTER_TICKERS, env, config);
+        await ensureCompanyAccessAllowed(identity, tickerRecord.ticker, STARTER_TICKERS, env, config, { relatedTickers });
       }
       let filing;
       try {

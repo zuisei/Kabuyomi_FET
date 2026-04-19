@@ -24,6 +24,10 @@ export interface QuotaMutationResult {
   didMutate: boolean;
 }
 
+interface TickerQuotaOptions {
+  relatedTickers?: readonly string[];
+}
+
 export async function readQuotaIdentity(
   request: Request,
   env: Pick<Env, "DEBUG_UNLIMITED_ENABLED"> = {},
@@ -82,9 +86,10 @@ export async function ensureStockQuotaAvailable(
   identity: QuotaIdentity,
   ticker: string,
   env: Env,
-  config: RemoteConfig
+  config: RemoteConfig,
+  options: TickerQuotaOptions = {}
 ): Promise<UsageState> {
-  return (await mutateUsage(identity, env, config, "checkStock", ticker)).usage;
+  return (await mutateUsage(identity, env, config, "checkStock", ticker, options)).usage;
 }
 
 export async function consumeChatQuota(
@@ -107,36 +112,50 @@ export async function consumeStockQuota(
   identity: QuotaIdentity,
   ticker: string,
   env: Env,
-  config: RemoteConfig
+  config: RemoteConfig,
+  options: TickerQuotaOptions = {}
 ): Promise<UsageState> {
-  return (await mutateUsage(identity, env, config, "consumeStock", ticker)).usage;
+  return (await mutateUsage(identity, env, config, "consumeStock", ticker, options)).usage;
 }
 
 export async function consumeStockQuotaWithMutation(
   identity: QuotaIdentity,
   ticker: string,
   env: Env,
-  config: RemoteConfig
+  config: RemoteConfig,
+  options: TickerQuotaOptions = {}
 ): Promise<QuotaMutationResult> {
-  return mutateUsage(identity, env, config, "consumeStock", ticker);
+  return mutateUsage(identity, env, config, "consumeStock", ticker, options);
 }
 
 export async function refundStockQuota(
   identity: QuotaIdentity,
   ticker: string,
   env: Env,
-  config: RemoteConfig
+  config: RemoteConfig,
+  options: TickerQuotaOptions = {}
 ): Promise<UsageState> {
-  return (await mutateUsage(identity, env, config, "refundStock", ticker)).usage;
+  return (await mutateUsage(identity, env, config, "refundStock", ticker, options)).usage;
+}
+
+export async function promoteSavedTickerAlias(
+  identity: QuotaIdentity,
+  ticker: string,
+  env: Env,
+  config: RemoteConfig,
+  options: TickerQuotaOptions = {}
+): Promise<UsageState> {
+  return (await mutateUsage(identity, env, config, "promoteTicker", ticker, options)).usage;
 }
 
 export async function removeTickerFromSavedQuota(
   identity: QuotaIdentity,
   ticker: string,
   env: Env,
-  config: RemoteConfig
+  config: RemoteConfig,
+  options: TickerQuotaOptions = {}
 ): Promise<UsageState> {
-  return (await mutateUsage(identity, env, config, "removeTicker", ticker)).usage;
+  return (await mutateUsage(identity, env, config, "removeTicker", ticker, options)).usage;
 }
 
 export async function ensureCompanyAccessAllowed(
@@ -144,7 +163,8 @@ export async function ensureCompanyAccessAllowed(
   ticker: string,
   previewTickers: readonly string[],
   env: Env,
-  config: RemoteConfig
+  config: RemoteConfig,
+  options: TickerQuotaOptions = {}
 ): Promise<void> {
   const isProPlan = identity.plan === "pro";
   if (isProPlan || identity.quotaSubject.startsWith("free:debug:")) {
@@ -163,7 +183,8 @@ export async function ensureCompanyAccessAllowed(
       ticker,
       chatLimit: isProPlan ? config.proDailyChatLimit : config.freeDailyChatLimit,
       stockLimit: isProPlan ? Number.MAX_SAFE_INTEGER : config.freeStockLimit,
-      previewTickers: normalizePreviewTickers(previewTickers)
+      previewTickers: normalizePreviewTickers(previewTickers),
+      relatedTickers: normalizePreviewTickers(options.relatedTickers ?? [])
     })
   });
 
@@ -237,8 +258,10 @@ async function mutateUsage(
     | "refundChat"
     | "consumeStock"
     | "refundStock"
-    | "removeTicker",
-  ticker?: string
+    | "removeTicker"
+    | "promoteTicker",
+  ticker?: string,
+  options: TickerQuotaOptions = {}
 ): Promise<QuotaMutationResult> {
   const stub = env.USER_QUOTA.getByName(identity.quotaSubject);
   const dateJST = buildQuotaDateJST();
@@ -252,6 +275,7 @@ async function mutateUsage(
       plan: identity.plan,
       dateJST,
       ticker,
+      relatedTickers: normalizePreviewTickers(options.relatedTickers ?? []),
       chatLimit: identity.plan === "pro" ? config.proDailyChatLimit : config.freeDailyChatLimit,
       stockLimit: identity.plan === "pro" ? Number.MAX_SAFE_INTEGER : config.freeStockLimit
     })

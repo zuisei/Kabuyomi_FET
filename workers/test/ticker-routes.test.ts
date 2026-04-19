@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/clients/sec", () => ({
-  lookupTicker: vi.fn()
+  lookupTicker: vi.fn(),
+  listTickersByCik: vi.fn()
 }));
 
 vi.mock("../src/lib/pipeline", () => ({
@@ -11,6 +12,7 @@ vi.mock("../src/lib/pipeline", () => ({
 vi.mock("../src/lib/quota", () => ({
   readQuotaIdentity: vi.fn(),
   consumeStockQuotaWithMutation: vi.fn(),
+  promoteSavedTickerAlias: vi.fn(),
   refundStockQuota: vi.fn(),
   removeTickerFromSavedQuota: vi.fn(),
   ensureCompanyAccessAllowed: vi.fn()
@@ -19,20 +21,23 @@ vi.mock("../src/lib/quota", () => ({
 import { handleCompanyRoute } from "../src/routes/company";
 import { handleWatchlistAddRoute } from "../src/routes/watchlist-add";
 import { handleWatchlistRemoveRoute } from "../src/routes/watchlist-remove";
-import { lookupTicker } from "../src/clients/sec";
+import { listTickersByCik, lookupTicker } from "../src/clients/sec";
 import { ensureLatestFiling } from "../src/lib/pipeline";
 import {
   consumeStockQuotaWithMutation,
   ensureCompanyAccessAllowed,
+  promoteSavedTickerAlias,
   readQuotaIdentity,
   refundStockQuota,
   removeTickerFromSavedQuota
 } from "../src/lib/quota";
 
 const mockLookupTicker = vi.mocked(lookupTicker);
+const mockListTickersByCik = vi.mocked(listTickersByCik);
 const mockEnsureLatestFiling = vi.mocked(ensureLatestFiling);
 const mockReadQuotaIdentity = vi.mocked(readQuotaIdentity);
 const mockConsumeStockQuotaWithMutation = vi.mocked(consumeStockQuotaWithMutation);
+const mockPromoteSavedTickerAlias = vi.mocked(promoteSavedTickerAlias);
 const mockRefundStockQuota = vi.mocked(refundStockQuota);
 const mockRemoveTickerFromSavedQuota = vi.mocked(removeTickerFromSavedQuota);
 const mockEnsureCompanyAccessAllowed = vi.mocked(ensureCompanyAccessAllowed);
@@ -82,6 +87,8 @@ function makeFiling(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockReadQuotaIdentity.mockResolvedValue(identity as never);
+  mockListTickersByCik.mockResolvedValue(["GOOG", "GOOGL"] as never);
+  mockPromoteSavedTickerAlias.mockResolvedValue(usage as never);
 });
 
 describe("ticker-aware routes", () => {
@@ -117,7 +124,13 @@ describe("ticker-aware routes", () => {
       },
       usage
     });
-    expect(mockConsumeStockQuotaWithMutation).toHaveBeenCalledWith(identity, "GOOG", expect.anything(), expect.anything());
+    expect(mockConsumeStockQuotaWithMutation).toHaveBeenCalledWith(
+      identity,
+      "GOOG",
+      expect.anything(),
+      expect.anything(),
+      { relatedTickers: ["GOOG", "GOOGL"] }
+    );
     expect(mockEnsureLatestFiling).toHaveBeenCalledWith(
       "GOOG",
       expect.anything(),
@@ -130,6 +143,43 @@ describe("ticker-aware routes", () => {
       mockEnsureLatestFiling.mock.invocationCallOrder[0]!
     );
     expect(mockRefundStockQuota).not.toHaveBeenCalled();
+    expect(mockPromoteSavedTickerAlias).not.toHaveBeenCalled();
+  });
+
+  it("promotes the requested ticker label when the issuer group was already saved", async () => {
+    mockLookupTicker.mockResolvedValue({
+      ticker: "BRK-B",
+      companyName: "Berkshire Hathaway Inc.",
+      cik: "0001067983",
+      exchange: "NYSE"
+    });
+    mockListTickersByCik.mockResolvedValue(["BRK-A", "BRK-B"] as never);
+    mockEnsureLatestFiling.mockResolvedValue(makeFiling({ ticker: "BRK-A", cik: "0001067983" }) as never);
+    mockConsumeStockQuotaWithMutation.mockResolvedValue({ usage, didMutate: false } as never);
+
+    const response = await handleWatchlistAddRoute({
+      request: new Request("https://kabuyomi.test/v1/watchlist/add", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({ ticker: "BRK.B" })
+      }),
+      url: new URL("https://kabuyomi.test/v1/watchlist/add"),
+      env: {} as never,
+      config: {} as never,
+      ctx: {} as never
+    });
+
+    expect(response?.status).toBe(200);
+    expect(mockPromoteSavedTickerAlias).toHaveBeenCalledWith(
+      identity,
+      "BRK-B",
+      expect.anything(),
+      expect.anything(),
+      { relatedTickers: ["BRK-A", "BRK-B"] }
+    );
   });
 
   it("normalizes separator aliases before company access checks and response serialization", async () => {
@@ -139,6 +189,7 @@ describe("ticker-aware routes", () => {
       cik: "0001067983",
       exchange: "NYSE"
     });
+    mockListTickersByCik.mockResolvedValue(["BRK-A", "BRK-B"] as never);
     mockEnsureCompanyAccessAllowed.mockResolvedValue(undefined);
     mockEnsureLatestFiling.mockResolvedValue(
       makeFiling({
@@ -166,7 +217,14 @@ describe("ticker-aware routes", () => {
     await expect(response?.json()).resolves.toMatchObject({
       ticker: "BRK-B"
     });
-    expect(mockEnsureCompanyAccessAllowed).toHaveBeenCalledWith(identity, "BRK-B", expect.any(Array), expect.anything(), expect.anything());
+    expect(mockEnsureCompanyAccessAllowed).toHaveBeenCalledWith(
+      identity,
+      "BRK-B",
+      expect.any(Array),
+      expect.anything(),
+      expect.anything(),
+      { relatedTickers: ["BRK-A", "BRK-B"] }
+    );
     expect(mockEnsureLatestFiling).toHaveBeenCalledWith(
       "BRK-B",
       expect.anything(),
@@ -184,6 +242,7 @@ describe("ticker-aware routes", () => {
       cik: "0001067983",
       exchange: "NYSE"
     });
+    mockListTickersByCik.mockResolvedValue(["BRK-A", "BRK-B"] as never);
     mockRemoveTickerFromSavedQuota.mockResolvedValue(usage as never);
 
     const response = await handleWatchlistRemoveRoute({
@@ -203,7 +262,13 @@ describe("ticker-aware routes", () => {
 
     expect(response?.status).toBe(200);
     await expect(response?.json()).resolves.toMatchObject({ usage });
-    expect(mockRemoveTickerFromSavedQuota).toHaveBeenCalledWith(identity, "BRK-B", expect.anything(), expect.anything());
+    expect(mockRemoveTickerFromSavedQuota).toHaveBeenCalledWith(
+      identity,
+      "BRK-B",
+      expect.anything(),
+      expect.anything(),
+      { relatedTickers: ["BRK-A", "BRK-B"] }
+    );
   });
 
   it("returns notFound for unknown tickers before access checks", async () => {
@@ -236,6 +301,7 @@ describe("ticker-aware routes", () => {
       cik: "0001652044",
       exchange: "Nasdaq"
     });
+    mockListTickersByCik.mockResolvedValue(["GOOG", "GOOGL"] as never);
     mockConsumeStockQuotaWithMutation.mockResolvedValue({ usage, didMutate: true } as never);
     mockRefundStockQuota.mockResolvedValue(usage as never);
     mockEnsureLatestFiling.mockRejectedValue(new Error("Filing fetch failed"));
@@ -257,6 +323,12 @@ describe("ticker-aware routes", () => {
       })
     ).rejects.toThrow("Filing fetch failed");
 
-    expect(mockRefundStockQuota).toHaveBeenCalledWith(identity, "GOOG", expect.anything(), expect.anything());
+    expect(mockRefundStockQuota).toHaveBeenCalledWith(
+      identity,
+      "GOOG",
+      expect.anything(),
+      expect.anything(),
+      { relatedTickers: ["GOOG", "GOOGL"] }
+    );
   });
 });

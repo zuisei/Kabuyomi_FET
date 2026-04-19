@@ -1,4 +1,4 @@
-import { lookupTicker } from "../clients/sec";
+import { listTickersByCik, lookupTicker } from "../clients/sec";
 import { WatchlistRemoveRequestSchema } from "../lib/contracts";
 import { readQuotaIdentity, removeTickerFromSavedQuota } from "../lib/quota";
 import { badRequest, json } from "../lib/response";
@@ -26,11 +26,13 @@ export const handleWatchlistRemoveRoute: RouteHandler = async ({ request, url, e
     allowDebugUnlimited: true
   });
   const tickerRecord = await lookupTicker(parsed.data.ticker, env);
+  const relatedTickers = tickerRecord ? await listTickersByCik(tickerRecord.cik, env) : [];
   const usage = await removeTickerFromSavedQuota(
     identity,
     tickerRecord?.ticker ?? parsed.data.ticker.trim().toUpperCase(),
     env,
-    config
+    config,
+    { relatedTickers }
   );
 
   return json({ usage });

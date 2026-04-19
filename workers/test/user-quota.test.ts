@@ -125,6 +125,40 @@ describe("UserQuotaDO", () => {
     });
   });
 
+  it("deduplicates saved ticker slots across related issuer tickers", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+
+    await postQuota(quota, {
+      action: "consumeStock",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-14",
+      ticker: "BRK-A",
+      relatedTickers: ["BRK-B"],
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    const second = await postQuota(quota, {
+      action: "consumeStock",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-14",
+      ticker: "BRK-B",
+      relatedTickers: ["BRK-A"],
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    await expect(second.json()).resolves.toMatchObject({
+      usage: {
+        stocksUsed: 1,
+        savedTickers: ["BRK-A"]
+      },
+      didMutate: false
+    });
+  });
+
   it("allows starter preview access without consuming a stock slot", async () => {
     const quota = new UserQuotaDO(createState() as never);
 
@@ -223,6 +257,41 @@ describe("UserQuotaDO", () => {
     await expect(allowed.json()).resolves.toMatchObject({
       usage: {
         stocksUsed: 1
+      }
+    });
+  });
+
+  it("allows company access through a related issuer ticker that shares the saved slot", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+
+    await postQuota(quota, {
+      action: "consumeStock",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-14",
+      ticker: "BRK-B",
+      relatedTickers: ["BRK-A"],
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    const allowed = await postQuota(quota, {
+      action: "checkCompanyAccess",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-14",
+      ticker: "BRK-A",
+      relatedTickers: ["BRK-B"],
+      previewTickers: [],
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    expect(allowed.status).toBe(200);
+    await expect(allowed.json()).resolves.toMatchObject({
+      usage: {
+        stocksUsed: 1,
+        savedTickers: ["BRK-B"]
       }
     });
   });
@@ -394,6 +463,40 @@ describe("UserQuotaDO", () => {
     });
   });
 
+  it("promotes the saved ticker label within a related issuer group", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+
+    await postQuota(quota, {
+      action: "consumeStock",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      ticker: "BRK-A",
+      relatedTickers: ["BRK-B"],
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    const promoted = await postQuota(quota, {
+      action: "promoteTicker",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      ticker: "BRK-B",
+      relatedTickers: ["BRK-A"],
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    await expect(promoted.json()).resolves.toMatchObject({
+      usage: {
+        stocksUsed: 1,
+        savedTickers: ["BRK-B"]
+      },
+      didMutate: true
+    });
+  });
+
   it("keeps saved tickers across JST day boundaries while resetting chat usage", async () => {
     const quota = new UserQuotaDO(createState() as never);
 
@@ -519,6 +622,40 @@ describe("UserQuotaDO", () => {
     });
 
     await expect(refunded.json()).resolves.toMatchObject({
+      usage: {
+        stocksUsed: 0,
+        savedTickers: []
+      },
+      didMutate: true
+    });
+  });
+
+  it("removes a related issuer group when any sibling ticker is removed", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+
+    await postQuota(quota, {
+      action: "consumeStock",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      ticker: "BRK-A",
+      relatedTickers: ["BRK-B"],
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    const removed = await postQuota(quota, {
+      action: "removeTicker",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      ticker: "BRK-B",
+      relatedTickers: ["BRK-A"],
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    await expect(removed.json()).resolves.toMatchObject({
       usage: {
         stocksUsed: 0,
         savedTickers: []

@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_REMOTE_CONFIG } from "../src/lib/remote-config";
 
+vi.mock("../src/clients/sec", () => ({
+  listTickersByCik: vi.fn()
+}));
+
 vi.mock("../src/lib/pipeline", () => ({
   buildChatResponse: vi.fn()
 }));
@@ -22,6 +26,7 @@ vi.mock("../src/clients/gemini/request", () => ({
 }));
 
 import { handleChatRoute } from "../src/routes/chat";
+import { listTickersByCik } from "../src/clients/sec";
 import { loadFilingByKey, isCurrentCacheRecord } from "../src/lib/filings/cache";
 import { buildChatResponse } from "../src/lib/pipeline";
 import {
@@ -32,6 +37,7 @@ import {
 } from "../src/lib/quota";
 
 const mockBuildChatResponse = vi.mocked(buildChatResponse);
+const mockListTickersByCik = vi.mocked(listTickersByCik);
 const mockLoadFilingByKey = vi.mocked(loadFilingByKey);
 const mockIsCurrentCacheRecord = vi.mocked(isCurrentCacheRecord);
 const mockReadQuotaIdentity = vi.mocked(readQuotaIdentity);
@@ -62,9 +68,11 @@ describe("handleChatRoute", () => {
     mockLoadFilingByKey.mockResolvedValue({
       filingKey: "filing-1",
       ticker: "ORCL",
+      cik: "0001341439",
       extractorVersion: DEFAULT_REMOTE_CONFIG.extractorVersion,
       promptVersion: DEFAULT_REMOTE_CONFIG.promptVersion
     } as never);
+    mockListTickersByCik.mockResolvedValue(["ORCL"] as never);
     mockIsCurrentCacheRecord.mockReturnValue(true);
     mockReadQuotaIdentity.mockResolvedValue(identity as never);
     mockConsumeChatQuota.mockResolvedValue(usage as never);
@@ -106,7 +114,8 @@ describe("handleChatRoute", () => {
       "ORCL",
       expect.any(Array),
       expect.anything(),
-      expect.anything()
+      expect.anything(),
+      { relatedTickers: ["ORCL"] }
     );
     expect(mockBuildChatResponse).toHaveBeenCalledWith(
       expect.objectContaining({ filingKey: "filing-1" }),
@@ -207,5 +216,49 @@ describe("handleChatRoute", () => {
 
     expect(mockConsumeChatQuota).toHaveBeenCalledWith(identity, expect.anything(), expect.anything());
     expect(mockRefundChatQuota).toHaveBeenCalledWith(identity, expect.anything(), expect.anything());
+  });
+
+  it("allows filing chat access through a related issuer ticker group", async () => {
+    mockLoadFilingByKey.mockResolvedValue({
+      filingKey: "filing-1",
+      ticker: "BRK-A",
+      cik: "0001067983",
+      extractorVersion: DEFAULT_REMOTE_CONFIG.extractorVersion,
+      promptVersion: DEFAULT_REMOTE_CONFIG.promptVersion
+    } as never);
+    mockListTickersByCik.mockResolvedValue(["BRK-A", "BRK-B"] as never);
+    mockBuildChatResponse.mockResolvedValue({
+      answer: "ok",
+      sources: [],
+      responsePath: "deterministic"
+    });
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "どう？"
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env,
+      config: DEFAULT_REMOTE_CONFIG,
+      ctx
+    });
+
+    expect(response?.status).toBe(200);
+    expect(mockEnsureCompanyAccessAllowed).toHaveBeenCalledWith(
+      identity,
+      "BRK-A",
+      expect.any(Array),
+      expect.anything(),
+      expect.anything(),
+      { relatedTickers: ["BRK-A", "BRK-B"] }
+    );
   });
 });

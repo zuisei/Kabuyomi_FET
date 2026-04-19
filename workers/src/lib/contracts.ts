@@ -39,6 +39,7 @@ export const QuotaRequestSchema = z.object({
     "consumeStock",
     "refundStock",
     "removeTicker",
+    "promoteTicker",
     "checkCompanyAccess"
   ]),
   quotaSubject: z.string().trim().min(1),
@@ -47,7 +48,8 @@ export const QuotaRequestSchema = z.object({
   ticker: z.string().trim().min(1).max(16).optional(),
   chatLimit: z.number().int().min(0),
   stockLimit: z.number().int().min(0),
-  previewTickers: z.array(z.string().trim().min(1).max(16)).optional()
+  previewTickers: z.array(z.string().trim().min(1).max(16)).optional(),
+  relatedTickers: z.array(z.string().trim().min(1).max(16)).optional()
 });
 
 export const SearchQuerySchema = z.object({

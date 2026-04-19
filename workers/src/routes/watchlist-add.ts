@@ -1,8 +1,8 @@
-import { lookupTicker } from "../clients/sec";
+import { listTickersByCik, lookupTicker } from "../clients/sec";
 import { WatchlistAddRequestSchema } from "../lib/contracts";
 import { logErrorEvent } from "../lib/logging";
 import { ensureLatestFiling } from "../lib/pipeline";
-import { consumeStockQuotaWithMutation, readQuotaIdentity, refundStockQuota } from "../lib/quota";
+import { consumeStockQuotaWithMutation, promoteSavedTickerAlias, readQuotaIdentity, refundStockQuota } from "../lib/quota";
 import { badRequest, json, notFound } from "../lib/response";
 import { serializeCompanyResponse } from "../lib/company-response";
 import type { RouteHandler } from "./types";
@@ -32,8 +32,9 @@ export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env,
   if (!tickerRecord) {
     return notFound(`Ticker not found: ${parsed.data.ticker}`);
   }
+  const relatedTickers = await listTickersByCik(tickerRecord.cik, env);
 
-  const stockQuota = await consumeStockQuotaWithMutation(identity, tickerRecord.ticker, env, config);
+  const stockQuota = await consumeStockQuotaWithMutation(identity, tickerRecord.ticker, env, config, { relatedTickers });
   const filing = await (async () => {
     try {
       return await ensureLatestFiling(tickerRecord.ticker, env, config, {
@@ -43,7 +44,7 @@ export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env,
     } catch (error) {
       if (stockQuota.didMutate) {
         try {
-          await refundStockQuota(identity, tickerRecord.ticker, env, config);
+          await refundStockQuota(identity, tickerRecord.ticker, env, config, { relatedTickers });
         } catch (refundError) {
           logErrorEvent("watchlist_add_quota_refund_failed", {
             ticker: tickerRecord.ticker,
@@ -55,9 +56,12 @@ export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env,
       throw error;
     }
   })();
+  const usage = stockQuota.didMutate
+    ? stockQuota.usage
+    : await promoteSavedTickerAlias(identity, tickerRecord.ticker, env, config, { relatedTickers });
 
   return json({
     company: await serializeCompanyResponse(filing, env, { displayTicker: tickerRecord.ticker }),
-    usage: stockQuota.usage
+    usage
   });
 };

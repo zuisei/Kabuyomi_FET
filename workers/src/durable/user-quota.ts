@@ -46,11 +46,11 @@ export class UserQuotaDO {
       ]);
 
       const normalizedTicker = normalizeTicker(body.ticker);
-      const alreadyTracked = normalizedTicker ? savedTickerRecord.savedTickers.includes(normalizedTicker) : false;
-      const isPreviewTicker =
-        normalizedTicker && Array.isArray(body.previewTickers)
-          ? body.previewTickers.map(normalizeTicker).includes(normalizedTicker)
-          : false;
+      const relatedTickers = buildTickerGroup(normalizedTicker, body.relatedTickers ?? []);
+      const trackedTicker = findTrackedTicker(savedTickerRecord.savedTickers, relatedTickers);
+      const alreadyTracked = trackedTicker !== null;
+      const previewTickers = buildTickerGroup(null, body.previewTickers ?? []);
+      const isPreviewTicker = relatedTickers.some((ticker) => previewTickers.includes(ticker));
       let didMutate = false;
 
       if (body.action === "checkChat") {
@@ -124,14 +124,21 @@ export class UserQuotaDO {
         }
       }
 
+      if (body.action === "promoteTicker" && normalizedTicker && trackedTicker && trackedTicker !== normalizedTicker) {
+        savedTickerRecord.savedTickers = savedTickerRecord.savedTickers.map((ticker) =>
+          ticker === trackedTicker ? normalizedTicker : ticker
+        );
+        didMutate = true;
+      }
+
       if (body.action === "refundStock" && normalizedTicker) {
-        const nextSavedTickers = savedTickerRecord.savedTickers.filter((ticker) => ticker !== normalizedTicker);
+        const nextSavedTickers = savedTickerRecord.savedTickers.filter((ticker) => !relatedTickers.includes(ticker));
         didMutate = nextSavedTickers.length !== savedTickerRecord.savedTickers.length;
         savedTickerRecord.savedTickers = nextSavedTickers;
       }
 
       if (body.action === "removeTicker" && normalizedTicker) {
-        const nextSavedTickers = savedTickerRecord.savedTickers.filter((ticker) => ticker !== normalizedTicker);
+        const nextSavedTickers = savedTickerRecord.savedTickers.filter((ticker) => !relatedTickers.includes(ticker));
         didMutate = nextSavedTickers.length !== savedTickerRecord.savedTickers.length;
         savedTickerRecord.savedTickers = nextSavedTickers;
       }
@@ -245,6 +252,14 @@ function normalizeTickerList(values: string[]): string[] {
   }
 
   return normalized;
+}
+
+function buildTickerGroup(primaryTicker: string | null, relatedTickers: string[]): string[] {
+  return normalizeTickerList(primaryTicker ? [primaryTicker, ...relatedTickers] : relatedTickers);
+}
+
+function findTrackedTicker(savedTickers: string[], tickerGroup: string[]): string | null {
+  return savedTickers.find((ticker) => tickerGroup.includes(ticker)) ?? null;
 }
 
 function buildDailyKey(dateJST: string): string {

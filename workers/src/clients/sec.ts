@@ -280,6 +280,21 @@ export async function lookupTicker(ticker: string, env: Env): Promise<TickerReco
   return resolveBaseTickerFallback(normalizedTicker, snapshot.items);
 }
 
+export async function listTickersByCik(cik: string, env: Env): Promise<string[]> {
+  const normalizedCik = cik.trim();
+  if (!normalizedCik) {
+    return [];
+  }
+
+  const snapshot = await getTickerSnapshot(env);
+  return [...new Set(
+    snapshot.items
+      .filter((item) => item.cik === normalizedCik)
+      .map((item) => normalizeTickerInput(item.ticker))
+      .filter(Boolean)
+  )];
+}
+
 export async function fetchSubmissions(cik: string, env: Env): Promise<SubmissionResponse> {
   return fetchSubmissionsFromFetcher(cik, env);
 }
