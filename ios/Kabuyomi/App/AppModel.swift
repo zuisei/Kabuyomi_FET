@@ -346,8 +346,8 @@ final class AppModel {
         return question?.isEmpty == false ? question : nil
     }
 
-    func isTickerInWatchlist(_ ticker: String) -> Bool {
-        savedTickers.contains(normalizedTicker(ticker))
+    func isTickerInWatchlist(_ ticker: String, cik: String? = nil) -> Bool {
+        savedTicker(for: ticker, cik: cik) != nil
     }
 
     func isAddingTicker(_ ticker: String) -> Bool {
@@ -402,7 +402,7 @@ final class AppModel {
     }
 
     func recentCompanyCards(limit: Int, includeSaved: Bool = false) -> [WatchlistCard] {
-        let filteredTickers = includeSaved ? recentTickers : recentTickers.filter { !savedTickers.contains($0) }
+        let filteredTickers = includeSaved ? recentTickers : recentTickers.filter { !isTickerInWatchlist($0) }
         return Array(orderedCards(for: filteredTickers).prefix(limit))
     }
 
@@ -498,13 +498,7 @@ final class AppModel {
             guard stateGeneration == self.stateGeneration else { return }
             storeUsage(result.usage)
             if result.usage.savedTickers == nil {
-                savedTickers.removeAll(where: { $0 == normalized })
-                UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
-                if shouldRevokeLocalAccessWithoutWatchlist(for: normalized) {
-                    revokeLocalAccess(for: normalized)
-                } else {
-                    accessRevokedTickers.remove(normalized)
-                }
+                applyLocalWatchlistRemovalFallback(for: normalized)
                 loadHomeFromPersistence()
             }
         } catch {
@@ -542,7 +536,7 @@ final class AppModel {
         guard !addingTickers.contains(normalized) else { return }
         let stateGeneration = self.stateGeneration
 
-        if isTickerInWatchlist(normalized) {
+        if isTickerInWatchlist(normalized, cik: searchItem?.cik) {
             if redirectToConversation {
                 openConversation(for: normalized)
             }
@@ -563,25 +557,26 @@ final class AppModel {
                 debugUnlimited: isDevUnlimitedModeActive
             )
             guard stateGeneration == self.stateGeneration else { return }
+            let savedTicker = normalizedTicker(result.company.ticker)
             try persistence.saveCompany(result.company, searchItem: searchItem)
-            companyCache[normalized] = result.company
-            chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized)?.chatHistory ?? []
+            companyCache.removeValue(forKey: normalized)
+            chatHistoryCache.removeValue(forKey: normalized)
+            companyCache[savedTicker] = result.company
+            chatHistoryCache[savedTicker] = persistence.loadCompany(ticker: savedTicker)?.chatHistory ?? []
             accessRevokedTickers.remove(normalized)
+            accessRevokedTickers.remove(savedTicker)
             completeInitialEntry()
             storeUsage(result.usage)
             if result.usage.savedTickers == nil {
-                savedTickers.removeAll(where: { $0 == normalized })
-                savedTickers.insert(normalized, at: 0)
-                savedTickers = Array(savedTickers.prefix(25))
-                UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
+                applyLocalWatchlistAddFallback(savedTicker: savedTicker, cik: result.company.cik)
             }
-            setLastSeenFilingKey(result.company.filingKey, for: normalized)
-            activeConversationTicker = normalized
-            UserDefaults.standard.set(normalized, forKey: Self.activeConversationTickerKey)
+            setLastSeenFilingKey(result.company.filingKey, for: savedTicker)
+            activeConversationTicker = savedTicker
+            UserDefaults.standard.set(savedTicker, forKey: Self.activeConversationTickerKey)
             loadHomeFromPersistence()
 
             if redirectToConversation {
-                openConversation(for: normalized)
+                openConversation(for: savedTicker)
             }
         } catch {
             guard stateGeneration == self.stateGeneration else { return }
@@ -796,21 +791,27 @@ final class AppModel {
 
     private func reconcileSavedTickers(with serverTickers: [String]) {
         let normalizedServerTickers = Self.normalizedTickers(serverTickers)
-        let removedTickers = Set(savedTickers).subtracting(normalizedServerTickers)
+        let previousSavedTickers = savedTickers
+        let removedIssuerKeys = savedIssuerKeys(for: previousSavedTickers)
+            .subtracting(savedIssuerKeys(for: normalizedServerTickers))
 
         savedTickers = normalizedServerTickers
         UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
 
-        for ticker in normalizedServerTickers {
-            accessRevokedTickers.remove(ticker)
+        for issuerKey in savedIssuerKeys(for: normalizedServerTickers) {
+            for ticker in relatedTickers(forIssuerGroupKey: issuerKey, additionalTickers: normalizedServerTickers) {
+                accessRevokedTickers.remove(ticker)
+            }
         }
 
-        for ticker in removedTickers {
-            guard shouldRevokeLocalAccessWithoutWatchlist(for: ticker) else {
-                accessRevokedTickers.remove(ticker)
-                continue
+        for issuerKey in removedIssuerKeys {
+            for ticker in relatedTickers(forIssuerGroupKey: issuerKey, additionalTickers: previousSavedTickers) {
+                guard shouldRevokeLocalAccessWithoutWatchlist(for: ticker) else {
+                    accessRevokedTickers.remove(ticker)
+                    continue
+                }
+                revokeLocalAccess(for: ticker)
             }
-            revokeLocalAccess(for: ticker)
         }
 
         loadHomeFromPersistence()
@@ -930,7 +931,7 @@ final class AppModel {
 
     private func loadHomeFromPersistence() {
         watchlist = orderedCards(for: savedTickers)
-        recentCompanies = orderedCards(for: recentTickers.filter { !savedTickers.contains($0) })
+        recentCompanies = orderedCards(for: recentTickers.filter { !isTickerInWatchlist($0) })
     }
 
     private func sanitizeRestoredConversationState() {
@@ -959,7 +960,7 @@ final class AppModel {
             return true
         }
 
-        if savedTickers.contains(ticker) || recentTickers.contains(ticker) {
+        if isTickerInWatchlist(ticker) || recentTickers.contains(ticker) {
             return true
         }
 
@@ -1010,10 +1011,140 @@ final class AppModel {
         return starterCompanies.contains(where: { $0.ticker == normalized })
     }
 
+    private func applyLocalWatchlistAddFallback(savedTicker: String, cik: String?) {
+        let normalizedSavedTicker = normalizedTicker(savedTicker)
+        let issuerKey = issuerGroupKey(for: normalizedSavedTicker, cikHint: cik)
+        savedTickers.removeAll { issuerGroupKey(for: $0) == issuerKey }
+        savedTickers.insert(normalizedSavedTicker, at: 0)
+        savedTickers = Array(savedTickers.prefix(25))
+        UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
+
+        for ticker in relatedTickers(forIssuerGroupKey: issuerKey, additionalTickers: [normalizedSavedTicker]) {
+            accessRevokedTickers.remove(ticker)
+        }
+    }
+
+    private func applyLocalWatchlistRemovalFallback(for ticker: String) {
+        let normalized = normalizedTicker(ticker)
+        let issuerKey = issuerGroupKey(for: normalized)
+        let previousSavedTickers = savedTickers
+
+        savedTickers.removeAll { issuerGroupKey(for: $0) == issuerKey }
+        UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
+
+        for relatedTicker in relatedTickers(forIssuerGroupKey: issuerKey, additionalTickers: previousSavedTickers + [normalized]) {
+            guard shouldRevokeLocalAccessWithoutWatchlist(for: relatedTicker) else {
+                accessRevokedTickers.remove(relatedTicker)
+                continue
+            }
+            revokeLocalAccess(for: relatedTicker)
+        }
+    }
+
+    private func savedIssuerKeys(for tickers: [String]) -> Set<String> {
+        Set(tickers.map { issuerGroupKey(for: $0) })
+    }
+
+    private func issuerGroupKey(for ticker: String, cikHint: String? = nil) -> String {
+        if let cik = resolvedCIK(for: ticker, cikHint: cikHint) {
+            return "cik:\(cik)"
+        }
+        return "ticker:\(normalizedTicker(ticker))"
+    }
+
+    private func savedTicker(for ticker: String, cik: String? = nil) -> String? {
+        let issuerKey = issuerGroupKey(for: ticker, cikHint: cik)
+        return savedTickers.first(where: { issuerGroupKey(for: $0) == issuerKey })
+    }
+
+    private func resolvedCIK(for ticker: String, cikHint: String? = nil) -> String? {
+        if let cik = normalizedCIK(cikHint) {
+            return cik
+        }
+
+        let normalized = normalizedTicker(ticker)
+        let tickerCIKMap = knownTickerCIKMap()
+
+        if let cik = tickerCIKMap[normalized] {
+            return cik
+        }
+
+        guard let familyKey = aliasFamilyKey(for: normalized) else { return nil }
+        let familyCIKs = Set(
+            tickerCIKMap.compactMap { pair in
+                aliasFamilyKey(for: pair.key) == familyKey ? pair.value : nil
+            }
+        )
+        guard familyCIKs.count == 1 else { return nil }
+        return familyCIKs.first
+    }
+
+    private func knownTickerCIKMap() -> [String: String] {
+        var result = persistence.loadTickerCIKMap().reduce(into: [String: String]()) { map, pair in
+            if let cik = normalizedCIK(pair.value) {
+                map[normalizedTicker(pair.key)] = cik
+            }
+        }
+
+        for company in companyCache.values {
+            guard let cik = normalizedCIK(company.cik) else { continue }
+            result[normalizedTicker(company.ticker)] = cik
+        }
+
+        for item in searchResults {
+            guard let cik = normalizedCIK(item.cik) else { continue }
+            result[normalizedTicker(item.ticker)] = cik
+        }
+
+        return result
+    }
+
+    private func relatedTickers(forIssuerGroupKey issuerKey: String, additionalTickers: [String] = []) -> Set<String> {
+        var related = Set<String>()
+
+        if issuerKey.hasPrefix("cik:") {
+            let cik = String(issuerKey.dropFirst(4))
+            related.formUnion(persistence.loadTickers(cik: cik).map(normalizedTicker))
+
+            for company in companyCache.values where normalizedCIK(company.cik) == cik {
+                related.insert(normalizedTicker(company.ticker))
+            }
+
+            for item in searchResults where normalizedCIK(item.cik) == cik {
+                related.insert(normalizedTicker(item.ticker))
+            }
+        }
+
+        for ticker in additionalTickers where issuerGroupKey(for: ticker) == issuerKey {
+            related.insert(normalizedTicker(ticker))
+        }
+
+        if issuerKey.hasPrefix("ticker:") {
+            related.insert(String(issuerKey.dropFirst(7)))
+        }
+
+        return related
+    }
+
+    private func aliasFamilyKey(for ticker: String) -> String? {
+        let normalized = normalizedTicker(ticker)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        let components = normalized
+            .components(separatedBy: CharacterSet(charactersIn: ".- "))
+            .filter { !$0.isEmpty }
+
+        guard components.count >= 2 else { return nil }
+        guard normalized.rangeOfCharacter(from: CharacterSet(charactersIn: ".- ")) != nil else {
+            return nil
+        }
+
+        return components[0]
+    }
+
     private func isLocalAccessRevoked(for ticker: String) -> Bool {
         let normalized = normalizedTicker(ticker)
         return accessRevokedTickers.contains(normalized)
-            && !savedTickers.contains(normalized)
+            && !isTickerInWatchlist(normalized)
             && shouldRevokeLocalAccessWithoutWatchlist(for: normalized)
     }
 
@@ -1039,6 +1170,12 @@ final class AppModel {
 
     private func normalizedTicker(_ ticker: String) -> String {
         ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private func normalizedCIK(_ cik: String?) -> String? {
+        guard let cik else { return nil }
+        let normalized = cik.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
     }
 
     private static func normalizedTickers(_ tickers: [String]) -> [String] {

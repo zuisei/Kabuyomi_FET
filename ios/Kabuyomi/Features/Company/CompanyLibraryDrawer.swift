@@ -406,7 +406,7 @@ private struct DrawerSearchRow: View {
     let action: () -> Void
 
     private var isSaved: Bool {
-        appModel.isTickerInWatchlist(item.ticker)
+        appModel.isTickerInWatchlist(item.ticker, cik: item.cik)
     }
 
     var body: some View {

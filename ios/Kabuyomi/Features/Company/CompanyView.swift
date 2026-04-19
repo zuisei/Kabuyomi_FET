@@ -58,7 +58,7 @@ struct CompanyView: View {
     }
 
     private var isCurrentTickerSaved: Bool {
-        appModel.isTickerInWatchlist(currentTicker)
+        appModel.isTickerInWatchlist(currentTicker, cik: company?.cik)
     }
 
     var body: some View {
@@ -327,14 +327,14 @@ struct CompanyView: View {
         }
 
         let normalized = item.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if appModel.isTickerInWatchlist(normalized) {
+        if appModel.isTickerInWatchlist(normalized, cik: item.cik) {
             selectTicker(normalized)
             return
         }
 
         Task {
             await appModel.addToWatchlist(item)
-            if appModel.isTickerInWatchlist(normalized) {
+            if appModel.isTickerInWatchlist(normalized, cik: item.cik) {
                 selectTicker(normalized)
             }
         }

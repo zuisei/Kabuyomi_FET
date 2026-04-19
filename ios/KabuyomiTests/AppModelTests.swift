@@ -511,6 +511,166 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(model.watchlist.contains(where: { $0.ticker == "ORCL" }))
     }
 
+    func testAddToWatchlistTreatsSameIssuerAliasAsAlreadySaved() async throws {
+        let cik = "0001067983"
+        UserDefaults.standard.set(["BRK-B"], forKey: AppModel.savedTickersKey)
+
+        let persistence = PersistenceController(inMemory: true)
+        try persistence.saveCompany(TestFixtures.companyPayload(ticker: "BRK-A", cik: cik), searchItem: nil)
+
+        let model = makeAppModel(persistence: persistence)
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            if request.url?.path == "/v1/watchlist/add" {
+                throw URLError(.badServerResponse)
+            }
+
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = try TestFixtures.jsonData([
+                "plan": "beta",
+                "chatsUsed": 0,
+                "chatLimit": 20,
+                "stocksUsed": 1,
+                "stockLimit": 25,
+                "dateJST": "2026-04-18",
+                "savedTickers": ["BRK-B"]
+            ])
+            return (response, data)
+        }
+
+        await model.addToWatchlist(
+            SearchItem(
+                ticker: "BRK.A",
+                companyName: "Berkshire Hathaway Inc. Class A",
+                cik: cik,
+                exchange: "NYSE",
+                latestFormType: "10-K"
+            )
+        )
+
+        XCTAssertEqual(model.activeAlert?.message, "BRK.A はすでに保存済みです。")
+        XCTAssertEqual(model.activeConversationTicker, "BRK.A")
+        XCTAssertTrue(model.isTickerInWatchlist("BRK.A", cik: cik))
+    }
+
+    func testBootstrapKeepsIssuerAliasLocallyAccessibleWhenCanonicalTickerChanges() async throws {
+        let cik = "0001067983"
+        UserDefaults.standard.set(["BRK-A"], forKey: AppModel.savedTickersKey)
+        UserDefaults.standard.set(["BRK-A"], forKey: AppModel.recentTickersKey)
+        UserDefaults.standard.set("BRK-A", forKey: AppModel.lastViewedTickerKey)
+        UserDefaults.standard.set("BRK-A", forKey: AppModel.activeConversationTickerKey)
+
+        let persistence = PersistenceController(inMemory: true)
+        try persistence.saveCompany(TestFixtures.companyPayload(ticker: "BRK-A", cik: cik), searchItem: nil)
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            switch request.url?.path {
+            case "/v1/usage":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "beta",
+                        "chatsUsed": 0,
+                        "chatLimit": 20,
+                        "stocksUsed": 1,
+                        "stockLimit": 25,
+                        "dateJST": "2026-04-18",
+                        "savedTickers": ["BRK-B"]
+                    ])
+                )
+            case "/v1/company/BRK-B":
+                return (
+                    response,
+                    try TestFixtures.companyPayloadData(ticker: "BRK-B", cik: cik)
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockAppModelURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let model = AppModel(
+            apiClient: APIClient(
+                session: session,
+                baseURL: URL(string: "https://example.com")!
+            ),
+            persistence: persistence,
+            deviceIdentity: DeviceIdentityStore()
+        )
+
+        await model.bootstrap()
+        try? await Task.sleep(nanoseconds: 250_000_000)
+
+        XCTAssertTrue(model.isTickerInWatchlist("BRK-A"))
+        XCTAssertTrue(model.isTickerInWatchlist("BRK.B", cik: cik))
+        XCTAssertNotNil(model.companyPayload(for: "BRK-A"))
+        XCTAssertEqual(model.watchlist.map(\.ticker), ["BRK-B"])
+        XCTAssertTrue(model.recentCompanies.isEmpty)
+        XCTAssertEqual(model.activeConversationTicker, "BRK-A")
+    }
+
+    func testRemoveFromWatchlistRevokesLocalAccessAcrossIssuerAliases() async throws {
+        let cik = "0001067983"
+        UserDefaults.standard.set(["BRK-B"], forKey: AppModel.savedTickersKey)
+        UserDefaults.standard.set(["BRK-A"], forKey: AppModel.recentTickersKey)
+        UserDefaults.standard.set("BRK-A", forKey: AppModel.lastViewedTickerKey)
+        UserDefaults.standard.set("BRK-A", forKey: AppModel.activeConversationTickerKey)
+
+        let persistence = PersistenceController(inMemory: true)
+        try persistence.saveCompany(TestFixtures.companyPayload(ticker: "BRK-A", cik: cik), searchItem: nil)
+
+        let model = makeAppModel(persistence: persistence)
+        model.recordCompanyVisit(ticker: "BRK-A")
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            if request.url?.path == "/v1/watchlist/remove" {
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "usage": [
+                            "plan": "beta",
+                            "chatsUsed": 0,
+                            "chatLimit": 20,
+                            "stocksUsed": 0,
+                            "stockLimit": 25,
+                            "dateJST": "2026-04-18",
+                            "savedTickers": []
+                        ]
+                    ])
+                )
+            }
+
+            return (
+                response,
+                try TestFixtures.jsonData([
+                    "plan": "beta",
+                    "chatsUsed": 0,
+                    "chatLimit": 20,
+                    "stocksUsed": 0,
+                    "stockLimit": 25,
+                    "dateJST": "2026-04-18",
+                    "savedTickers": []
+                ])
+            )
+        }
+
+        await model.removeFromWatchlist("BRK-A")
+
+        XCTAssertFalse(model.isTickerInWatchlist("BRK-A"))
+        XCTAssertNil(model.companyPayload(for: "BRK-A"))
+        XCTAssertNil(persistence.loadCompany(ticker: "BRK-A"))
+        XCTAssertNil(model.activeConversationTicker)
+        XCTAssertNil(model.lastViewedTicker)
+        XCTAssertTrue(model.watchlist.isEmpty)
+        XCTAssertTrue(model.recentCompanies.isEmpty)
+    }
+
     func testBootstrapReconcilesServerWatchlistAndHydratesMissingCards() async {
         let msft = TestFixtures.companyPayload(ticker: "MSFT")
         let model = makeAppModel()

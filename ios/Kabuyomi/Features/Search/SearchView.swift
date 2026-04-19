@@ -33,7 +33,7 @@ struct SearchView: View {
                                     SearchResultCard(
                                         item: item,
                                         isAdding: appModel.isAddingTicker(item.ticker),
-                                        isAdded: appModel.isTickerInWatchlist(item.ticker)
+                                        isAdded: appModel.isTickerInWatchlist(item.ticker, cik: item.cik)
                                     ) {
                                         addSearchResult(item)
                                     }

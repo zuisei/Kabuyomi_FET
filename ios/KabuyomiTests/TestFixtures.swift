@@ -2,12 +2,12 @@ import Foundation
 @testable import Kabuyomi
 
 enum TestFixtures {
-    static func companyPayload(ticker: String = "AAPL") -> CompanyPayload {
+    static func companyPayload(ticker: String = "AAPL", cik: String = "0000320193") -> CompanyPayload {
         CompanyPayload(
-            filingKey: "v1:\(ticker):0000320193-24-000001",
+            filingKey: "v1:\(ticker):\(cik)-24-000001",
             ticker: ticker,
             companyName: "\(ticker) Holdings",
-            cik: "0000320193",
+            cik: cik,
             formType: "10-K",
             filedAt: "2024-11-01",
             periodOfReport: "2024-09-30",
@@ -50,7 +50,7 @@ enum TestFixtures {
                         label: "売上高",
                         points: [
                             HistoricalMetricPointPayload(
-                                filingKey: "v1:\(ticker):0000320193-22-000001",
+                                filingKey: "v1:\(ticker):\(cik)-22-000001",
                                 filedAt: "2022-11-01",
                                 periodEnd: "2022-09-30",
                                 value: 365_817_000_000,
@@ -59,7 +59,7 @@ enum TestFixtures {
                                 sourceId: "metric-revenue-2022"
                             ),
                             HistoricalMetricPointPayload(
-                                filingKey: "v1:\(ticker):0000320193-23-000001",
+                                filingKey: "v1:\(ticker):\(cik)-23-000001",
                                 filedAt: "2023-11-01",
                                 periodEnd: "2023-09-30",
                                 value: 383_285_000_000,
@@ -68,7 +68,7 @@ enum TestFixtures {
                                 sourceId: "metric-revenue-2023"
                             ),
                             HistoricalMetricPointPayload(
-                                filingKey: "v1:\(ticker):0000320193-24-000001",
+                                filingKey: "v1:\(ticker):\(cik)-24-000001",
                                 filedAt: "2024-11-01",
                                 periodEnd: "2024-09-30",
                                 value: 401_220_000_000,
@@ -157,8 +157,8 @@ enum TestFixtures {
         ])
     }
 
-    static func watchlistAddResponseData(ticker: String = "AAPL") throws -> Data {
-        let company = companyPayload(ticker: ticker)
+    static func watchlistAddResponseData(ticker: String = "AAPL", cik: String = "0000320193") throws -> Data {
+        let company = companyPayload(ticker: ticker, cik: cik)
         return try jsonData([
             "company": [
                 "filingKey": company.filingKey,
@@ -236,8 +236,8 @@ enum TestFixtures {
         ])
     }
 
-    static func companyPayloadData(ticker: String = "AAPL") throws -> Data {
-        let company = companyPayload(ticker: ticker)
+    static func companyPayloadData(ticker: String = "AAPL", cik: String = "0000320193") throws -> Data {
+        let company = companyPayload(ticker: ticker, cik: cik)
         return try jsonData([
             "filingKey": company.filingKey,
             "ticker": company.ticker,

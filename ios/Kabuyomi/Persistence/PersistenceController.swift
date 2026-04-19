@@ -40,6 +40,34 @@ final class PersistenceController {
         loadCompanyCards(tickers: [ticker]).first
     }
 
+    func loadTickerCIKMap() -> [String: String] {
+        let request = StockEntity.fetchRequest()
+
+        do {
+            return try viewContext.fetch(request).reduce(into: [String: String]()) { result, stock in
+                result[stock.ticker] = stock.cik
+            }
+        } catch {
+            return [:]
+        }
+    }
+
+    func loadTickers(cik: String) -> [String] {
+        let normalized = cik.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return [] }
+
+        let request = StockEntity.fetchRequest()
+        request.predicate = NSPredicate(format: "cik == %@", normalized)
+
+        do {
+            return try viewContext.fetch(request)
+                .map(\.ticker)
+                .sorted()
+        } catch {
+            return []
+        }
+    }
+
     func loadCompanyCards(tickers: [String]) -> [WatchlistCard] {
         guard !tickers.isEmpty else { return [] }
 
