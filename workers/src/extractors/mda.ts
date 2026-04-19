@@ -15,6 +15,10 @@ export interface MDAExtractionDiagnostics {
   normalizedChars: number;
   startMatchesCount: number;
   endMatchesCount: number;
+  sanitizeMs: number;
+  domParseMs: number;
+  textReadMs: number;
+  cleanupMs: number;
   normalizeMs: number;
   boundaryScanMs: number;
   selectionMs: number;
@@ -31,17 +35,39 @@ export function estimateTokenCount(text: string): number {
 }
 
 export function normalizeFilingText(html: string): string {
-  const sanitizedHtml = sanitizeHtmlForTextExtraction(html);
-  const { document } = parseHTML(sanitizedHtml);
-  const text = document.body.textContent ?? sanitizedHtml;
+  return normalizeFilingTextWithDiagnostics(html).text;
+}
 
-  return text
+function normalizeFilingTextWithDiagnostics(
+  html: string
+): { text: string; diagnostics: Pick<MDAExtractionDiagnostics, "sanitizeMs" | "domParseMs" | "textReadMs" | "cleanupMs" | "normalizeMs"> } {
+  const sanitizeStartedAt = nowMs();
+  const sanitizedHtml = sanitizeHtmlForTextExtraction(html);
+  const sanitizedAt = nowMs();
+  const { document } = parseHTML(sanitizedHtml);
+  const parsedAt = nowMs();
+  const text = document.body.textContent ?? sanitizedHtml;
+  const textReadAt = nowMs();
+
+  const normalized = text
     .replace(/\u00a0/g, " ")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/ ?([,:;.)])/g, "$1")
     .trim();
+  const finishedAt = nowMs();
+
+  return {
+    text: normalized,
+    diagnostics: {
+      sanitizeMs: elapsedMs(sanitizeStartedAt, sanitizedAt),
+      domParseMs: elapsedMs(sanitizedAt, parsedAt),
+      textReadMs: elapsedMs(parsedAt, textReadAt),
+      cleanupMs: elapsedMs(textReadAt, finishedAt),
+      normalizeMs: elapsedMs(sanitizeStartedAt, finishedAt)
+    }
+  };
 }
 
 export function extractMDASection(html: string, formType: "10-K" | "10-Q"): ExtractedMDA | null {
@@ -52,13 +78,13 @@ export function extractMDASectionWithDiagnostics(
   html: string,
   formType: "10-K" | "10-Q"
 ): { result: ExtractedMDA | null; diagnostics: MDAExtractionDiagnostics } {
-  const startedAt = Date.now();
-  const normalizedText = normalizeFilingText(html);
-  const normalizedAt = Date.now();
+  const startedAt = nowMs();
+  const { text: normalizedText, diagnostics: normalizationDiagnostics } = normalizeFilingTextWithDiagnostics(html);
+  const normalizedAt = nowMs();
   const patterns = getPatterns(formType);
   const startMatches = findAllMatches(normalizedText, patterns.start, "start");
   const endMatches = findAllMatches(normalizedText, patterns.end, "end");
-  const matchedAt = Date.now();
+  const matchedAt = nowMs();
 
   let endCursor = 0;
   for (const [index, startMatch] of startMatches.entries()) {
@@ -80,7 +106,7 @@ export function extractMDASectionWithDiagnostics(
       }
 
       const trimmed = trimToTokenBudget(candidate, TOKEN_BUDGET);
-      const finishedAt = Date.now();
+      const finishedAt = nowMs();
       return {
         result: {
           text: trimmed,
@@ -93,16 +119,20 @@ export function extractMDASectionWithDiagnostics(
           normalizedChars: normalizedText.length,
           startMatchesCount: startMatches.length,
           endMatchesCount: endMatches.length,
-          normalizeMs: normalizedAt - startedAt,
-          boundaryScanMs: matchedAt - normalizedAt,
-          selectionMs: finishedAt - matchedAt,
-          totalMs: finishedAt - startedAt
+          sanitizeMs: normalizationDiagnostics.sanitizeMs,
+          domParseMs: normalizationDiagnostics.domParseMs,
+          textReadMs: normalizationDiagnostics.textReadMs,
+          cleanupMs: normalizationDiagnostics.cleanupMs,
+          normalizeMs: normalizationDiagnostics.normalizeMs,
+          boundaryScanMs: elapsedMs(normalizedAt, matchedAt),
+          selectionMs: elapsedMs(matchedAt, finishedAt),
+          totalMs: elapsedMs(startedAt, finishedAt)
         }
       };
     }
   }
 
-  const finishedAt = Date.now();
+  const finishedAt = nowMs();
   return {
     result: null,
     diagnostics: {
@@ -110,10 +140,14 @@ export function extractMDASectionWithDiagnostics(
       normalizedChars: normalizedText.length,
       startMatchesCount: startMatches.length,
       endMatchesCount: endMatches.length,
-      normalizeMs: normalizedAt - startedAt,
-      boundaryScanMs: matchedAt - normalizedAt,
-      selectionMs: finishedAt - matchedAt,
-      totalMs: finishedAt - startedAt
+      sanitizeMs: normalizationDiagnostics.sanitizeMs,
+      domParseMs: normalizationDiagnostics.domParseMs,
+      textReadMs: normalizationDiagnostics.textReadMs,
+      cleanupMs: normalizationDiagnostics.cleanupMs,
+      normalizeMs: normalizationDiagnostics.normalizeMs,
+      boundaryScanMs: elapsedMs(normalizedAt, matchedAt),
+      selectionMs: elapsedMs(matchedAt, finishedAt),
+      totalMs: elapsedMs(startedAt, finishedAt)
     }
   };
 }
@@ -264,6 +298,20 @@ function sanitizeHtmlForTextExtraction(html: string): string {
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ");
+}
+
+function nowMs(): number {
+  // Deployed Cloudflare Workers freeze timers between I/O boundaries, so these
+  // diagnostics are primarily useful under local workerd profiling.
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+
+  return Date.now();
+}
+
+function elapsedMs(startedAt: number, finishedAt: number): number {
+  return Math.round((finishedAt - startedAt) * 10) / 10;
 }
 
 function trimToTokenBudget(text: string, maxTokens: number): string {

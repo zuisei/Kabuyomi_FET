@@ -14,13 +14,20 @@ export async function invokeGemini(
   const model = resolveGeminiModel(env);
   const timeoutMs = resolveGeminiTimeoutMs(env);
   const responseJsonSchema = kind === "summary" ? summaryResponseJsonSchema() : chatResponseJsonSchema();
-  const attempts = [
-    {
-      includeSchema: true,
-      generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseJsonSchema }
-    },
-    { includeSchema: false, generationConfig: { temperature: 0.2, responseMimeType: "application/json" } }
-  ];
+  const attempts = kind === "summary"
+    ? [
+        {
+          includeSchema: true,
+          generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseJsonSchema }
+        }
+      ]
+    : [
+        {
+          includeSchema: true,
+          generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseJsonSchema }
+        },
+        { includeSchema: false, generationConfig: { temperature: 0.2, responseMimeType: "application/json" } }
+      ];
 
   for (const [index, attempt] of attempts.entries()) {
     const controller = new AbortController();

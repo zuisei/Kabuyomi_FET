@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateChatAnswer } from "../src/clients/gemini";
+import { generateChatAnswer, generateSummary } from "../src/clients/gemini";
 import { DEFAULT_GEMINI_MODEL, resolveGeminiModel } from "../src/clients/gemini/request";
 
 afterEach(() => {
@@ -14,6 +14,71 @@ describe("resolveGeminiModel", () => {
 
   it("normalizes Google model resource prefixes", () => {
     expect(resolveGeminiModel({ GEMINI_MODEL: "models/gemini-2.5-flash" } as never)).toBe("gemini-2.5-flash");
+  });
+});
+
+describe("Gemini summary fallback", () => {
+  it("falls back after a single timed out summary request", async () => {
+    const fetchMock = vi.fn().mockImplementation((_, init?: RequestInit) => {
+      return new Promise((_, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await generateSummary(
+      {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TIMEOUT_MS: "1"
+      } as never,
+      {
+        filingKey: "v3:0000000000:000000000000000999",
+        ticker: "TEST",
+        companyName: "Test Corp",
+        formType: "10-K",
+        filedAt: "2026-02-10",
+        periodOfReport: "2025-12-31",
+        metrics: [
+          {
+            logicalName: "revenue",
+            tagUsed: "Revenues",
+            value: 100,
+            unit: "USD",
+            periodEnd: "2025-12-31",
+            comparisonValue: 80,
+            yoyPercent: 25
+          }
+        ],
+        sourceChunks: [
+          {
+            sourceId: "S1",
+            sectionType: "md_a",
+            sectionTitle: "Item 7",
+            sourceLabel: "10-K Item 7",
+            text: "Revenue improved because enterprise demand remained strong.",
+            startOffset: 0,
+            endOffset: 57,
+            sortOrder: 1
+          },
+          {
+            sourceId: "S2",
+            sectionType: "xbrl_metric",
+            sectionTitle: "売上高",
+            sourceLabel: "XBRL 売上高 (Revenues)",
+            text: "売上高: 100 USD / 比較値: 80 / YoY: 25.0%",
+            startOffset: 0,
+            endOffset: 0,
+            tagName: "Revenues",
+            sortOrder: 2
+          }
+        ]
+      }
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(response.verdict).toContain("Test Corp");
   });
 });
 
@@ -650,17 +715,15 @@ describe("Gemini local chat fallback", () => {
   });
 
   it("falls back locally when Gemini times out", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation((_, init?: RequestInit) => {
-        return new Promise((_, reject) => {
-          const signal = init?.signal;
-          signal?.addEventListener("abort", () => {
-            reject(new DOMException("Aborted", "AbortError"));
-          });
+    const fetchMock = vi.fn().mockImplementation((_, init?: RequestInit) => {
+      return new Promise((_, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
         });
-      })
-    );
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     const response = await generateChatAnswer(
       {
@@ -708,6 +771,7 @@ describe("Gemini local chat fallback", () => {
     expect(response.sourceIds).toEqual(["S6"]);
     expect(response.answer).toContain("関税");
     expect(response.answer).toContain("サプライチェーン");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("recovers from low-signal narrative citations on broader driver questions", async () => {
