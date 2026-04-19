@@ -7,6 +7,7 @@ const HISTORY_YEARS = 3;
 const ARCHIVE_PREFIX = "filings";
 const DEFAULT_BACKFILL_FORMS: FilingReference["formType"][] = ["10-K"];
 const DEFAULT_BACKFILL_TOTAL_CAP = 8;
+const MAX_BACKFILL_TOTAL_CAP = 20;
 const SAME_QUARTER_MATCH_WINDOW_DAYS = 45;
 
 type HistoricalSource = {
@@ -440,7 +441,7 @@ function resolveMaxTotalFilings(value?: number): number {
     return DEFAULT_BACKFILL_TOTAL_CAP;
   }
 
-  return Math.max(1, Math.min(DEFAULT_BACKFILL_TOTAL_CAP, Math.trunc(value ?? DEFAULT_BACKFILL_TOTAL_CAP)));
+  return Math.max(1, Math.min(MAX_BACKFILL_TOTAL_CAP, Math.trunc(value ?? DEFAULT_BACKFILL_TOTAL_CAP)));
 }
 
 function preserveRemainingTickers(

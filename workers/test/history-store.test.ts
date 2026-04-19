@@ -132,4 +132,36 @@ describe("history backfill guardrails", () => {
       MSFT: 0
     });
   });
+
+  it("honors explicit total filing caps above the default batch size", async () => {
+    vi.mocked(lookupTicker).mockImplementation(async (ticker: string) => ({
+      ticker,
+      companyName: `${ticker} Inc.`,
+      cik: `0000${ticker}`,
+      exchange: "Nasdaq"
+    }) as never);
+    vi.mocked(fetchSubmissions).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
+    vi.mocked(listSupportedFilings).mockImplementation((tickerRecord: { ticker: string }) => [
+      makeFiling(tickerRecord.ticker, "10-K", `${tickerRecord.ticker}-01`, "2025-12-31")
+    ]);
+
+    const ensureStoredFiling = vi.fn(async (filing: FilingReference) => ({ filingKey: `v1:${filing.cik}:${filing.accessionNumber.replaceAll("-", "")}` }));
+
+    const result = await backfillHistoricalFilings(
+      {
+        tickers: ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "BRK-B", "JPM", "WMT", "XOM"],
+        years: 3,
+        forms: ["10-K"],
+        maxFilingsPerTicker: 1,
+        maxTotalFilings: 20
+      },
+      makeEnv() as never,
+      { extractorVersion: "v1" } as never,
+      ensureStoredFiling as never
+    );
+
+    expect(result.maxTotalFilings).toBe(20);
+    expect(result.totalCapReached).toBe(false);
+    expect(ensureStoredFiling).toHaveBeenCalledTimes(10);
+  });
 });

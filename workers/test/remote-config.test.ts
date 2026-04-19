@@ -11,11 +11,11 @@ describe("remote config", () => {
 
     expect(config.trackedTickers).toEqual(DEFAULT_REMOTE_CONFIG.trackedTickers);
     expect(config.dailyRefreshBatchSize).toBe(DEFAULT_REMOTE_CONFIG.dailyRefreshBatchSize);
-    expect(config.trackedTickers).toHaveLength(25);
+    expect(config.trackedTickers).toHaveLength(30);
     expect(config.webSupplementEnabled).toBe(false);
   });
 
-  it("normalizes tracked tickers and caps the beta warm set at 25 tickers", async () => {
+  it("normalizes tracked tickers and caps the beta warm set at 30 tickers", async () => {
     const config = await loadRemoteConfig({
       KABUYOMI_CACHE: {
         get: async () => ({
@@ -27,27 +27,33 @@ describe("remote config", () => {
             100,
             "NVDA",
             "AMZN",
-            "GOOGL",
+            "GOOG",
             "META",
             "AVGO",
             "TSLA",
+            "BRK-B",
             "JPM",
             "WMT",
             "V",
             "XOM",
+            "LLY",
+            "MU",
+            "ORCL",
+            "CAT",
+            "PLTR",
+            "INTC",
             "COST",
             "NFLX",
             "MA",
             "PG",
             "JNJ",
-            "ORCL",
             "HD",
             "BAC",
-            "KO",
             "ABBV",
-            "CRM",
             "CVX",
-            "AMD"
+            "AMD",
+            "CSCO",
+            "LRCX"
           ],
           dailyRefreshBatchSize: 999,
           dailyRefreshConcurrency: 0,
@@ -57,11 +63,11 @@ describe("remote config", () => {
       }
     } as never);
 
-    expect(config.trackedTickers).toHaveLength(25);
+    expect(config.trackedTickers).toHaveLength(30);
     expect(config.trackedTickers[0]).toBe("MSFT");
     expect(config.trackedTickers[1]).toBe("AAPL");
-    expect(config.trackedTickers.at(-1)).toBe("AMD");
-    expect(config.dailyRefreshBatchSize).toBe(25);
+    expect(config.trackedTickers.at(-1)).toBe("CSCO");
+    expect(config.dailyRefreshBatchSize).toBe(30);
     expect(config.dailyRefreshConcurrency).toBe(DEFAULT_REMOTE_CONFIG.dailyRefreshConcurrency);
     expect(config.dailyRefreshEnabled).toBe(false);
     expect(config.webSupplementEnabled).toBe(true);

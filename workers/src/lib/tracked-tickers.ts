@@ -1,35 +1,40 @@
-const MAX_TRACKED_TICKERS = 25;
+const MAX_TRACKED_TICKERS = 30;
 const DEFAULT_BATCH_SIZE = MAX_TRACKED_TICKERS;
 const DEFAULT_CONCURRENCY = 4;
 const MAX_BATCH_SIZE = MAX_TRACKED_TICKERS;
 const MAX_CONCURRENCY = 8;
 
 export const DEFAULT_TRACKED_TICKERS = [
+  "NVDA",
+  "GOOG",
   "AAPL",
   "MSFT",
-  "NVDA",
   "AMZN",
-  "GOOGL",
-  "META",
   "AVGO",
+  "META",
   "TSLA",
-  "JPM",
+  "BRK-B",
   "WMT",
+  "JPM",
+  "LLY",
   "V",
   "XOM",
+  "JNJ",
+  "MU",
+  "ORCL",
+  "MA",
+  "AMD",
   "COST",
   "NFLX",
-  "MA",
-  "PG",
-  "JNJ",
-  "ORCL",
-  "HD",
   "BAC",
-  "KO",
+  "CAT",
   "ABBV",
-  "CRM",
   "CVX",
-  "AMD"
+  "PLTR",
+  "HD",
+  "INTC",
+  "PG",
+  "CSCO"
 ] as const;
 
 const TICKER_PATTERN = /^[A-Z][A-Z0-9.-]{0,15}$/;
