@@ -141,6 +141,121 @@ test("fetchSubmissions serves cached data when the upstream later fails", async 
   }
 });
 
+test("fetchSubmissions merges older split submissions files when recent annual history is incomplete", async () => {
+  const originalFetch = global.fetch;
+  const calls = [];
+
+  global.fetch = async (url) => {
+    const target = String(url);
+    calls.push(target);
+
+    if (target.endsWith("/CIK0001326801.json")) {
+      return new Response(
+        JSON.stringify({
+          filings: {
+            recent: {
+              form: ["10-K", "10-Q", "10-Q", "10-Q", "10-Q", "10-K"],
+              accessionNumber: [
+                "0001326801-26-000017",
+                "0001326801-25-000101",
+                "0001326801-25-000075",
+                "0001326801-25-000048",
+                "0001326801-25-000020",
+                "0001326801-25-000018"
+              ],
+              primaryDocument: [
+                "meta-20251231.htm",
+                "meta-q3.htm",
+                "meta-q2.htm",
+                "meta-q1.htm",
+                "meta-q4.htm",
+                "meta-20241231.htm"
+              ],
+              filingDate: [
+                "2026-01-29",
+                "2025-10-29",
+                "2025-07-30",
+                "2025-04-30",
+                "2025-01-29",
+                "2025-01-30"
+              ],
+              reportDate: [
+                "2025-12-31",
+                "2025-09-30",
+                "2025-06-30",
+                "2025-03-31",
+                "2024-12-31",
+                "2024-12-31"
+              ]
+            },
+            files: [
+              {
+                name: "CIK0001326801-submissions-001.json",
+                filingCount: 2001,
+                filingFrom: "2016-11-02",
+                filingTo: "2024-03-18"
+              },
+              {
+                name: "CIK0001326801-submissions-002.json",
+                filingCount: 1064,
+                filingFrom: "2005-05-06",
+                filingTo: "2016-10-31"
+              }
+            ]
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+
+    if (target.endsWith("/CIK0001326801-submissions-001.json")) {
+      return new Response(
+        JSON.stringify({
+          form: ["10-K"],
+          accessionNumber: ["0001326801-24-000012"],
+          primaryDocument: ["meta-20231231.htm"],
+          filingDate: ["2024-02-02"],
+          reportDate: ["2023-12-31"]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+
+    throw new Error(`Unexpected fetch: ${target}`);
+  };
+
+  try {
+    const service = createSecService({
+      internalToken: "",
+      userAgent: "Kabuyomi admin@kabuyomi.app",
+      rateLimitPerSecond: 8,
+      retryCount: 0,
+      initialBackoffMs: 1,
+      requestTimeoutMs: 10
+    });
+    const payload = await service.fetchSubmissions("0001326801");
+
+    assert.deepEqual(
+      payload.filings.recent.accessionNumber.slice(0, 7),
+      [
+        "0001326801-26-000017",
+        "0001326801-25-000101",
+        "0001326801-25-000075",
+        "0001326801-25-000048",
+        "0001326801-25-000018",
+        "0001326801-25-000020",
+        "0001326801-24-000012"
+      ]
+    );
+    assert.deepEqual(calls, [
+      "https://data.sec.gov/submissions/CIK0001326801.json",
+      "https://data.sec.gov/submissions/CIK0001326801-submissions-001.json"
+    ]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test("fetchFilingAssets deduplicates concurrent upstream work", async () => {
   const originalFetch = global.fetch;
   const calls = [];

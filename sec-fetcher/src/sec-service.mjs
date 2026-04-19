@@ -8,6 +8,9 @@ const CACHE_TTL = {
   concept: 6 * 60 * 60 * 1000,
   companyFacts: 6 * 60 * 60 * 1000
 };
+const SUBMISSIONS_LOOKBACK_YEARS = 4;
+const MIN_RECENT_10K_FILINGS = 3;
+const MIN_RECENT_10Q_FILINGS = 4;
 
 export function readConfig(env = process.env) {
   return {
@@ -82,9 +85,11 @@ export function createSecService(config = readConfig()) {
     },
 
     async fetchSubmissions(cik) {
-      return secJson(`https://data.sec.gov/submissions/CIK${String(cik).padStart(10, "0")}.json`, {
+      const root = await secJson(`https://data.sec.gov/submissions/CIK${String(cik).padStart(10, "0")}.json`, {
         cacheTtlMs: CACHE_TTL.submissions
       });
+
+      return expandSubmissionHistory(root, secJson);
     },
 
     async fetchFiling({ cik, accessionNumber, primaryDocument }) {
@@ -134,6 +139,62 @@ export function createSecService(config = readConfig()) {
       const concepts = Object.fromEntries(conceptEntries);
 
       return { concepts, companyFacts };
+    }
+  };
+}
+
+async function expandSubmissionHistory(root, secJson) {
+  const recent = normalizeSubmissionRecent(root);
+  if (!recent) {
+    return root;
+  }
+
+  const files = Array.isArray(root?.filings?.files) ? root.filings.files : [];
+  if (files.length === 0 || hasEnoughSupportedHistory(recent)) {
+    return root;
+  }
+
+  const entries = toSubmissionEntries(recent);
+  const cutoff = isoDateYearsAgo(SUBMISSIONS_LOOKBACK_YEARS);
+
+  for (const file of files) {
+    const fileName = typeof file?.name === "string" ? file.name.trim() : "";
+    if (!fileName) {
+      continue;
+    }
+
+    const fileTo = typeof file?.filingTo === "string" ? file.filingTo : "";
+    const fileFrom = typeof file?.filingFrom === "string" ? file.filingFrom : "";
+    if (fileTo && fileTo < cutoff) {
+      break;
+    }
+
+    const payload = await secJson(`https://data.sec.gov/submissions/${fileName}`, {
+      cacheTtlMs: CACHE_TTL.submissions
+    });
+    const historicalRecent = normalizeSubmissionRecent(payload);
+    if (!historicalRecent) {
+      if (fileFrom && fileFrom < cutoff && hasEnoughSupportedHistoryEntries(entries)) {
+        break;
+      }
+      continue;
+    }
+
+    entries.push(...toSubmissionEntries(historicalRecent));
+    if (hasEnoughSupportedHistoryEntries(entries)) {
+      break;
+    }
+
+    if (fileFrom && fileFrom < cutoff) {
+      break;
+    }
+  }
+
+  return {
+    ...root,
+    filings: {
+      ...(root?.filings ?? {}),
+      recent: toSubmissionRecent(entries)
     }
   };
 }
@@ -240,6 +301,115 @@ async function withCache(cache, key, ttlMs, loader) {
       cache.delete(key);
     }
   }
+}
+
+function normalizeSubmissionRecent(payload) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const recent =
+    payload?.filings?.recent && typeof payload.filings.recent === "object"
+      ? payload.filings.recent
+      : payload;
+
+  return Array.isArray(recent.form) &&
+    Array.isArray(recent.accessionNumber) &&
+    Array.isArray(recent.primaryDocument) &&
+    Array.isArray(recent.filingDate) &&
+    Array.isArray(recent.reportDate)
+    ? recent
+    : null;
+}
+
+function toSubmissionEntries(recent) {
+  const entries = [];
+  const seen = new Set();
+
+  for (let index = 0; index < recent.form.length; index += 1) {
+    const accessionNumber = String(recent.accessionNumber[index] ?? "").trim();
+    if (!accessionNumber || seen.has(accessionNumber)) {
+      continue;
+    }
+
+    seen.add(accessionNumber);
+    entries.push({
+      form: String(recent.form[index] ?? ""),
+      accessionNumber,
+      primaryDocument: String(recent.primaryDocument[index] ?? ""),
+      filingDate: String(recent.filingDate[index] ?? ""),
+      reportDate: String(recent.reportDate[index] ?? "") || String(recent.filingDate[index] ?? "")
+    });
+  }
+
+  return entries;
+}
+
+function toSubmissionRecent(entries) {
+  const deduped = [];
+  const seen = new Set();
+
+  for (const entry of entries) {
+    if (!entry.accessionNumber || seen.has(entry.accessionNumber)) {
+      continue;
+    }
+    seen.add(entry.accessionNumber);
+    deduped.push(entry);
+  }
+
+  deduped.sort((left, right) => {
+    const filedDelta = right.filingDate.localeCompare(left.filingDate);
+    if (filedDelta !== 0) {
+      return filedDelta;
+    }
+
+    const reportDelta = right.reportDate.localeCompare(left.reportDate);
+    if (reportDelta !== 0) {
+      return reportDelta;
+    }
+
+    return right.accessionNumber.localeCompare(left.accessionNumber);
+  });
+
+  return {
+    form: deduped.map((entry) => entry.form),
+    accessionNumber: deduped.map((entry) => entry.accessionNumber),
+    primaryDocument: deduped.map((entry) => entry.primaryDocument),
+    filingDate: deduped.map((entry) => entry.filingDate),
+    reportDate: deduped.map((entry) => entry.reportDate)
+  };
+}
+
+function hasEnoughSupportedHistory(recent) {
+  return hasEnoughSupportedHistoryEntries(toSubmissionEntries(recent));
+}
+
+function hasEnoughSupportedHistoryEntries(entries) {
+  let tenKCount = 0;
+  let tenQCount = 0;
+
+  for (const entry of entries) {
+    if (!entry.filingDate || entry.filingDate < isoDateYearsAgo(SUBMISSIONS_LOOKBACK_YEARS)) {
+      continue;
+    }
+
+    if (entry.form.startsWith("10-K")) {
+      tenKCount += 1;
+      continue;
+    }
+
+    if (entry.form.startsWith("10-Q")) {
+      tenQCount += 1;
+    }
+  }
+
+  return tenKCount >= MIN_RECENT_10K_FILINGS && tenQCount >= MIN_RECENT_10Q_FILINGS;
+}
+
+function isoDateYearsAgo(years) {
+  const date = new Date();
+  date.setUTCFullYear(date.getUTCFullYear() - years);
+  return date.toISOString().slice(0, 10);
 }
 
 function shouldRetryResponse(response) {

@@ -255,6 +255,76 @@ describe("history backfill guardrails", () => {
     expect(ensureStoredFiling).toHaveBeenCalledTimes(10);
   });
 
+  it("normalizes already-indexed filing rows to the current representative ticker", async () => {
+    vi.mocked(lookupTicker).mockResolvedValue({
+      ticker: "GOOG",
+      companyName: "Alphabet Inc.",
+      cik: "0001652044",
+      exchange: "Nasdaq"
+    } as never);
+    vi.mocked(fetchSubmissions).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
+    vi.mocked(listSupportedFilings).mockReturnValue([
+      makeFiling("GOOG", "10-K", "0001652044-26-000018", "2025-12-31")
+    ]);
+
+    const batch = vi.fn().mockResolvedValue([]);
+    const env = {
+      DB: {
+        prepare: vi.fn((sql: string) => ({
+          bind: vi.fn((...args: unknown[]) => ({
+            sql,
+            args,
+            first: vi.fn().mockResolvedValue(
+              sql.includes("SELECT filing_key, ticker FROM filings")
+                ? {
+                    filing_key: "v3:0001652044:000165204426000018",
+                    ticker: "GOOGL"
+                  }
+                : null
+            )
+          }))
+        })),
+        batch
+      },
+      FILINGS_BUCKET: {
+        get: vi.fn(),
+        put: vi.fn(),
+        head: vi.fn()
+      }
+    };
+
+    const ensureStoredFiling = vi.fn();
+
+    const result = await backfillHistoricalFilings(
+      {
+        tickers: ["GOOG"],
+        years: 3,
+        forms: ["10-K"],
+        maxFilingsPerTicker: 1
+      },
+      env as never,
+      { extractorVersion: "v3" } as never,
+      ensureStoredFiling as never
+    );
+
+    expect(ensureStoredFiling).not.toHaveBeenCalled();
+    expect(result.skippedFilings).toEqual([
+      {
+        ticker: "GOOG",
+        filingKey: "v3:0001652044:000165204426000018",
+        reason: "already_indexed"
+      }
+    ]);
+    expect(batch).toHaveBeenCalledTimes(1);
+    const statements = batch.mock.calls[0]?.[0] as Array<{ sql: string; args: unknown[] }>;
+    expect(statements.map((statement) => statement.sql)).toEqual([
+      "UPDATE filings SET ticker = ? WHERE filing_key = ?",
+      "UPDATE metric_history SET ticker = ? WHERE filing_key = ?",
+      "UPDATE segment_highlights SET ticker = ? WHERE filing_key = ?"
+    ]);
+    expect(statements.every((statement) => statement.args[0] === "GOOG")).toBe(true);
+  });
+
   it("loads historical overview across class-share aliases via cik", async () => {
     const overview = await loadHistoricalOverview(
       {

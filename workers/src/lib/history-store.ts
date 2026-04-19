@@ -370,16 +370,19 @@ export async function backfillHistoricalFilings(
         }
 
         const filingKey = filingReference.accessionNumber.replaceAll("-", "");
-        const alreadyIndexed = await env.DB.prepare("SELECT filing_key FROM filings WHERE filing_key = ? LIMIT 1")
+        const existingIndexed = await env.DB.prepare("SELECT filing_key, ticker FROM filings WHERE filing_key = ? LIMIT 1")
           .bind(`${config.extractorVersion}:${filingReference.cik}:${filingKey}`)
-          .first<string>("filing_key");
+          .first<{ filing_key: string; ticker: string }>();
         consumedInBatch += 1;
         remainingBudget -= 1;
 
-        if (alreadyIndexed) {
+        if (existingIndexed?.filing_key) {
+          if (existingIndexed.ticker !== tickerRecord.ticker) {
+            await normalizeIndexedFilingTicker(existingIndexed.filing_key, tickerRecord.ticker, env);
+          }
           skippedFilings.push({
             ticker,
-            filingKey: alreadyIndexed,
+            filingKey: existingIndexed.filing_key,
             reason: "already_indexed"
           });
           continue;
@@ -452,6 +455,18 @@ function preserveRemainingTickers(
   for (const ticker of tickers) {
     nextCursorByTicker[ticker] = cursorByTicker?.[ticker] ?? 0;
   }
+}
+
+async function normalizeIndexedFilingTicker(
+  filingKey: string,
+  ticker: string,
+  env: Env & { DB: D1Database }
+): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare("UPDATE filings SET ticker = ? WHERE filing_key = ?").bind(ticker, filingKey),
+    env.DB.prepare("UPDATE metric_history SET ticker = ? WHERE filing_key = ?").bind(ticker, filingKey),
+    env.DB.prepare("UPDATE segment_highlights SET ticker = ? WHERE filing_key = ?").bind(ticker, filingKey)
+  ]);
 }
 
 function buildArchiveObjectKey(filingKey: string): string {
