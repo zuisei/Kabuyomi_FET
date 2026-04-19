@@ -177,7 +177,7 @@ export async function maybeBuildHistoricalChatResponse(
 
   const metricNames = selectHistoricalMetricNames(question);
   const metricRows = await loadHistoricalMetricRows(
-    filing.ticker,
+    filing.cik,
     filing.formType,
     subtractYearsIsoDate(filing.periodOfReport, HISTORY_YEARS),
     metricNames,
@@ -215,7 +215,7 @@ export async function maybeBuildHistoricalChatResponse(
 
   if (asksDrivers) {
     const segments = await loadSegmentHighlights(
-      filing.ticker,
+      filing.cik,
       filing.formType,
       subtractYearsIsoDate(filing.periodOfReport, HISTORY_YEARS),
       env
@@ -256,7 +256,7 @@ export async function loadHistoricalOverview(
     "epsBasic"
   ];
   const metricRows = await loadHistoricalMetricRows(
-    filing.ticker,
+    filing.cik,
     filing.formType,
     subtractYearsIsoDate(filing.periodOfReport, HISTORY_YEARS),
     logicalNames,
@@ -593,7 +593,7 @@ function extractSegmentHighlights(record: FilingCacheRecord): SegmentHighlightIn
 }
 
 async function loadHistoricalMetricRows(
-  ticker: string,
+  cik: string,
   formType: FilingReference["formType"],
   sinceDate: string,
   logicalNames: MetricSnapshot["logicalName"][],
@@ -616,18 +616,18 @@ async function loadHistoricalMetricRows(
       m.source_id AS sourceId
     FROM metric_history m
     JOIN filings f ON f.filing_key = m.filing_key
-    WHERE m.ticker = ? AND f.form_type = ? AND m.period_end >= ? AND m.logical_name IN (${placeholders})
+    WHERE f.cik = ? AND f.form_type = ? AND m.period_end >= ? AND m.logical_name IN (${placeholders})
     ORDER BY m.period_end DESC, f.filed_at DESC
     LIMIT ?`
   )
-    .bind(ticker, formType, sinceDate, ...logicalNames, limit)
+    .bind(cik, formType, sinceDate, ...logicalNames, limit)
     .all<HistoricalMetricRow>();
 
   return result.results;
 }
 
 async function loadSegmentHighlights(
-  ticker: string,
+  cik: string,
   formType: FilingReference["formType"],
   sinceDate: string,
   env: Env & { DB: D1Database }
@@ -645,11 +645,11 @@ async function loadSegmentHighlights(
       s.source_id AS sourceId
     FROM segment_highlights s
     JOIN filings f ON f.filing_key = s.filing_key
-    WHERE s.ticker = ? AND f.form_type = ? AND s.period_end >= ?
+    WHERE f.cik = ? AND f.form_type = ? AND s.period_end >= ?
     ORDER BY s.period_end DESC, s.label ASC
     LIMIT 12`
   )
-    .bind(ticker, formType, sinceDate)
+    .bind(cik, formType, sinceDate)
     .all<SegmentHighlightRow>();
 
   return result.results;

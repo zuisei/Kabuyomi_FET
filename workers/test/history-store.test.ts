@@ -2,12 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/clients/sec", () => ({
   fetchSubmissions: vi.fn(),
+  listTickersByCik: vi.fn(),
   listSupportedFilings: vi.fn(),
   lookupTicker: vi.fn(),
   pickComparisonFiling: vi.fn().mockReturnValue(null)
 }));
 
-import { backfillHistoricalFilings } from "../src/lib/history-store";
+import { backfillHistoricalFilings, loadHistoricalOverview, maybeBuildHistoricalChatResponse } from "../src/lib/history-store";
 import type { FilingReference } from "../src/env";
 import { fetchSubmissions, listSupportedFilings, lookupTicker } from "../src/clients/sec";
 
@@ -29,6 +30,95 @@ function makeEnv() {
       get: vi.fn(),
       put: vi.fn(),
       head: vi.fn()
+    }
+  };
+}
+
+function makeHistoricalBindingsEnv() {
+  return {
+    DB: {
+      prepare: vi.fn((sql: string) => {
+        if (sql.includes("SELECT filing_key FROM filings WHERE filing_key")) {
+          return {
+            bind: vi.fn(() => ({
+              first: vi.fn().mockResolvedValue("existing")
+            }))
+          };
+        }
+
+        if (sql.includes("FROM metric_history")) {
+          return {
+            bind: vi.fn((subject: string) => ({
+              all: vi.fn().mockResolvedValue({
+                results:
+                  subject === "0001067983"
+                    ? [
+                        {
+                          filingKey: "v3:0001067983:1",
+                          ticker: "BRK-A",
+                          formType: "10-K",
+                          filedAt: "2025-02-20",
+                          periodOfReport: "2024-12-31",
+                          periodEnd: "2024-12-31",
+                          logicalName: "revenue",
+                          value: 100,
+                          unit: "USDm",
+                          yoyPercent: 10,
+                          sourceId: "S9"
+                        },
+                        {
+                          filingKey: "v3:0001067983:2",
+                          ticker: "BRK-A",
+                          formType: "10-K",
+                          filedAt: "2024-02-20",
+                          periodOfReport: "2023-12-31",
+                          periodEnd: "2023-12-31",
+                          logicalName: "revenue",
+                          value: 90,
+                          unit: "USDm",
+                          yoyPercent: 8,
+                          sourceId: "S8"
+                        }
+                      ]
+                    : []
+              })
+            }))
+          };
+        }
+
+        if (sql.includes("FROM segment_highlights")) {
+          return {
+            bind: vi.fn((subject: string) => ({
+              all: vi.fn().mockResolvedValue({
+                results:
+                  subject === "0001067983"
+                    ? [
+                        {
+                          filingKey: "v3:0001067983:1",
+                          ticker: "BRK-A",
+                          formType: "10-K",
+                          filedAt: "2025-02-20",
+                          periodEnd: "2024-12-31",
+                          dimension: "geography",
+                          label: "米州",
+                          summary: "保険料収入が伸びた",
+                          sourceId: "S1"
+                        }
+                      ]
+                    : []
+              })
+            }))
+          };
+        }
+
+        throw new Error(`Unexpected SQL: ${sql}`);
+      }),
+      batch: vi.fn().mockResolvedValue([])
+    },
+    FILINGS_BUCKET: {
+      get: vi.fn(),
+      put: vi.fn(),
+      head: vi.fn().mockResolvedValue({ key: "archived" })
     }
   };
 }
@@ -163,5 +253,61 @@ describe("history backfill guardrails", () => {
     expect(result.maxTotalFilings).toBe(20);
     expect(result.totalCapReached).toBe(false);
     expect(ensureStoredFiling).toHaveBeenCalledTimes(10);
+  });
+
+  it("loads historical overview across class-share aliases via cik", async () => {
+    const overview = await loadHistoricalOverview(
+      {
+        filingKey: "v3:0001067983:3",
+        ticker: "BRK-B",
+        companyName: "Berkshire Hathaway",
+        cik: "0001067983",
+        formType: "10-K",
+        filedAt: "2026-03-02",
+        periodOfReport: "2025-12-31",
+        primaryDocumentUrl: "https://www.sec.gov/Archives/test.htm",
+        mdaText: "",
+        mdaTokenCount: 0,
+        metrics: [],
+        sourceChunks: [],
+        summary: { verdict: "", highlights: [], changes: [] },
+        generatedAt: "2026-04-19T00:00:00.000Z",
+        extractorVersion: "v3",
+        promptVersion: "v2"
+      },
+      makeHistoricalBindingsEnv() as never
+    );
+
+    expect(overview?.comparisonBasis).toBe("annual");
+    expect(overview?.series).toHaveLength(1);
+    expect(overview?.series[0]?.points).toHaveLength(2);
+  });
+
+  it("loads historical chat evidence across class-share aliases via cik", async () => {
+    const response = await maybeBuildHistoricalChatResponse(
+      {
+        filingKey: "v3:0001067983:3",
+        ticker: "BRK-B",
+        companyName: "Berkshire Hathaway",
+        cik: "0001067983",
+        formType: "10-K",
+        filedAt: "2026-03-02",
+        periodOfReport: "2025-12-31",
+        primaryDocumentUrl: "https://www.sec.gov/Archives/test.htm",
+        mdaText: "",
+        mdaTokenCount: 0,
+        metrics: [],
+        sourceChunks: [],
+        summary: { verdict: "", highlights: [], changes: [] },
+        generatedAt: "2026-04-19T00:00:00.000Z",
+        extractorVersion: "v3",
+        promptVersion: "v2"
+      },
+      "この3年の売上推移と地域要因は？",
+      makeHistoricalBindingsEnv() as never
+    );
+
+    expect(response).not.toBeNull();
+    expect(response?.sources.length).toBeGreaterThan(0);
   });
 });

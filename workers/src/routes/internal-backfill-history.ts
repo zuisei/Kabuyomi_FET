@@ -3,7 +3,7 @@ import { backfillHistoricalFilings } from "../lib/history-store";
 import { isAuthorizedInternalRequest } from "../lib/internal-auth";
 import { ensureHistoricalFilingStored } from "../lib/pipeline";
 import { badRequest, json } from "../lib/response";
-import { resolveTrackedTickers } from "../lib/tracked-tickers";
+import { resolveTrackedTickersForExecution } from "../lib/tracked-tickers";
 import type { RouteHandler } from "./types";
 
 export const handleInternalBackfillHistoryRoute: RouteHandler = async ({ request, url, env, config }) => {
@@ -30,7 +30,10 @@ export const handleInternalBackfillHistoryRoute: RouteHandler = async ({ request
   const result = await backfillHistoricalFilings(
     {
       ...parsed.data,
-      tickers: parsed.data.tickers?.length ? parsed.data.tickers : resolveTrackedTickers(config)
+      tickers:
+        parsed.data.tickers?.length
+          ? await resolveTrackedTickersForExecution({ trackedTickers: parsed.data.tickers }, env)
+          : await resolveTrackedTickersForExecution(config, env)
     },
     env,
     config,

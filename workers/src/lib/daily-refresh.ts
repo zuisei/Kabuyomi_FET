@@ -2,7 +2,7 @@ import type { Env } from "../env";
 import { ensureLatestFiling } from "./pipeline";
 import { logErrorEvent, logEvent, logWarnEvent } from "./logging";
 import type { RemoteConfig } from "./remote-config";
-import { resolveDailyRefreshConcurrency, resolveTrackedTickers } from "./tracked-tickers";
+import { resolveDailyRefreshConcurrency, resolveTrackedTickersForExecution } from "./tracked-tickers";
 
 export interface DailyRefreshResult {
   attempted: string[];
@@ -20,7 +20,7 @@ export async function refreshTrackedFilings(env: Env, config: RemoteConfig): Pro
     };
   }
 
-  const tickers = resolveTrackedTickers(config);
+  const tickers = await resolveTrackedTickersForExecution(config, env);
   if (tickers.length === 0) {
     logEvent("tracked_filings_refresh_skipped", { reason: "empty_targets" });
     return {
