@@ -88,6 +88,8 @@ final class AppModel {
     private var loadingTickers: Set<String> = []
     private var accessRevokedTickers: Set<String> = []
     private var refreshedTickersThisSession: Set<String> = []
+    private var watchlistMutationInFlight = false
+    private var watchlistMutationWaiters: [CheckedContinuation<Void, Never>] = []
     private var savedTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.savedTickers") ?? [])
     private var recentTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.recentTickers") ?? [])
     private var pendingConversationTicker = UserDefaults.standard.string(forKey: "kabuyomi.pendingConversationTicker")
@@ -483,6 +485,8 @@ final class AppModel {
 
     func removeFromWatchlist(_ ticker: String) async {
         let normalized = normalizedTicker(ticker)
+        await acquireWatchlistMutationLock()
+        defer { releaseWatchlistMutationLock() }
         guard !addingTickers.contains(normalized) else { return }
         let stateGeneration = self.stateGeneration
 
@@ -533,6 +537,8 @@ final class AppModel {
 
     private func saveTicker(_ ticker: String, searchItem: SearchItem?, redirectToConversation: Bool) async {
         let normalized = normalizedTicker(ticker)
+        await acquireWatchlistMutationLock()
+        defer { releaseWatchlistMutationLock() }
         guard !addingTickers.contains(normalized) else { return }
         let stateGeneration = self.stateGeneration
 
@@ -676,6 +682,27 @@ final class AppModel {
         guard stateGeneration == self.stateGeneration else { return }
         loadingTickers.remove(ticker)
         companyIsLoading = !loadingTickers.isEmpty
+    }
+
+    private func acquireWatchlistMutationLock() async {
+        if !watchlistMutationInFlight {
+            watchlistMutationInFlight = true
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            watchlistMutationWaiters.append(continuation)
+        }
+    }
+
+    private func releaseWatchlistMutationLock() {
+        if let next = watchlistMutationWaiters.first {
+            watchlistMutationWaiters.removeFirst()
+            next.resume()
+            return
+        }
+
+        watchlistMutationInFlight = false
     }
 
     private func presentAlert(for error: Error) {
