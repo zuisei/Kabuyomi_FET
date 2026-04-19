@@ -35,7 +35,8 @@ export async function ensureHistoricalFilingStored(
   filing: FilingReference,
   comparisonFiling: FilingReference | null,
   env: Env,
-  config: RemoteConfig
+  config: RemoteConfig,
+  options: { contentMode?: "full" | "metrics_only" } = {}
 ): Promise<FilingCacheRecord> {
   const filingKey = buildFilingKey(config.extractorVersion, filing);
   const archived = await loadArchivedFilingByKey(filingKey, env);
@@ -54,7 +55,8 @@ export async function ensureHistoricalFilingStored(
 
     // Historical backfills only need filing-grounded metrics and MD&A chunks, so skip Gemini summary spend.
     const record = await ingestFiling(filing, comparisonFiling, env, config, {
-      summaryMode: "fallback_only"
+      summaryMode: "fallback_only",
+      contentMode: options.contentMode ?? "full"
     });
     await ensureHistoricalArtifacts(record, env);
     return record;

@@ -1,6 +1,6 @@
 import type { Env, FilingCacheRecord, FilingReference, MetricSnapshot, SourceChunkRecord } from "../../env";
 import { generateSummary } from "../../clients/gemini";
-import { fetchFilingAssets } from "../../clients/sec";
+import { buildPrimaryDocumentUrl, fetchFilingAssets, fetchMetricSnapshots } from "../../clients/sec";
 import { extractMDASectionWithDiagnostics } from "../../extractors/mda";
 import { AppError } from "../errors";
 import { logEvent } from "../logging";
@@ -12,40 +12,88 @@ export async function ingestFiling(
   comparisonFiling: FilingReference | null,
   env: Env,
   config: RemoteConfig,
-  options: { summaryMode?: "default" | "fallback_only" } = {}
+  options: { summaryMode?: "default" | "fallback_only"; contentMode?: "full" | "metrics_only" } = {}
 ): Promise<FilingCacheRecord> {
   const startedAt = Date.now();
   const summaryMode = options.summaryMode ?? "default";
+  const contentMode = options.contentMode ?? "full";
   const fetchStartedAt = Date.now();
-  const { html, primaryDocumentUrl, metrics } = await fetchFilingAssets(filing, comparisonFiling, env);
-  const fetchedAt = Date.now();
-  const { result: extracted, diagnostics } = extractMDASectionWithDiagnostics(html, filing.formType);
-  if (!extracted) {
-    logEvent("extraction_failed", {
+  let metrics: MetricSnapshot[];
+  let primaryDocumentUrl: string;
+  let html = "";
+  let extractedText = "";
+  let extractedTokenCount = 0;
+  let extractionDiagnostics = {
+    inputHtmlChars: 0,
+    normalizedChars: 0,
+    startMatchesCount: 0,
+    endMatchesCount: 0,
+    sanitizeMs: 0,
+    domParseMs: 0,
+    textReadMs: 0,
+    cleanupMs: 0,
+    normalizeMs: 0,
+    boundaryScanMs: 0,
+    selectionMs: 0,
+    totalMs: 0
+  };
+  let usedStartPattern = "";
+  let usedEndPattern = "";
+
+  if (contentMode === "metrics_only") {
+    metrics = await fetchMetricSnapshots(filing, comparisonFiling, env);
+    primaryDocumentUrl = buildPrimaryDocumentUrl(filing);
+    logEvent("extraction_skipped", {
       ticker: filing.ticker,
       cik: filing.cik,
       formType: filing.formType,
       accessionNumber: filing.accessionNumber,
       summaryMode,
-      fetchMs: fetchedAt - fetchStartedAt,
-      ...diagnostics
+      contentMode
     });
-    throw new AppError(422, "Failed to extract MD&A section");
-  }
+  } else {
+    const fetched = await fetchFilingAssets(filing, comparisonFiling, env);
+    html = fetched.html;
+    primaryDocumentUrl = fetched.primaryDocumentUrl;
+    metrics = fetched.metrics;
+    const fetchedAt = Date.now();
+    const { result: extracted, diagnostics } = extractMDASectionWithDiagnostics(html, filing.formType);
+    if (!extracted) {
+      logEvent("extraction_failed", {
+        ticker: filing.ticker,
+        cik: filing.cik,
+        formType: filing.formType,
+        accessionNumber: filing.accessionNumber,
+        summaryMode,
+        contentMode,
+        fetchMs: fetchedAt - fetchStartedAt,
+        ...diagnostics
+      });
+      throw new AppError(422, "Failed to extract MD&A section");
+    }
 
-  logEvent("extraction_succeeded", {
-    ticker: filing.ticker,
+    extractedText = extracted.text;
+    extractedTokenCount = extracted.tokenCount;
+    extractionDiagnostics = diagnostics;
+    usedStartPattern = extracted.usedStartPattern;
+    usedEndPattern = extracted.usedEndPattern;
+
+    logEvent("extraction_succeeded", {
+      ticker: filing.ticker,
       cik: filing.cik,
       formType: filing.formType,
       accessionNumber: filing.accessionNumber,
       tokenCount: extracted.tokenCount,
       summaryMode,
+      contentMode,
       fetchMs: fetchedAt - fetchStartedAt,
       ...diagnostics
     });
+  }
+  const fetchedAt = Date.now();
 
   const filingKey = `${config.extractorVersion}:${filing.cik}:${filing.accessionNumber.replaceAll("-", "")}`;
-  const sourceChunks = buildSourceChunks(filing, extracted.text, metrics);
+  const sourceChunks = buildSourceChunks(filing, extractedText, metrics);
   const summaryEnv = summaryMode === "fallback_only" ? ({ ...env, GEMINI_API_KEY: undefined } as Env) : env;
   const summaryStartedAt = Date.now();
   const summary = await generateSummary(summaryEnv, {
@@ -65,25 +113,26 @@ export async function ingestFiling(
     ticker: filing.ticker,
     formType: filing.formType,
     summaryMode,
+    contentMode,
     fetchMs: fetchedAt - fetchStartedAt,
     summaryMs: finishedAt - summaryStartedAt,
     totalMs: finishedAt - startedAt,
     htmlChars: html.length,
     metricsCount: metrics.length,
     sourceChunkCount: sourceChunks.length,
-    mdaChars: extracted.text.length,
-    mdaTokenCount: extracted.tokenCount,
+    mdaChars: extractedText.length,
+    mdaTokenCount: extractedTokenCount,
     primaryDocumentHost: safeUrlHost(primaryDocumentUrl),
-    usedStartPattern: extracted.usedStartPattern,
-    usedEndPattern: extracted.usedEndPattern,
-    inputHtmlChars: diagnostics.inputHtmlChars,
-    normalizedChars: diagnostics.normalizedChars,
-    startMatchesCount: diagnostics.startMatchesCount,
-    endMatchesCount: diagnostics.endMatchesCount,
-    normalizeMs: diagnostics.normalizeMs,
-    boundaryScanMs: diagnostics.boundaryScanMs,
-    selectionMs: diagnostics.selectionMs,
-    extractTotalMs: diagnostics.totalMs
+    usedStartPattern,
+    usedEndPattern,
+    inputHtmlChars: extractionDiagnostics.inputHtmlChars,
+    normalizedChars: extractionDiagnostics.normalizedChars,
+    startMatchesCount: extractionDiagnostics.startMatchesCount,
+    endMatchesCount: extractionDiagnostics.endMatchesCount,
+    normalizeMs: extractionDiagnostics.normalizeMs,
+    boundaryScanMs: extractionDiagnostics.boundaryScanMs,
+    selectionMs: extractionDiagnostics.selectionMs,
+    extractTotalMs: extractionDiagnostics.totalMs
   });
 
   return {
@@ -95,8 +144,8 @@ export async function ingestFiling(
     filedAt: filing.filedAt,
     periodOfReport: filing.periodOfReport,
     primaryDocumentUrl,
-    mdaText: extracted.text,
-    mdaTokenCount: extracted.tokenCount,
+    mdaText: extractedText,
+    mdaTokenCount: extractedTokenCount,
     metrics,
     sourceChunks,
     summary,
