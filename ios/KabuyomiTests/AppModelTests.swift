@@ -813,6 +813,163 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.usage?.savedTickers, ["AAPL", "AMZN"])
     }
 
+    func testDevUnlimitedWatchlistAddsReuseStableDeviceKey() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let model = makeAppModel(persistence: persistence)
+        model.devUnlimitedModeEnabled = true
+        let aapl = TestFixtures.companyPayload(ticker: "AAPL", cik: "0000320193")
+        let amzn = TestFixtures.companyPayload(ticker: "AMZN", cik: "0001018724")
+        let lock = NSLock()
+        var savedTickersByDeviceKey: [String: [String]] = [:]
+        var seenDeviceKeys: [String] = []
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            switch request.url?.path {
+            case "/v1/watchlist/add":
+                let deviceKey = try XCTUnwrap(request.value(forHTTPHeaderField: "x-device-key"))
+                XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-debug-unlimited"), "1")
+
+                let body = try XCTUnwrap(Self.requestBodyData(from: request))
+                let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+                let ticker = try XCTUnwrap(payload["ticker"])
+                let company = ticker == "AAPL" ? aapl : amzn
+
+                lock.lock()
+                seenDeviceKeys.append(deviceKey)
+                var savedTickers = savedTickersByDeviceKey[deviceKey] ?? []
+                if !savedTickers.contains(ticker) {
+                    savedTickers.append(ticker)
+                }
+                savedTickersByDeviceKey[deviceKey] = savedTickers
+                lock.unlock()
+
+                let baseData = try TestFixtures.watchlistAddResponseData(ticker: company.ticker, cik: company.cik)
+                var json = try XCTUnwrap(JSONSerialization.jsonObject(with: baseData) as? [String: Any])
+                var usage = try XCTUnwrap(json["usage"] as? [String: Any])
+                usage["stocksUsed"] = savedTickers.count
+                usage["savedTickers"] = savedTickers
+                json["usage"] = usage
+
+                return (response, try TestFixtures.jsonData(json))
+            default:
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "beta",
+                        "chatsUsed": 0,
+                        "chatLimit": 20,
+                        "stocksUsed": 0,
+                        "stockLimit": 25,
+                        "dateJST": "2026-04-18",
+                        "savedTickers": []
+                    ])
+                )
+            }
+        }
+
+        await model.addToWatchlist(
+            SearchItem(
+                ticker: "AAPL",
+                companyName: "Apple Inc.",
+                cik: "0000320193",
+                exchange: "NASDAQ",
+                latestFormType: "10-Q"
+            )
+        )
+        await model.addToWatchlist(
+            SearchItem(
+                ticker: "AMZN",
+                companyName: "AMAZON COM INC",
+                cik: "0001018724",
+                exchange: "NASDAQ",
+                latestFormType: "10-K"
+            )
+        )
+
+        XCTAssertEqual(Set(seenDeviceKeys).count, 1)
+        XCTAssertEqual(model.watchlist.map(\.ticker), ["AAPL", "AMZN"])
+        XCTAssertEqual(model.usage?.savedTickers, ["AAPL", "AMZN"])
+    }
+
+    func testStaleUsageRefreshDoesNotOverwriteLaterWatchlistAdds() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockAppModelURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let model = AppModel(
+            apiClient: APIClient(
+                session: session,
+                baseURL: URL(string: "https://example.com")!
+            ),
+            persistence: persistence,
+            deviceIdentity: DeviceIdentityStore()
+        )
+        let aapl = TestFixtures.companyPayload(ticker: "AAPL", cik: "0000320193")
+        let amzn = TestFixtures.companyPayload(ticker: "AMZN", cik: "0001018724")
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            switch request.url?.path {
+            case "/v1/usage":
+                Thread.sleep(forTimeInterval: 0.3)
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "beta",
+                        "chatsUsed": 0,
+                        "chatLimit": 20,
+                        "stocksUsed": 1,
+                        "stockLimit": 25,
+                        "dateJST": "2026-04-18",
+                        "savedTickers": ["AMZN"]
+                    ])
+                )
+            case "/v1/watchlist/add":
+                let body = try XCTUnwrap(Self.requestBodyData(from: request))
+                let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+                let ticker = try XCTUnwrap(payload["ticker"])
+                let company = ticker == "AAPL" ? aapl : amzn
+                let savedTickers = ticker == "AAPL" ? ["AAPL"] : ["AAPL", "AMZN"]
+                let baseData = try TestFixtures.watchlistAddResponseData(ticker: company.ticker, cik: company.cik)
+                var json = try XCTUnwrap(JSONSerialization.jsonObject(with: baseData) as? [String: Any])
+                var usage = try XCTUnwrap(json["usage"] as? [String: Any])
+                usage["stocksUsed"] = savedTickers.count
+                usage["savedTickers"] = savedTickers
+                json["usage"] = usage
+                return (response, try TestFixtures.jsonData(json))
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        await model.bootstrap()
+        await model.addToWatchlist(
+            SearchItem(
+                ticker: "AAPL",
+                companyName: "Apple Inc.",
+                cik: "0000320193",
+                exchange: "NASDAQ",
+                latestFormType: "10-Q"
+            )
+        )
+        await model.addToWatchlist(
+            SearchItem(
+                ticker: "AMZN",
+                companyName: "AMAZON COM INC",
+                cik: "0001018724",
+                exchange: "NASDAQ",
+                latestFormType: "10-K"
+            )
+        )
+        try? await Task.sleep(nanoseconds: 400_000_000)
+
+        XCTAssertEqual(model.watchlist.map(\.ticker), ["AAPL", "AMZN"])
+        XCTAssertEqual(model.usage?.savedTickers, ["AAPL", "AMZN"])
+    }
+
     func testBootstrapShowsPlaceholderForSavedTickerWithoutLocalCard() async throws {
         let persistence = PersistenceController(inMemory: true)
         try persistence.saveCompany(TestFixtures.companyPayload(ticker: "AMZN", cik: "0001018724"), searchItem: nil)

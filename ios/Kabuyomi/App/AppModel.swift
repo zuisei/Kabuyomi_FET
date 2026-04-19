@@ -33,6 +33,11 @@ enum UsageLoadState {
     case failed
 }
 
+private enum UsageUpdateSource {
+    case refresh
+    case mutation
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -90,6 +95,7 @@ final class AppModel {
     private var refreshedTickersThisSession: Set<String> = []
     private var watchlistMutationInFlight = false
     private var watchlistMutationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var usageMutationGeneration = 0
     private var savedTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.savedTickers") ?? [])
     private var recentTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.recentTickers") ?? [])
     private var pendingConversationTicker = UserDefaults.standard.string(forKey: "kabuyomi.pendingConversationTicker")
@@ -273,7 +279,7 @@ final class AppModel {
                 return false
             }
             try persistence.saveChat(question: trimmed, response: response, for: company)
-            storeUsage(response.usage)
+            storeUsage(response.usage, source: .mutation)
             chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized)?.chatHistory ?? []
             await ensureMinimumPendingChatDuration(since: pendingStartedAt)
             return true
@@ -500,7 +506,7 @@ final class AppModel {
                 debugUnlimited: isDevUnlimitedModeActive
             )
             guard stateGeneration == self.stateGeneration else { return }
-            storeUsage(result.usage)
+            storeUsage(result.usage, source: .mutation)
             if result.usage.savedTickers == nil {
                 applyLocalWatchlistRemovalFallback(for: normalized)
                 loadHomeFromPersistence()
@@ -572,7 +578,7 @@ final class AppModel {
             accessRevokedTickers.remove(normalized)
             accessRevokedTickers.remove(savedTicker)
             completeInitialEntry()
-            storeUsage(result.usage)
+            storeUsage(result.usage, source: .mutation)
             if result.usage.savedTickers == nil {
                 applyLocalWatchlistAddFallback(savedTicker: savedTicker, cik: result.company.cik)
             }
@@ -592,6 +598,7 @@ final class AppModel {
 
     private func refreshUsage() async {
         let stateGeneration = self.stateGeneration
+        let usageGeneration = usageMutationGeneration
         usageLoadState = .loading
         do {
             let usage = try await apiClient.fetchUsage(
@@ -599,7 +606,8 @@ final class AppModel {
                 debugUnlimited: isDevUnlimitedModeActive
             )
             guard stateGeneration == self.stateGeneration else { return }
-            storeUsage(usage)
+            guard usageGeneration == usageMutationGeneration else { return }
+            storeUsage(usage, source: .refresh)
             usageLoadState = .loaded
         } catch {
             guard stateGeneration == self.stateGeneration else { return }
@@ -810,7 +818,10 @@ final class AppModel {
         return error.localizedDescription
     }
 
-    private func storeUsage(_ usage: UsagePayload) {
+    private func storeUsage(_ usage: UsagePayload, source: UsageUpdateSource) {
+        if source == .mutation {
+            usageMutationGeneration += 1
+        }
         self.usage = usage
         guard let serverTickers = usage.savedTickers else { return }
         reconcileSavedTickers(with: serverTickers)
@@ -1214,10 +1225,7 @@ final class AppModel {
         }
     }
 
-    private func quotaDeviceKey(purpose: String) -> String {
-        if isDevUnlimitedModeActive {
-            return "dev-unlimited-\(purpose)-\(UUID().uuidString)"
-        }
+    private func quotaDeviceKey(purpose _: String) -> String {
         return deviceIdentity.deviceKey()
     }
 
