@@ -930,7 +930,7 @@ final class AppModel {
     }
 
     private func loadHomeFromPersistence() {
-        watchlist = orderedCards(for: savedTickers)
+        watchlist = persistence.loadWatchlistCards(savedTickers: savedTickers)
         recentCompanies = orderedCards(for: recentTickers.filter { !isTickerInWatchlist($0) })
     }
 

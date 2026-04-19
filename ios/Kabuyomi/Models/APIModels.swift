@@ -301,6 +301,7 @@ struct WatchlistCard: Identifiable, Hashable {
     let filedAt: Date
     let verdict: String
     let metrics: [MetricPayload]
+    let isPlaceholder: Bool
 
     var id: String { ticker }
 }

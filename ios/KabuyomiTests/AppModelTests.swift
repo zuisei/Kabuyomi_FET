@@ -671,6 +671,121 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.recentCompanies.isEmpty)
     }
 
+    func testAddToWatchlistKeepsMultipleDistinctTickersVisible() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let model = makeAppModel(persistence: persistence)
+        let aapl = TestFixtures.companyPayload(ticker: "AAPL", cik: "0000320193")
+        let amzn = TestFixtures.companyPayload(ticker: "AMZN", cik: "0001018724")
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            switch request.url?.path {
+            case "/v1/watchlist/add":
+                let body = try XCTUnwrap(Self.requestBodyData(from: request))
+                let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+                let ticker = try XCTUnwrap(payload["ticker"])
+                let company = ticker == "AAPL" ? aapl : amzn
+                let savedTickers = ticker == "AAPL" ? ["AAPL"] : ["AAPL", "AMZN"]
+                let baseData = try TestFixtures.watchlistAddResponseData(ticker: company.ticker, cik: company.cik)
+                var json = try XCTUnwrap(JSONSerialization.jsonObject(with: baseData) as? [String: Any])
+                var usage = try XCTUnwrap(json["usage"] as? [String: Any])
+                usage["stocksUsed"] = savedTickers.count
+                usage["savedTickers"] = savedTickers
+                json["usage"] = usage
+
+                return (
+                    response,
+                    try TestFixtures.jsonData(json)
+                )
+            default:
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "beta",
+                        "chatsUsed": 0,
+                        "chatLimit": 20,
+                        "stocksUsed": 0,
+                        "stockLimit": 25,
+                        "dateJST": "2026-04-18",
+                        "savedTickers": []
+                    ])
+                )
+            }
+        }
+
+        await model.addToWatchlist(
+            SearchItem(
+                ticker: "AAPL",
+                companyName: "Apple Inc.",
+                cik: "0000320193",
+                exchange: "NASDAQ",
+                latestFormType: "10-Q"
+            )
+        )
+        await model.addToWatchlist(
+            SearchItem(
+                ticker: "AMZN",
+                companyName: "AMAZON COM INC",
+                cik: "0001018724",
+                exchange: "NASDAQ",
+                latestFormType: "10-K"
+            )
+        )
+
+        XCTAssertEqual(model.watchlist.map(\.ticker), ["AAPL", "AMZN"])
+        XCTAssertTrue(model.isTickerInWatchlist("AAPL", cik: "0000320193"))
+        XCTAssertTrue(model.isTickerInWatchlist("AMZN", cik: "0001018724"))
+    }
+
+    func testBootstrapShowsPlaceholderForSavedTickerWithoutLocalCard() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        try persistence.saveCompany(TestFixtures.companyPayload(ticker: "AMZN", cik: "0001018724"), searchItem: nil)
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            switch request.url?.path {
+            case "/v1/usage":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "beta",
+                        "chatsUsed": 0,
+                        "chatLimit": 20,
+                        "stocksUsed": 2,
+                        "stockLimit": 25,
+                        "dateJST": "2026-04-18",
+                        "savedTickers": ["AAPL", "AMZN"]
+                    ])
+                )
+            case "/v1/company/AAPL":
+                let failure = HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!
+                return (failure, try TestFixtures.jsonData(["error": "Internal server error"]))
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockAppModelURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let model = AppModel(
+            apiClient: APIClient(
+                session: session,
+                baseURL: URL(string: "https://example.com")!
+            ),
+            persistence: persistence,
+            deviceIdentity: DeviceIdentityStore()
+        )
+
+        await model.bootstrap()
+        try? await Task.sleep(nanoseconds: 250_000_000)
+
+        XCTAssertEqual(model.watchlist.map(\.ticker), ["AAPL", "AMZN"])
+        XCTAssertEqual(model.watchlist.map(\.isPlaceholder), [true, false])
+    }
+
     func testBootstrapReconcilesServerWatchlistAndHydratesMissingCards() async {
         let msft = TestFixtures.companyPayload(ticker: "MSFT")
         let model = makeAppModel()
@@ -743,6 +858,31 @@ final class AppModelTests: XCTestCase {
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("kabuyomi.") {
             defaults.removeObject(forKey: key)
         }
+    }
+
+    private nonisolated static func requestBodyData(from request: URLRequest) -> Data? {
+        if let httpBody = request.httpBody {
+            return httpBody
+        }
+
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+
+        let bufferSize = 1024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        var data = Data()
+        while stream.hasBytesAvailable {
+            let read = stream.read(buffer, maxLength: bufferSize)
+            if read <= 0 {
+                break
+            }
+            data.append(buffer, count: read)
+        }
+
+        return data.isEmpty ? nil : data
     }
 }
 

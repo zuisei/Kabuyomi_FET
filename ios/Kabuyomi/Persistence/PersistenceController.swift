@@ -33,7 +33,18 @@ final class PersistenceController {
         guard !savedTickers.isEmpty else { return [] }
 
         let cardsByTicker = Dictionary(uniqueKeysWithValues: loadCompanyCards(tickers: savedTickers).map { ($0.ticker, $0) })
-        return savedTickers.compactMap { cardsByTicker[$0] }
+        return savedTickers.map { ticker in
+            cardsByTicker[ticker] ?? WatchlistCard(
+                filingKey: "",
+                ticker: ticker,
+                companyName: ticker,
+                formType: "",
+                filedAt: .distantPast,
+                verdict: "",
+                metrics: [],
+                isPlaceholder: true
+            )
+        }
     }
 
     func loadCompanyCard(ticker: String) -> WatchlistCard? {
@@ -243,7 +254,8 @@ final class PersistenceController {
             formType: latest.formType,
             filedAt: latest.filedAt,
             verdict: latest.summary?.verdictText ?? "",
-            metrics: latest.metricArray.map(metricPayload(from:))
+            metrics: latest.metricArray.map(metricPayload(from:)),
+            isPlaceholder: false
         )
     }
 

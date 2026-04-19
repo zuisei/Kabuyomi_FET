@@ -137,7 +137,10 @@ struct ConversationLibraryDrawer: View {
     }
 
     private func drawerSubtitle(for company: WatchlistCard) -> String {
-        "\(company.formType) ・ \(company.filedAt.formatted(date: .abbreviated, time: .omitted))"
+        if company.isPlaceholder {
+            return "ローカル同期中"
+        }
+        return "\(company.formType) ・ \(company.filedAt.formatted(date: .abbreviated, time: .omitted))"
     }
 
     private var header: some View {
