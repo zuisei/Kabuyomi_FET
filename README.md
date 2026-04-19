@@ -96,6 +96,8 @@ npx wrangler d1 execute kabuyomi-history --remote --file ./d1/migrations/0001_hi
 - Treat D1 as an index only; keep large filing payloads in R2.
 - Prefer small batch runs over broad backfills.
 - Default rollout is annual `10-K` first, then narrow `10-Q` top-ups for saved or explicitly requested tickers.
+- The current background history seed targets the top 30 U.S.-listed issuers by market cap, normalized at the issuer/CIK level so class-share families such as `GOOG/GOOGL` or `BRK-A/BRK-B` count as one tracked company.
+- Live annual coverage is intended to hold 3 years of `10-K` history for that top-30 tracked issuer set before any broader `10-Q` rollout.
 - Free-tier-safe defaults currently cap one run to annual filings with `maxFilingsPerTicker=1` and `maxTotalFilings=8`.
 - User-facing history chat stays narrow on purpose: each request hydrates at most 2 prior filings and does not do broad background sweeps.
 

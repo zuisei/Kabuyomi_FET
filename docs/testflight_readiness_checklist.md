@@ -16,6 +16,7 @@ Treat the current code as the source of truth over older specs. The ship target 
 - Current free beta limits: `3` saved tickers and `3` chats per JST day
 - Chat metadata should follow `responsePath`; remote model naming should appear only for real remote Gemini execution
 - Historical chat is narrow on purpose: explicit `3年` / `比較` / `推移` style prompts only
+- Background history seed is the top 30 U.S.-listed issuers by market cap, using issuer-level normalization for class-share families and targeting 3 years of annual `10-K` coverage
 
 ## Not In Scope For This TestFlight
 
@@ -49,6 +50,7 @@ Treat the current code as the source of truth over older specs. The ship target 
 - [ ] Confirm `webSupplementEnabled = false` unless you are intentionally running an external-supplement test.
 - [ ] Decide whether the default free beta limits stay at `3 / 3` or are raised before inviting testers.
 - [ ] Confirm `dailyRefreshEnabled` and any background tracked ticker list are intentional for beta load, and are not being described as the user saved ticker source of truth.
+- [ ] Confirm the tracked history seed still matches the intended top-30 U.S. issuer roster and remains issuer-normalized across class shares.
 - [ ] Confirm `/v1/watchlist/add` and `/v1/watchlist/remove` return updated usage with the current saved ticker semantics.
 - [ ] Confirm `/v1/billing/sync` still returns the beta-disabled response in the target environment.
 - [ ] Run remote D1 migration if the target environment is fresh.
