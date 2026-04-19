@@ -86,6 +86,7 @@ final class AppModel {
     private var stateGeneration = 0
     private var addingTickers: Set<String> = []
     private var loadingTickers: Set<String> = []
+    private var accessRevokedTickers: Set<String> = []
     private var refreshedTickersThisSession: Set<String> = []
     private var savedTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.savedTickers") ?? [])
     private var recentTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.recentTickers") ?? [])
@@ -205,6 +206,7 @@ final class AppModel {
 
     func prefetchCompany(ticker: String) {
         let normalized = normalizedTicker(ticker)
+        guard !isLocalAccessRevoked(for: normalized) else { return }
         guard companyCache[normalized] == nil, !loadingTickers.contains(normalized) else { return }
 
         Task {
@@ -214,6 +216,7 @@ final class AppModel {
 
     func loadCompany(ticker: String, forceRefresh: Bool = false) async {
         let normalized = normalizedTicker(ticker)
+        guard !isLocalAccessRevoked(for: normalized) else { return }
 
         if !forceRefresh, companyCache[normalized] != nil {
             return
@@ -244,7 +247,7 @@ final class AppModel {
             )
             return false
         }
-        guard let company = companyCache[normalized] ?? persistence.loadCompany(ticker: normalized)?.company else {
+        guard let company = companyPayload(for: normalized) else {
             activeAlert = AppAlertState(message: "企業データを先に読み込んでください。", kind: .dismissOnly)
             return false
         }
@@ -268,7 +271,7 @@ final class AppModel {
                 return false
             }
             try persistence.saveChat(question: trimmed, response: response, for: company)
-            usage = response.usage
+            storeUsage(response.usage)
             chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized)?.chatHistory ?? []
             await ensureMinimumPendingChatDuration(since: pendingStartedAt)
             return true
@@ -309,7 +312,9 @@ final class AppModel {
     }
 
     func companyPayload(for ticker: String) -> CompanyPayload? {
-        companyCache[ticker] ?? persistence.loadCompany(ticker: ticker)?.company
+        let normalized = normalizedTicker(ticker)
+        guard !isLocalAccessRevoked(for: normalized) else { return nil }
+        return companyCache[normalized] ?? persistence.loadCompany(ticker: normalized)?.company
     }
 
     func openConversation(for ticker: String, draftQuestion: String? = nil) {
@@ -350,10 +355,12 @@ final class AppModel {
     }
 
     func chatHistory(for ticker: String) -> [LocalChatMessage] {
-        if let cached = chatHistoryCache[ticker] {
+        let normalized = normalizedTicker(ticker)
+        guard !isLocalAccessRevoked(for: normalized) else { return [] }
+        if let cached = chatHistoryCache[normalized] {
             return cached
         }
-        return persistence.loadCompany(ticker: ticker)?.chatHistory ?? []
+        return persistence.loadCompany(ticker: normalized)?.chatHistory ?? []
     }
 
     func pendingChat(for ticker: String) -> PendingChatState? {
@@ -435,6 +442,7 @@ final class AppModel {
             pendingChats = [:]
             addingTickers = []
             loadingTickers = []
+            accessRevokedTickers = []
             refreshedTickersThisSession = []
             savedTickers = []
             recentTickers = []
@@ -450,10 +458,12 @@ final class AppModel {
             UserDefaults.standard.removeObject(forKey: Self.hasCompletedInitialEntryKey)
             UserDefaults.standard.removeObject(forKey: Self.appLaunchCountKey)
             UserDefaults.standard.removeObject(forKey: Self.starterCompaniesAutoHiddenKey)
+            UserDefaults.standard.removeObject(forKey: Self.aiConsentKey)
             UserDefaults.standard.set(true, forKey: Self.showStarterCompaniesKey)
             hasCompletedInitialEntry = false
             appLaunchCount = 0
             showStarterCompanies = true
+            aiConsentGranted = false
             pendingConversationTicker = nil
             pendingConversationQuestion = nil
             starterCompaniesAutoHidden = false
@@ -486,10 +496,17 @@ final class AppModel {
                 debugUnlimited: isDevUnlimitedModeActive
             )
             guard stateGeneration == self.stateGeneration else { return }
-            usage = result.usage
-            savedTickers.removeAll(where: { $0 == normalized })
-            UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
-            loadHomeFromPersistence()
+            storeUsage(result.usage)
+            if result.usage.savedTickers == nil {
+                savedTickers.removeAll(where: { $0 == normalized })
+                UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
+                if shouldRevokeLocalAccessWithoutWatchlist(for: normalized) {
+                    revokeLocalAccess(for: normalized)
+                } else {
+                    accessRevokedTickers.remove(normalized)
+                }
+                loadHomeFromPersistence()
+            }
         } catch {
             guard stateGeneration == self.stateGeneration else { return }
             handle(error)
@@ -547,14 +564,17 @@ final class AppModel {
             )
             guard stateGeneration == self.stateGeneration else { return }
             try persistence.saveCompany(result.company, searchItem: searchItem)
-            usage = result.usage
             companyCache[normalized] = result.company
             chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized)?.chatHistory ?? []
+            accessRevokedTickers.remove(normalized)
             completeInitialEntry()
-            savedTickers.removeAll(where: { $0 == normalized })
-            savedTickers.insert(normalized, at: 0)
-            savedTickers = Array(savedTickers.prefix(25))
-            UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
+            storeUsage(result.usage)
+            if result.usage.savedTickers == nil {
+                savedTickers.removeAll(where: { $0 == normalized })
+                savedTickers.insert(normalized, at: 0)
+                savedTickers = Array(savedTickers.prefix(25))
+                UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
+            }
             setLastSeenFilingKey(result.company.filingKey, for: normalized)
             activeConversationTicker = normalized
             UserDefaults.standard.set(normalized, forKey: Self.activeConversationTickerKey)
@@ -578,7 +598,7 @@ final class AppModel {
                 debugUnlimited: isDevUnlimitedModeActive
             )
             guard stateGeneration == self.stateGeneration else { return }
-            self.usage = usage
+            storeUsage(usage)
             usageLoadState = .loaded
         } catch {
             guard stateGeneration == self.stateGeneration else { return }
@@ -592,6 +612,7 @@ final class AppModel {
 
     private func refreshCompanyInBackgroundIfNeeded(ticker: String) {
         guard !loadingTickers.contains(ticker), !refreshedTickersThisSession.contains(ticker) else { return }
+        guard !isLocalAccessRevoked(for: ticker) else { return }
 
         Task {
             await fetchCompanyRemote(ticker: ticker, forceRefresh: false)
@@ -599,7 +620,7 @@ final class AppModel {
     }
 
     private func fetchCompanyRemote(ticker: String, forceRefresh: Bool) async {
-        guard !loadingTickers.contains(ticker) else { return }
+        guard !loadingTickers.contains(ticker), !isLocalAccessRevoked(for: ticker) else { return }
         let stateGeneration = self.stateGeneration
 
         loadingTickers.insert(ticker)
@@ -624,9 +645,11 @@ final class AppModel {
                     )
             )
             guard stateGeneration == self.stateGeneration else { return }
+            guard !isLocalAccessRevoked(for: ticker) else { return }
             try persistence.saveCompany(company, searchItem: nil)
             companyCache[ticker] = company
             chatHistoryCache[ticker] = persistence.loadCompany(ticker: ticker)?.chatHistory ?? []
+            accessRevokedTickers.remove(ticker)
             refreshedTickersThisSession.insert(ticker)
             loadHomeFromPersistence()
         } catch {
@@ -765,6 +788,82 @@ final class AppModel {
         return error.localizedDescription
     }
 
+    private func storeUsage(_ usage: UsagePayload) {
+        self.usage = usage
+        guard let serverTickers = usage.savedTickers else { return }
+        reconcileSavedTickers(with: serverTickers)
+    }
+
+    private func reconcileSavedTickers(with serverTickers: [String]) {
+        let normalizedServerTickers = Self.normalizedTickers(serverTickers)
+        let removedTickers = Set(savedTickers).subtracting(normalizedServerTickers)
+
+        savedTickers = normalizedServerTickers
+        UserDefaults.standard.set(savedTickers, forKey: Self.savedTickersKey)
+
+        for ticker in normalizedServerTickers {
+            accessRevokedTickers.remove(ticker)
+        }
+
+        for ticker in removedTickers {
+            guard shouldRevokeLocalAccessWithoutWatchlist(for: ticker) else {
+                accessRevokedTickers.remove(ticker)
+                continue
+            }
+            revokeLocalAccess(for: ticker)
+        }
+
+        loadHomeFromPersistence()
+        hydrateMissingWatchlistCompanies(for: normalizedServerTickers)
+    }
+
+    private func hydrateMissingWatchlistCompanies(for tickers: [String]) {
+        for ticker in tickers {
+            guard companyCache[ticker] == nil else { continue }
+            guard persistence.loadCompanyCard(ticker: ticker) == nil else { continue }
+            guard !loadingTickers.contains(ticker) else { continue }
+
+            Task { [weak self] in
+                await self?.fetchCompanyRemote(ticker: ticker, forceRefresh: false)
+            }
+        }
+    }
+
+    private func shouldRevokeLocalAccessWithoutWatchlist(for ticker: String) -> Bool {
+        !isStarterTicker(ticker)
+    }
+
+    private func revokeLocalAccess(for ticker: String) {
+        let normalized = normalizedTicker(ticker)
+        accessRevokedTickers.insert(normalized)
+        companyCache.removeValue(forKey: normalized)
+        chatHistoryCache.removeValue(forKey: normalized)
+        pendingChats.removeValue(forKey: normalized)
+        addingTickers.remove(normalized)
+        loadingTickers.remove(normalized)
+        refreshedTickersThisSession.remove(normalized)
+        recentTickers.removeAll(where: { $0 == normalized })
+        UserDefaults.standard.set(recentTickers, forKey: Self.recentTickersKey)
+        if lastViewedTicker == normalized {
+            lastViewedTicker = nil
+            UserDefaults.standard.removeObject(forKey: Self.lastViewedTickerKey)
+        }
+        if activeConversationTicker == normalized {
+            activeConversationTicker = nil
+            UserDefaults.standard.removeObject(forKey: Self.activeConversationTickerKey)
+        }
+        if pendingConversationTicker == normalized {
+            pendingConversationTicker = nil
+            pendingConversationQuestion = nil
+            UserDefaults.standard.removeObject(forKey: Self.pendingConversationTickerKey)
+            UserDefaults.standard.removeObject(forKey: Self.pendingConversationQuestionKey)
+        }
+        clearLastSeenFilingKey(for: normalized)
+        try? persistence.removeStock(ticker: normalized)
+        companyIsLoading = !loadingTickers.isEmpty
+        chatIsSending = !pendingChats.isEmpty
+    }
+
     private func searchScore(for item: SearchItem, query: String) -> Int {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let ticker = item.ticker.lowercased()
@@ -874,7 +973,9 @@ final class AppModel {
     }
 
     private func hasLocallyAvailableConversation(ticker: String) -> Bool {
-        companyCache[ticker] != nil || persistence.loadCompany(ticker: ticker) != nil
+        let normalized = normalizedTicker(ticker)
+        guard !isLocalAccessRevoked(for: normalized) else { return false }
+        return companyCache[normalized] != nil || persistence.loadCompany(ticker: normalized) != nil
     }
 
     private func orderedCards(for tickers: [String]) -> [WatchlistCard] {
@@ -898,6 +999,22 @@ final class AppModel {
                 defaults.removeObject(forKey: key)
             }
         }
+    }
+
+    private func clearLastSeenFilingKey(for ticker: String) {
+        UserDefaults.standard.removeObject(forKey: lastSeenFilingKeyKey(for: ticker))
+    }
+
+    private func isStarterTicker(_ ticker: String) -> Bool {
+        let normalized = normalizedTicker(ticker)
+        return starterCompanies.contains(where: { $0.ticker == normalized })
+    }
+
+    private func isLocalAccessRevoked(for ticker: String) -> Bool {
+        let normalized = normalizedTicker(ticker)
+        return accessRevokedTickers.contains(normalized)
+            && !savedTickers.contains(normalized)
+            && shouldRevokeLocalAccessWithoutWatchlist(for: normalized)
     }
 
     private func completeInitialEntry() {

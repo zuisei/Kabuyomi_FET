@@ -24,14 +24,14 @@ export const handleCompanyRoute: RouteHandler = async ({ request, url, env, conf
         requireDeviceKey: true,
         allowDebugUnlimited: true
       });
+      const tickerRecord = await lookupTicker(ticker, env);
+      if (!tickerRecord) {
+        return notFound(`Ticker not found: ${ticker}`);
+      }
       const normalizedRequestedTicker = ticker.trim().toUpperCase();
       const needsAliasResolution = /[.\-\s]/.test(normalizedRequestedTicker);
       if (!needsAliasResolution) {
         await ensureCompanyAccessAllowed(identity, normalizedRequestedTicker, STARTER_TICKERS, env, config);
-      }
-      const tickerRecord = await lookupTicker(ticker, env);
-      if (!tickerRecord) {
-        return notFound(`Ticker not found: ${ticker}`);
       }
 
       if (needsAliasResolution || tickerRecord.ticker !== normalizedRequestedTicker) {
@@ -64,14 +64,14 @@ export const handleCompanyRoute: RouteHandler = async ({ request, url, env, conf
         requireDeviceKey: true,
         allowDebugUnlimited: true
       });
+      const tickerRecord = await lookupTicker(ticker, env);
+      if (!tickerRecord) {
+        return notFound(`Ticker not found: ${ticker}`);
+      }
       const normalizedRequestedTicker = ticker.trim().toUpperCase();
       const needsAliasResolution = /[.\-\s]/.test(normalizedRequestedTicker);
       if (!needsAliasResolution) {
         await ensureCompanyAccessAllowed(identity, normalizedRequestedTicker, STARTER_TICKERS, env, config);
-      }
-      const tickerRecord = await lookupTicker(ticker, env);
-      if (!tickerRecord) {
-        return notFound(`Ticker not found: ${ticker}`);
       }
 
       if (needsAliasResolution || tickerRecord.ticker !== normalizedRequestedTicker) {

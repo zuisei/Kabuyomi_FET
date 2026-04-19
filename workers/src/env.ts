@@ -103,4 +103,5 @@ export interface UsageState {
   stocksUsed: number;
   stockLimit: number;
   dateJST: string;
+  savedTickers?: string[];
 }

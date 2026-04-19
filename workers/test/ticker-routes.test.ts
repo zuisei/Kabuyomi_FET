@@ -10,8 +10,8 @@ vi.mock("../src/lib/pipeline", () => ({
 
 vi.mock("../src/lib/quota", () => ({
   readQuotaIdentity: vi.fn(),
-  ensureStockQuotaAvailable: vi.fn(),
-  consumeStockQuota: vi.fn(),
+  consumeStockQuotaWithMutation: vi.fn(),
+  refundStockQuota: vi.fn(),
   removeTickerFromSavedQuota: vi.fn(),
   ensureCompanyAccessAllowed: vi.fn()
 }));
@@ -22,18 +22,18 @@ import { handleWatchlistRemoveRoute } from "../src/routes/watchlist-remove";
 import { lookupTicker } from "../src/clients/sec";
 import { ensureLatestFiling } from "../src/lib/pipeline";
 import {
-  consumeStockQuota,
+  consumeStockQuotaWithMutation,
   ensureCompanyAccessAllowed,
-  ensureStockQuotaAvailable,
   readQuotaIdentity,
+  refundStockQuota,
   removeTickerFromSavedQuota
 } from "../src/lib/quota";
 
 const mockLookupTicker = vi.mocked(lookupTicker);
 const mockEnsureLatestFiling = vi.mocked(ensureLatestFiling);
 const mockReadQuotaIdentity = vi.mocked(readQuotaIdentity);
-const mockEnsureStockQuotaAvailable = vi.mocked(ensureStockQuotaAvailable);
-const mockConsumeStockQuota = vi.mocked(consumeStockQuota);
+const mockConsumeStockQuotaWithMutation = vi.mocked(consumeStockQuotaWithMutation);
+const mockRefundStockQuota = vi.mocked(refundStockQuota);
 const mockRemoveTickerFromSavedQuota = vi.mocked(removeTickerFromSavedQuota);
 const mockEnsureCompanyAccessAllowed = vi.mocked(ensureCompanyAccessAllowed);
 
@@ -93,8 +93,7 @@ describe("ticker-aware routes", () => {
       exchange: "Nasdaq"
     });
     mockEnsureLatestFiling.mockResolvedValue(makeFiling({ ticker: "GOOGL" }) as never);
-    mockEnsureStockQuotaAvailable.mockResolvedValue(usage as never);
-    mockConsumeStockQuota.mockResolvedValue(usage as never);
+    mockConsumeStockQuotaWithMutation.mockResolvedValue({ usage, didMutate: true } as never);
 
     const response = await handleWatchlistAddRoute({
       request: new Request("https://kabuyomi.test/v1/watchlist/add", {
@@ -118,8 +117,7 @@ describe("ticker-aware routes", () => {
       },
       usage
     });
-    expect(mockEnsureStockQuotaAvailable).toHaveBeenCalledWith(identity, "GOOG", expect.anything(), expect.anything());
-    expect(mockConsumeStockQuota).toHaveBeenCalledWith(identity, "GOOG", expect.anything(), expect.anything());
+    expect(mockConsumeStockQuotaWithMutation).toHaveBeenCalledWith(identity, "GOOG", expect.anything(), expect.anything());
     expect(mockEnsureLatestFiling).toHaveBeenCalledWith(
       "GOOG",
       expect.anything(),
@@ -128,6 +126,10 @@ describe("ticker-aware routes", () => {
         tickerRecord: expect.objectContaining({ ticker: "GOOG" })
       })
     );
+    expect(mockConsumeStockQuotaWithMutation.mock.invocationCallOrder[0]).toBeLessThan(
+      mockEnsureLatestFiling.mock.invocationCallOrder[0]!
+    );
+    expect(mockRefundStockQuota).not.toHaveBeenCalled();
   });
 
   it("normalizes separator aliases before company access checks and response serialization", async () => {
@@ -202,5 +204,59 @@ describe("ticker-aware routes", () => {
     expect(response?.status).toBe(200);
     await expect(response?.json()).resolves.toMatchObject({ usage });
     expect(mockRemoveTickerFromSavedQuota).toHaveBeenCalledWith(identity, "BRK-B", expect.anything(), expect.anything());
+  });
+
+  it("returns notFound for unknown tickers before access checks", async () => {
+    mockLookupTicker.mockResolvedValue(null);
+
+    const response = await handleCompanyRoute({
+      request: new Request("https://kabuyomi.test/v1/company/NOPE", {
+        method: "GET",
+        headers: {
+          "x-device-key": "device-123"
+        }
+      }),
+      url: new URL("https://kabuyomi.test/v1/company/NOPE"),
+      env: {} as never,
+      config: {} as never,
+      ctx: {} as never
+    });
+
+    expect(response?.status).toBe(404);
+    await expect(response?.json()).resolves.toMatchObject({
+      error: "Ticker not found: NOPE"
+    });
+    expect(mockEnsureCompanyAccessAllowed).not.toHaveBeenCalled();
+  });
+
+  it("refunds a newly consumed stock slot when filing ingestion fails", async () => {
+    mockLookupTicker.mockResolvedValue({
+      ticker: "GOOG",
+      companyName: "Alphabet Inc.",
+      cik: "0001652044",
+      exchange: "Nasdaq"
+    });
+    mockConsumeStockQuotaWithMutation.mockResolvedValue({ usage, didMutate: true } as never);
+    mockRefundStockQuota.mockResolvedValue(usage as never);
+    mockEnsureLatestFiling.mockRejectedValue(new Error("Filing fetch failed"));
+
+    await expect(
+      handleWatchlistAddRoute({
+        request: new Request("https://kabuyomi.test/v1/watchlist/add", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-device-key": "device-123"
+          },
+          body: JSON.stringify({ ticker: "GOOG" })
+        }),
+        url: new URL("https://kabuyomi.test/v1/watchlist/add"),
+        env: {} as never,
+        config: {} as never,
+        ctx: {} as never
+      })
+    ).rejects.toThrow("Filing fetch failed");
+
+    expect(mockRefundStockQuota).toHaveBeenCalledWith(identity, "GOOG", expect.anything(), expect.anything());
   });
 });

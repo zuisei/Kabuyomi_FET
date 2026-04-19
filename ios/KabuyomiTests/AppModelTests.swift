@@ -100,6 +100,23 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.showStarterCompanies)
     }
 
+    func testResetLocalDataClearsAIConsentAndRequiresReconsentBeforeChat() async {
+        let model = makeAppModel()
+        model.setAIConsent(true)
+
+        XCTAssertTrue(model.aiConsentGranted)
+
+        model.resetLocalData()
+
+        XCTAssertFalse(model.aiConsentGranted)
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: AppModel.aiConsentKey))
+
+        let didSend = await model.sendChat(question: "売上高は？", ticker: "AAPL")
+
+        XCTAssertFalse(didSend)
+        XCTAssertEqual(model.activeAlert?.kind, .aiConsent)
+    }
+
     func testResetLocalDataClearsRecentStateAndRotatesDeviceIdentity() async throws {
         let persistence = PersistenceController(inMemory: true)
         let company = TestFixtures.companyPayload()
@@ -435,6 +452,102 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertFalse(sent)
         XCTAssertEqual(model.activeAlert?.message, "チャット応答を現在生成できません。少し待ってから、もう一度お試しください。")
+    }
+
+    func testRemoveFromWatchlistRevokesLocalAccessForNonStarterTickers() async throws {
+        UserDefaults.standard.set(["ORCL"], forKey: AppModel.savedTickersKey)
+        UserDefaults.standard.set(["ORCL"], forKey: AppModel.recentTickersKey)
+        UserDefaults.standard.set("ORCL", forKey: AppModel.lastViewedTickerKey)
+        UserDefaults.standard.set("ORCL", forKey: AppModel.activeConversationTickerKey)
+
+        let persistence = PersistenceController(inMemory: true)
+        let company = TestFixtures.companyPayload(ticker: "ORCL")
+        try persistence.saveCompany(company, searchItem: nil)
+
+        let model = makeAppModel(persistence: persistence)
+        model.recordCompanyVisit(ticker: "ORCL")
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            if request.url?.path == "/v1/watchlist/remove" {
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "usage": [
+                            "plan": "beta",
+                            "chatsUsed": 0,
+                            "chatLimit": 20,
+                            "stocksUsed": 0,
+                            "stockLimit": 25,
+                            "dateJST": "2026-04-18",
+                            "savedTickers": []
+                        ]
+                    ])
+                )
+            }
+
+            return (
+                response,
+                try TestFixtures.jsonData([
+                    "plan": "beta",
+                    "chatsUsed": 0,
+                    "chatLimit": 20,
+                    "stocksUsed": 0,
+                    "stockLimit": 25,
+                    "dateJST": "2026-04-18",
+                    "savedTickers": []
+                ])
+            )
+        }
+
+        await model.removeFromWatchlist("ORCL")
+
+        XCTAssertFalse(model.isTickerInWatchlist("ORCL"))
+        XCTAssertNil(model.companyPayload(for: "ORCL"))
+        XCTAssertNil(persistence.loadCompany(ticker: "ORCL"))
+        XCTAssertNil(model.activeConversationTicker)
+        XCTAssertNil(model.lastViewedTicker)
+        XCTAssertFalse(model.watchlist.contains(where: { $0.ticker == "ORCL" }))
+    }
+
+    func testBootstrapReconcilesServerWatchlistAndHydratesMissingCards() async {
+        let msft = TestFixtures.companyPayload(ticker: "MSFT")
+        let model = makeAppModel()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            switch request.url?.path {
+            case "/v1/usage":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "beta",
+                        "chatsUsed": 0,
+                        "chatLimit": 20,
+                        "stocksUsed": 1,
+                        "stockLimit": 25,
+                        "dateJST": "2026-04-18",
+                        "savedTickers": ["MSFT"]
+                    ])
+                )
+            case "/v1/company/MSFT":
+                return (
+                    response,
+                    try TestFixtures.companyPayloadData(ticker: "MSFT")
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        await model.bootstrap()
+        try? await Task.sleep(nanoseconds: 250_000_000)
+
+        XCTAssertTrue(model.isTickerInWatchlist("MSFT"))
+        XCTAssertEqual(model.watchlist.map(\.ticker), ["MSFT"])
+        XCTAssertEqual(model.companyPayload(for: "MSFT")?.filingKey, msft.filingKey)
     }
 
     private func makeAppModel(persistence: PersistenceController = PersistenceController(inMemory: true)) -> AppModel {

@@ -133,6 +133,7 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
     expect(response.answer).toContain("前年同期比 15.7%増");
     expect(response.answer).not.toContain("D1 unavailable");
+    expect(response.responsePath).toBe("fallback");
     expect(response.sources.length).toBe(1);
     expect(response.sources[0]?.sourceKind).toBe("sec_filing");
   });
@@ -371,6 +372,50 @@ describe("buildChatResponse", () => {
     expect(response.responsePath).toBe("fallback");
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
     expect(response.answer).toContain("この先を言い切ることはできません");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
+    expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+  });
+
+  it("preserves the gemini response path when a remote answer returns valid filing sources", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.startsWith("https://generativelanguage.googleapis.com/")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        answer: "売上の伸びは iPhone とサービスが主因です。",
+                        sourceIds: ["S9", "S7"]
+                      })
+                    }
+                  ]
+                }
+              }
+            ]
+          })
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filing = makeTestFiling();
+    const response = await buildChatResponse(
+      filing,
+      "ガイダンスや今後の見通しは強い？",
+      { GEMINI_API_KEY: "test-key" } as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.responsePath).toBe("gemini");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
   });

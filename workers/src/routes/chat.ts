@@ -1,12 +1,14 @@
 import { resolveGeminiModel } from "../clients/gemini/request";
 import { ChatRequestSchema } from "../lib/contracts";
-import { buildChatResponse, loadFilingByKey } from "../lib/pipeline";
-import { consumeChatQuota, ensureChatQuotaAvailable, readQuotaIdentity } from "../lib/quota";
+import { isCurrentCacheRecord, loadFilingByKey } from "../lib/filings/cache";
+import { buildChatResponse } from "../lib/pipeline";
+import { consumeChatQuota, ensureCompanyAccessAllowed, readQuotaIdentity, refundChatQuota } from "../lib/quota";
 import { logErrorEvent, logEvent } from "../lib/logging";
 import { badRequest, json, notFound, unavailable } from "../lib/response";
+import { STARTER_TICKERS } from "../lib/starter-tickers";
 import type { RouteHandler } from "./types";
 
-export const handleChatRoute: RouteHandler = async ({ request, url, env, config }) => {
+export const handleChatRoute: RouteHandler = async ({ request, url, env, config, ctx }) => {
   if (!(request.method === "POST" && url.pathname === "/v1/chat")) {
     return null;
   }
@@ -28,8 +30,8 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config 
   }
 
   try {
-    const filing = await loadFilingByKey(parsed.data.filingKey, env);
-    if (!filing) {
+    const requestedFiling = await loadFilingByKey(parsed.data.filingKey, env);
+    if (!requestedFiling || !isCurrentCacheRecord(requestedFiling, config)) {
       return notFound("Filing cache not found");
     }
 
@@ -37,13 +39,28 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config 
       requireDeviceKey: true,
       allowDebugUnlimited: true
     });
-    await ensureChatQuotaAvailable(identity, env, config);
-    const startedAt = Date.now();
-    const answer = await buildChatResponse(filing, parsed.data.question, env, config);
+    await ensureCompanyAccessAllowed(identity, requestedFiling.ticker, STARTER_TICKERS, env, config);
     const usage = await consumeChatQuota(identity, env, config);
+    const startedAt = Date.now();
+    const answer = await (async () => {
+      try {
+        return await buildChatResponse(requestedFiling, parsed.data.question, env, config);
+      } catch (error) {
+        try {
+          await refundChatQuota(identity, env, config);
+        } catch (refundError) {
+          logErrorEvent("chat_quota_refund_failed", {
+            filingKey: requestedFiling.filingKey,
+            quotaSubject: identity.quotaSubject,
+            reason: refundError instanceof Error ? refundError.message : String(refundError)
+          });
+        }
+        throw error;
+      }
+    })();
 
     logEvent("chat_request", {
-      filingKey: parsed.data.filingKey,
+      filingKey: requestedFiling.filingKey,
       quotaSubject: identity.quotaSubject,
       identityKind: identity.identityKind,
       latencyMs: Date.now() - startedAt,

@@ -16,6 +16,12 @@ interface QuotaIdentityOptions {
 
 interface UsageEnvelope {
   usage: UsageState;
+  didMutate?: boolean;
+}
+
+export interface QuotaMutationResult {
+  usage: UsageState;
+  didMutate: boolean;
 }
 
 export async function readQuotaIdentity(
@@ -69,7 +75,7 @@ export async function ensureChatQuotaAvailable(
   env: Env,
   config: RemoteConfig
 ): Promise<UsageState> {
-  return mutateUsage(identity, env, config, "checkChat");
+  return (await mutateUsage(identity, env, config, "checkChat")).usage;
 }
 
 export async function ensureStockQuotaAvailable(
@@ -78,7 +84,7 @@ export async function ensureStockQuotaAvailable(
   env: Env,
   config: RemoteConfig
 ): Promise<UsageState> {
-  return mutateUsage(identity, env, config, "checkStock", ticker);
+  return (await mutateUsage(identity, env, config, "checkStock", ticker)).usage;
 }
 
 export async function consumeChatQuota(
@@ -86,7 +92,15 @@ export async function consumeChatQuota(
   env: Env,
   config: RemoteConfig
 ): Promise<UsageState> {
-  return mutateUsage(identity, env, config, "consumeChat");
+  return (await mutateUsage(identity, env, config, "consumeChat")).usage;
+}
+
+export async function refundChatQuota(
+  identity: QuotaIdentity,
+  env: Env,
+  config: RemoteConfig
+): Promise<UsageState> {
+  return (await mutateUsage(identity, env, config, "refundChat")).usage;
 }
 
 export async function consumeStockQuota(
@@ -95,7 +109,25 @@ export async function consumeStockQuota(
   env: Env,
   config: RemoteConfig
 ): Promise<UsageState> {
+  return (await mutateUsage(identity, env, config, "consumeStock", ticker)).usage;
+}
+
+export async function consumeStockQuotaWithMutation(
+  identity: QuotaIdentity,
+  ticker: string,
+  env: Env,
+  config: RemoteConfig
+): Promise<QuotaMutationResult> {
   return mutateUsage(identity, env, config, "consumeStock", ticker);
+}
+
+export async function refundStockQuota(
+  identity: QuotaIdentity,
+  ticker: string,
+  env: Env,
+  config: RemoteConfig
+): Promise<UsageState> {
+  return (await mutateUsage(identity, env, config, "refundStock", ticker)).usage;
 }
 
 export async function removeTickerFromSavedQuota(
@@ -104,7 +136,7 @@ export async function removeTickerFromSavedQuota(
   env: Env,
   config: RemoteConfig
 ): Promise<UsageState> {
-  return mutateUsage(identity, env, config, "removeTicker", ticker);
+  return (await mutateUsage(identity, env, config, "removeTicker", ticker)).usage;
 }
 
 export async function ensureCompanyAccessAllowed(
@@ -153,7 +185,7 @@ export async function loadUsage(
   env: Env,
   config: RemoteConfig
 ): Promise<UsageState> {
-  return mutateUsage(identity, env, config, "state");
+  return (await mutateUsage(identity, env, config, "state")).usage;
 }
 
 function normalizeConnectingIp(rawValue: string | null): string | null {
@@ -197,9 +229,17 @@ async function mutateUsage(
   identity: QuotaIdentity,
   env: Env,
   config: RemoteConfig,
-  action: "state" | "checkChat" | "checkStock" | "consumeChat" | "consumeStock" | "removeTicker",
+  action:
+    | "state"
+    | "checkChat"
+    | "checkStock"
+    | "consumeChat"
+    | "refundChat"
+    | "consumeStock"
+    | "refundStock"
+    | "removeTicker",
   ticker?: string
-): Promise<UsageState> {
+): Promise<QuotaMutationResult> {
   const stub = env.USER_QUOTA.getByName(identity.quotaSubject);
   const dateJST = buildQuotaDateJST();
 
@@ -228,7 +268,10 @@ async function mutateUsage(
     throw new AppError(response.status, payload.error ?? "Quota request failed");
   }
 
-  return payload.usage;
+  return {
+    usage: payload.usage,
+    didMutate: payload.didMutate === true
+  };
 }
 
 function buildQuotaDateJST(): string {

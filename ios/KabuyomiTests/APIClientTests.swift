@@ -63,7 +63,8 @@ final class APIClientTests: XCTestCase {
                     "chatLimit": 20,
                     "stocksUsed": 1,
                     "stockLimit": 25,
-                    "dateJST": "2026-04-17"
+                    "dateJST": "2026-04-17",
+                    "savedTickers": ["AAPL"]
                 ])
             )
         }
@@ -72,6 +73,7 @@ final class APIClientTests: XCTestCase {
 
         XCTAssertEqual(usage.chatsUsed, 1)
         XCTAssertEqual(usage.chatLimit, 20)
+        XCTAssertEqual(usage.savedTickers, ["AAPL"])
     }
 
     func testSendChatDecodesResponsePathWhenPresent() async throws {

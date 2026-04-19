@@ -115,7 +115,8 @@ enum TestFixtures {
             chatLimit: 20,
             stocksUsed: 1,
             stockLimit: 25,
-            dateJST: "2026-04-17"
+            dateJST: "2026-04-17",
+            savedTickers: ["AAPL"]
         )
     }
 
@@ -232,6 +233,75 @@ enum TestFixtures {
                 "stockLimit": 25,
                 "dateJST": "2026-04-17"
             ]
+        ])
+    }
+
+    static func companyPayloadData(ticker: String = "AAPL") throws -> Data {
+        let company = companyPayload(ticker: ticker)
+        return try jsonData([
+            "filingKey": company.filingKey,
+            "ticker": company.ticker,
+            "companyName": company.companyName,
+            "cik": company.cik,
+            "formType": company.formType,
+            "filedAt": company.filedAt,
+            "periodOfReport": company.periodOfReport,
+            "primaryDocumentUrl": company.primaryDocumentUrl,
+            "summary": [
+                "verdict": company.summary.verdict,
+                "highlights": company.summary.highlights.map {
+                    ["text": $0.text, "sourceIds": $0.sourceIds]
+                },
+                "changes": company.summary.changes.map {
+                    ["text": $0.text, "sourceIds": $0.sourceIds]
+                }
+            ],
+            "metrics": company.metrics.map {
+                [
+                    "logicalName": $0.logicalName,
+                    "tagUsed": $0.tagUsed,
+                    "value": $0.value,
+                    "unit": $0.unit,
+                    "periodEnd": $0.periodEnd,
+                    "comparisonValue": jsonField($0.comparisonValue),
+                    "yoyPercent": jsonField($0.yoyPercent)
+                ]
+            },
+            "historicalOverview": [
+                "comparisonBasis": company.historicalOverview?.comparisonBasis as Any,
+                "years": company.historicalOverview?.years as Any,
+                "series": company.historicalOverview?.series.map {
+                    [
+                        "logicalName": $0.logicalName,
+                        "label": $0.label,
+                        "points": $0.points.map {
+                            [
+                                "filingKey": $0.filingKey,
+                                "filedAt": $0.filedAt,
+                                "periodEnd": $0.periodEnd,
+                                "value": $0.value,
+                                "unit": $0.unit,
+                                "yoyPercent": jsonField($0.yoyPercent),
+                                "sourceId": $0.sourceId
+                            ]
+                        }
+                    ]
+                } as Any
+            ],
+            "sourceChunks": company.sourceChunks.map {
+                [
+                    "sourceId": $0.sourceId,
+                    "sectionType": $0.sectionType,
+                    "sectionTitle": $0.sectionTitle,
+                    "sourceLabel": $0.sourceLabel,
+                    "text": $0.text,
+                    "startOffset": $0.startOffset,
+                    "endOffset": $0.endOffset,
+                    "tagName": jsonField($0.tagName),
+                    "sortOrder": $0.sortOrder
+                ]
+            },
+            "lastUpdatedAt": company.lastUpdatedAt
         ])
     }
 

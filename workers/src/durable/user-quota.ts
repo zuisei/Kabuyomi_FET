@@ -51,53 +51,60 @@ export class UserQuotaDO {
         normalizedTicker && Array.isArray(body.previewTickers)
           ? body.previewTickers.map(normalizeTicker).includes(normalizedTicker)
           : false;
+      let didMutate = false;
 
       if (body.action === "checkChat") {
         if (dailyRecord.chatsUsed >= dailyRecord.chatLimit) {
           return {
             status: 429,
-            payload: { error: "Daily chat quota exceeded", usage: usagePayload(dailyRecord, savedTickerRecord) }
+            payload: { error: "Daily chat quota exceeded", usage: usagePayload(dailyRecord, savedTickerRecord), didMutate }
           };
         }
-        return { status: 200, payload: { usage: usagePayload(dailyRecord, savedTickerRecord) } };
+        return { status: 200, payload: { usage: usagePayload(dailyRecord, savedTickerRecord), didMutate } };
       }
 
       if (body.action === "consumeChat") {
         if (dailyRecord.chatsUsed >= dailyRecord.chatLimit) {
           return {
             status: 429,
-            payload: { error: "Daily chat quota exceeded", usage: usagePayload(dailyRecord, savedTickerRecord) }
+            payload: { error: "Daily chat quota exceeded", usage: usagePayload(dailyRecord, savedTickerRecord), didMutate }
           };
         }
         dailyRecord.chatsUsed += 1;
+        didMutate = true;
+      }
+
+      if (body.action === "refundChat" && dailyRecord.chatsUsed > 0) {
+        dailyRecord.chatsUsed -= 1;
+        didMutate = true;
       }
 
       if (body.action === "checkStock") {
         if (!alreadyTracked && savedTickerRecord.savedTickers.length >= savedTickerRecord.stockLimit) {
           return {
             status: 429,
-            payload: { error: "Watchlist limit exceeded", usage: usagePayload(dailyRecord, savedTickerRecord) }
+            payload: { error: "Watchlist limit exceeded", usage: usagePayload(dailyRecord, savedTickerRecord), didMutate }
           };
         }
 
-        return { status: 200, payload: { usage: usagePayload(dailyRecord, savedTickerRecord) } };
+        return { status: 200, payload: { usage: usagePayload(dailyRecord, savedTickerRecord), didMutate } };
       }
 
       if (body.action === "checkCompanyAccess") {
         if (body.plan === "pro" || alreadyTracked || isPreviewTicker) {
-          return { status: 200, payload: { usage: usagePayload(dailyRecord, savedTickerRecord) } };
+          return { status: 200, payload: { usage: usagePayload(dailyRecord, savedTickerRecord), didMutate } };
         }
 
         if (savedTickerRecord.savedTickers.length >= savedTickerRecord.stockLimit) {
           return {
             status: 429,
-            payload: { error: "Watchlist limit exceeded", usage: usagePayload(dailyRecord, savedTickerRecord) }
+            payload: { error: "Watchlist limit exceeded", usage: usagePayload(dailyRecord, savedTickerRecord), didMutate }
           };
         }
 
         return {
           status: 403,
-          payload: { error: "Ticker access requires watchlist add", usage: usagePayload(dailyRecord, savedTickerRecord) }
+          payload: { error: "Ticker access requires watchlist add", usage: usagePayload(dailyRecord, savedTickerRecord), didMutate }
         };
       }
 
@@ -106,18 +113,27 @@ export class UserQuotaDO {
           if (savedTickerRecord.savedTickers.length >= savedTickerRecord.stockLimit) {
             return {
               status: 429,
-              payload: { error: "Watchlist limit exceeded", usage: usagePayload(dailyRecord, savedTickerRecord) }
+              payload: { error: "Watchlist limit exceeded", usage: usagePayload(dailyRecord, savedTickerRecord), didMutate }
             };
           }
 
           if (normalizedTicker) {
             savedTickerRecord.savedTickers.push(normalizedTicker);
+            didMutate = true;
           }
         }
       }
 
+      if (body.action === "refundStock" && normalizedTicker) {
+        const nextSavedTickers = savedTickerRecord.savedTickers.filter((ticker) => ticker !== normalizedTicker);
+        didMutate = nextSavedTickers.length !== savedTickerRecord.savedTickers.length;
+        savedTickerRecord.savedTickers = nextSavedTickers;
+      }
+
       if (body.action === "removeTicker" && normalizedTicker) {
-        savedTickerRecord.savedTickers = savedTickerRecord.savedTickers.filter((ticker) => ticker !== normalizedTicker);
+        const nextSavedTickers = savedTickerRecord.savedTickers.filter((ticker) => ticker !== normalizedTicker);
+        didMutate = nextSavedTickers.length !== savedTickerRecord.savedTickers.length;
+        savedTickerRecord.savedTickers = nextSavedTickers;
       }
 
       const now = new Date().toISOString();
@@ -128,7 +144,7 @@ export class UserQuotaDO {
         this.state.storage.put(SAVED_TICKERS_KEY, savedTickerRecord)
       ]);
 
-      return { status: 200, payload: { usage: usagePayload(dailyRecord, savedTickerRecord) } };
+      return { status: 200, payload: { usage: usagePayload(dailyRecord, savedTickerRecord), didMutate } };
     });
 
     return this.reply(result.payload, result.status);
@@ -205,6 +221,7 @@ function usagePayload(dailyRecord: QuotaRecord, savedTickerRecord: SavedTickerRe
     chatLimit: dailyRecord.chatLimit,
     stocksUsed: savedTickerRecord.savedTickers.length,
     stockLimit: savedTickerRecord.stockLimit,
+    savedTickers: [...savedTickerRecord.savedTickers],
     updatedAt: maxIsoTimestamp(dailyRecord.updatedAt, savedTickerRecord.updatedAt)
   };
 }

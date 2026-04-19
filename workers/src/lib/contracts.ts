@@ -30,7 +30,17 @@ export const BillingSyncRequestSchema = z.object({
 export const EntitlementRequestSchema = BillingSyncRequestSchema;
 
 export const QuotaRequestSchema = z.object({
-  action: z.enum(["state", "checkChat", "checkStock", "consumeChat", "consumeStock", "removeTicker", "checkCompanyAccess"]),
+  action: z.enum([
+    "state",
+    "checkChat",
+    "checkStock",
+    "consumeChat",
+    "refundChat",
+    "consumeStock",
+    "refundStock",
+    "removeTicker",
+    "checkCompanyAccess"
+  ]),
   quotaSubject: z.string().trim().min(1),
   plan: z.enum(["free", "pro"]),
   dateJST: z.string().trim().min(1),

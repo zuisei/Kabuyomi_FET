@@ -34,14 +34,17 @@ export async function buildChatResponse(
     });
   }
   if (historical) {
+    const responsePath = historical.responsePath ?? (
+      historical.sources.some((source) => source.sourceKind === "historical_filing") ? "historical" : "fallback"
+    );
     logEvent("chat_path_selected", {
       filingKey: filing.filingKey,
       ticker: filing.ticker,
-      path: "historical"
+      path: responsePath
     });
     return {
       ...ensureFilingGroundedResponse(historical),
-      responsePath: "historical"
+      responsePath
     };
   }
 
@@ -179,10 +182,12 @@ export async function buildChatResponse(
     }
   }
 
+  const responsePath = modelResponse.usedRemoteModel === true ? "gemini" : "fallback";
+
   logEvent("chat_path_selected", {
     filingKey: filing.filingKey,
     ticker: filing.ticker,
-    path: "gemini",
+    path: responsePath,
     sourceCount: approvedSourceIds.length
   });
 
@@ -201,7 +206,7 @@ export async function buildChatResponse(
   );
   return {
     ...response,
-    responsePath: modelResponse.usedRemoteModel === true ? "gemini" : "fallback"
+    responsePath
   };
 }
 

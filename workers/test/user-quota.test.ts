@@ -142,7 +142,39 @@ describe("UserQuotaDO", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       usage: {
+        savedTickers: [],
         stocksUsed: 0
+      }
+    });
+  });
+
+  it("returns saved_tickers in the usage payload for client resync", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+
+    await postQuota(quota, {
+      action: "consumeStock",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-14",
+      ticker: "AAPL",
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    const response = await postQuota(quota, {
+      action: "state",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-14",
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      usage: {
+        savedTickers: ["AAPL"],
+        stocksUsed: 1
       }
     });
   });
@@ -431,6 +463,89 @@ describe("UserQuotaDO", () => {
       usage: {
         stocksUsed: 0
       }
+    });
+  });
+
+  it("refunds a previously consumed chat slot", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+
+    await postQuota(quota, {
+      action: "consumeChat",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    const refunded = await postQuota(quota, {
+      action: "refundChat",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    await expect(refunded.json()).resolves.toMatchObject({
+      usage: {
+        chatsUsed: 0
+      },
+      didMutate: true
+    });
+  });
+
+  it("refunds a newly saved ticker and reports mutation state", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+
+    await postQuota(quota, {
+      action: "consumeStock",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      ticker: "AAPL",
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    const refunded = await postQuota(quota, {
+      action: "refundStock",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      ticker: "AAPL",
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    await expect(refunded.json()).resolves.toMatchObject({
+      usage: {
+        stocksUsed: 0,
+        savedTickers: []
+      },
+      didMutate: true
+    });
+  });
+
+  it("treats refunding an unknown ticker as a no-op", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+
+    const refunded = await postQuota(quota, {
+      action: "refundStock",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      ticker: "AAPL",
+      chatLimit: 3,
+      stockLimit: 3
+    });
+
+    await expect(refunded.json()).resolves.toMatchObject({
+      usage: {
+        stocksUsed: 0,
+        savedTickers: []
+      },
+      didMutate: false
     });
   });
 });

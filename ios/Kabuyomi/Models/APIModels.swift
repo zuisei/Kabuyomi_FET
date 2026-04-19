@@ -261,6 +261,7 @@ struct UsagePayload: Decodable, Hashable {
     let stocksUsed: Int
     let stockLimit: Int
     let dateJST: String
+    let savedTickers: [String]?
 
     var displayPlanLabel: String {
         "BETA"

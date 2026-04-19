@@ -153,7 +153,22 @@ describe("worker routing", () => {
       }),
       {
         KABUYOMI_CACHE: {
-          get: vi.fn().mockResolvedValue(null)
+          get: vi.fn(async (key: string) => {
+            if (key === "tickers_snapshot") {
+              return {
+                updatedAt: "2026-04-17T00:00:00.000Z",
+                items: [
+                  {
+                    ticker: "ORCL",
+                    companyName: "Oracle Corporation",
+                    cik: "0001341439",
+                    exchange: "NYSE"
+                  }
+                ]
+              };
+            }
+            return null;
+          })
         },
         USER_QUOTA: {
           getByName: vi.fn().mockReturnValue({

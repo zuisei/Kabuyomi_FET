@@ -69,7 +69,8 @@ export async function generateChatAnswer(env: Env, input: ChatPromptInput): Prom
 
   const recovered = recoverBroaderFallbackIfNeeded(input, {
     answer: stripEnglishParentheticals(polishJapaneseText(normalized.answer)),
-    sourceIds: normalized.sourceIds
+    sourceIds: normalized.sourceIds,
+    usedRemoteModel: normalized.usedRemoteModel
   });
 
   if (shouldRecoverLowQualityChatAnswer(input, recovered.answer)) {
