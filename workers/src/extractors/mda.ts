@@ -10,6 +10,17 @@ export interface ExtractedMDA {
   usedEndPattern: string;
 }
 
+export interface MDAExtractionDiagnostics {
+  inputHtmlChars: number;
+  normalizedChars: number;
+  startMatchesCount: number;
+  endMatchesCount: number;
+  normalizeMs: number;
+  boundaryScanMs: number;
+  selectionMs: number;
+  totalMs: number;
+}
+
 interface PatternPair {
   start: RegExp[];
   end: RegExp[];
@@ -20,8 +31,9 @@ export function estimateTokenCount(text: string): number {
 }
 
 export function normalizeFilingText(html: string): string {
-  const { document } = parseHTML(html);
-  const text = document.body.textContent ?? html;
+  const sanitizedHtml = sanitizeHtmlForTextExtraction(html);
+  const { document } = parseHTML(sanitizedHtml);
+  const text = document.body.textContent ?? sanitizedHtml;
 
   return text
     .replace(/\u00a0/g, " ")
@@ -33,21 +45,34 @@ export function normalizeFilingText(html: string): string {
 }
 
 export function extractMDASection(html: string, formType: "10-K" | "10-Q"): ExtractedMDA | null {
+  return extractMDASectionWithDiagnostics(html, formType).result;
+}
+
+export function extractMDASectionWithDiagnostics(
+  html: string,
+  formType: "10-K" | "10-Q"
+): { result: ExtractedMDA | null; diagnostics: MDAExtractionDiagnostics } {
+  const startedAt = Date.now();
   const normalizedText = normalizeFilingText(html);
+  const normalizedAt = Date.now();
   const patterns = getPatterns(formType);
   const startMatches = findAllMatches(normalizedText, patterns.start, "start");
   const endMatches = findAllMatches(normalizedText, patterns.end, "end");
+  const matchedAt = Date.now();
 
+  let endCursor = 0;
   for (const [index, startMatch] of startMatches.entries()) {
     const nextStart = startMatches[index + 1];
     if (nextStart && nextStart.index - startMatch.index < 1_000) {
       continue;
     }
 
-    for (const endMatch of endMatches) {
-      if (endMatch.index <= startMatch.index) {
-        continue;
-      }
+    while (endCursor < endMatches.length && endMatches[endCursor]!.index <= startMatch.index) {
+      endCursor += 1;
+    }
+
+    for (let endIndex = endCursor; endIndex < endMatches.length; endIndex += 1) {
+      const endMatch = endMatches[endIndex]!;
 
       const candidate = stripLeadingNoise(normalizedText.slice(startMatch.index, endMatch.index).trim(), patterns.start);
       if (candidate.length < MIN_SECTION_CHARS) {
@@ -55,16 +80,42 @@ export function extractMDASection(html: string, formType: "10-K" | "10-Q"): Extr
       }
 
       const trimmed = trimToTokenBudget(candidate, TOKEN_BUDGET);
+      const finishedAt = Date.now();
       return {
-        text: trimmed,
-        tokenCount: estimateTokenCount(trimmed),
-        usedStartPattern: startMatch.pattern,
-        usedEndPattern: endMatch.pattern
+        result: {
+          text: trimmed,
+          tokenCount: estimateTokenCount(trimmed),
+          usedStartPattern: startMatch.pattern,
+          usedEndPattern: endMatch.pattern
+        },
+        diagnostics: {
+          inputHtmlChars: html.length,
+          normalizedChars: normalizedText.length,
+          startMatchesCount: startMatches.length,
+          endMatchesCount: endMatches.length,
+          normalizeMs: normalizedAt - startedAt,
+          boundaryScanMs: matchedAt - normalizedAt,
+          selectionMs: finishedAt - matchedAt,
+          totalMs: finishedAt - startedAt
+        }
       };
     }
   }
 
-  return null;
+  const finishedAt = Date.now();
+  return {
+    result: null,
+    diagnostics: {
+      inputHtmlChars: html.length,
+      normalizedChars: normalizedText.length,
+      startMatchesCount: startMatches.length,
+      endMatchesCount: endMatches.length,
+      normalizeMs: normalizedAt - startedAt,
+      boundaryScanMs: matchedAt - normalizedAt,
+      selectionMs: finishedAt - matchedAt,
+      totalMs: finishedAt - startedAt
+    }
+  };
 }
 
 function stripLeadingNoise(candidate: string, startPatterns: RegExp[]): string {
@@ -206,6 +257,13 @@ function looksLikeTocWindow(text: string): boolean {
   const pageMentions = [...sample.matchAll(/\bpages?\s*\d/gi)].length;
 
   return /table of contents/i.test(sample) || /pagepart/i.test(sample) || itemMentions >= 3 || pageMentions >= 2;
+}
+
+function sanitizeHtmlForTextExtraction(html: string): string {
+  return html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ");
 }
 
 function trimToTokenBudget(text: string, maxTokens: number): string {

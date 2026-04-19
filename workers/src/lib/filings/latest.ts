@@ -25,11 +25,13 @@ export async function ensureLatestFiling(
     tickerRecord?: TickerRecord;
   } = {}
 ): Promise<FilingCacheRecord> {
+  const startedAt = Date.now();
   const normalizedTicker = options.tickerRecord?.ticker ?? ticker.trim().toUpperCase();
   if (!options.forceRemoteCheck) {
     const cachedByTicker = await loadCachedLatestFiling(normalizedTicker, env, config);
     if (cachedByTicker && isCurrentCacheRecord(cachedByTicker, config)) {
       enqueueHistoricalPersistence(cachedByTicker, env, options.executionContext);
+      logLatestFilingReady("cache_alias", normalizedTicker, cachedByTicker.filingKey, startedAt, options.forceRemoteCheck);
       return cachedByTicker;
     }
   }
@@ -63,6 +65,7 @@ export async function ensureLatestFiling(
   if (cached && isCurrentCacheRecord(cached as FilingCacheRecord, config)) {
     await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
     enqueueHistoricalPersistence(cached as FilingCacheRecord, env, options.executionContext);
+    logLatestFilingReady("cache_record", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
     return cached as FilingCacheRecord;
   }
 
@@ -71,6 +74,7 @@ export async function ensureLatestFiling(
     await env.KABUYOMI_CACHE.put(cacheKey, JSON.stringify(archived));
     await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
     enqueueHistoricalPersistence(archived, env, options.executionContext);
+    logLatestFilingReady("archive", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
     return archived;
   }
 
@@ -80,6 +84,7 @@ export async function ensureLatestFiling(
     if (secondRead && isCurrentCacheRecord(secondRead as FilingCacheRecord, config)) {
       await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
       enqueueHistoricalPersistence(secondRead as FilingCacheRecord, env, options.executionContext);
+      logLatestFilingReady("cache_record_after_lock", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
       return secondRead as FilingCacheRecord;
     }
 
@@ -88,6 +93,7 @@ export async function ensureLatestFiling(
       await env.KABUYOMI_CACHE.put(cacheKey, JSON.stringify(secondArchived));
       await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
       enqueueHistoricalPersistence(secondArchived, env, options.executionContext);
+      logLatestFilingReady("archive_after_lock", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
       return secondArchived;
     }
 
@@ -95,6 +101,7 @@ export async function ensureLatestFiling(
     await env.KABUYOMI_CACHE.put(cacheKey, JSON.stringify(record));
     await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
     enqueueHistoricalPersistence(record, env, options.executionContext);
+    logLatestFilingReady("ingest", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
     return record;
   } finally {
     await releaseLock();
@@ -108,4 +115,20 @@ async function cacheLatestFilingAlias(
   env: Env
 ): Promise<void> {
   await Promise.all(buildTickerAliasKeys(extractorVersion, ticker).map((aliasKey) => env.KABUYOMI_CACHE.put(aliasKey, filingKey)));
+}
+
+function logLatestFilingReady(
+  source: string,
+  ticker: string,
+  filingKey: string,
+  startedAt: number,
+  forceRemoteCheck?: boolean
+): void {
+  logEvent("latest_filing_ready", {
+    ticker,
+    filingKey,
+    source,
+    forceRemoteCheck: Boolean(forceRemoteCheck),
+    totalMs: Date.now() - startedAt
+  });
 }

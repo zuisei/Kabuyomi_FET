@@ -76,6 +76,22 @@ const tenQInlineHeadingBoundary = `
   <html><body><div>Apple Inc.Form 10-QFor the Fiscal Quarter Ended December 27, 2025 TABLE OF CONTENTSPagePart IItem 1.Financial Statements1Item 2.Management’s Discussion and Analysis of Financial Condition and Results of Operations13Item 3.Quantitative and Qualitative Disclosures About Market Risk18Item 4.Controls and Procedures18</div><div>Apple Inc. | Q1 2026 Form 10-Q | 12Item 2. Management’s Discussion and Analysis of Financial Condition and Results of Operations ${"Services revenue increased while iPhone demand remained strong across key regions. ".repeat(80)} Item 3. Quantitative and Qualitative Disclosures About Market Risk</div></body></html>
 `;
 
+const tenQWithHeavyInlineAssets = `
+  <html>
+    <head>
+      <style>${".toc{display:none;}".repeat(400)}</style>
+      <script>${"window.__INLINE_DATA__='x';".repeat(400)}</script>
+    </head>
+    <body>
+      <!-- TABLE OF CONTENTS Item 2. Management's Discussion and Analysis -->
+      <h2>Part I - Financial Information</h2>
+      <h3>Item 2. Management's Discussion and Analysis of Financial Condition and Results of Operations</h3>
+      <p>${"Subscription growth improved and churn remained stable across enterprise cohorts. ".repeat(100)}</p>
+      <h3>Item 3. Quantitative and Qualitative Disclosures About Market Risk</h3>
+    </body>
+  </html>
+`;
+
 describe("extractMDASection", () => {
   it("extracts the 10-K MD&A and skips short TOC matches", () => {
     const result = extractMDASection(tenK, "10-K");
@@ -120,5 +136,13 @@ describe("extractMDASection", () => {
     expect(result?.text).toContain("Services revenue increased while iPhone demand remained strong");
     expect(result?.text).not.toContain("TABLE OF CONTENTS");
     expect(result?.text).not.toContain("PagePart IItem 1.");
+  });
+
+  it("ignores inline scripts, styles, and comments before extracting the 10-Q MD&A", () => {
+    const result = extractMDASection(tenQWithHeavyInlineAssets, "10-Q");
+    expect(result).not.toBeNull();
+    expect(result?.text).toContain("Subscription growth improved and churn remained stable");
+    expect(result?.text).not.toContain("window.__INLINE_DATA__");
+    expect(result?.text).not.toContain(".toc{display:none;}");
   });
 });

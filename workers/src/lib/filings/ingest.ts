@@ -1,7 +1,7 @@
 import type { Env, FilingCacheRecord, FilingReference, MetricSnapshot, SourceChunkRecord } from "../../env";
 import { generateSummary } from "../../clients/gemini";
 import { fetchFilingAssets } from "../../clients/sec";
-import { extractMDASection } from "../../extractors/mda";
+import { extractMDASectionWithDiagnostics } from "../../extractors/mda";
 import { AppError } from "../errors";
 import { logEvent } from "../logging";
 import { metricLabel } from "../metrics";
@@ -14,29 +14,40 @@ export async function ingestFiling(
   config: RemoteConfig,
   options: { summaryMode?: "default" | "fallback_only" } = {}
 ): Promise<FilingCacheRecord> {
+  const startedAt = Date.now();
+  const summaryMode = options.summaryMode ?? "default";
+  const fetchStartedAt = Date.now();
   const { html, primaryDocumentUrl, metrics } = await fetchFilingAssets(filing, comparisonFiling, env);
-  const extracted = extractMDASection(html, filing.formType);
+  const fetchedAt = Date.now();
+  const { result: extracted, diagnostics } = extractMDASectionWithDiagnostics(html, filing.formType);
   if (!extracted) {
     logEvent("extraction_failed", {
       ticker: filing.ticker,
       cik: filing.cik,
       formType: filing.formType,
-      accessionNumber: filing.accessionNumber
+      accessionNumber: filing.accessionNumber,
+      summaryMode,
+      fetchMs: fetchedAt - fetchStartedAt,
+      ...diagnostics
     });
     throw new AppError(422, "Failed to extract MD&A section");
   }
 
   logEvent("extraction_succeeded", {
     ticker: filing.ticker,
-    cik: filing.cik,
-    formType: filing.formType,
-    accessionNumber: filing.accessionNumber,
-    tokenCount: extracted.tokenCount
-  });
+      cik: filing.cik,
+      formType: filing.formType,
+      accessionNumber: filing.accessionNumber,
+      tokenCount: extracted.tokenCount,
+      summaryMode,
+      fetchMs: fetchedAt - fetchStartedAt,
+      ...diagnostics
+    });
 
   const filingKey = `${config.extractorVersion}:${filing.cik}:${filing.accessionNumber.replaceAll("-", "")}`;
   const sourceChunks = buildSourceChunks(filing, extracted.text, metrics);
-  const summaryEnv = options.summaryMode === "fallback_only" ? ({ ...env, GEMINI_API_KEY: undefined } as Env) : env;
+  const summaryEnv = summaryMode === "fallback_only" ? ({ ...env, GEMINI_API_KEY: undefined } as Env) : env;
+  const summaryStartedAt = Date.now();
   const summary = await generateSummary(summaryEnv, {
     filingKey,
     ticker: filing.ticker,
@@ -46,6 +57,33 @@ export async function ingestFiling(
     periodOfReport: filing.periodOfReport,
     metrics,
     sourceChunks
+  });
+  const finishedAt = Date.now();
+
+  logEvent("filing_ingest_completed", {
+    filingKey,
+    ticker: filing.ticker,
+    formType: filing.formType,
+    summaryMode,
+    fetchMs: fetchedAt - fetchStartedAt,
+    summaryMs: finishedAt - summaryStartedAt,
+    totalMs: finishedAt - startedAt,
+    htmlChars: html.length,
+    metricsCount: metrics.length,
+    sourceChunkCount: sourceChunks.length,
+    mdaChars: extracted.text.length,
+    mdaTokenCount: extracted.tokenCount,
+    primaryDocumentHost: safeUrlHost(primaryDocumentUrl),
+    usedStartPattern: extracted.usedStartPattern,
+    usedEndPattern: extracted.usedEndPattern,
+    inputHtmlChars: diagnostics.inputHtmlChars,
+    normalizedChars: diagnostics.normalizedChars,
+    startMatchesCount: diagnostics.startMatchesCount,
+    endMatchesCount: diagnostics.endMatchesCount,
+    normalizeMs: diagnostics.normalizeMs,
+    boundaryScanMs: diagnostics.boundaryScanMs,
+    selectionMs: diagnostics.selectionMs,
+    extractTotalMs: diagnostics.totalMs
   });
 
   return {
@@ -165,4 +203,12 @@ function looksLikeTocParagraph(paragraph: string): boolean {
   const sample = paragraph.slice(0, 320);
   const itemMentions = [...sample.matchAll(/item\s+\d/gi)].length;
   return /table of contents/i.test(sample) || /pagepart/i.test(sample) || itemMentions >= 3;
+}
+
+function safeUrlHost(url: string): string | null {
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
 }
