@@ -194,12 +194,13 @@ function normalizeLatestRawForm(forms: readonly string[]): string | null {
 }
 
 function scoreTickerSearch(item: TickerRecord, query: string): number | null {
-  const normalizedQuery = query.trim();
+  const normalizedQuery = normalizeTickerInput(query);
   const lowerQuery = normalizedQuery.toLowerCase();
   const ticker = item.ticker.toLowerCase();
   const companyName = item.companyName.toLowerCase();
   const queryAlias = normalizeClassTickerAlias(normalizedQuery);
   const tickerAlias = normalizeClassTickerAlias(item.ticker);
+  const baseTickerFallback = normalizeSeriesBaseTickerFallback(normalizedQuery);
 
   if (ticker === lowerQuery) {
     return 0;
@@ -207,6 +208,14 @@ function scoreTickerSearch(item: TickerRecord, query: string): number | null {
 
   if (queryAlias && tickerAlias === queryAlias) {
     return 1;
+  }
+
+  if (matchesCompactTickerAlias(normalizedQuery, item.ticker)) {
+    return 1.5;
+  }
+
+  if (baseTickerFallback && normalizeTickerInput(item.ticker) === baseTickerFallback) {
+    return 1.75;
   }
 
   if (ticker.startsWith(lowerQuery)) {
@@ -259,7 +268,16 @@ export async function lookupTicker(ticker: string, env: Env): Promise<TickerReco
   }
 
   const aliasMatch = snapshot.items.find((item) => matchesClassTickerAlias(normalizedTicker, item.ticker));
-  return aliasMatch ?? null;
+  if (aliasMatch) {
+    return aliasMatch;
+  }
+
+  const compactAliasMatch = snapshot.items.find((item) => matchesCompactTickerAlias(normalizedTicker, item.ticker));
+  if (compactAliasMatch) {
+    return compactAliasMatch;
+  }
+
+  return resolveBaseTickerFallback(normalizedTicker, snapshot.items);
 }
 
 export async function fetchSubmissions(cik: string, env: Env): Promise<SubmissionResponse> {
@@ -590,17 +608,57 @@ function normalizeTickerInput(value: string): string {
 }
 
 function normalizeClassTickerAlias(value: string): string | null {
-  const normalized = normalizeTickerInput(value);
-  const match = normalized.match(/^([A-Z0-9]+)[.\-\s]+([A-Z0-9]+)$/);
-  if (!match?.[1] || !match[2]) {
+  const parsed = parseTickerAliasInput(value);
+  if (!parsed) {
     return null;
   }
 
-  return `${match[1]}.${match[2]}`;
+  return `${parsed.baseTicker}.${parsed.suffix}`;
 }
 
 function matchesClassTickerAlias(input: string, candidateTicker: string): boolean {
   const inputAlias = normalizeClassTickerAlias(input);
   const candidateAlias = normalizeClassTickerAlias(candidateTicker);
   return Boolean(inputAlias && candidateAlias && inputAlias === candidateAlias);
+}
+
+function matchesCompactTickerAlias(input: string, candidateTicker: string): boolean {
+  const parsed = parseTickerAliasInput(input);
+  if (!parsed) {
+    return false;
+  }
+
+  return normalizeCompactTicker(candidateTicker) === parsed.compactTicker;
+}
+
+function resolveBaseTickerFallback(input: string, items: TickerRecord[]): TickerRecord | null {
+  const baseTicker = normalizeSeriesBaseTickerFallback(input);
+  if (!baseTicker) {
+    return null;
+  }
+
+  return items.find((item) => normalizeTickerInput(item.ticker) === baseTicker) ?? null;
+}
+
+function normalizeSeriesBaseTickerFallback(value: string): string | null {
+  const parsed = parseTickerAliasInput(value);
+  return parsed?.baseTicker ?? null;
+}
+
+function normalizeCompactTicker(value: string): string {
+  return normalizeTickerInput(value).replace(/[.\-\s]+/g, "");
+}
+
+function parseTickerAliasInput(value: string): { baseTicker: string; suffix: string; compactTicker: string } | null {
+  const normalized = normalizeTickerInput(value);
+  const match = normalized.match(/^([A-Z0-9]+)[.\-\s]+([A-Z0-9]+)$/);
+  if (!match?.[1] || !match[2]) {
+    return null;
+  }
+
+  return {
+    baseTicker: match[1],
+    suffix: match[2],
+    compactTicker: `${match[1]}${match[2]}`
+  };
 }

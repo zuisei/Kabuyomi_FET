@@ -131,7 +131,7 @@ describe("SEC filing selection", () => {
     expect(match?.ticker).toBe("BRK-B");
   });
 
-  it("does not misresolve unknown separator aliases to a different ticker family member", async () => {
+  it("falls back to the base ticker when a separated class-like suffix has no dedicated symbol", async () => {
     const match = await lookupTicker("BARK A", {
       KABUYOMI_CACHE: {
         get: async () => ({
@@ -154,7 +154,33 @@ describe("SEC filing selection", () => {
       }
     } as never);
 
-    expect(match).toBeNull();
+    expect(match?.ticker).toBe("BARK");
+  });
+
+  it("resolves separated compact suffix aliases before falling back to the base ticker", async () => {
+    const match = await lookupTicker("BARK W", {
+      KABUYOMI_CACHE: {
+        get: async () => ({
+          updatedAt: "2026-04-19T00:00:00.000Z",
+          items: [
+            {
+              ticker: "BARK",
+              companyName: "BARK, Inc.",
+              cik: "0001823529",
+              exchange: "NYSE"
+            },
+            {
+              ticker: "BARKW",
+              companyName: "BARK, Inc. Warrant",
+              cik: "0001823529",
+              exchange: "NYSE"
+            }
+          ]
+        })
+      }
+    } as never);
+
+    expect(match?.ticker).toBe("BARKW");
   });
 
   it("keeps exact family ticker lookups distinct", async () => {
@@ -273,6 +299,28 @@ describe("SEC filing selection", () => {
     );
 
     expect(ranked[0]?.ticker).toBe("BRK-B");
+  });
+
+  it("ranks separated suffix queries against the compact or base ticker family", () => {
+    const ranked = sortTickerSearchResults(
+      [
+        {
+          ticker: "BARK",
+          companyName: "BARK, Inc.",
+          cik: "0001823529",
+          exchange: "NYSE"
+        },
+        {
+          ticker: "BARKW",
+          companyName: "BARK, Inc. Warrant",
+          cik: "0001823529",
+          exchange: "NYSE"
+        }
+      ],
+      "BARK A"
+    );
+
+    expect(ranked[0]?.ticker).toBe("BARK");
   });
 
   it("prefers the device key over the shared client IP for quota identity", async () => {
