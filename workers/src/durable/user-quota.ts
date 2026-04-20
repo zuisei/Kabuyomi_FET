@@ -49,6 +49,7 @@ export class UserQuotaDO {
         this.loadDailyRecord(body.dateJST, body.plan, body.chatLimit),
         this.loadSavedTickerRecord(body.plan, body.stockLimit)
       ]);
+      const currentUsage = () => usagePayload(dailyRecord, savedTickerRecord, body.accessMode);
 
       const normalizedTicker = normalizeTicker(body.ticker);
       const relatedTickers = buildTickerGroup(normalizedTicker, body.relatedTickers ?? []);
@@ -62,17 +63,17 @@ export class UserQuotaDO {
         if (dailyRecord.chatsUsed >= dailyRecord.chatLimit) {
           return {
             status: 429,
-            payload: { error: "Daily chat quota exceeded", usage: usagePayload(dailyRecord, savedTickerRecord), didMutate }
+            payload: { error: "Daily chat quota exceeded", usage: currentUsage(), didMutate }
           };
         }
-        return { status: 200, payload: { usage: usagePayload(dailyRecord, savedTickerRecord), didMutate } };
+        return { status: 200, payload: { usage: currentUsage(), didMutate } };
       }
 
       if (body.action === "consumeChat") {
         if (dailyRecord.chatsUsed >= dailyRecord.chatLimit) {
           return {
             status: 429,
-            payload: { error: "Daily chat quota exceeded", usage: usagePayload(dailyRecord, savedTickerRecord), didMutate }
+            payload: { error: "Daily chat quota exceeded", usage: currentUsage(), didMutate }
           };
         }
         dailyRecord.chatsUsed += 1;
@@ -88,28 +89,28 @@ export class UserQuotaDO {
         if (!alreadyTracked && savedTickerRecord.savedTickers.length >= savedTickerRecord.stockLimit) {
           return {
             status: 429,
-            payload: { error: "Watchlist limit exceeded", usage: usagePayload(dailyRecord, savedTickerRecord), didMutate }
+            payload: { error: "Watchlist limit exceeded", usage: currentUsage(), didMutate }
           };
         }
 
-        return { status: 200, payload: { usage: usagePayload(dailyRecord, savedTickerRecord), didMutate } };
+        return { status: 200, payload: { usage: currentUsage(), didMutate } };
       }
 
       if (body.action === "checkCompanyAccess") {
         if (body.plan === "pro" || alreadyTracked || isPreviewTicker) {
-          return { status: 200, payload: { usage: usagePayload(dailyRecord, savedTickerRecord), didMutate } };
+          return { status: 200, payload: { usage: currentUsage(), didMutate } };
         }
 
         if (savedTickerRecord.savedTickers.length >= savedTickerRecord.stockLimit) {
           return {
             status: 429,
-            payload: { error: "Watchlist limit exceeded", usage: usagePayload(dailyRecord, savedTickerRecord), didMutate }
+            payload: { error: "Watchlist limit exceeded", usage: currentUsage(), didMutate }
           };
         }
 
         return {
           status: 403,
-          payload: { error: "Ticker access requires watchlist add", usage: usagePayload(dailyRecord, savedTickerRecord), didMutate }
+          payload: { error: "Ticker access requires watchlist add", usage: currentUsage(), didMutate }
         };
       }
 
@@ -118,7 +119,7 @@ export class UserQuotaDO {
           if (savedTickerRecord.savedTickers.length >= savedTickerRecord.stockLimit) {
             return {
               status: 429,
-              payload: { error: "Watchlist limit exceeded", usage: usagePayload(dailyRecord, savedTickerRecord), didMutate }
+              payload: { error: "Watchlist limit exceeded", usage: currentUsage(), didMutate }
             };
           }
 
@@ -156,7 +157,7 @@ export class UserQuotaDO {
         this.state.storage.put(SAVED_TICKERS_KEY, savedTickerRecord)
       ]);
 
-      return { status: 200, payload: { usage: usagePayload(dailyRecord, savedTickerRecord), didMutate } };
+      return { status: 200, payload: { usage: currentUsage(), didMutate } };
     });
 
     return this.reply(result.payload, result.status);
@@ -229,9 +230,10 @@ export class UserQuotaDO {
   }
 }
 
-function usagePayload(dailyRecord: QuotaRecord, savedTickerRecord: SavedTickerRecord) {
+function usagePayload(dailyRecord: QuotaRecord, savedTickerRecord: SavedTickerRecord, accessMode?: string) {
   return {
     plan: dailyRecord.plan,
+    accessMode,
     dateJST: dailyRecord.dateJST,
     chatsUsed: dailyRecord.chatsUsed,
     chatLimit: dailyRecord.chatLimit,

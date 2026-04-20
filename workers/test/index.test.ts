@@ -213,6 +213,63 @@ describe("worker routing", () => {
     });
   });
 
+  it("returns detached dev usage when the dev gate and header are both present", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
+        method: "GET",
+        headers: {
+          "x-device-key": "device-123",
+          "x-kabuyomi-detached-access": "dev_unlimited"
+        }
+      }),
+      {
+        DEV_DETACHED_ACCESS_ENABLED: "true",
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        },
+        USER_QUOTA: {
+          getByName: vi.fn().mockReturnValue({
+            fetch: vi.fn().mockResolvedValue(
+              new Response(
+                JSON.stringify({
+                  usage: {
+                    plan: "pro",
+                    accessMode: "dev_unlimited",
+                    chatsUsed: 0,
+                    chatLimit: Number.MAX_SAFE_INTEGER,
+                    stocksUsed: 0,
+                    stockLimit: Number.MAX_SAFE_INTEGER,
+                    savedTickers: [],
+                    dateJST: "2026-04-20"
+                  }
+                }),
+                {
+                  status: 200,
+                  headers: { "content-type": "application/json" }
+                }
+              )
+            )
+          })
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    await expect(response.json()).resolves.toEqual({
+      plan: "pro",
+      accessMode: "dev_unlimited",
+      chatsUsed: 0,
+      chatLimit: Number.MAX_SAFE_INTEGER,
+      stocksUsed: 0,
+      stockLimit: Number.MAX_SAFE_INTEGER,
+      savedTickers: [],
+      dateJST: "2026-04-20"
+    });
+  });
+
   it("blocks non-starter company access until the ticker has been added", async () => {
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/v1/company/ORCL", {

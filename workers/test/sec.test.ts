@@ -50,7 +50,7 @@ function entitlementEnv(payload?: Record<string, unknown>, status = 200) {
         )
       })
     }
-  } as never;
+  } as any;
 }
 
 describe("SEC filing selection", () => {
@@ -403,6 +403,34 @@ describe("SEC filing selection", () => {
     expect(identity.identityKind).toBe("ip_hash");
     expect(identity.quotaSubject).toMatch(/^free:[a-f0-9]{64}$/);
     expect(identity.quotaSubject).not.toContain("device-123");
+  });
+
+  it("uses detached dev access ahead of synced billing when the dev gate is enabled", async () => {
+    const identity = await readQuotaIdentity(
+      new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
+        headers: {
+          "x-device-key": "device-123",
+          "x-kabuyomi-original-transaction-id": "tx-123",
+          "x-kabuyomi-detached-access": "dev_unlimited"
+        }
+      }),
+      {
+        ...entitlementEnv({
+          plan: "pro",
+          quotaSubject: "pro:abc123",
+          productId: "app.kabuyomi.pro.monthly",
+          syncedAt: "2026-04-20T00:00:00.000Z"
+        }),
+        DEV_DETACHED_ACCESS_ENABLED: "true"
+      } as never
+    );
+
+    expect(identity.plan).toBe("pro");
+    expect(identity.identityKind).toBe("detached_access");
+    expect(identity.accessMode).toBe("dev_unlimited");
+    expect(identity.chatLimitOverride).toBe(Number.MAX_SAFE_INTEGER);
+    expect(identity.stockLimitOverride).toBe(Number.MAX_SAFE_INTEGER);
+    expect(identity.quotaSubject).toMatch(/^detached:dev_unlimited:[a-f0-9]{64}$/);
   });
 
   it("uses the synced pro entitlement when the original transaction id resolves server-side", async () => {

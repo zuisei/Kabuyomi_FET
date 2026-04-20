@@ -3,10 +3,12 @@ import Foundation
 struct QuotaRequestContext {
     let deviceKey: String
     let originalTransactionId: String?
+    let detachedAccessMode: String?
 
-    init(deviceKey: String, originalTransactionId: String? = nil) {
+    init(deviceKey: String, originalTransactionId: String? = nil, detachedAccessMode: String? = nil) {
         self.deviceKey = deviceKey
         self.originalTransactionId = originalTransactionId
+        self.detachedAccessMode = detachedAccessMode
     }
 }
 
@@ -56,19 +58,26 @@ struct APIClient {
     private let deviceIdentity: DeviceIdentityStore?
     private let requestContext: QuotaRequestContext?
     private let subscriptionStore: SubscriptionStore?
+    private let detachedAccessStore: DetachedAccessStore?
 
     init(
         session: URLSession = APIClient.makeSession(),
         baseURL: URL? = nil,
         deviceIdentity: DeviceIdentityStore? = DeviceIdentityStore.shared,
         requestContext: QuotaRequestContext? = nil,
-        subscriptionStore: SubscriptionStore? = SubscriptionStore.shared
+        subscriptionStore: SubscriptionStore? = SubscriptionStore.shared,
+        detachedAccessStore: DetachedAccessStore? = DetachedAccessStore.shared
     ) {
         self.session = session
         self.baseURL = APIBaseURLResolver.resolve(baseURL: baseURL)
         self.deviceIdentity = deviceIdentity
         self.requestContext = requestContext
         self.subscriptionStore = subscriptionStore
+        self.detachedAccessStore = detachedAccessStore
+    }
+
+    var baseURLDisplayString: String {
+        baseURL.absoluteString
     }
 
     func search(query: String) async throws -> [SearchItem] {
@@ -145,11 +154,17 @@ struct APIClient {
     private func requestHeaders() -> [String: String] {
         let deviceKey = requestContext?.deviceKey ?? deviceIdentity?.deviceKey() ?? ""
         let originalTransactionId = requestContext?.originalTransactionId ?? subscriptionStore?.requestOriginalTransactionId
+        let detachedAccessMode = requestContext?.detachedAccessMode ?? detachedAccessStore?.requestDetachedAccessMode
         var headers = ["x-device-key": deviceKey]
 
         if let originalTransactionId,
            !originalTransactionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             headers["x-kabuyomi-original-transaction-id"] = originalTransactionId
+        }
+
+        if let detachedAccessMode,
+           !detachedAccessMode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            headers["x-kabuyomi-detached-access"] = detachedAccessMode
         }
 
         return headers

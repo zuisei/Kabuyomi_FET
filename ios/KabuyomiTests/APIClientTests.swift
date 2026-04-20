@@ -6,6 +6,7 @@ import XCTest
 final class APIClientTests: XCTestCase {
     private let standardContext = QuotaRequestContext(deviceKey: "device-123")
     private let proContext = QuotaRequestContext(deviceKey: "device-123", originalTransactionId: "tx-123")
+    private let devContext = QuotaRequestContext(deviceKey: "device-123", detachedAccessMode: DetachedAccessMode.devUnlimited.rawValue)
 
     override func tearDown() {
         MockURLProtocol.requestHandler = nil
@@ -102,6 +103,33 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(usage.plan, "pro")
         XCTAssertEqual(usage.chatLimit, 50)
         XCTAssertEqual(usage.stockLimit, 20)
+    }
+
+    func testFetchUsageIncludesDetachedAccessHeaderWhenPresent() async throws {
+        let client = makeClient(context: devContext) { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-detached-access"), DetachedAccessMode.devUnlimited.rawValue)
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "plan": "pro",
+                    "accessMode": "dev_unlimited",
+                    "chatsUsed": 0,
+                    "chatLimit": 999999,
+                    "stocksUsed": 0,
+                    "stockLimit": 999999,
+                    "dateJST": "2026-04-20",
+                    "savedTickers": []
+                ])
+            )
+        }
+
+        let usage = try await client.fetchUsage()
+
+        XCTAssertEqual(usage.displayPlanLabel, "DEV")
+        XCTAssertEqual(usage.displayChatLimit, "∞")
+        XCTAssertEqual(usage.displayStockLimit, "∞")
     }
 
     func testSendChatDecodesResponsePathWhenPresent() async throws {
@@ -216,7 +244,7 @@ final class APIClientTests: XCTestCase {
     }
 
     private func makeClient(
-        context: QuotaRequestContext = QuotaRequestContext(deviceKey: "device-123", originalTransactionId: nil),
+        context: QuotaRequestContext = QuotaRequestContext(deviceKey: "device-123"),
         handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> APIClient {
         MockURLProtocol.requestHandler = handler
@@ -228,7 +256,9 @@ final class APIClientTests: XCTestCase {
         return APIClient(
             session: session,
             baseURL: URL(string: "https://example.com")!,
-            requestContext: context
+            requestContext: context,
+            subscriptionStore: nil,
+            detachedAccessStore: nil
         )
     }
 

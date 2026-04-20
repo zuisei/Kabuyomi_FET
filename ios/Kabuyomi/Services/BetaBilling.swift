@@ -15,6 +15,17 @@ struct BillingTier: Equatable {
     }
 }
 
+enum DetachedAccessMode: String {
+    case devUnlimited = "dev_unlimited"
+
+    var displayLabel: String {
+        switch self {
+        case .devUnlimited:
+            "DEV"
+        }
+    }
+}
+
 enum BillingCatalog {
     static let free = BillingTier(plan: "free", title: "Free", stockLimit: 3, chatLimit: 10)
     static let pro = BillingTier(plan: "pro", title: "Pro", stockLimit: 20, chatLimit: 50)
@@ -42,5 +53,36 @@ enum BillingCatalog {
         default:
             plan.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         }
+    }
+}
+
+@MainActor
+final class DetachedAccessStore {
+    static let shared = DetachedAccessStore()
+
+    private let defaults = UserDefaults.standard
+    private let devModeEnabledKey = "kabuyomi.detachedAccess.devModeEnabled"
+    private let requestHeaderValue = DetachedAccessMode.devUnlimited.rawValue
+
+    var isDevModeEnabled: Bool {
+        #if DEBUG
+        defaults.bool(forKey: devModeEnabledKey)
+        #else
+        false
+        #endif
+    }
+
+    var requestDetachedAccessMode: String? {
+        #if DEBUG
+        isDevModeEnabled ? requestHeaderValue : nil
+        #else
+        nil
+        #endif
+    }
+
+    func setDevModeEnabled(_ value: Bool) {
+        #if DEBUG
+        defaults.set(value, forKey: devModeEnabledKey)
+        #endif
     }
 }

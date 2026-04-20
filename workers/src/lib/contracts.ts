@@ -44,6 +44,7 @@ export const QuotaRequestSchema = z.object({
   ]),
   quotaSubject: z.string().trim().min(1),
   plan: z.enum(["free", "pro"]),
+  accessMode: z.string().trim().min(1).optional(),
   dateJST: z.string().trim().min(1),
   ticker: z.string().trim().min(1).max(16).optional(),
   chatLimit: z.number().int().min(0),

@@ -12,6 +12,9 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(spacing: 16) {
                         planCard
+                        #if DEBUG
+                        devCard
+                        #endif
                         aiCard
                         linksCard
                         displayCard
@@ -41,9 +44,9 @@ struct SettingsView: View {
                     .foregroundStyle(KabuyomiTheme.ink)
 
                 HStack {
-                    Label(appModel.currentBillingTier.badgeTitle, systemImage: appModel.isProPlanActive ? "crown.fill" : "bolt.badge.a")
+                    Label(appModel.currentPlanBadgeTitle, systemImage: appModel.currentPlanBadgeSystemImage)
                         .font(.system(.caption2, design: .rounded, weight: .semibold))
-                        .foregroundStyle(appModel.isProPlanActive ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
+                        .foregroundStyle(appModel.currentPlanBadgeUsesAccent ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
                         .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
@@ -107,6 +110,44 @@ struct SettingsView: View {
             }
         }
     }
+
+    #if DEBUG
+    private var devCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("開発用オプション")
+                    .font(.system(.headline, design: .rounded, weight: .bold))
+
+                Toggle(isOn: Binding(
+                    get: { appModel.devModeEnabled },
+                    set: { appModel.setDevModeEnabled($0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Dev モード")
+                            .font(.system(.body, design: .rounded, weight: .semibold))
+                        Text("DEBUG ビルド専用です。Worker 側で `DEV_DETACHED_ACCESS_ENABLED=true` が有効な環境に対してだけ detached dev access header を送ります。")
+                            .font(.footnote)
+                            .foregroundStyle(KabuyomiTheme.inkMuted)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("現在の API 接続先")
+                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                    Text(appModel.currentAPIBaseURLDisplay)
+                        .font(.system(.footnote, design: .monospaced, weight: .medium))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                        .textSelection(.enabled)
+                }
+
+                Text(appModel.isDetachedDevAccessActive ? "現在の usage は detached dev access を返しています。" : "release ではこのセクション自体を出しません。dev 用 Worker が header を無視している場合は free / pro のまま表示されます。")
+                    .font(.footnote)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+            }
+        }
+    }
+    #endif
 
     private var aiCard: some View {
         card {

@@ -1,5 +1,6 @@
 import type { Env, UsageState } from "../env";
 import { resolvePlanLimits } from "./billing-catalog";
+import { loadDetachedAccessFromRequest } from "./detached-access";
 import { loadActiveEntitlementFromRequest } from "./entitlements";
 import { AppError } from "./errors";
 import { logEvent } from "./logging";
@@ -8,7 +9,10 @@ import type { RemoteConfig } from "./remote-config";
 export interface QuotaIdentity {
   quotaSubject: string;
   plan: "free" | "pro";
-  identityKind: "device_key" | "ip_hash" | "local_device" | "entitlement";
+  identityKind: "device_key" | "ip_hash" | "local_device" | "entitlement" | "detached_access";
+  accessMode?: string;
+  chatLimitOverride?: number;
+  stockLimitOverride?: number;
 }
 
 interface QuotaIdentityOptions {
@@ -38,6 +42,18 @@ export async function readQuotaIdentity(
 
   if (options.requireDeviceKey && !deviceKey) {
     throw new AppError(400, "Device key is required");
+  }
+
+  const detachedAccess = await loadDetachedAccessFromRequest(request, env);
+  if (detachedAccess) {
+    return {
+      quotaSubject: detachedAccess.quotaSubject,
+      plan: detachedAccess.plan,
+      identityKind: "detached_access",
+      accessMode: detachedAccess.accessMode,
+      chatLimitOverride: detachedAccess.chatLimit,
+      stockLimitOverride: detachedAccess.stockLimit
+    };
   }
 
   const syncedEntitlement = await loadActiveEntitlementFromRequest(request, env);
@@ -173,7 +189,7 @@ export async function ensureCompanyAccessAllowed(
     return;
   }
 
-  const limits = resolvePlanLimits(identity.plan, config);
+  const limits = resolveIdentityLimits(identity, config);
 
   const dateJST = buildQuotaDateJST();
   const response = await env.USER_QUOTA.getByName(identity.quotaSubject).fetch("https://do/quota", {
@@ -183,6 +199,7 @@ export async function ensureCompanyAccessAllowed(
       action: "checkCompanyAccess",
       quotaSubject: identity.quotaSubject,
       plan: identity.plan,
+      accessMode: identity.accessMode,
       dateJST,
       ticker,
       chatLimit: limits.chatLimit,
@@ -247,7 +264,7 @@ async function mutateUsage(
 ): Promise<QuotaMutationResult> {
   const stub = env.USER_QUOTA.getByName(identity.quotaSubject);
   const dateJST = buildQuotaDateJST();
-  const limits = resolvePlanLimits(identity.plan, config);
+  const limits = resolveIdentityLimits(identity, config);
 
   const response = await stub.fetch("https://do/quota", {
     method: "POST",
@@ -256,6 +273,7 @@ async function mutateUsage(
       action,
       quotaSubject: identity.quotaSubject,
       plan: identity.plan,
+      accessMode: identity.accessMode,
       dateJST,
       ticker,
       relatedTickers: normalizePreviewTickers(options.relatedTickers ?? []),
@@ -278,6 +296,14 @@ async function mutateUsage(
   return {
     usage: payload.usage,
     didMutate: payload.didMutate === true
+  };
+}
+
+function resolveIdentityLimits(identity: QuotaIdentity, config: RemoteConfig) {
+  const planLimits = resolvePlanLimits(identity.plan, config);
+  return {
+    chatLimit: identity.chatLimitOverride ?? planLimits.chatLimit,
+    stockLimit: identity.stockLimitOverride ?? planLimits.stockLimit
   };
 }
 

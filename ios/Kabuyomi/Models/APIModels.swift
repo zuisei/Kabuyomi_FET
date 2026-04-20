@@ -262,17 +262,32 @@ struct UsagePayload: Decodable, Hashable {
     let stockLimit: Int
     let dateJST: String
     let savedTickers: [String]?
+    let accessMode: String?
+
+    var detachedAccessMode: DetachedAccessMode? {
+        guard let accessMode else { return nil }
+        return DetachedAccessMode(rawValue: accessMode)
+    }
 
     var displayPlanLabel: String {
-        BillingCatalog.displayLabel(for: plan)
+        if let detachedAccessMode {
+            return detachedAccessMode.displayLabel
+        }
+        return BillingCatalog.displayLabel(for: plan)
     }
 
     var displayChatLimit: String {
-        displayLimit(chatLimit)
+        if detachedAccessMode != nil {
+            return "∞"
+        }
+        return displayLimit(chatLimit)
     }
 
     var displayStockLimit: String {
-        displayLimit(stockLimit)
+        if detachedAccessMode != nil {
+            return "∞"
+        }
+        return displayLimit(stockLimit)
     }
 
     private func displayLimit(_ value: Int) -> String {

@@ -9,6 +9,7 @@ export interface Env {
   SEC_FETCHER_SHARED_SECRET?: string;
   SEC_FETCHER_TIMEOUT_MS?: string;
   BACKFILL_SHARED_SECRET?: string;
+  DEV_DETACHED_ACCESS_ENABLED?: string;
   KABUYOMI_CACHE: KVNamespace;
   DB: D1Database;
   FILINGS_BUCKET: R2Bucket;
@@ -97,6 +98,7 @@ export interface FilingCacheRecord {
 
 export interface UsageState {
   plan: "free" | "pro";
+  accessMode?: string;
   chatsUsed: number;
   chatLimit: number;
   stocksUsed: number;

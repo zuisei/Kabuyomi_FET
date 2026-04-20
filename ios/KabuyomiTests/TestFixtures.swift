@@ -116,7 +116,8 @@ enum TestFixtures {
             stocksUsed: 1,
             stockLimit: 3,
             dateJST: "2026-04-17",
-            savedTickers: ["AAPL"]
+            savedTickers: ["AAPL"],
+            accessMode: nil
         )
     }
 

@@ -58,6 +58,9 @@ final class AppModel {
     static let appLaunchCountKey = "kabuyomi.appLaunchCount"
     static let starterCompaniesAutoHiddenKey = "kabuyomi.starterCompaniesAutoHidden"
     static let starterCompaniesAutoHideLaunchThreshold = 5
+    #if DEBUG
+    static let devModeEnabledKey = "kabuyomi.detachedAccess.devModeEnabled"
+    #endif
 
     let apiClient: APIClient
     let persistence: PersistenceController
@@ -85,6 +88,9 @@ final class AppModel {
     var showStarterCompanies = UserDefaults.standard.object(forKey: "kabuyomi.showStarterCompanies") as? Bool ?? true
     var hasCompletedInitialEntry = UserDefaults.standard.bool(forKey: "kabuyomi.hasCompletedInitialEntry")
     var appLaunchCount = UserDefaults.standard.integer(forKey: "kabuyomi.appLaunchCount")
+    #if DEBUG
+    var devModeEnabled = UserDefaults.standard.bool(forKey: "kabuyomi.detachedAccess.devModeEnabled")
+    #endif
 
     private var searchGeneration = 0
     private var stateGeneration = 0
@@ -166,6 +172,29 @@ final class AppModel {
         currentBillingTier.plan == BillingCatalog.pro.plan
     }
 
+    var currentPlanBadgeTitle: String {
+        usage?.displayPlanLabel ?? currentBillingTier.badgeTitle
+    }
+
+    var isDetachedDevAccessActive: Bool {
+        usage?.detachedAccessMode == .devUnlimited
+    }
+
+    var currentPlanBadgeSystemImage: String {
+        if isDetachedDevAccessActive {
+            return "hammer.fill"
+        }
+        return isProPlanActive ? "crown.fill" : "bolt.badge.a"
+    }
+
+    var currentPlanBadgeUsesAccent: Bool {
+        isProPlanActive || isDetachedDevAccessActive
+    }
+
+    var currentAPIBaseURLDisplay: String {
+        apiClient.baseURLDisplayString
+    }
+
     func bootstrap() async {
         isBootstrapped = false
 
@@ -220,6 +249,16 @@ final class AppModel {
             handle(error)
         }
     }
+
+    #if DEBUG
+    func setDevModeEnabled(_ value: Bool) {
+        DetachedAccessStore.shared.setDevModeEnabled(value)
+        devModeEnabled = value
+        Task { [weak self] in
+            await self?.refreshUsage()
+        }
+    }
+    #endif
 
     func search(query: String) async {
         let stateGeneration = self.stateGeneration
@@ -878,7 +917,8 @@ final class AppModel {
             stocksUsed: mergedTickers.count,
             stockLimit: usage.stockLimit,
             dateJST: usage.dateJST,
-            savedTickers: mergedTickers
+            savedTickers: mergedTickers,
+            accessMode: usage.accessMode
         )
     }
 
