@@ -51,7 +51,7 @@ sec-fetcher は SEC EDGAR の薄い proxy + キャッシュ + rate limiter。
 - 起動ブートストラップは `AppModel`:
   - 起動カウントのインクリメント
   - usage の取得
-  - billing sync (現状 `billingSyncEnabled = false`)
+  - StoreKit entitlement refresh と `/v1/billing/sync`
   - 永続化からのホーム再構築
     ([AppModel.swift:47-143](ios/Kabuyomi/App/AppModel.swift)).
 - 初回判定は「保存銘柄 / 最近銘柄 / lastViewedTicker / activeConversationTicker が
@@ -118,13 +118,13 @@ Overview 相当は独立タブではなく右ドロワーになっている
 
 ### 2.5 Settings タブ
 
-- **利用状況**: plan (現状 `beta preview` 固定), 今日の chat 回数, 保存銘柄数
+- **プラン**: `FREE` / `PRO` バッジ、今日の chat 回数、保存銘柄数、`free 3 / 10` と `pro 20 / 50` の比較行、購入 / 復元ボタン
 - **AI 利用**: Gemini 送信への同意トグル。初回チャット送信時にダイアログ。
 - **表示**: スターター銘柄の表示トグル (5 起動で自動 off の注記あり)
 - **Links**: プライバシー / 利用規約 / サポート (いずれもアプリ内静的 view)
 - **ローカルデータ**: 「データをリセット」(破壊的)
-- **[DEBUG]**: デバッグビルド限定。「無限チャット / 無限保存」モード。
-  デバイスキーの扱いを変更し Worker 側の quota を事実上バイパスする
+- **課金導線**: StoreKit の購読状態を `/v1/billing/sync` で同期し、同じ API のまま free / pro quota を切り替える。
+  将来の detachable offer は free/pro 導線とは分離して扱う
   ([SettingsView.swift:1-395](ios/Kabuyomi/Features/Settings/SettingsView.swift)).
 
 ### 2.6 ネットワーク層
@@ -175,9 +175,8 @@ ticker 不明 / SEC 不通)。
 - `ios/oldui/` は 旧設計の歴史資料。ビルドターゲットには含まれない
   (リポジトリ外から参照されてもいない)。
 - `CompanyTabPreference.overview` 定義はあるが実質未使用。
-- `publicMonetizationEnabled = false`, `billingSyncEnabled = false`。
-  購入導線は「課金機能は現在の beta では無効です。」で塞がれている
-  ([AppModel.swift:19-20](ios/Kabuyomi/App/AppModel.swift)).
+- 旧 `publicMonetizationEnabled` / `billingSyncEnabled` フラグ前提の説明は現状と不一致。
+  現在は StoreKit 購入 / 復元と `/v1/billing/sync` による free / pro 切り替えが入っている。
 
 ---
 
@@ -463,7 +462,7 @@ iOS composer 送信 → /v1/chat
 | スターター 5 社 | AAPL, MSFT, NVDA, AMZN, TSLA | 一致 |
 | 自動非表示 | 5 回起動で auto-hide | 一致 (`starterCompaniesAutoHideLaunchThreshold = 5`) |
 | push 通知 | Phase 2 として将来 | 未実装。`PushNotification` 等は外部ツールの話 |
-| beta quota 引き上げ (5 / 10) | 仕様書で推奨 | **実装は 3 / 3 のまま** |
+| beta quota / 課金導線 | 旧仕様では未確定 | **実装は free 3 / 10, pro 20 / 50** |
 | 他社比較 | v1 対象外 | UI に明示的な制限バナーあり |
 | 20-F / 6-K | 対象外 | Search で弾く、pipeline でも弾く (一致) |
 | ランディングの「保存した銘柄」改名 | `ブックマーク` 等への寄せ提案 | UI は `保存した銘柄` のまま |

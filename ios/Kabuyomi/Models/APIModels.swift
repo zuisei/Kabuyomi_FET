@@ -264,7 +264,7 @@ struct UsagePayload: Decodable, Hashable {
     let savedTickers: [String]?
 
     var displayPlanLabel: String {
-        "BETA"
+        BillingCatalog.displayLabel(for: plan)
     }
 
     var displayChatLimit: String {
@@ -276,7 +276,7 @@ struct UsagePayload: Decodable, Hashable {
     }
 
     private func displayLimit(_ value: Int) -> String {
-        value >= 9_000_000_000 ? "—" : String(value)
+        String(value)
     }
 }
 

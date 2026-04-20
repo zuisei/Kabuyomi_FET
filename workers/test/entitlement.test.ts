@@ -27,7 +27,7 @@ describe("EntitlementDO", () => {
         body: JSON.stringify({
           originalTransactionId: "tx-123",
           active: true,
-          productId: "kabuyomi.pro.monthly"
+          productId: "app.kabuyomi.pro.monthly"
         })
       })
     );
@@ -36,7 +36,7 @@ describe("EntitlementDO", () => {
     await expect(response.json()).resolves.toMatchObject({
       plan: "pro",
       quotaSubject: expect.stringMatching(/^pro:[a-f0-9]{64}$/),
-      productId: "kabuyomi.pro.monthly"
+      productId: "app.kabuyomi.pro.monthly"
     });
   });
 
@@ -65,7 +65,7 @@ describe("EntitlementDO", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          productId: "kabuyomi.pro.monthly"
+          productId: "app.kabuyomi.pro.monthly"
         })
       })
     );

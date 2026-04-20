@@ -18,10 +18,7 @@ export const handleWatchlistRemoveRoute: RouteHandler = async ({ request, url, e
     tooLargeMessage: "Ticker payload is too large"
   });
 
-  const identity = await readQuotaIdentity(request, env, {
-    requireDeviceKey: true,
-    allowDebugUnlimited: true
-  });
+  const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
   const tickerRecord = await lookupTicker(payload.ticker, env);
   const relatedTickers = tickerRecord ? await listTickersByCik(tickerRecord.cik, env) : [];
   const usage = await removeTickerFromSavedQuota(

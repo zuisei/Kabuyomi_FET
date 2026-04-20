@@ -10,10 +10,10 @@ Treat the current code as the source of truth over older specs. The ship target 
 - Conversation-first flow: entry -> company conversation -> drawers/settings
 - Supported filings: `10-K` and `10-Q` only
 - Starter preview tickers: `AAPL`, `MSFT`, `NVDA`, `AMZN`, `TSLA`
-- Billing remains disabled in the beta path
+- Billing is enabled with the current free/pro quota ladder
 - Beta default is filing-grounded only. External web supplements stay disabled unless explicitly re-enabled for a controlled test.
 - Saved tickers are persistent server-side; chat quota resets daily on JST boundaries
-- Current free beta limits: `3` saved tickers and `3` chats per JST day
+- Current limits: `free = 3` saved tickers / `10` chats per JST day, `pro = 20` saved tickers / `50` chats per JST day
 - Chat metadata should follow `responsePath`; remote model naming should appear only for real remote Gemini execution
 - Historical chat is narrow on purpose: explicit `3年` / `比較` / `推移` style prompts only
 - Background history seed is the top 30 U.S.-listed issuers by market cap, using issuer-level normalization for class-share families and targeting 3 years of annual `10-K` coverage
@@ -29,7 +29,7 @@ Treat the current code as the source of truth over older specs. The ship target 
 
 - A Release archive builds successfully.
 - Workers and `sec-fetcher` are deployed with the expected secrets and storage bindings.
-- The app copy consistently states saved tickers vs daily chat quota, billing-disabled beta status, and unsupported cases.
+- The app copy consistently states saved tickers vs daily chat quota, the current free/pro ladder, and unsupported cases.
 - Manual QA covers the main happy paths plus saved/remove/reset/limit/error paths.
 - TestFlight metadata and tester notes explain that this is a limited beta, not investment advice.
 
@@ -37,7 +37,7 @@ Treat the current code as the source of truth over older specs. The ship target 
 
 - [ ] Do not add new product surface area until the first TestFlight build is out.
 - [ ] Keep the filing scope explicit everywhere: `10-K / 10-Q` only.
-- [ ] Keep billing disabled for this beta.
+- [ ] Keep the free/pro ladder and paywall copy aligned with the actual StoreKit SKU and Worker limits.
 - [ ] Decide whether the initial drop is `internal testers only` or `small external beta`.
 - [ ] Use the current conversation-first UI as the ship target. Do not block on reviving the older home/search/tab concept.
 
@@ -48,11 +48,11 @@ Treat the current code as the source of truth over older specs. The ship target 
 - [ ] Confirm Gemini API key and model config are set for the beta environment.
 - [ ] Confirm `maintenanceMode = false` and `chatEnabled = true`.
 - [ ] Confirm `webSupplementEnabled = false` unless you are intentionally running an external-supplement test.
-- [ ] Decide whether the default free beta limits stay at `3 / 3` or are raised before inviting testers.
+- [ ] Confirm the default limits stay at `free 3 / 10` and `pro 20 / 50`, or intentionally update both StoreKit copy and Worker remote config together.
 - [ ] Confirm `dailyRefreshEnabled` and any background tracked ticker list are intentional for beta load, and are not being described as the user saved ticker source of truth.
 - [ ] Confirm the tracked history seed still matches the intended top-30 U.S. issuer roster and remains issuer-normalized across class shares.
 - [ ] Confirm `/v1/watchlist/add` and `/v1/watchlist/remove` return updated usage with the current saved ticker semantics.
-- [ ] Confirm `/v1/billing/sync` still returns the beta-disabled response in the target environment.
+- [ ] Confirm `/v1/billing/sync` returns a synced entitlement payload in the target environment and that requests with `x-kabuyomi-original-transaction-id` resolve to `pro` usage.
 - [ ] Run remote D1 migration if the target environment is fresh.
 
 Reference commands:
@@ -107,7 +107,6 @@ If the local simulator name or OS differs, adjust only the `xcodebuild test` des
 
 ## 4. Release-Safety Checks In The iOS App
 
-- [ ] `DEBUG`-only unlimited mode is not reachable in TestFlight or Release, and the Worker honors it only for local/dev runs with `DEBUG_UNLIMITED_ENABLED=true`.
 - [ ] Settings copy for Privacy Policy / Terms / Support is present and readable.
 - [ ] Settings usage copy clearly separates persistent saved ticker count from today's chat count.
 - [ ] AI consent flow appears before first chat send.
@@ -124,7 +123,7 @@ Explicitly recheck these current product rules:
 - [ ] Starter tickers open without consuming saved ticker quota.
 - [ ] Search shows unsupported tickers as unsupported instead of allowing save.
 - [ ] Filing-grounded beta mode stays on by default, and no external supplement copy leaks into the main happy path unless intentionally enabled.
-- [ ] Billing UI remains beta-disabled and does not expose dead purchase flows.
+- [ ] Billing UI shows the actual free/pro ladder and the purchase / restore actions work end-to-end.
 
 ## 5. Manual QA Matrix
 
@@ -164,7 +163,8 @@ Suggested tester note baseline:
 
 - This is a limited beta for reading SEC `10-K / 10-Q` filings in Japanese.
 - `20-F / 6-K` companies are not yet supported.
-- Saved tickers are capped separately from the daily chat quota, and billing is disabled in this beta.
+- Saved tickers are capped separately from the daily chat quota.
+- Current limits are `free 3 / 10` and `pro 20 / 50`.
 - The app is not investment advice and may contain summary or chat errors.
 - Use TestFlight feedback with the ticker, question, screenshot, and repro steps.
 
@@ -188,8 +188,8 @@ Suggested tester note baseline:
 ## Current Code Anchors
 
 - Xcode project source of truth: `ios/project.yml`
-- Beta billing flag: `ios/Kabuyomi/Services/BetaBilling.swift`
-- DEBUG unlimited mode warning: `ios/Kabuyomi/App/AppModel.swift`
+- Billing catalog: `ios/Kabuyomi/Services/BetaBilling.swift`
+- StoreKit sync and purchase flow: `ios/Kabuyomi/Services/SubscriptionStore.swift`
 - Search support gating: `ios/Kabuyomi/Models/APIModels.swift`
 - Company access gating: `workers/src/routes/company.ts` and `workers/src/lib/quota.ts`
 - Saved ticker quota semantics: `workers/src/durable/user-quota.ts`

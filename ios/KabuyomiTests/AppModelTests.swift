@@ -59,11 +59,11 @@ final class AppModelTests: XCTestCase {
             Thread.sleep(forTimeInterval: 1.0)
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             let data = try TestFixtures.jsonData([
-                "plan": "beta",
+                "plan": "free",
                 "chatsUsed": 0,
-                "chatLimit": 20,
+                "chatLimit": 10,
                 "stocksUsed": 0,
-                "stockLimit": 25,
+                "stockLimit": 3,
                 "dateJST": "2026-04-18"
             ])
             return (response, data)
@@ -130,24 +130,24 @@ final class AppModelTests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.05)
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             let data = try TestFixtures.jsonData([
-                "plan": "beta",
+                "plan": "free",
                 "chatsUsed": 0,
-                "chatLimit": 20,
+                "chatLimit": 10,
                 "stocksUsed": 0,
-                "stockLimit": 25,
+                "stockLimit": 3,
                 "dateJST": "2026-04-18"
             ])
             return (response, data)
         }
 
         let model = AppModel(
-            apiClient: APIClient(
+            apiClient: makeAPIClient(
                 session: {
                     let configuration = URLSessionConfiguration.ephemeral
                     configuration.protocolClasses = [MockAppModelURLProtocol.self]
                     return URLSession(configuration: configuration)
                 }(),
-                baseURL: URL(string: "https://example.com")!
+                deviceIdentity: deviceIdentity
             ),
             persistence: persistence,
             deviceIdentity: deviceIdentity
@@ -185,11 +185,11 @@ final class AppModelTests: XCTestCase {
                 return (
                     response,
                     try TestFixtures.jsonData([
-                        "plan": "beta",
+                        "plan": "free",
                         "chatsUsed": 3,
-                        "chatLimit": 20,
+                        "chatLimit": 10,
                         "stocksUsed": 9,
-                        "stockLimit": 25,
+                        "stockLimit": 3,
                         "dateJST": "2026-04-18"
                     ])
                 )
@@ -199,11 +199,11 @@ final class AppModelTests: XCTestCase {
             return (
                 response,
                 try TestFixtures.jsonData([
-                    "plan": "beta",
+                    "plan": "free",
                     "chatsUsed": 0,
-                    "chatLimit": 20,
+                    "chatLimit": 10,
                     "stocksUsed": 0,
-                    "stockLimit": 25,
+                    "stockLimit": 3,
                     "dateJST": "2026-04-18"
                 ])
             )
@@ -214,10 +214,7 @@ final class AppModelTests: XCTestCase {
         let session = URLSession(configuration: configuration)
 
         let model = AppModel(
-            apiClient: APIClient(
-                session: session,
-                baseURL: URL(string: "https://example.com")!
-            ),
+            apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
             persistence: PersistenceController(inMemory: true),
             deviceIdentity: deviceIdentity
         )
@@ -246,11 +243,11 @@ final class AppModelTests: XCTestCase {
                 return (
                     response,
                     try TestFixtures.jsonData([
-                        "plan": "beta",
+                        "plan": "free",
                         "chatsUsed": 0,
-                        "chatLimit": 20,
+                        "chatLimit": 10,
                         "stocksUsed": 0,
-                        "stockLimit": 25,
+                        "stockLimit": 3,
                         "dateJST": "2026-04-18"
                     ])
                 )
@@ -339,10 +336,7 @@ final class AppModelTests: XCTestCase {
         configuration.protocolClasses = [MockAppModelURLProtocol.self]
         let session = URLSession(configuration: configuration)
         let model = AppModel(
-            apiClient: APIClient(
-                session: session,
-                baseURL: URL(string: "https://example.com")!
-            ),
+            apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
             persistence: PersistenceController(inMemory: true),
             deviceIdentity: deviceIdentity
         )
@@ -394,11 +388,11 @@ final class AppModelTests: XCTestCase {
             return (
                 response,
                 try TestFixtures.jsonData([
-                    "plan": "beta",
+                    "plan": "free",
                     "chatsUsed": 0,
-                    "chatLimit": 20,
+                    "chatLimit": 10,
                     "stocksUsed": 0,
-                    "stockLimit": 25,
+                    "stockLimit": 3,
                     "dateJST": "2026-04-18"
                 ])
             )
@@ -407,13 +401,11 @@ final class AppModelTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockAppModelURLProtocol.self]
         let session = URLSession(configuration: configuration)
+        let deviceIdentity = DeviceIdentityStore()
         let model = AppModel(
-            apiClient: APIClient(
-                session: session,
-                baseURL: URL(string: "https://example.com")!
-            ),
+            apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
             persistence: PersistenceController(inMemory: true),
-            deviceIdentity: DeviceIdentityStore()
+            deviceIdentity: deviceIdentity
         )
 
         await model.search(query: "BRK.B")
@@ -438,11 +430,11 @@ final class AppModelTests: XCTestCase {
 
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             let data = try TestFixtures.jsonData([
-                "plan": "beta",
+                "plan": "free",
                 "chatsUsed": 0,
-                "chatLimit": 20,
+                "chatLimit": 10,
                 "stocksUsed": 0,
-                "stockLimit": 25,
+                "stockLimit": 3,
                 "dateJST": "2026-04-18"
             ])
             return (response, data)
@@ -475,11 +467,11 @@ final class AppModelTests: XCTestCase {
                     response,
                     try TestFixtures.jsonData([
                         "usage": [
-                            "plan": "beta",
+                            "plan": "free",
                             "chatsUsed": 0,
-                            "chatLimit": 20,
+                            "chatLimit": 10,
                             "stocksUsed": 0,
-                            "stockLimit": 25,
+                            "stockLimit": 3,
                             "dateJST": "2026-04-18",
                             "savedTickers": []
                         ]
@@ -490,11 +482,11 @@ final class AppModelTests: XCTestCase {
             return (
                 response,
                 try TestFixtures.jsonData([
-                    "plan": "beta",
+                    "plan": "free",
                     "chatsUsed": 0,
-                    "chatLimit": 20,
+                    "chatLimit": 10,
                     "stocksUsed": 0,
-                    "stockLimit": 25,
+                    "stockLimit": 3,
                     "dateJST": "2026-04-18",
                     "savedTickers": []
                 ])
@@ -527,11 +519,11 @@ final class AppModelTests: XCTestCase {
 
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             let data = try TestFixtures.jsonData([
-                "plan": "beta",
+                "plan": "free",
                 "chatsUsed": 0,
-                "chatLimit": 20,
+                "chatLimit": 10,
                 "stocksUsed": 1,
-                "stockLimit": 25,
+                "stockLimit": 3,
                 "dateJST": "2026-04-18",
                 "savedTickers": ["BRK-B"]
             ])
@@ -571,11 +563,11 @@ final class AppModelTests: XCTestCase {
                 return (
                     response,
                     try TestFixtures.jsonData([
-                        "plan": "beta",
+                        "plan": "free",
                         "chatsUsed": 0,
-                        "chatLimit": 20,
+                        "chatLimit": 10,
                         "stocksUsed": 1,
-                        "stockLimit": 25,
+                        "stockLimit": 3,
                         "dateJST": "2026-04-18",
                         "savedTickers": ["BRK-B"]
                     ])
@@ -593,13 +585,11 @@ final class AppModelTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockAppModelURLProtocol.self]
         let session = URLSession(configuration: configuration)
+        let deviceIdentity = DeviceIdentityStore()
         let model = AppModel(
-            apiClient: APIClient(
-                session: session,
-                baseURL: URL(string: "https://example.com")!
-            ),
+            apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
             persistence: persistence,
-            deviceIdentity: DeviceIdentityStore()
+            deviceIdentity: deviceIdentity
         )
 
         await model.bootstrap()
@@ -634,11 +624,11 @@ final class AppModelTests: XCTestCase {
                     response,
                     try TestFixtures.jsonData([
                         "usage": [
-                            "plan": "beta",
+                            "plan": "free",
                             "chatsUsed": 0,
-                            "chatLimit": 20,
+                            "chatLimit": 10,
                             "stocksUsed": 0,
-                            "stockLimit": 25,
+                            "stockLimit": 3,
                             "dateJST": "2026-04-18",
                             "savedTickers": []
                         ]
@@ -649,11 +639,11 @@ final class AppModelTests: XCTestCase {
             return (
                 response,
                 try TestFixtures.jsonData([
-                    "plan": "beta",
+                    "plan": "free",
                     "chatsUsed": 0,
-                    "chatLimit": 20,
+                    "chatLimit": 10,
                     "stocksUsed": 0,
-                    "stockLimit": 25,
+                    "stockLimit": 3,
                     "dateJST": "2026-04-18",
                     "savedTickers": []
                 ])
@@ -702,11 +692,11 @@ final class AppModelTests: XCTestCase {
                 return (
                     response,
                     try TestFixtures.jsonData([
-                        "plan": "beta",
+                        "plan": "free",
                         "chatsUsed": 0,
-                        "chatLimit": 20,
+                        "chatLimit": 10,
                         "stocksUsed": 0,
-                        "stockLimit": 25,
+                        "stockLimit": 3,
                         "dateJST": "2026-04-18",
                         "savedTickers": []
                     ])
@@ -776,11 +766,11 @@ final class AppModelTests: XCTestCase {
                 return (
                     response,
                     try TestFixtures.jsonData([
-                        "plan": "beta",
+                        "plan": "free",
                         "chatsUsed": 0,
-                        "chatLimit": 20,
+                        "chatLimit": 10,
                         "stocksUsed": 0,
-                        "stockLimit": 25,
+                        "stockLimit": 3,
                         "dateJST": "2026-04-18",
                         "savedTickers": []
                     ])
@@ -813,15 +803,20 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.usage?.savedTickers, ["AAPL", "AMZN"])
     }
 
-    func testDevUnlimitedWatchlistAddsReuseStableDeviceKey() async throws {
+    func testWatchlistAddsReuseStableDeviceKey() async throws {
         let persistence = PersistenceController(inMemory: true)
-        let model = makeAppModel(persistence: persistence)
-        model.devUnlimitedModeEnabled = true
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockAppModelURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let deviceIdentity = DeviceIdentityStore()
+        let model = AppModel(
+            apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
+            persistence: persistence,
+            deviceIdentity: deviceIdentity
+        )
         let aapl = TestFixtures.companyPayload(ticker: "AAPL", cik: "0000320193")
         let amzn = TestFixtures.companyPayload(ticker: "AMZN", cik: "0001018724")
-        let lock = NSLock()
-        var savedTickersByDeviceKey: [String: [String]] = [:]
-        var seenDeviceKeys: [String] = []
+        let recorder = DeviceKeyWatchlistRecorder()
 
         MockAppModelURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
@@ -829,21 +824,13 @@ final class AppModelTests: XCTestCase {
             switch request.url?.path {
             case "/v1/watchlist/add":
                 let deviceKey = try XCTUnwrap(request.value(forHTTPHeaderField: "x-device-key"))
-                XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-debug-unlimited"), "1")
 
                 let body = try XCTUnwrap(Self.requestBodyData(from: request))
                 let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
                 let ticker = try XCTUnwrap(payload["ticker"])
                 let company = ticker == "AAPL" ? aapl : amzn
 
-                lock.lock()
-                seenDeviceKeys.append(deviceKey)
-                var savedTickers = savedTickersByDeviceKey[deviceKey] ?? []
-                if !savedTickers.contains(ticker) {
-                    savedTickers.append(ticker)
-                }
-                savedTickersByDeviceKey[deviceKey] = savedTickers
-                lock.unlock()
+                let savedTickers = recorder.record(deviceKey: deviceKey, ticker: ticker)
 
                 let baseData = try TestFixtures.watchlistAddResponseData(ticker: company.ticker, cik: company.cik)
                 var json = try XCTUnwrap(JSONSerialization.jsonObject(with: baseData) as? [String: Any])
@@ -857,11 +844,11 @@ final class AppModelTests: XCTestCase {
                 return (
                     response,
                     try TestFixtures.jsonData([
-                        "plan": "beta",
+                        "plan": "free",
                         "chatsUsed": 0,
-                        "chatLimit": 20,
+                        "chatLimit": 10,
                         "stocksUsed": 0,
-                        "stockLimit": 25,
+                        "stockLimit": 3,
                         "dateJST": "2026-04-18",
                         "savedTickers": []
                     ])
@@ -888,7 +875,7 @@ final class AppModelTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(Set(seenDeviceKeys).count, 1)
+        XCTAssertEqual(recorder.uniqueDeviceKeyCount, 1)
         XCTAssertEqual(model.watchlist.map(\.ticker), ["AAPL", "AMZN"])
         XCTAssertEqual(model.usage?.savedTickers, ["AAPL", "AMZN"])
     }
@@ -898,13 +885,11 @@ final class AppModelTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockAppModelURLProtocol.self]
         let session = URLSession(configuration: configuration)
+        let deviceIdentity = DeviceIdentityStore()
         let model = AppModel(
-            apiClient: APIClient(
-                session: session,
-                baseURL: URL(string: "https://example.com")!
-            ),
+            apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
             persistence: persistence,
-            deviceIdentity: DeviceIdentityStore()
+            deviceIdentity: deviceIdentity
         )
         let aapl = TestFixtures.companyPayload(ticker: "AAPL", cik: "0000320193")
         let amzn = TestFixtures.companyPayload(ticker: "AMZN", cik: "0001018724")
@@ -918,11 +903,11 @@ final class AppModelTests: XCTestCase {
                 return (
                     response,
                     try TestFixtures.jsonData([
-                        "plan": "beta",
+                        "plan": "free",
                         "chatsUsed": 0,
-                        "chatLimit": 20,
+                        "chatLimit": 10,
                         "stocksUsed": 1,
-                        "stockLimit": 25,
+                        "stockLimit": 3,
                         "dateJST": "2026-04-18",
                         "savedTickers": ["AMZN"]
                     ])
@@ -982,11 +967,11 @@ final class AppModelTests: XCTestCase {
                 return (
                     response,
                     try TestFixtures.jsonData([
-                        "plan": "beta",
+                        "plan": "free",
                         "chatsUsed": 0,
-                        "chatLimit": 20,
+                        "chatLimit": 10,
                         "stocksUsed": 2,
-                        "stockLimit": 25,
+                        "stockLimit": 3,
                         "dateJST": "2026-04-18",
                         "savedTickers": ["AAPL", "AMZN"]
                     ])
@@ -1002,13 +987,11 @@ final class AppModelTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockAppModelURLProtocol.self]
         let session = URLSession(configuration: configuration)
+        let deviceIdentity = DeviceIdentityStore()
         let model = AppModel(
-            apiClient: APIClient(
-                session: session,
-                baseURL: URL(string: "https://example.com")!
-            ),
+            apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
             persistence: persistence,
-            deviceIdentity: DeviceIdentityStore()
+            deviceIdentity: deviceIdentity
         )
 
         await model.bootstrap()
@@ -1030,11 +1013,11 @@ final class AppModelTests: XCTestCase {
                 return (
                     response,
                     try TestFixtures.jsonData([
-                        "plan": "beta",
+                        "plan": "free",
                         "chatsUsed": 0,
-                        "chatLimit": 20,
+                        "chatLimit": 10,
                         "stocksUsed": 1,
-                        "stockLimit": 25,
+                        "stockLimit": 3,
                         "dateJST": "2026-04-18",
                         "savedTickers": ["MSFT"]
                     ])
@@ -1061,11 +1044,11 @@ final class AppModelTests: XCTestCase {
         MockAppModelURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             let data = try TestFixtures.jsonData([
-                "plan": "beta",
+                "plan": "free",
                 "chatsUsed": 0,
-                "chatLimit": 20,
+                "chatLimit": 10,
                 "stocksUsed": 0,
-                "stockLimit": 25,
+                "stockLimit": 3,
                 "dateJST": "2026-04-18"
             ])
             return (response, data)
@@ -1074,14 +1057,20 @@ final class AppModelTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockAppModelURLProtocol.self]
         let session = URLSession(configuration: configuration)
+        let deviceIdentity = DeviceIdentityStore()
 
         return AppModel(
-            apiClient: APIClient(
-                session: session,
-                baseURL: URL(string: "https://example.com")!
-            ),
+            apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
             persistence: persistence,
-            deviceIdentity: DeviceIdentityStore()
+            deviceIdentity: deviceIdentity
+        )
+    }
+
+    private func makeAPIClient(session: URLSession, deviceIdentity: DeviceIdentityStore) -> APIClient {
+        return APIClient(
+            session: session,
+            baseURL: URL(string: "https://example.com")!,
+            deviceIdentity: deviceIdentity
         )
     }
 
@@ -1115,6 +1104,31 @@ final class AppModelTests: XCTestCase {
         }
 
         return data.isEmpty ? nil : data
+    }
+}
+
+private final class DeviceKeyWatchlistRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seenDeviceKeys: [String] = []
+    private var savedTickersByDeviceKey: [String: [String]] = [:]
+
+    func record(deviceKey: String, ticker: String) -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        seenDeviceKeys.append(deviceKey)
+        var savedTickers = savedTickersByDeviceKey[deviceKey] ?? []
+        if !savedTickers.contains(ticker) {
+            savedTickers.append(ticker)
+        }
+        savedTickersByDeviceKey[deviceKey] = savedTickers
+        return savedTickers
+    }
+
+    var uniqueDeviceKeyCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return Set(seenDeviceKeys).count
     }
 }
 

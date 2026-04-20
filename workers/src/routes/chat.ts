@@ -33,10 +33,7 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
       return notFound("Filing cache not found");
     }
 
-    const identity = await readQuotaIdentity(request, env, {
-      requireDeviceKey: true,
-      allowDebugUnlimited: true
-    });
+  const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
     const relatedTickers = await listTickersByCik(requestedFiling.cik, env);
     await ensureCompanyAccessAllowed(identity, requestedFiling.ticker, STARTER_TICKERS, env, config, { relatedTickers });
     const usage = await consumeChatQuota(identity, env, config);

@@ -1,4 +1,6 @@
 import type { Env, UsageState } from "../env";
+import { resolvePlanLimits } from "./billing-catalog";
+import { loadActiveEntitlementFromRequest } from "./entitlements";
 import { AppError } from "./errors";
 import { logEvent } from "./logging";
 import type { RemoteConfig } from "./remote-config";
@@ -6,12 +8,11 @@ import type { RemoteConfig } from "./remote-config";
 export interface QuotaIdentity {
   quotaSubject: string;
   plan: "free" | "pro";
-  identityKind: "device_key" | "ip_hash" | "local_device" | "debug_device";
+  identityKind: "device_key" | "ip_hash" | "local_device" | "entitlement";
 }
 
 interface QuotaIdentityOptions {
   requireDeviceKey?: boolean;
-  allowDebugUnlimited?: boolean;
 }
 
 interface UsageEnvelope {
@@ -30,15 +31,21 @@ interface TickerQuotaOptions {
 
 export async function readQuotaIdentity(
   request: Request,
-  env: Pick<Env, "DEBUG_UNLIMITED_ENABLED"> = {},
+  env: Env,
   options: QuotaIdentityOptions = {}
 ): Promise<QuotaIdentity> {
   const deviceKey = request.headers.get("x-device-key")?.trim();
-  if (shouldHonorDebugUnlimited(request, env, options) && deviceKey) {
+
+  if (options.requireDeviceKey && !deviceKey) {
+    throw new AppError(400, "Device key is required");
+  }
+
+  const syncedEntitlement = await loadActiveEntitlementFromRequest(request, env);
+  if (syncedEntitlement) {
     return {
-      quotaSubject: `free:debug:${deviceKey}`,
-      plan: "free",
-      identityKind: "debug_device"
+      quotaSubject: syncedEntitlement.quotaSubject,
+      plan: syncedEntitlement.plan,
+      identityKind: "entitlement"
     };
   }
 
@@ -56,10 +63,6 @@ export async function readQuotaIdentity(
       plan: "free",
       identityKind: "device_key"
     };
-  }
-
-  if (options.requireDeviceKey) {
-    throw new AppError(400, "Device key is required");
   }
 
   const connectingIp = normalizeConnectingIp(request.headers.get("cf-connecting-ip"));
@@ -166,10 +169,11 @@ export async function ensureCompanyAccessAllowed(
   config: RemoteConfig,
   options: TickerQuotaOptions = {}
 ): Promise<void> {
-  const isProPlan = identity.plan === "pro";
-  if (isProPlan || identity.quotaSubject.startsWith("free:debug:")) {
+  if (identity.plan === "pro") {
     return;
   }
+
+  const limits = resolvePlanLimits(identity.plan, config);
 
   const dateJST = buildQuotaDateJST();
   const response = await env.USER_QUOTA.getByName(identity.quotaSubject).fetch("https://do/quota", {
@@ -181,8 +185,8 @@ export async function ensureCompanyAccessAllowed(
       plan: identity.plan,
       dateJST,
       ticker,
-      chatLimit: isProPlan ? config.proDailyChatLimit : config.freeDailyChatLimit,
-      stockLimit: isProPlan ? Number.MAX_SAFE_INTEGER : config.freeStockLimit,
+      chatLimit: limits.chatLimit,
+      stockLimit: limits.stockLimit,
       previewTickers: normalizePreviewTickers(previewTickers),
       relatedTickers: normalizePreviewTickers(options.relatedTickers ?? [])
     })
@@ -219,28 +223,6 @@ function isLocalQuotaFallbackRequest(request: Request): boolean {
   return hostname === "127.0.0.1" || hostname === "localhost" || hostname.endsWith(".test");
 }
 
-function shouldHonorDebugUnlimited(
-  request: Request,
-  env: Pick<Env, "DEBUG_UNLIMITED_ENABLED">,
-  options: QuotaIdentityOptions
-): boolean {
-  return Boolean(
-    options.allowDebugUnlimited &&
-      isDebugUnlimitedEnvEnabled(env.DEBUG_UNLIMITED_ENABLED) &&
-      isLocalQuotaFallbackRequest(request) &&
-      isDebugUnlimitedRequest(request)
-  );
-}
-
-function isDebugUnlimitedRequest(request: Request): boolean {
-  return request.headers.get("x-kabuyomi-debug-unlimited")?.trim() === "1";
-}
-
-function isDebugUnlimitedEnvEnabled(rawValue: string | undefined): boolean {
-  const normalized = rawValue?.trim().toLowerCase();
-  return normalized === "1" || normalized === "true" || normalized === "yes";
-}
-
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -265,6 +247,7 @@ async function mutateUsage(
 ): Promise<QuotaMutationResult> {
   const stub = env.USER_QUOTA.getByName(identity.quotaSubject);
   const dateJST = buildQuotaDateJST();
+  const limits = resolvePlanLimits(identity.plan, config);
 
   const response = await stub.fetch("https://do/quota", {
     method: "POST",
@@ -276,8 +259,8 @@ async function mutateUsage(
       dateJST,
       ticker,
       relatedTickers: normalizePreviewTickers(options.relatedTickers ?? []),
-      chatLimit: identity.plan === "pro" ? config.proDailyChatLimit : config.freeDailyChatLimit,
-      stockLimit: identity.plan === "pro" ? Number.MAX_SAFE_INTEGER : config.freeStockLimit
+      chatLimit: limits.chatLimit,
+      stockLimit: limits.stockLimit
     })
   });
 

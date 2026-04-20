@@ -20,10 +20,7 @@ export const handleCompanyRoute: RouteHandler = async ({ request, url, env, conf
 
   if (request.method === "GET") {
     try {
-      const identity = await readQuotaIdentity(request, env, {
-        requireDeviceKey: true,
-        allowDebugUnlimited: true
-      });
+      const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
       const tickerRecord = await lookupTicker(ticker, env);
       if (!tickerRecord) {
         return notFound(`Ticker not found: ${ticker}`);
@@ -61,10 +58,7 @@ export const handleCompanyRoute: RouteHandler = async ({ request, url, env, conf
 
   if (request.method === "POST" && url.pathname.endsWith("/refresh")) {
     try {
-      const identity = await readQuotaIdentity(request, env, {
-        requireDeviceKey: true,
-        allowDebugUnlimited: true
-      });
+      const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
       const tickerRecord = await lookupTicker(ticker, env);
       if (!tickerRecord) {
         return notFound(`Ticker not found: ${ticker}`);

@@ -3,7 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
-    @State private var devOptionsExpanded = false
 
     var body: some View {
         NavigationStack {
@@ -17,9 +16,6 @@ struct SettingsView: View {
                         linksCard
                         displayCard
                         resetCard
-                        #if DEBUG
-                        devCard
-                        #endif
                     }
                     .padding(20)
                 }
@@ -40,14 +36,14 @@ struct SettingsView: View {
     private var planCard: some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
-                Text("利用状況")
+                Text("プラン")
                     .font(.system(.headline, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.ink)
 
                 HStack {
-                    Label(BetaBilling.statusLabel, systemImage: "testtube.2")
+                    Label(appModel.currentBillingTier.badgeTitle, systemImage: appModel.isProPlanActive ? "crown.fill" : "bolt.badge.a")
                         .font(.system(.caption2, design: .rounded, weight: .semibold))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .foregroundStyle(appModel.isProPlanActive ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
                         .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
@@ -69,60 +65,48 @@ struct SettingsView: View {
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
-                Text(BetaBilling.disabledMessage)
+                VStack(spacing: 10) {
+                    BillingTierRow(tier: BillingCatalog.free, isCurrent: appModel.currentBillingTier.plan == BillingCatalog.free.plan)
+                    BillingTierRow(tier: BillingCatalog.pro, isCurrent: appModel.currentBillingTier.plan == BillingCatalog.pro.plan)
+                }
+
+                HStack(spacing: 10) {
+                    Button {
+                        Task {
+                            await appModel.purchasePro()
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if appModel.billingActionInFlight {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(appModel.isProPlanActive ? "Pro 利用中" : "Pro を購入")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(KabuyomiTheme.accentDeep)
+                    .disabled(appModel.billingActionInFlight || appModel.isProPlanActive)
+
+                    Button {
+                        Task {
+                            await appModel.restorePurchases()
+                        }
+                    } label: {
+                        Text("購入を復元")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(appModel.billingActionInFlight)
+                }
+
+                Text("StoreKit の購読状態を同期し、同じ API のまま free / pro の quota だけを切り替えます。")
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
             }
         }
     }
-
-    #if DEBUG
-    private var devCard: some View {
-        card {
-            DisclosureGroup(isExpanded: $devOptionsExpanded) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Toggle(isOn: Binding(
-                        get: { appModel.devUnlimitedModeEnabled },
-                        set: { appModel.setDevUnlimitedMode($0) }
-                    )) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("無限チャット / 無限保存")
-                                .font(.system(.body, design: .rounded, weight: .semibold))
-                            Text(appModel.devUnlimitedModeDescription)
-                                .font(.footnote)
-                                .foregroundStyle(KabuyomiTheme.inkMuted)
-                        }
-                    }
-
-                    if appModel.isDevUnlimitedModeActive {
-                        Text("有効時は DEBUG 専用ヘッダと開発用 device key を送ります。quota bypass は `DEBUG_UNLIMITED_ENABLED=true` を入れたローカル / 開発 Worker でだけ有効です。利用状況の数値は実利用を表しません。")
-                            .font(.footnote)
-                            .foregroundStyle(KabuyomiTheme.inkMuted)
-                    }
-                }
-            } label: {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("開発用オプション")
-                            .font(.system(.headline, design: .rounded, weight: .bold))
-                            .foregroundStyle(KabuyomiTheme.ink)
-                        Text("通常利用では不要な DEBUG 向け設定")
-                            .font(.system(.footnote, design: .rounded))
-                            .foregroundStyle(KabuyomiTheme.inkMuted)
-                    }
-
-                    Spacer()
-
-                    if appModel.isDevUnlimitedModeActive {
-                        Label("有効", systemImage: "checkmark.seal.fill")
-                            .font(.system(.caption, design: .rounded, weight: .bold))
-                            .foregroundStyle(KabuyomiTheme.positive)
-                    }
-                }
-            }
-        }
-    }
-    #endif
 
     private var aiCard: some View {
         card {
@@ -302,6 +286,40 @@ struct SettingsView: View {
                 body: "正式公開前に Privacy Policy / Terms / Support の外部 URL と連絡先を設置予定です。beta 中はアプリ内案内と TestFlight フィードバックを窓口とします。"
             )
         ]
+    }
+}
+
+private struct BillingTierRow: View {
+    let tier: BillingTier
+    let isCurrent: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(tier.title)
+                    .font(.system(.body, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                Text(tier.summary)
+                    .font(.footnote)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+            }
+
+            Spacer()
+
+            if isCurrent {
+                Text("現在")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(KabuyomiTheme.fill(for: isCurrent ? .secondary : .muted))
+        )
     }
 }
 

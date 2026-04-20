@@ -2,7 +2,11 @@ import Foundation
 import XCTest
 @testable import Kabuyomi
 
+@MainActor
 final class APIClientTests: XCTestCase {
+    private let standardContext = QuotaRequestContext(deviceKey: "device-123")
+    private let proContext = QuotaRequestContext(deviceKey: "device-123", originalTransactionId: "tx-123")
+
     override func tearDown() {
         MockURLProtocol.requestHandler = nil
         super.tearDown()
@@ -24,11 +28,10 @@ final class APIClientTests: XCTestCase {
     }
 
     func testAddToWatchlistSendsDeviceHeaderAndJSONBody() async throws {
-        let client = makeClient { request in
+        let client = makeClient(context: standardContext) { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/watchlist/add")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
-            XCTAssertNil(request.value(forHTTPHeaderField: "x-kabuyomi-debug-unlimited"))
             XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
 
             let body = try XCTUnwrap(Self.requestBodyData(from: request))
@@ -41,43 +44,68 @@ final class APIClientTests: XCTestCase {
             )
         }
 
-        let response = try await client.addToWatchlist(ticker: "AAPL", deviceKey: "device-123")
+        let response = try await client.addToWatchlist(ticker: "AAPL")
 
         XCTAssertEqual(response.company.ticker, "AAPL")
         XCTAssertEqual(response.usage.stocksUsed, 1)
     }
 
-    func testFetchUsageIncludesDebugUnlimitedHeaderWhenEnabled() async throws {
-        let client = makeClient { request in
+    func testFetchUsageSendsDeviceHeader() async throws {
+        let client = makeClient(context: standardContext) { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/usage")
             XCTAssertEqual(request.httpMethod, "GET")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-debug-unlimited"), "1")
             XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
 
             return (
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                 try TestFixtures.jsonData([
-                    "plan": "beta",
+                    "plan": "free",
                     "chatsUsed": 1,
-                    "chatLimit": 20,
+                    "chatLimit": 10,
                     "stocksUsed": 1,
-                    "stockLimit": 25,
+                    "stockLimit": 3,
                     "dateJST": "2026-04-17",
                     "savedTickers": ["AAPL"]
                 ])
             )
         }
 
-        let usage = try await client.fetchUsage(deviceKey: "device-123", debugUnlimited: true)
+        let usage = try await client.fetchUsage()
 
         XCTAssertEqual(usage.chatsUsed, 1)
-        XCTAssertEqual(usage.chatLimit, 20)
+        XCTAssertEqual(usage.chatLimit, 10)
         XCTAssertEqual(usage.savedTickers, ["AAPL"])
     }
 
+    func testFetchUsageIncludesOriginalTransactionIdWhenPresent() async throws {
+        let client = makeClient(context: proContext) { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-original-transaction-id"), "tx-123")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "plan": "pro",
+                    "chatsUsed": 2,
+                    "chatLimit": 50,
+                    "stocksUsed": 4,
+                    "stockLimit": 20,
+                    "dateJST": "2026-04-20",
+                    "savedTickers": ["AAPL", "MSFT", "AMZN", "NVDA"]
+                ])
+            )
+        }
+
+        let usage = try await client.fetchUsage()
+
+        XCTAssertEqual(usage.plan, "pro")
+        XCTAssertEqual(usage.chatLimit, 50)
+        XCTAssertEqual(usage.stockLimit, 20)
+    }
+
     func testSendChatDecodesResponsePathWhenPresent() async throws {
-        let client = makeClient { request in
+        let client = makeClient(context: standardContext) { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/chat")
             XCTAssertEqual(request.httpMethod, "POST")
 
@@ -97,11 +125,11 @@ final class APIClientTests: XCTestCase {
                     "responsePath": "gemini",
                     "modelName": "gemini-2.5-flash",
                     "usage": [
-                        "plan": "beta",
+                        "plan": "free",
                         "chatsUsed": 1,
-                        "chatLimit": 20,
+                        "chatLimit": 10,
                         "stocksUsed": 1,
-                        "stockLimit": 25,
+                        "stockLimit": 3,
                         "dateJST": "2026-04-18"
                     ]
                 ])
@@ -110,8 +138,7 @@ final class APIClientTests: XCTestCase {
 
         let response = try await client.sendChat(
             filingKey: "v1:AAPL:0000320193-24-000001",
-            question: "今回の変化は？",
-            deviceKey: "device-123"
+            question: "今回の変化は？"
         )
 
         XCTAssertEqual(response.responsePath, .gemini)
@@ -119,7 +146,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testSendChatDecodesLegacyResponseWithoutResponsePath() async throws {
-        let client = makeClient { request in
+        let client = makeClient(context: standardContext) { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/chat")
             XCTAssertEqual(request.httpMethod, "POST")
 
@@ -138,11 +165,11 @@ final class APIClientTests: XCTestCase {
                     ],
                     "modelName": NSNull(),
                     "usage": [
-                        "plan": "beta",
+                        "plan": "free",
                         "chatsUsed": 1,
-                        "chatLimit": 20,
+                        "chatLimit": 10,
                         "stocksUsed": 1,
-                        "stockLimit": 25,
+                        "stockLimit": 3,
                         "dateJST": "2026-04-18"
                     ]
                 ])
@@ -151,8 +178,7 @@ final class APIClientTests: XCTestCase {
 
         let response = try await client.sendChat(
             filingKey: "v1:AAPL:0000320193-24-000001",
-            question: "今回の変化は？",
-            deviceKey: "device-123"
+            question: "今回の変化は？"
         )
 
         XCTAssertNil(response.responsePath)
@@ -160,7 +186,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testRemoveFromWatchlistSendsDeviceHeaderAndJSONBody() async throws {
-        let client = makeClient { request in
+        let client = makeClient(context: standardContext) { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/watchlist/remove")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
@@ -173,23 +199,24 @@ final class APIClientTests: XCTestCase {
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                 try TestFixtures.jsonData([
                     "usage": [
-                        "plan": "beta",
+                        "plan": "free",
                         "chatsUsed": 0,
-                        "chatLimit": 20,
+                        "chatLimit": 10,
                         "stocksUsed": 0,
-                        "stockLimit": 25,
+                        "stockLimit": 3,
                         "dateJST": "2026-04-18"
                     ]
                 ])
             )
         }
 
-        let response = try await client.removeFromWatchlist(ticker: "AAPL", deviceKey: "device-123")
+        let response = try await client.removeFromWatchlist(ticker: "AAPL")
 
         XCTAssertEqual(response.usage.stocksUsed, 0)
     }
 
     private func makeClient(
+        context: QuotaRequestContext = QuotaRequestContext(deviceKey: "device-123", originalTransactionId: nil),
         handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> APIClient {
         MockURLProtocol.requestHandler = handler
@@ -200,7 +227,8 @@ final class APIClientTests: XCTestCase {
 
         return APIClient(
             session: session,
-            baseURL: URL(string: "https://example.com")!
+            baseURL: URL(string: "https://example.com")!,
+            requestContext: context
         )
     }
 

@@ -15,7 +15,8 @@ Kabuyomi is an iOS + Cloudflare Workers app for reading SEC filings in Japanese 
 - Main iOS flow is `AppRootView -> ConversationEntryView -> CompanyView`.
 - `SearchView` is now a utility sheet for ticker discovery, not the app root.
 - `CompanyView` is split into focused subcomponents under `ios/Kabuyomi/Features/Company/`.
-- Kabuyomi is currently a free beta. Billing / monetization remains intentionally disabled even though StoreKit and Worker scaffolding still exist in the repo.
+- Kabuyomi is currently a beta with a two-tier quota ladder: `free` (`3` saved tickers / `10` daily chats) and `pro` (`20` saved tickers / `50` daily chats).
+- StoreKit purchase / restore and Worker billing sync stay on the same `/v1/*` API surface. If a detachable offer such as unlimited returns later, keep it outside the core free/pro ladder.
 - Beta chat is filing-grounded by default. External web supplements stay off unless you intentionally re-enable them for testing via Worker remote config.
 - Workers routes live under `workers/src/routes/`; shared logic is split across `workers/src/lib/` and `workers/src/clients/gemini/`.
 
@@ -44,7 +45,6 @@ Local Workers development expects:
 - `SEC_FETCHER_BASE_URL=http://127.0.0.1:8789`
 - the same `SEC_FETCHER_SHARED_SECRET` in `workers/.dev.vars`
 - optional overrides such as `GEMINI_MODEL`, `GEMINI_TIMEOUT_MS`, `SEC_FETCHER_TIMEOUT_MS`, and `BACKFILL_SHARED_SECRET`
-- `DEBUG_UNLIMITED_ENABLED=true` only when you intentionally want a local Worker to honor the iOS DEBUG quota-bypass header
 
 The repo default model lives in `workers/src/clients/gemini/request.ts` as `DEFAULT_GEMINI_MODEL`.
 Set `GEMINI_MODEL` only when you want a local or deployed override, so model swaps do not require iOS code changes.
@@ -63,11 +63,11 @@ Unit tests live under `ios/KabuyomiTests/` and can be run with `xcodebuild test`
 
 - Saved tickers are persistent on the server. In `/v1/usage`, `stocksUsed` means the current saved ticker count, not "today's stock consumption".
 - Daily quota currently applies only to chats and resets on JST day boundaries.
-- Free-plan quota identity currently trusts the client-provided `x-device-key`. That is acceptable for the current beta, but it is not abuse-resistant because rotating keys can evade the beta limits; production hardening would need a server-issued identity or attestation.
+- Free-plan quota identity currently trusts the client-provided `x-device-key`. That is acceptable for the current beta, but it is not abuse-resistant because rotating keys can evade the free limits; production hardening would need a server-issued identity or attestation.
 - `/v1/watchlist/add` saves a ticker. `/v1/watchlist/remove` removes it and returns updated usage.
 - `/v1/chat` returns `responsePath`; `modelName` is populated only when the answer actually used the remote Gemini path.
 - `resetLocalData()` is a full "start over" reset: local saved data and chat history are cleared, device identity is regenerated, and usage may come back in a new-user state.
-- `/v1/billing/sync` is intentionally disabled during beta and should return the beta-disabled response.
+- `/v1/billing/sync` stores the current StoreKit entitlement keyed by `originalTransactionId`. Requests carrying `x-kabuyomi-original-transaction-id` resolve to the synced `pro` quota subject.
 
 ## Storage And History
 
@@ -124,7 +124,7 @@ KABUYOMI_SMOKE_BASE_URL=https://your-staging-worker.example.workers.dev \
 npm run smoke:staging
 ```
 
-The smoke path covers `usage-baseline -> search -> watchlist/add -> company -> chat -> chat-history -> watchlist/remove -> billing-disabled`.
+The smoke path covers `usage-baseline -> search -> watchlist/add -> company -> chat -> chat-history -> watchlist/remove -> billing-sync`.
 It also validates the current chat metadata contract: `responsePath` must be present, and `modelName` must be non-null only for the remote Gemini path.
 
 ## Historical Docs

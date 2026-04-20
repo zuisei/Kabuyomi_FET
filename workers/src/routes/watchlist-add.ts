@@ -21,10 +21,7 @@ export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env,
     tooLargeMessage: "Ticker payload is too large"
   });
 
-  const identity = await readQuotaIdentity(request, env, {
-    requireDeviceKey: true,
-    allowDebugUnlimited: true
-  });
+  const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
   const tickerRecord = await lookupTicker(payload.ticker, env);
   if (!tickerRecord) {
     return notFound(`Ticker not found: ${payload.ticker}`);

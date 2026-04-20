@@ -1,14 +1,24 @@
 import type { DurableObjectState } from "@cloudflare/workers-types";
 import { EntitlementRequestSchema } from "../lib/contracts";
 import { isAppError } from "../lib/errors";
+import { buildSyncedEntitlement } from "../lib/entitlements";
 import { parseJsonBody } from "../lib/request";
 
 const ENTITLEMENT_PAYLOAD_MAX_BYTES = 2_048;
+const CURRENT_ENTITLEMENT_KEY = "current";
 
 export class EntitlementDO {
   constructor(private readonly state: DurableObjectState) {}
 
   async fetch(request: Request): Promise<Response> {
+    if (request.method === "GET") {
+      const current = await this.state.storage.get(CURRENT_ENTITLEMENT_KEY);
+      if (!current) {
+        return this.reply({ error: "Entitlement not found" }, 404);
+      }
+      return this.reply(current, 200);
+    }
+
     let body;
     try {
       body = await parseJsonBody(request, EntitlementRequestSchema, {
@@ -23,19 +33,8 @@ export class EntitlementDO {
       return this.reply({ error: error.publicMessage }, error.status);
     }
 
-    const digest = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(body.originalTransactionId)
-    );
-    const hex = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
-    const payload = {
-      plan: body.active ? "pro" : "free",
-      quotaSubject: body.active ? `pro:${hex}` : `free:${hex}`,
-      productId: body.productId ?? null,
-      syncedAt: new Date().toISOString()
-    };
-
-    await this.state.storage.put(hex, payload);
+    const payload = await buildSyncedEntitlement(body.originalTransactionId, body.productId, body.active);
+    await this.state.storage.put(CURRENT_ENTITLEMENT_KEY, payload);
     return this.reply(payload, 200);
   }
 

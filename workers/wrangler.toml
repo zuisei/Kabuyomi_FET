@@ -23,8 +23,6 @@ SEC_USER_AGENT = "Kabuyomi admin@kabuyomi.app"
 SEC_FETCHER_BASE_URL = "https://kabuyomifet-production.up.railway.app"
 # Leave GEMINI_MODEL unset here so the repo default lives in workers/src/clients/gemini/request.ts.
 # Override GEMINI_MODEL only when testing or rolling a different remote model.
-# Leave DEBUG_UNLIMITED_ENABLED unset in deployed environments. Only local .dev.vars
-# should opt into the DEBUG quota bypass for simulator/dev testing.
 GEMINI_TIMEOUT_MS = "12000"
 SEC_FETCHER_TIMEOUT_MS = "25000"
 # Configure SEC_FETCHER_BASE_URL in .dev.vars for local wrangler dev

@@ -7,7 +7,7 @@ describe("worker routing", () => {
     passThroughOnException: vi.fn()
   } as never;
 
-  it("disables billing sync during beta", async () => {
+  it("syncs the StoreKit entitlement and returns the resolved plan", async () => {
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/v1/billing/sync", {
         method: "POST",
@@ -21,16 +21,37 @@ describe("worker routing", () => {
       {
         KABUYOMI_CACHE: {
           get: vi.fn().mockResolvedValue(null)
+        },
+        ENTITLEMENT: {
+          getByName: vi.fn().mockReturnValue({
+            fetch: vi.fn().mockResolvedValue(
+              new Response(
+                JSON.stringify({
+                  plan: "pro",
+                  quotaSubject: "pro:abc123",
+                  productId: "app.kabuyomi.pro.monthly",
+                  syncedAt: "2026-04-20T00:00:00.000Z"
+                }),
+                {
+                  status: 200,
+                  headers: { "content-type": "application/json" }
+                }
+              )
+            )
+          })
         }
       } as never,
       executionContext
     );
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     await expect(response.json()).resolves.toEqual({
-      error: "Billing sync is disabled during beta"
+      plan: "pro",
+      quotaSubject: "pro:abc123",
+      productId: "app.kabuyomi.pro.monthly",
+      syncedAt: "2026-04-20T00:00:00.000Z"
     });
   });
 

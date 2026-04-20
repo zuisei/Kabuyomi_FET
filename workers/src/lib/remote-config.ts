@@ -9,6 +9,7 @@ import {
 export interface RemoteConfig {
   freeStockLimit: number;
   freeDailyChatLimit: number;
+  proStockLimit: number;
   proDailyChatLimit: number;
   adsEnabled: boolean;
   chatEnabled: boolean;
@@ -24,7 +25,8 @@ export interface RemoteConfig {
 
 export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   freeStockLimit: 3,
-  freeDailyChatLimit: 3,
+  freeDailyChatLimit: 10,
+  proStockLimit: 20,
   proDailyChatLimit: 50,
   adsEnabled: true,
   chatEnabled: true,

@@ -35,16 +35,18 @@ enum UsageLoadState {
 
 private enum UsageUpdateSource {
     case refresh
-    case mutation
+    case chat
+    case watchlistAdd
+    case watchlistRemove
 }
 
 @MainActor
 @Observable
 final class AppModel {
     private let minimumPendingChatDuration: TimeInterval = 1.0
+    private static let isRunningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     static let aiConsentKey = "kabuyomi.aiConsentGranted"
-    static let devUnlimitedModeKey = "kabuyomi.devUnlimitedModeEnabled"
     static let savedTickersKey = "kabuyomi.savedTickers"
     static let recentTickersKey = "kabuyomi.recentTickers"
     static let lastViewedTickerKey = "kabuyomi.lastViewedTicker"
@@ -60,6 +62,7 @@ final class AppModel {
     let apiClient: APIClient
     let persistence: PersistenceController
     let deviceIdentity: DeviceIdentityStore
+    private let subscriptionStore: SubscriptionStore
 
     var watchlist: [WatchlistCard] = []
     var recentCompanies: [WatchlistCard] = []
@@ -76,16 +79,12 @@ final class AppModel {
     var searchIsLoading = false
     var companyIsLoading = false
     var chatIsSending = false
+    var billingActionInFlight = false
     var activeAlert: AppAlertState?
     var aiConsentGranted = UserDefaults.standard.bool(forKey: "kabuyomi.aiConsentGranted")
     var showStarterCompanies = UserDefaults.standard.object(forKey: "kabuyomi.showStarterCompanies") as? Bool ?? true
     var hasCompletedInitialEntry = UserDefaults.standard.bool(forKey: "kabuyomi.hasCompletedInitialEntry")
     var appLaunchCount = UserDefaults.standard.integer(forKey: "kabuyomi.appLaunchCount")
-    #if DEBUG
-    var devUnlimitedModeEnabled = UserDefaults.standard.bool(forKey: "kabuyomi.devUnlimitedModeEnabled")
-    #else
-    let devUnlimitedModeEnabled = false
-    #endif
 
     private var searchGeneration = 0
     private var stateGeneration = 0
@@ -96,6 +95,7 @@ final class AppModel {
     private var watchlistMutationInFlight = false
     private var watchlistMutationWaiters: [CheckedContinuation<Void, Never>] = []
     private var usageMutationGeneration = 0
+    private var subscriptionStateObserver: NSObjectProtocol?
     private var savedTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.savedTickers") ?? [])
     private var recentTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.recentTickers") ?? [])
     private var pendingConversationTicker = UserDefaults.standard.string(forKey: "kabuyomi.pendingConversationTicker")
@@ -105,18 +105,35 @@ final class AppModel {
     init(
         apiClient: APIClient,
         persistence: PersistenceController,
-        deviceIdentity: DeviceIdentityStore
+        deviceIdentity: DeviceIdentityStore,
+        subscriptionStore: SubscriptionStore = .shared
     ) {
         self.apiClient = apiClient
         self.persistence = persistence
         self.deviceIdentity = deviceIdentity
+        self.subscriptionStore = subscriptionStore
+        self.subscriptionStateObserver = NotificationCenter.default.addObserver(
+            forName: .kabuyomiSubscriptionStateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.syncBillingState(showErrors: false)
+                await self.refreshUsage()
+            }
+        }
     }
 
     static func live() -> AppModel {
-        AppModel(
-            apiClient: APIClient(),
+        let deviceIdentity = DeviceIdentityStore.shared
+        return AppModel(
+            apiClient: APIClient(
+                deviceIdentity: deviceIdentity
+            ),
             persistence: PersistenceController.shared,
-            deviceIdentity: .shared
+            deviceIdentity: deviceIdentity,
+            subscriptionStore: .shared
         )
     }
 
@@ -140,6 +157,15 @@ final class AppModel {
         && activeConversationTicker == nil
     }
 
+    var currentBillingTier: BillingTier {
+        let resolvedPlan = usage?.plan ?? (subscriptionStore.isSubscriptionActive ? BillingCatalog.pro.plan : BillingCatalog.free.plan)
+        return BillingCatalog.tier(for: resolvedPlan)
+    }
+
+    var isProPlanActive: Bool {
+        currentBillingTier.plan == BillingCatalog.pro.plan
+    }
+
     func bootstrap() async {
         isBootstrapped = false
 
@@ -150,7 +176,48 @@ final class AppModel {
         usageLoadState = .loading
 
         Task { [weak self] in
-            await self?.refreshUsage()
+            guard let self else { return }
+            if !Self.isRunningTests {
+                await self.subscriptionStore.refreshEntitlements(reason: "bootstrap")
+                await self.syncBillingState(showErrors: false)
+            }
+            await self.refreshUsage()
+        }
+    }
+
+    func purchasePro() async {
+        guard !billingActionInFlight else { return }
+        billingActionInFlight = true
+        defer { billingActionInFlight = false }
+
+        do {
+            let isActive = try await subscriptionStore.purchasePro()
+            guard isActive else { return }
+            await syncBillingState(showErrors: true)
+            await refreshUsage()
+        } catch {
+            handle(error)
+        }
+    }
+
+    func restorePurchases() async {
+        guard !billingActionInFlight else { return }
+        billingActionInFlight = true
+        defer { billingActionInFlight = false }
+
+        do {
+            try await subscriptionStore.restorePurchases()
+            await syncBillingState(showErrors: true)
+            await refreshUsage()
+
+            if !subscriptionStore.isSubscriptionActive {
+                activeAlert = AppAlertState(
+                    message: "復元できる Pro 購読は見つかりませんでした。",
+                    kind: .dismissOnly
+                )
+            }
+        } catch {
+            handle(error)
         }
     }
 
@@ -270,16 +337,14 @@ final class AppModel {
         do {
             let response = try await apiClient.sendChat(
                 filingKey: company.filingKey,
-                question: trimmed,
-                deviceKey: quotaDeviceKey(purpose: "chat-\(normalized)"),
-                debugUnlimited: isDevUnlimitedModeActive
+                question: trimmed
             )
             guard stateGeneration == self.stateGeneration else {
                 await ensureMinimumPendingChatDuration(since: pendingStartedAt)
                 return false
             }
             try persistence.saveChat(question: trimmed, response: response, for: company)
-            storeUsage(response.usage, source: .mutation)
+            storeUsage(response.usage, source: .chat)
             chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized)?.chatHistory ?? []
             await ensureMinimumPendingChatDuration(since: pendingStartedAt)
             return true
@@ -303,16 +368,6 @@ final class AppModel {
         showStarterCompanies = value
         UserDefaults.standard.set(value, forKey: Self.showStarterCompaniesKey)
     }
-
-    #if DEBUG
-    func setDevUnlimitedMode(_ value: Bool) {
-        devUnlimitedModeEnabled = value
-        UserDefaults.standard.set(value, forKey: Self.devUnlimitedModeKey)
-        Task {
-            await refreshUsage()
-        }
-    }
-    #endif
 
     func confirmAIConsent() {
         setAIConsent(true)
@@ -501,12 +556,10 @@ final class AppModel {
 
         do {
             let result = try await apiClient.removeFromWatchlist(
-                ticker: normalized,
-                deviceKey: quotaDeviceKey(purpose: "bookmark-remove-\(normalized)"),
-                debugUnlimited: isDevUnlimitedModeActive
+                ticker: normalized
             )
             guard stateGeneration == self.stateGeneration else { return }
-            storeUsage(result.usage, source: .mutation)
+            storeUsage(result.usage, source: .watchlistRemove)
             if result.usage.savedTickers == nil {
                 applyLocalWatchlistRemovalFallback(for: normalized)
                 loadHomeFromPersistence()
@@ -517,28 +570,16 @@ final class AppModel {
         }
     }
 
-    var isDevUnlimitedModeActive: Bool {
-        #if DEBUG
-        return devUnlimitedModeEnabled
-        #else
-        return false
-        #endif
-    }
-
-    var devUnlimitedModeDescription: String {
-        "DEBUG 専用の無限チャット / 無限保存モードです。ローカル / 開発 Worker でだけ有効にしてください。TestFlight / Release では必ず外してください。"
-    }
-
     func displayPlanLabel(for usage: UsagePayload) -> String {
-        isDevUnlimitedModeActive ? "DEV∞" : usage.displayPlanLabel
+        usage.displayPlanLabel
     }
 
     func displayChatLimit(for usage: UsagePayload) -> String {
-        isDevUnlimitedModeActive ? "∞" : usage.displayChatLimit
+        usage.displayChatLimit
     }
 
     func displayStockLimit(for usage: UsagePayload) -> String {
-        isDevUnlimitedModeActive ? "∞" : usage.displayStockLimit
+        usage.displayStockLimit
     }
 
     private func saveTicker(_ ticker: String, searchItem: SearchItem?, redirectToConversation: Bool) async {
@@ -564,9 +605,7 @@ final class AppModel {
 
         do {
             let result = try await apiClient.addToWatchlist(
-                ticker: normalized,
-                deviceKey: quotaDeviceKey(purpose: "bookmark-add-\(normalized)"),
-                debugUnlimited: isDevUnlimitedModeActive
+                ticker: normalized
             )
             guard stateGeneration == self.stateGeneration else { return }
             let savedTicker = normalizedTicker(result.company.ticker)
@@ -578,7 +617,7 @@ final class AppModel {
             accessRevokedTickers.remove(normalized)
             accessRevokedTickers.remove(savedTicker)
             completeInitialEntry()
-            storeUsage(result.usage, source: .mutation)
+            storeUsage(result.usage, source: .watchlistAdd)
             if result.usage.savedTickers == nil {
                 applyLocalWatchlistAddFallback(savedTicker: savedTicker, cik: result.company.cik)
             }
@@ -601,10 +640,7 @@ final class AppModel {
         let usageGeneration = usageMutationGeneration
         usageLoadState = .loading
         do {
-            let usage = try await apiClient.fetchUsage(
-                deviceKey: quotaDeviceKey(purpose: "usage"),
-                debugUnlimited: isDevUnlimitedModeActive
-            )
+            let usage = try await apiClient.fetchUsage()
             guard stateGeneration == self.stateGeneration else { return }
             guard usageGeneration == usageMutationGeneration else { return }
             storeUsage(usage, source: .refresh)
@@ -639,18 +675,13 @@ final class AppModel {
         }
 
         do {
-            let deviceKey = quotaDeviceKey(purpose: forceRefresh ? "company-refresh-\(ticker)" : "company-\(ticker)")
             let company = try await (
                 forceRefresh
                     ? apiClient.refreshCompany(
-                        ticker: ticker,
-                        deviceKey: deviceKey,
-                        debugUnlimited: isDevUnlimitedModeActive
+                        ticker: ticker
                     )
                     : apiClient.fetchCompany(
-                        ticker: ticker,
-                        deviceKey: deviceKey,
-                        debugUnlimited: isDevUnlimitedModeActive
+                        ticker: ticker
                     )
             )
             guard stateGeneration == self.stateGeneration else { return }
@@ -751,11 +782,11 @@ final class AppModel {
         }
 
         if rawMessage.contains("Daily chat quota exceeded") {
-            return "本日のベータ版チャット上限に達しました。日付が変わってから再度お試しください。"
+            return "本日のチャット上限に達しました。日付が変わってから再度お試しください。"
         }
 
         if rawMessage.contains("Watchlist limit exceeded") {
-            return "現在のベータ版保存銘柄上限に達しました。"
+            return "現在の保存銘柄上限に達しました。"
         }
 
         if rawMessage.contains("Ticker access requires watchlist add") {
@@ -819,12 +850,49 @@ final class AppModel {
     }
 
     private func storeUsage(_ usage: UsagePayload, source: UsageUpdateSource) {
-        if source == .mutation {
+        if source != .refresh {
             usageMutationGeneration += 1
         }
-        self.usage = usage
-        guard let serverTickers = usage.savedTickers else { return }
+        let effectiveUsage = mergeUsageSavedTickersIfNeeded(usage, source: source)
+        self.usage = effectiveUsage
+        guard let serverTickers = effectiveUsage.savedTickers else { return }
         reconcileSavedTickers(with: serverTickers)
+    }
+
+    private func mergeUsageSavedTickersIfNeeded(_ usage: UsagePayload, source: UsageUpdateSource) -> UsagePayload {
+        guard source == .watchlistAdd else { return usage }
+        guard let serverTickers = usage.savedTickers else { return usage }
+
+        let mergedTickers = mergedSavedTickersPreservingServerOrder(
+            serverTickers: serverTickers,
+            existingTickers: savedTickers
+        )
+        guard mergedTickers != Self.normalizedTickers(serverTickers) || usage.stocksUsed != mergedTickers.count else {
+            return usage
+        }
+
+        return UsagePayload(
+            plan: usage.plan,
+            chatsUsed: usage.chatsUsed,
+            chatLimit: usage.chatLimit,
+            stocksUsed: mergedTickers.count,
+            stockLimit: usage.stockLimit,
+            dateJST: usage.dateJST,
+            savedTickers: mergedTickers
+        )
+    }
+
+    private func mergedSavedTickersPreservingServerOrder(serverTickers: [String], existingTickers: [String]) -> [String] {
+        var mergedTickers = Self.normalizedTickers(serverTickers)
+        var seenIssuerKeys = savedIssuerKeys(for: mergedTickers)
+
+        for ticker in Self.normalizedTickers(existingTickers) {
+            let issuerKey = issuerGroupKey(for: ticker)
+            guard seenIssuerKeys.insert(issuerKey).inserted else { continue }
+            mergedTickers.append(ticker)
+        }
+
+        return mergedTickers
     }
 
     private func reconcileSavedTickers(with serverTickers: [String]) {
@@ -1225,8 +1293,18 @@ final class AppModel {
         }
     }
 
-    private func quotaDeviceKey(purpose _: String) -> String {
-        return deviceIdentity.deviceKey()
+    private func syncBillingState(showErrors: Bool) async {
+        do {
+            guard let request = try await subscriptionStore.syncRequestIfAvailable() else {
+                return
+            }
+            let response = try await apiClient.syncBilling(request)
+            subscriptionStore.apply(response)
+        } catch {
+            if showErrors {
+                handle(error)
+            }
+        }
     }
 
     var isUsageSynchronizing: Bool {

@@ -2,7 +2,6 @@ import Foundation
 import StoreKit
 import OSLog
 
-// Retained for post-beta billing reactivation.
 extension Notification.Name {
     static let kabuyomiSubscriptionStateDidChange = Notification.Name("kabuyomi.subscriptionStateDidChange")
 }
@@ -42,6 +41,11 @@ final class SubscriptionStore {
 
     var isSubscriptionActive: Bool {
         defaults.bool(forKey: activeKey)
+    }
+
+    var requestOriginalTransactionId: String? {
+        guard isSubscriptionActive else { return nil }
+        return defaults.string(forKey: originalTransactionIdKey)
     }
 
     func purchasePro() async throws -> Bool {

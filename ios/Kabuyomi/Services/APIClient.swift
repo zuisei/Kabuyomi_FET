@@ -1,5 +1,50 @@
 import Foundation
 
+struct QuotaRequestContext {
+    let deviceKey: String
+    let originalTransactionId: String?
+
+    init(deviceKey: String, originalTransactionId: String? = nil) {
+        self.deviceKey = deviceKey
+        self.originalTransactionId = originalTransactionId
+    }
+}
+
+private enum APIBaseURLResolver {
+    static let productionURL = URL(string: "https://kabuyomi-api.dznqjmctk7.workers.dev")!
+
+    static func resolve(baseURL: URL?) -> URL {
+        baseURL ?? configuredBaseURL() ?? productionURL
+    }
+
+    private static func parsedURL(from rawValue: String) -> URL? {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              url.host != nil else {
+            return nil
+        }
+        return url
+    }
+
+    private static func configuredBaseURL() -> URL? {
+        if let override = ProcessInfo.processInfo.environment["KABUYOMI_API_BASE_URL"],
+           let url = parsedURL(from: override) {
+            return url
+        }
+
+        if let plistValue = Bundle.main.object(forInfoDictionaryKey: "KABUYOMI_API_BASE_URL") as? String,
+           let url = parsedURL(from: plistValue) {
+            return url
+        }
+
+        return nil
+    }
+}
+
+@MainActor
 struct APIClient {
     private enum Timeout {
         static let request: TimeInterval = 45
@@ -8,13 +53,22 @@ struct APIClient {
 
     private let session: URLSession
     private let baseURL: URL
+    private let deviceIdentity: DeviceIdentityStore?
+    private let requestContext: QuotaRequestContext?
+    private let subscriptionStore: SubscriptionStore?
 
     init(
         session: URLSession = APIClient.makeSession(),
-        baseURL: URL = APIClient.defaultBaseURL()
+        baseURL: URL? = nil,
+        deviceIdentity: DeviceIdentityStore? = DeviceIdentityStore.shared,
+        requestContext: QuotaRequestContext? = nil,
+        subscriptionStore: SubscriptionStore? = SubscriptionStore.shared
     ) {
         self.session = session
-        self.baseURL = baseURL
+        self.baseURL = APIBaseURLResolver.resolve(baseURL: baseURL)
+        self.deviceIdentity = deviceIdentity
+        self.requestContext = requestContext
+        self.subscriptionStore = subscriptionStore
     }
 
     func search(query: String) async throws -> [SearchItem] {
@@ -25,75 +79,62 @@ struct APIClient {
     }
 
     func addToWatchlist(
-        ticker: String,
-        deviceKey: String,
-        debugUnlimited: Bool = false
+        ticker: String
     ) async throws -> WatchlistAddResponse {
         try await sendRequest(
             path: "/v1/watchlist/add",
             method: "POST",
-            headers: requestHeaders(deviceKey: deviceKey, debugUnlimited: debugUnlimited),
+            headers: requestHeaders(),
             body: ["ticker": ticker]
         )
     }
 
     func removeFromWatchlist(
-        ticker: String,
-        deviceKey: String,
-        debugUnlimited: Bool = false
+        ticker: String
     ) async throws -> WatchlistRemoveResponse {
         try await sendRequest(
             path: "/v1/watchlist/remove",
             method: "POST",
-            headers: requestHeaders(deviceKey: deviceKey, debugUnlimited: debugUnlimited),
+            headers: requestHeaders(),
             body: ["ticker": ticker]
         )
     }
 
     func fetchCompany(
-        ticker: String,
-        deviceKey: String,
-        debugUnlimited: Bool = false
+        ticker: String
     ) async throws -> CompanyPayload {
         try await sendRequest(
             path: "/v1/company/\(ticker)",
-            headers: requestHeaders(deviceKey: deviceKey, debugUnlimited: debugUnlimited)
+            headers: requestHeaders()
         )
     }
 
     func refreshCompany(
-        ticker: String,
-        deviceKey: String,
-        debugUnlimited: Bool = false
+        ticker: String
     ) async throws -> CompanyPayload {
         try await sendRequest(
             path: "/v1/company/\(ticker)/refresh",
             method: "POST",
-            headers: requestHeaders(deviceKey: deviceKey, debugUnlimited: debugUnlimited)
+            headers: requestHeaders()
         )
     }
 
     func sendChat(
         filingKey: String,
-        question: String,
-        deviceKey: String,
-        debugUnlimited: Bool = false
+        question: String
     ) async throws -> ChatResponse {
         try await sendRequest(
             path: "/v1/chat",
             method: "POST",
-            headers: requestHeaders(deviceKey: deviceKey, debugUnlimited: debugUnlimited),
+            headers: requestHeaders(),
             body: ["filingKey": filingKey, "question": question]
         )
     }
 
-    func fetchUsage(
-        deviceKey: String,
-        debugUnlimited: Bool = false
-    ) async throws -> UsagePayload {
+    func fetchUsage() async throws -> UsagePayload {
         try await sendRequest(
             path: "/v1/usage",
-            headers: requestHeaders(deviceKey: deviceKey, debugUnlimited: debugUnlimited)
+            headers: requestHeaders()
         )
     }
 
@@ -101,13 +142,16 @@ struct APIClient {
         try await sendRequest(path: "/v1/billing/sync", method: "POST", body: request)
     }
 
-    private func requestHeaders(deviceKey: String, debugUnlimited: Bool) -> [String: String] {
+    private func requestHeaders() -> [String: String] {
+        let deviceKey = requestContext?.deviceKey ?? deviceIdentity?.deviceKey() ?? ""
+        let originalTransactionId = requestContext?.originalTransactionId ?? subscriptionStore?.requestOriginalTransactionId
         var headers = ["x-device-key": deviceKey]
-        #if DEBUG
-        if debugUnlimited {
-            headers["x-kabuyomi-debug-unlimited"] = "1"
+
+        if let originalTransactionId,
+           !originalTransactionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            headers["x-kabuyomi-original-transaction-id"] = originalTransactionId
         }
-        #endif
+
         return headers
     }
 
@@ -162,14 +206,6 @@ struct APIClient {
         return try JSONDecoder().decode(ResponseType.self, from: data)
     }
 
-    private static func defaultBaseURL() -> URL {
-        if let url = configuredBaseURL() {
-            return url
-        }
-
-        return URL(string: "https://kabuyomi-api.dznqjmctk7.workers.dev")!
-    }
-
     private static func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = Timeout.request
@@ -178,20 +214,6 @@ struct APIClient {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.urlCache = nil
         return URLSession(configuration: configuration)
-    }
-
-    private static func configuredBaseURL() -> URL? {
-        if let override = ProcessInfo.processInfo.environment["KABUYOMI_API_BASE_URL"],
-           let url = URL(string: override) {
-            return url
-        }
-
-        if let plistValue = Bundle.main.object(forInfoDictionaryKey: "KABUYOMI_API_BASE_URL") as? String,
-           let url = URL(string: plistValue) {
-            return url
-        }
-
-        return nil
     }
 }
 

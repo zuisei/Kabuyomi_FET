@@ -27,7 +27,7 @@ async function main() {
   } else {
     console.log("[smoke] watchlist/remove ... skipped (ticker was already saved for the custom smoke device)");
   }
-  await runStep("billing/sync", checkBillingDisabled);
+  await runStep("billing/sync", checkBillingSync);
   console.log("Kabuyomi staging smoke passed");
 }
 
@@ -289,7 +289,7 @@ function assertUsageDelta(currentUsage, expectedUsage, label) {
   }
 }
 
-async function checkBillingDisabled() {
+async function checkBillingSync() {
   const response = await fetch(`${baseURL}/v1/billing/sync`, {
     method: "POST",
     headers: {
@@ -302,13 +302,21 @@ async function checkBillingDisabled() {
     })
   });
 
-  if (response.status !== 503) {
-    throw new Error(`/v1/billing/sync expected 503, received ${response.status}`);
+  if (response.status !== 200) {
+    throw new Error(`/v1/billing/sync expected 200, received ${response.status}`);
   }
 
   const payload = await response.json();
-  if (payload?.error !== "Billing sync is disabled during beta") {
-    throw new Error("/v1/billing/sync did not return the beta-disabled response");
+  if (payload?.plan !== "pro") {
+    throw new Error("/v1/billing/sync did not return a pro entitlement");
+  }
+
+  if (typeof payload?.quotaSubject !== "string" || !payload.quotaSubject.startsWith("pro:")) {
+    throw new Error("/v1/billing/sync did not return a pro quota subject");
+  }
+
+  if (payload?.productId !== "app.kabuyomi.pro.monthly") {
+    throw new Error("/v1/billing/sync did not echo the expected product id");
   }
 }
 

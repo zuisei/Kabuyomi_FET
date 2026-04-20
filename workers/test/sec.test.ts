@@ -38,6 +38,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function entitlementEnv(payload?: Record<string, unknown>, status = 200) {
+  return {
+    ENTITLEMENT: {
+      getByName: vi.fn().mockReturnValue({
+        fetch: vi.fn().mockResolvedValue(
+          new Response(payload ? JSON.stringify(payload) : JSON.stringify({ error: "Entitlement not found" }), {
+            status: payload ? status : 404,
+            headers: { "content-type": "application/json" }
+          })
+        )
+      })
+    }
+  } as never;
+}
+
 describe("SEC filing selection", () => {
   it("picks the latest supported filing", () => {
     const filing = pickLatestSupportedFiling(ticker, submissions);
@@ -332,7 +347,7 @@ describe("SEC filing selection", () => {
           "x-quota-subject": "pro:forged"
         }
       }),
-      {} as never
+      entitlementEnv()
     );
 
     expect(identity.plan).toBe("free");
@@ -349,7 +364,7 @@ describe("SEC filing selection", () => {
           "x-device-key": "device-123"
         }
       }),
-      {} as never
+      entitlementEnv()
     );
 
     expect(identity.plan).toBe("free");
@@ -365,7 +380,7 @@ describe("SEC filing selection", () => {
             "cf-connecting-ip": "203.0.113.5"
           }
         }),
-        {} as never,
+        entitlementEnv(),
         { requireDeviceKey: true }
       )
     ).rejects.toMatchObject({
@@ -381,7 +396,7 @@ describe("SEC filing selection", () => {
           "cf-connecting-ip": "203.0.113.5"
         }
       }),
-      {} as never
+      entitlementEnv()
     );
 
     expect(identity.plan).toBe("free");
@@ -390,53 +405,41 @@ describe("SEC filing selection", () => {
     expect(identity.quotaSubject).not.toContain("device-123");
   });
 
-  it("uses the device key subject for explicit debug unlimited requests", async () => {
-    const identity = await readQuotaIdentity(
-      new Request("https://kabuyomi.test/v1/usage", {
-        headers: {
-          "cf-connecting-ip": "203.0.113.5",
-          "x-device-key": "dev-unlimited-chat-AAPL-123",
-          "x-kabuyomi-debug-unlimited": "1"
-        }
-      }),
-      { DEBUG_UNLIMITED_ENABLED: "true" } as never,
-      { requireDeviceKey: true, allowDebugUnlimited: true }
-    );
-
-    expect(identity.plan).toBe("free");
-    expect(identity.identityKind).toBe("debug_device");
-    expect(identity.quotaSubject).toBe("free:debug:dev-unlimited-chat-AAPL-123");
-  });
-
-  it("ignores the debug unlimited header when the server-side gate is disabled", async () => {
-    const identity = await readQuotaIdentity(
-      new Request("https://kabuyomi.test/v1/usage", {
-        headers: {
-          "cf-connecting-ip": "203.0.113.5",
-          "x-device-key": "dev-unlimited-chat-AAPL-123",
-          "x-kabuyomi-debug-unlimited": "1"
-        }
-      }),
-      {} as never,
-      { requireDeviceKey: true, allowDebugUnlimited: true }
-    );
-
-    expect(identity.plan).toBe("free");
-    expect(identity.identityKind).toBe("local_device");
-    expect(identity.quotaSubject).toBe("free:local:dev-unlimited-chat-AAPL-123");
-  });
-
-  it("ignores the debug unlimited header for non-local worker hosts even when enabled", async () => {
+  it("uses the synced pro entitlement when the original transaction id resolves server-side", async () => {
     const identity = await readQuotaIdentity(
       new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
         headers: {
-          "cf-connecting-ip": "203.0.113.5",
-          "x-device-key": "dev-unlimited-chat-AAPL-123",
-          "x-kabuyomi-debug-unlimited": "1"
+          "x-device-key": "device-123",
+          "x-kabuyomi-original-transaction-id": "tx-123"
         }
       }),
-      { DEBUG_UNLIMITED_ENABLED: "true" } as never,
-      { requireDeviceKey: true, allowDebugUnlimited: true }
+      entitlementEnv({
+        plan: "pro",
+        quotaSubject: "pro:abc123",
+        productId: "app.kabuyomi.pro.monthly",
+        syncedAt: "2026-04-20T00:00:00.000Z"
+      })
+    );
+
+    expect(identity.plan).toBe("pro");
+    expect(identity.identityKind).toBe("entitlement");
+    expect(identity.quotaSubject).toBe("pro:abc123");
+  });
+
+  it("falls back to the device identity when the synced entitlement is not active pro", async () => {
+    const identity = await readQuotaIdentity(
+      new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
+        headers: {
+          "x-device-key": "device-123",
+          "x-kabuyomi-original-transaction-id": "tx-123"
+        }
+      }),
+      entitlementEnv({
+        plan: "free",
+        quotaSubject: "free:abc123",
+        productId: "app.kabuyomi.pro.monthly",
+        syncedAt: "2026-04-20T00:00:00.000Z"
+      })
     );
 
     expect(identity.plan).toBe("free");

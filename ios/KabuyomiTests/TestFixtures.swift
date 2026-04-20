@@ -110,11 +110,11 @@ enum TestFixtures {
 
     static func usagePayload() -> UsagePayload {
         UsagePayload(
-            plan: "beta",
+            plan: "free",
             chatsUsed: 1,
-            chatLimit: 20,
+            chatLimit: 10,
             stocksUsed: 1,
-            stockLimit: 25,
+            stockLimit: 3,
             dateJST: "2026-04-17",
             savedTickers: ["AAPL"]
         )
@@ -226,11 +226,11 @@ enum TestFixtures {
                 "lastUpdatedAt": company.lastUpdatedAt
             ],
             "usage": [
-                "plan": "beta",
+                "plan": "free",
                 "chatsUsed": 0,
-                "chatLimit": 20,
+                "chatLimit": 10,
                 "stocksUsed": 1,
-                "stockLimit": 25,
+                "stockLimit": 3,
                 "dateJST": "2026-04-17"
             ]
         ])
