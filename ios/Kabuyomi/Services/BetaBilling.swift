@@ -27,7 +27,7 @@ enum DetachedAccessMode: String {
 }
 
 enum BillingCatalog {
-    static let free = BillingTier(plan: "free", title: "Free", stockLimit: 3, chatLimit: 10)
+    static let free = BillingTier(plan: "free", title: "無料", stockLimit: 3, chatLimit: 10)
     static let pro = BillingTier(plan: "pro", title: "Pro", stockLimit: 20, chatLimit: 50)
 
     // Keep detachable offers outside the standard free/pro ladder.

@@ -219,19 +219,19 @@ struct SettingsView: View {
                 Text("リンク")
                     .font(.system(.headline, design: .rounded, weight: .bold))
 
-                Text("Privacy Policy / 利用条件 / Support はアプリ内で確認できます。")
+                Text("プライバシーポリシー / 利用条件 / サポートはアプリ内で確認できます。")
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
 
                 NavigationLink {
                     LegalDocumentView(
-                        title: "Privacy Policy",
+                        title: "プライバシーポリシー",
                         subtitle: "beta 期間中の最小開示",
                         sections: privacySections
                     )
                 } label: {
                     SettingsLinkRow(
-                        title: "Privacy Policy",
+                        title: "プライバシーポリシー",
                         subtitle: "収集・送信・保存の方針"
                     )
                 }
@@ -253,13 +253,13 @@ struct SettingsView: View {
 
                 NavigationLink {
                     LegalDocumentView(
-                        title: "Support",
+                        title: "サポート",
                         subtitle: "beta フィードバック窓口",
                         sections: supportSections
                     )
                 } label: {
                     SettingsLinkRow(
-                        title: "Support",
+                        title: "サポート",
                         subtitle: "TestFlight からのフィードバック案内"
                     )
                 }
@@ -344,7 +344,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "正式サポート",
-                body: "正式公開前に Privacy Policy / Terms / Support の外部 URL と連絡先を設置予定です。beta 中はアプリ内案内と TestFlight フィードバックを窓口とします。"
+                body: "正式公開前にプライバシーポリシー / 利用条件 / サポートの外部 URL と連絡先を設置予定です。beta 中はアプリ内案内と TestFlight フィードバックを窓口とします。"
             )
         ]
     }
@@ -423,7 +423,7 @@ private struct LegalDocumentView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("App Policy")
+                        Text("アプリポリシー")
                             .font(.system(.caption, design: .rounded, weight: .bold))
                             .foregroundStyle(KabuyomiTheme.heroSubtext)
                         Text(title)
