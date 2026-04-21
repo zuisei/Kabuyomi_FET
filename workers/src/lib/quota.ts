@@ -9,7 +9,7 @@ import type { RemoteConfig } from "./remote-config";
 export interface QuotaIdentity {
   quotaSubject: string;
   plan: "free" | "pro";
-  identityKind: "device_key" | "ip_hash" | "local_device" | "entitlement" | "detached_access";
+  identityKind: "device_key" | "ip_hash" | "local_device" | "entitlement" | "detached_device";
   accessMode?: string;
   chatLimitOverride?: number;
   stockLimitOverride?: number;
@@ -32,7 +32,6 @@ export interface QuotaMutationResult {
 interface TickerQuotaOptions {
   relatedTickers?: readonly string[];
 }
-
 export async function readQuotaIdentity(
   request: Request,
   env: Env,
@@ -48,11 +47,11 @@ export async function readQuotaIdentity(
   if (detachedAccess) {
     return {
       quotaSubject: detachedAccess.quotaSubject,
-      plan: detachedAccess.plan,
-      identityKind: "detached_access",
+      plan: "pro",
+      identityKind: "detached_device",
       accessMode: detachedAccess.accessMode,
-      chatLimitOverride: detachedAccess.chatLimit,
-      stockLimitOverride: detachedAccess.stockLimit
+      chatLimitOverride: detachedAccess.chatLimitOverride,
+      stockLimitOverride: detachedAccess.stockLimitOverride
     };
   }
 

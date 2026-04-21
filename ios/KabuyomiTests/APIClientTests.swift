@@ -6,7 +6,7 @@ import XCTest
 final class APIClientTests: XCTestCase {
     private let standardContext = QuotaRequestContext(deviceKey: "device-123")
     private let proContext = QuotaRequestContext(deviceKey: "device-123", originalTransactionId: "tx-123")
-    private let devContext = QuotaRequestContext(deviceKey: "device-123", detachedAccessMode: DetachedAccessMode.devUnlimited.rawValue)
+    private let devContext = QuotaRequestContext(deviceKey: "device-123", detachedAccessMode: .devUnlimited)
 
     override func tearDown() {
         MockURLProtocol.requestHandler = nil
@@ -108,7 +108,8 @@ final class APIClientTests: XCTestCase {
     func testFetchUsageIncludesDetachedAccessHeaderWhenPresent() async throws {
         let client = makeClient(context: devContext) { request in
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-detached-access"), DetachedAccessMode.devUnlimited.rawValue)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-detached-access"), "dev_unlimited")
+            XCTAssertNil(request.value(forHTTPHeaderField: "x-kabuyomi-original-transaction-id"))
 
             return (
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,

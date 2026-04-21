@@ -1,49 +1,56 @@
 import type { Env } from "../env";
 
-export const DETACHED_ACCESS_HEADER = "x-kabuyomi-detached-access";
-export const DEV_DETACHED_ACCESS_MODE = "dev_unlimited";
+export type DetachedAccessMode = "dev_unlimited";
 
 export interface DetachedAccessGrant {
-  accessMode: typeof DEV_DETACHED_ACCESS_MODE;
-  plan: "pro";
   quotaSubject: string;
-  chatLimit: number;
-  stockLimit: number;
+  accessMode: DetachedAccessMode;
+  chatLimitOverride: number;
+  stockLimitOverride: number;
 }
 
-const DEV_UNLIMITED_LIMIT = Number.MAX_SAFE_INTEGER;
+const DETACHED_ACCESS_HEADER = "x-kabuyomi-detached-access";
+const DEV_UNLIMITED_MODE: DetachedAccessMode = "dev_unlimited";
+const DETACHED_ACCESS_LIMIT = Number.MAX_SAFE_INTEGER;
 
 export async function loadDetachedAccessFromRequest(request: Request, env: Env): Promise<DetachedAccessGrant | null> {
-  const requestedMode = request.headers.get(DETACHED_ACCESS_HEADER)?.trim();
-  if (requestedMode !== DEV_DETACHED_ACCESS_MODE) {
+  const requestedMode = request.headers.get(DETACHED_ACCESS_HEADER)?.trim().toLowerCase();
+  if (requestedMode !== DEV_UNLIMITED_MODE) {
     return null;
   }
 
-  if (!isDetachedAccessEnabled(env.DEV_DETACHED_ACCESS_ENABLED)) {
-    return null;
-  }
-
-  const deviceKey = request.headers.get("x-device-key")?.trim();
+  const deviceKey = request.headers.get("x-device-key")?.trim().toLowerCase();
   if (!deviceKey) {
     return null;
   }
 
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(`detached-access:${DEV_DETACHED_ACCESS_MODE}:${deviceKey}`)
-  );
-  const hex = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+  const allowlist = parseDetachedAccessDeviceKeys(env.DEV_DETACHED_ACCESS_DEVICE_KEYS);
+  if (!allowlist.has(deviceKey)) {
+    return null;
+  }
 
   return {
-    accessMode: DEV_DETACHED_ACCESS_MODE,
-    plan: "pro",
-    quotaSubject: `detached:${DEV_DETACHED_ACCESS_MODE}:${hex}`,
-    chatLimit: DEV_UNLIMITED_LIMIT,
-    stockLimit: DEV_UNLIMITED_LIMIT
+    quotaSubject: `pro:detached:${await sha256Hex(`detached-device:${deviceKey}`)}`,
+    accessMode: DEV_UNLIMITED_MODE,
+    chatLimitOverride: DETACHED_ACCESS_LIMIT,
+    stockLimitOverride: DETACHED_ACCESS_LIMIT
   };
 }
 
-function isDetachedAccessEnabled(rawValue: string | undefined): boolean {
-  const normalized = rawValue?.trim().toLowerCase();
-  return normalized === "1" || normalized === "true" || normalized === "yes";
+function parseDetachedAccessDeviceKeys(rawValue: string | undefined): Set<string> {
+  if (!rawValue) {
+    return new Set();
+  }
+
+  return new Set(
+    rawValue
+      .split(/[,\n]/)
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry) => entry.length > 0)
+  );
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

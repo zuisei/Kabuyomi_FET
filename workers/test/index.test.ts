@@ -213,7 +213,7 @@ describe("worker routing", () => {
     });
   });
 
-  it("returns detached dev usage when the dev gate and header are both present", async () => {
+  it("returns detached dev usage when the device key is allowlisted and the header is present", async () => {
     const response = await worker.fetch(
       new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
         method: "GET",
@@ -223,7 +223,7 @@ describe("worker routing", () => {
         }
       }),
       {
-        DEV_DETACHED_ACCESS_ENABLED: "true",
+        DEV_DETACHED_ACCESS_DEVICE_KEYS: "device-123",
         KABUYOMI_CACHE: {
           get: vi.fn().mockResolvedValue(null)
         },

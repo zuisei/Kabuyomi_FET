@@ -62,7 +62,6 @@ final class DetachedAccessStore {
 
     private let defaults = UserDefaults.standard
     private let devModeEnabledKey = "kabuyomi.detachedAccess.devModeEnabled"
-    private let requestHeaderValue = DetachedAccessMode.devUnlimited.rawValue
 
     var isDevModeEnabled: Bool {
         #if DEBUG
@@ -72,9 +71,9 @@ final class DetachedAccessStore {
         #endif
     }
 
-    var requestDetachedAccessMode: String? {
+    var requestDetachedAccessMode: DetachedAccessMode? {
         #if DEBUG
-        isDevModeEnabled ? requestHeaderValue : nil
+        isDevModeEnabled ? .devUnlimited : nil
         #else
         nil
         #endif

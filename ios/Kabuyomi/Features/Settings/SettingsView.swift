@@ -125,7 +125,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Dev モード")
                             .font(.system(.body, design: .rounded, weight: .semibold))
-                        Text("DEBUG ビルド専用です。Worker 側で `DEV_DETACHED_ACCESS_ENABLED=true` が有効な環境に対してだけ detached dev access header を送ります。")
+                        Text("DEBUG ビルド専用です。同じ API に detached access header を送り、Worker 側の allowlisted device key だけ開発用 quota を使います。release には出しません。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
@@ -141,11 +141,31 @@ struct SettingsView: View {
                         .textSelection(.enabled)
                 }
 
-                Text(appModel.isDetachedDevAccessActive ? "現在の usage は detached dev access を返しています。" : "release ではこのセクション自体を出しません。dev 用 Worker が header を無視している場合は free / pro のまま表示されます。")
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("現在の device key")
+                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                    Text(appModel.currentDeviceKeyDisplay)
+                        .font(.system(.footnote, design: .monospaced, weight: .medium))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                        .textSelection(.enabled)
+                }
+
+                Text(devModeStatusText)
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
             }
         }
+    }
+
+    private var devModeStatusText: String {
+        if appModel.isDetachedDevAccessActive {
+            return "現在の device key は detached dev allowlist に一致しています。"
+        }
+        if appModel.devModeEnabled {
+            return "Dev モードは ON ですが、この device key はまだ allowlist 未登録か、Worker 側の DEV_DETACHED_ACCESS_DEVICE_KEYS が未反映です。"
+        }
+        return "release ではこのセクション自体を出しません。無効時は通常の free / pro に戻ります。"
     }
     #endif
 

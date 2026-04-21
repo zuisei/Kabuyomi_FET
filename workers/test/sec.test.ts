@@ -405,32 +405,26 @@ describe("SEC filing selection", () => {
     expect(identity.quotaSubject).not.toContain("device-123");
   });
 
-  it("uses detached dev access ahead of synced billing when the dev gate is enabled", async () => {
+  it("uses detached unlimited access when the device key is allowlisted and the header is present", async () => {
     const identity = await readQuotaIdentity(
       new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
         headers: {
           "x-device-key": "device-123",
-          "x-kabuyomi-original-transaction-id": "tx-123",
           "x-kabuyomi-detached-access": "dev_unlimited"
         }
       }),
       {
-        ...entitlementEnv({
-          plan: "pro",
-          quotaSubject: "pro:abc123",
-          productId: "app.kabuyomi.pro.monthly",
-          syncedAt: "2026-04-20T00:00:00.000Z"
-        }),
-        DEV_DETACHED_ACCESS_ENABLED: "true"
-      } as never
+        ...entitlementEnv(),
+        DEV_DETACHED_ACCESS_DEVICE_KEYS: "device-123"
+      } as any
     );
 
     expect(identity.plan).toBe("pro");
-    expect(identity.identityKind).toBe("detached_access");
+    expect(identity.identityKind).toBe("detached_device");
     expect(identity.accessMode).toBe("dev_unlimited");
     expect(identity.chatLimitOverride).toBe(Number.MAX_SAFE_INTEGER);
     expect(identity.stockLimitOverride).toBe(Number.MAX_SAFE_INTEGER);
-    expect(identity.quotaSubject).toMatch(/^detached:dev_unlimited:[a-f0-9]{64}$/);
+    expect(identity.quotaSubject).toMatch(/^pro:detached:[a-f0-9]{64}$/);
   });
 
   it("uses the synced pro entitlement when the original transaction id resolves server-side", async () => {

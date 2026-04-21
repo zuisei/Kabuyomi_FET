@@ -195,6 +195,10 @@ final class AppModel {
         apiClient.baseURLDisplayString
     }
 
+    var currentDeviceKeyDisplay: String {
+        deviceIdentity.deviceKey()
+    }
+
     func bootstrap() async {
         isBootstrapped = false
 
@@ -252,7 +256,8 @@ final class AppModel {
 
     #if DEBUG
     func setDevModeEnabled(_ value: Bool) {
-        DetachedAccessStore.shared.setDevModeEnabled(value)
+        let store = DetachedAccessStore.shared
+        store.setDevModeEnabled(value)
         devModeEnabled = value
         Task { [weak self] in
             await self?.refreshUsage()

@@ -130,7 +130,7 @@ It also validates the current chat metadata contract: `responsePath` must be pre
 ## Historical Docs
 
 - Older specs and handoffs under `docs/` are reference-only. Some still describe Home/Tab roots, monetization-forward work, or pre-slice quota language.
-- Local coordination docs such as `docs/current_shipping_truth.md` and `CURRENT_SLICE.md` are intentionally kept out of Git.
+- `docs/current_shipping_truth.md` is the shared shipping snapshot; `CURRENT_SLICE.md` is working-slice context and may be more transient.
 - For the tracked repository, use `docs/testflight_readiness_checklist.md` and the current code as the current-behavior reference.
 - Screenshot notes are consolidated at `artifacts/README.md` instead of keeping README files inside dated capture folders.
 

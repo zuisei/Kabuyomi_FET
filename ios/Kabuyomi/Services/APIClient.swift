@@ -3,9 +3,9 @@ import Foundation
 struct QuotaRequestContext {
     let deviceKey: String
     let originalTransactionId: String?
-    let detachedAccessMode: String?
+    let detachedAccessMode: DetachedAccessMode?
 
-    init(deviceKey: String, originalTransactionId: String? = nil, detachedAccessMode: String? = nil) {
+    init(deviceKey: String, originalTransactionId: String? = nil, detachedAccessMode: DetachedAccessMode? = nil) {
         self.deviceKey = deviceKey
         self.originalTransactionId = originalTransactionId
         self.detachedAccessMode = detachedAccessMode
@@ -153,7 +153,9 @@ struct APIClient {
 
     private func requestHeaders() -> [String: String] {
         let deviceKey = requestContext?.deviceKey ?? deviceIdentity?.deviceKey() ?? ""
-        let originalTransactionId = requestContext?.originalTransactionId ?? subscriptionStore?.requestOriginalTransactionId
+        let originalTransactionId =
+            requestContext?.originalTransactionId
+            ?? subscriptionStore?.requestOriginalTransactionId
         let detachedAccessMode = requestContext?.detachedAccessMode ?? detachedAccessStore?.requestDetachedAccessMode
         var headers = ["x-device-key": deviceKey]
 
@@ -161,10 +163,8 @@ struct APIClient {
            !originalTransactionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             headers["x-kabuyomi-original-transaction-id"] = originalTransactionId
         }
-
-        if let detachedAccessMode,
-           !detachedAccessMode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            headers["x-kabuyomi-detached-access"] = detachedAccessMode
+        if let detachedAccessMode {
+            headers["x-kabuyomi-detached-access"] = detachedAccessMode.rawValue
         }
 
         return headers

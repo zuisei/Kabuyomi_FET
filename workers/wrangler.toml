@@ -26,7 +26,7 @@ SEC_FETCHER_BASE_URL = "https://kabuyomifet-production.up.railway.app"
 GEMINI_TIMEOUT_MS = "12000"
 SEC_FETCHER_TIMEOUT_MS = "25000"
 # Configure SEC_FETCHER_BASE_URL in .dev.vars for local wrangler dev
-# Configure DEV_DETACHED_ACCESS_ENABLED only in dev/test environments when the detached dev mode is needed.
+# Optionally set DEV_DETACHED_ACCESS_DEVICE_KEYS in deployed environments to allow DEBUG-only detached access for specific x-device-key values
 # Configure SEC_FETCHER_BASE_URL, SEC_FETCHER_SHARED_SECRET, and BACKFILL_SHARED_SECRET in deployed environments
 
 [observability]
