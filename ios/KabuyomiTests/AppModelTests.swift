@@ -54,6 +54,23 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.rootConversationTicker, "AAPL")
     }
 
+    func testBootstrapClearsRestoredRecentOnlyTickerWithoutWatchlistOrLocalData() async {
+        UserDefaults.standard.set("MSFT", forKey: AppModel.activeConversationTickerKey)
+        UserDefaults.standard.set("MSFT", forKey: AppModel.lastViewedTickerKey)
+        UserDefaults.standard.set(["MSFT"], forKey: AppModel.recentTickersKey)
+        UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
+
+        let model = makeAppModel()
+
+        await model.bootstrap()
+
+        XCTAssertNil(model.activeConversationTicker)
+        XCTAssertNil(model.lastViewedTicker)
+        XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
+        XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.lastViewedTickerKey))
+        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+    }
+
     func testBootstrapDoesNotBlockOnUsageRefresh() async {
         MockAppModelURLProtocol.requestHandler = { request in
             Thread.sleep(forTimeInterval: 1.0)

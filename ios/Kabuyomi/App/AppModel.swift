@@ -1090,6 +1090,17 @@ final class AppModel {
             self.pendingConversationTicker = normalizedTicker(pendingConversationTicker)
         }
 
+        if let lastViewedTicker {
+            let normalized = normalizedTicker(lastViewedTicker)
+            if shouldRestoreNavigationTicker(ticker: normalized) {
+                self.lastViewedTicker = normalized
+                UserDefaults.standard.set(normalized, forKey: Self.lastViewedTickerKey)
+            } else {
+                self.lastViewedTicker = nil
+                UserDefaults.standard.removeObject(forKey: Self.lastViewedTickerKey)
+            }
+        }
+
         if let activeConversationTicker {
             let normalized = normalizedTicker(activeConversationTicker)
             if shouldRestoreConversationSelection(ticker: normalized) {
@@ -1107,15 +1118,19 @@ final class AppModel {
     }
 
     private func shouldPersistConversationSelection(ticker: String, draftQuestion: String?) -> Bool {
-        if hasLocallyAvailableConversation(ticker: ticker) {
-            return true
-        }
-
-        if isTickerInWatchlist(ticker) || recentTickers.contains(ticker) {
+        if shouldRestoreNavigationTicker(ticker: ticker) {
             return true
         }
 
         return !(draftQuestion?.isEmpty ?? true)
+    }
+
+    private func shouldRestoreNavigationTicker(ticker: String) -> Bool {
+        if hasLocallyAvailableConversation(ticker: ticker) {
+            return true
+        }
+
+        return isTickerInWatchlist(ticker) || isStarterTicker(ticker)
     }
 
     private func pendingDraftQuestion(for ticker: String) -> String? {
