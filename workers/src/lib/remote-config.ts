@@ -23,7 +23,7 @@ export interface RemoteConfig {
   trackedTickers: string[];
 }
 
-const CURRENT_EXTRACTOR_VERSION = "v2";
+const CURRENT_EXTRACTOR_VERSION = "v4";
 
 export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   freeStockLimit: 3,
@@ -79,9 +79,21 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
 
 function normalizeExtractorVersion(rawValue: unknown): string {
   const trimmed = typeof rawValue === "string" ? rawValue.trim() : "";
-  if (!trimmed || trimmed === "v1") {
+  if (!trimmed) {
     return CURRENT_EXTRACTOR_VERSION;
   }
 
-  return trimmed;
+  const currentMatch = CURRENT_EXTRACTOR_VERSION.match(/^v(\d+)$/i);
+  const trimmedMatch = trimmed.match(/^v(\d+)$/i);
+  if (!currentMatch?.[1] || !trimmedMatch?.[1]) {
+    return trimmed;
+  }
+
+  const currentVersion = Number.parseInt(currentMatch[1], 10);
+  const requestedVersion = Number.parseInt(trimmedMatch[1], 10);
+  if (!Number.isFinite(currentVersion) || !Number.isFinite(requestedVersion)) {
+    return trimmed;
+  }
+
+  return requestedVersion < currentVersion ? CURRENT_EXTRACTOR_VERSION : trimmed;
 }

@@ -61,40 +61,44 @@ export async function ensureLatestFiling(
 
   const filingKey = buildFilingKey(config.extractorVersion, current);
   const cacheKey = buildCacheKey(config.extractorVersion, current.cik, current.accessionNumber);
-  const cached = await env.KABUYOMI_CACHE.get(cacheKey, "json");
-  if (cached && isCurrentCacheRecord(cached as FilingCacheRecord, config)) {
-    await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
-    enqueueHistoricalPersistence(cached as FilingCacheRecord, env, options.executionContext);
-    logLatestFilingReady("cache_record", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
-    return cached as FilingCacheRecord;
-  }
+  if (!options.forceRemoteCheck) {
+    const cached = await env.KABUYOMI_CACHE.get(cacheKey, "json");
+    if (cached && isCurrentCacheRecord(cached as FilingCacheRecord, config)) {
+      await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
+      enqueueHistoricalPersistence(cached as FilingCacheRecord, env, options.executionContext);
+      logLatestFilingReady("cache_record", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
+      return cached as FilingCacheRecord;
+    }
 
-  const archived = await loadArchivedFilingByKey(filingKey, env);
-  if (archived && isCurrentCacheRecord(archived, config)) {
-    await env.KABUYOMI_CACHE.put(cacheKey, JSON.stringify(archived));
-    await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
-    enqueueHistoricalPersistence(archived, env, options.executionContext);
-    logLatestFilingReady("archive", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
-    return archived;
+    const archived = await loadArchivedFilingByKey(filingKey, env);
+    if (archived && isCurrentCacheRecord(archived, config)) {
+      await env.KABUYOMI_CACHE.put(cacheKey, JSON.stringify(archived));
+      await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
+      enqueueHistoricalPersistence(archived, env, options.executionContext);
+      logLatestFilingReady("archive", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
+      return archived;
+    }
   }
 
   const releaseLock = await acquireFilingLock(filingKey, env);
   try {
-    const secondRead = await env.KABUYOMI_CACHE.get(cacheKey, "json");
-    if (secondRead && isCurrentCacheRecord(secondRead as FilingCacheRecord, config)) {
-      await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
-      enqueueHistoricalPersistence(secondRead as FilingCacheRecord, env, options.executionContext);
-      logLatestFilingReady("cache_record_after_lock", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
-      return secondRead as FilingCacheRecord;
-    }
+    if (!options.forceRemoteCheck) {
+      const secondRead = await env.KABUYOMI_CACHE.get(cacheKey, "json");
+      if (secondRead && isCurrentCacheRecord(secondRead as FilingCacheRecord, config)) {
+        await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
+        enqueueHistoricalPersistence(secondRead as FilingCacheRecord, env, options.executionContext);
+        logLatestFilingReady("cache_record_after_lock", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
+        return secondRead as FilingCacheRecord;
+      }
 
-    const secondArchived = await loadArchivedFilingByKey(filingKey, env);
-    if (secondArchived && isCurrentCacheRecord(secondArchived, config)) {
-      await env.KABUYOMI_CACHE.put(cacheKey, JSON.stringify(secondArchived));
-      await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
-      enqueueHistoricalPersistence(secondArchived, env, options.executionContext);
-      logLatestFilingReady("archive_after_lock", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
-      return secondArchived;
+      const secondArchived = await loadArchivedFilingByKey(filingKey, env);
+      if (secondArchived && isCurrentCacheRecord(secondArchived, config)) {
+        await env.KABUYOMI_CACHE.put(cacheKey, JSON.stringify(secondArchived));
+        await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
+        enqueueHistoricalPersistence(secondArchived, env, options.executionContext);
+        logLatestFilingReady("archive_after_lock", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
+        return secondArchived;
+      }
     }
 
     const record = await ingestFiling(current, pickComparisonFiling(tickerRecord, submissions, current), env, config);

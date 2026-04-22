@@ -73,11 +73,11 @@ describe("remote config", () => {
     expect(config.webSupplementEnabled).toBe(true);
   });
 
-  it("forces a reingest-worthy extractor version when remote config is still on v1", async () => {
+  it("forces a reingest-worthy extractor version when remote config is still on an older extractor version", async () => {
     const config = await loadRemoteConfig({
       KABUYOMI_CACHE: {
         get: async () => ({
-          extractorVersion: "v1"
+          extractorVersion: "v3"
         })
       }
     } as never);
