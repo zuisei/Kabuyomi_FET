@@ -422,9 +422,13 @@ function buildMetricSnapshotsFromFetcherPayload(
       continue;
     }
 
-    const comparison = comparisonFiling
-      ? resolveFact(logicalName, comparisonFiling, fetcherPayload.concepts, fetcherPayload.companyFacts)
-      : null;
+    const comparison = resolveComparisonFact(
+      logicalName,
+      filing,
+      comparisonFiling,
+      fetcherPayload.concepts,
+      fetcherPayload.companyFacts
+    );
 
     results.push({
       logicalName,
@@ -441,6 +445,28 @@ function buildMetricSnapshotsFromFetcherPayload(
   }
 
   return results;
+}
+
+function resolveComparisonFact(
+  logicalName: MetricName,
+  filing: FilingReference,
+  comparisonFiling: FilingReference | null,
+  concepts: Record<string, ConceptResponse | null>,
+  companyFacts: CompanyFactsResponse | null
+): { tagUsed: string; unit: string; fact: ConceptFact } | null {
+  const sameFilingComparison = inferSameFilingComparisonReference(filing);
+  if (sameFilingComparison) {
+    const fact = resolveFact(logicalName, sameFilingComparison, concepts, companyFacts);
+    if (fact) {
+      return fact;
+    }
+  }
+
+  if (!comparisonFiling) {
+    return null;
+  }
+
+  return resolveFact(logicalName, comparisonFiling, concepts, companyFacts);
 }
 
 function resolveFact(
@@ -512,6 +538,43 @@ function selectBestFact(
   flattened.sort((left, right) => left.score - right.score);
   const best = flattened[0];
   return best ? { unit: best.unit, fact: best.fact } : null;
+}
+
+function inferSameFilingComparisonReference(filing: FilingReference): FilingReference | null {
+  const priorPeriodEnd = shiftPeriodEndByYears(filing.periodOfReport, -1);
+  if (!priorPeriodEnd) {
+    return null;
+  }
+
+  return {
+    ...filing,
+    periodOfReport: priorPeriodEnd
+  };
+}
+
+function shiftPeriodEndByYears(dateString: string, years: number): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateString);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const shifted = new Date(Date.UTC(year + years, month - 1, day));
+  if (
+    shifted.getUTCFullYear() !== year + years ||
+    shifted.getUTCMonth() !== month - 1 ||
+    shifted.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return [
+    String(shifted.getUTCFullYear()).padStart(4, "0"),
+    String(shifted.getUTCMonth() + 1).padStart(2, "0"),
+    String(shifted.getUTCDate()).padStart(2, "0")
+  ].join("-");
 }
 
 function durationScore(fact: ConceptFact, targetDurationDays: number): number {

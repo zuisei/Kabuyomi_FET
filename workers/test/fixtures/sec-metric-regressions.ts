@@ -49,17 +49,7 @@ export const REVENUE_REGRESSION_CASES: RevenueRegressionCase[] = [
       filedAt: "2026-03-09",
       periodOfReport: "2025-12-31"
     }),
-    comparisonFiling: filingReference({
-      cik: "0001876042",
-      ticker: "CRCL",
-      companyName: "Circle Internet Group, Inc.",
-      exchange: "NYSE",
-      formType: "10-K",
-      accessionNumber: "0001876042-26-000062",
-      primaryDocument: "crcl-20251231.htm",
-      filedAt: "2026-03-09",
-      periodOfReport: "2024-12-31"
-    }),
+    comparisonFiling: null,
     payload: {
       concepts: {
         Revenues: {
@@ -124,17 +114,7 @@ export const REVENUE_REGRESSION_CASES: RevenueRegressionCase[] = [
       filedAt: "2025-11-12",
       periodOfReport: "2025-09-30"
     }),
-    comparisonFiling: filingReference({
-      cik: "0001876042",
-      ticker: "CRCL",
-      companyName: "Circle Internet Group, Inc.",
-      exchange: "NYSE",
-      formType: "10-Q",
-      accessionNumber: "0001876042-25-000051",
-      primaryDocument: "crcl-20250930.htm",
-      filedAt: "2025-11-12",
-      periodOfReport: "2024-09-30"
-    }),
+    comparisonFiling: null,
     payload: {
       concepts: {
         Revenues: {
