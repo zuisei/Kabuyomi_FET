@@ -8,6 +8,12 @@ private enum CompanySidePanel {
     case summary
 }
 
+private struct PendingDrawerTickerOpen: Equatable {
+    let ticker: String
+    let companyName: String
+    let detail: String
+}
+
 struct CompanyView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.openURL) private var openURL
@@ -22,6 +28,7 @@ struct CompanyView: View {
     @State private var libraryPanelID = UUID()
     @State private var summaryPanelID = UUID()
     @State private var pendingLibraryOpenItem: SearchItem?
+    @State private var pendingDrawerTickerOpen: PendingDrawerTickerOpen?
 
     init(ticker: String) {
         _currentTicker = State(initialValue: ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
@@ -94,19 +101,19 @@ struct CompanyView: View {
                             starterCompanies: filteredStarterCompanies,
                             searchResults: appModel.searchResults,
                             isSearchLoading: appModel.searchIsLoading,
-                            selectTicker: selectTicker,
+                            pendingTicker: pendingLibraryOpenItem?.ticker ?? pendingDrawerTickerOpen?.ticker,
+                            pendingCompanyName: pendingLibraryOpenItem?.companyName ?? pendingDrawerTickerOpen?.companyName,
+                            pendingDetail: pendingLibraryOpenItem != nil
+                                ? "追加が終わり次第、そのまま会話へ移ります。"
+                                : pendingDrawerTickerOpen?.detail,
+                            selectTicker: openDrawerTicker,
                             openSearchResult: openSearchResult,
                             openSettings: openSettingsScreen,
                             close: closePanels
                         )
                         .id(libraryPanelID)
                         .frame(maxWidth: 356)
-                        .disabled(pendingLibraryOpenItem != nil)
-
-                        if let pendingLibraryOpenItem {
-                            drawerPendingOverlay(for: pendingLibraryOpenItem)
-                                .padding(16)
-                        }
+                        .disabled(pendingLibraryOpenItem != nil || pendingDrawerTickerOpen != nil)
 
                         CompanyDrawerEdgeBlendLayer(style: .library)
                     }
@@ -338,6 +345,7 @@ struct CompanyView: View {
     private func selectTicker(_ ticker: String) {
         let normalized = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         pendingLibraryOpenItem = nil
+        pendingDrawerTickerOpen = nil
         guard normalized != currentTicker else {
             closePanels()
             return
@@ -345,6 +353,36 @@ struct CompanyView: View {
 
         currentTicker = normalized
         closePanels()
+    }
+
+    private func openDrawerTicker(_ ticker: String, _ companyName: String) {
+        let normalized = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard pendingLibraryOpenItem == nil, pendingDrawerTickerOpen == nil else { return }
+
+        if normalized == currentTicker, appModel.companyPayload(for: normalized) != nil {
+            closePanels()
+            return
+        }
+
+        if appModel.companyPayload(for: normalized) != nil {
+            selectTicker(normalized)
+            return
+        }
+
+        pendingDrawerTickerOpen = PendingDrawerTickerOpen(
+            ticker: normalized,
+            companyName: companyName,
+            detail: "決算資料を開けたら、そのまま会話へ移ります。"
+        )
+
+        Task {
+            await appModel.loadCompany(ticker: normalized)
+            if appModel.companyPayload(for: normalized) != nil {
+                selectTicker(normalized)
+            } else if pendingDrawerTickerOpen?.ticker == normalized {
+                pendingDrawerTickerOpen = nil
+            }
+        }
     }
 
     private func openSearchResult(_ item: SearchItem) {
@@ -373,27 +411,6 @@ struct CompanyView: View {
                 pendingLibraryOpenItem = nil
             }
         }
-    }
-
-    @ViewBuilder
-    private func drawerPendingOverlay(for item: SearchItem) -> some View {
-        ZStack {
-            Color.black.opacity(0.12)
-                .ignoresSafeArea()
-
-            VStack {
-                Spacer(minLength: 0)
-
-                TickerOpenTransitionOverlay(
-                    ticker: item.ticker,
-                    companyName: item.companyName,
-                    detail: "追加が終わり次第、そのまま会話へ移ります。"
-                )
-
-                Spacer(minLength: 0)
-            }
-        }
-        .transition(.opacity)
     }
 
     private func openPrimaryDocument(urlString: String) {
@@ -1015,9 +1032,17 @@ private struct SourceDocumentViewerSheet: View {
 
     private var statusCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(searchStatus.title)
-                .font(.system(.headline, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.ink)
+            HStack(spacing: 10) {
+                if case .loading = searchStatus {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(KabuyomiTheme.accentDeep)
+                }
+
+                Text(searchStatus.title)
+                    .font(.system(.headline, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+            }
 
             Text(statusDetailText)
                 .font(.system(.footnote, design: .rounded, weight: .medium))
@@ -1132,7 +1157,7 @@ private struct SourceDocumentWebView: UIViewRepresentable {
               const textFor = (element) => normalize(element.innerText || element.textContent || "");
               const selectors =
                 searchMode === "tabular"
-                  ? "h1,h2,h3,h4,h5,h6,p,li,div,table,tbody,thead,tr,td,th,strong,b,span"
+                  ? "table,tr,td,th,h1,h2,h3,h4,h5,h6,p,li"
                   : "h1,h2,h3,h4,h5,h6,p,li,div,td,th,strong,b";
 
               const hasTableOfContentsContext = (element) => {
@@ -1163,12 +1188,13 @@ private struct SourceDocumentWebView: UIViewRepresentable {
                 const tag = (element.tagName || "").toUpperCase();
                 if (["SCRIPT", "STYLE", "NOSCRIPT"].includes(tag)) return null;
 
-                const links = Array.from(element.querySelectorAll("a"));
-                const linkTextLength = links.reduce((sum, link) => sum + textFor(link).length, 0);
-                const linkDensity = linkTextLength / Math.max(text.length, 1);
                 const inTable = Boolean(element.closest("table"));
                 const inNav = Boolean(element.closest("nav,[role='navigation']"));
                 const tocContext = hasTableOfContentsContext(element);
+                const linkDensity =
+                  searchMode === "tabular"
+                    ? 0
+                    : Array.from(element.querySelectorAll("a")).reduce((sum, link) => sum + textFor(link).length, 0) / Math.max(text.length, 1);
                 const headingLike = /^H[1-6]$/.test(tag) || ["STRONG", "B", "TH"].includes(tag);
                 const rowLike = tag === "TR";
                 const tableCellLike = tag === "TD" || tag === "TH";
@@ -1190,6 +1216,20 @@ private struct SourceDocumentWebView: UIViewRepresentable {
               }).filter(Boolean);
 
               const entryByElement = new Map(entries.map((entry) => [entry.element, entry]));
+              const primaryEntries = [];
+              const fallbackEntries = [];
+
+              for (const entry of entries) {
+                if (searchMode === "tabular") {
+                  if (entry.rowLike || entry.tableCellLike || entry.inTable) {
+                    primaryEntries.push(entry);
+                  } else {
+                    fallbackEntries.push(entry);
+                  }
+                } else {
+                  primaryEntries.push(entry);
+                }
+              }
 
               const clearHighlight = () => {
                 document.querySelectorAll("[data-kabuyomi-highlight='1']").forEach((element) => {
@@ -1297,14 +1337,21 @@ private struct SourceDocumentWebView: UIViewRepresentable {
                 }
 
                 let bestMatch = null;
+                const entryGroups = searchMode === "tabular" ? [primaryEntries, fallbackEntries] : [primaryEntries];
 
                 for (const variant of variants) {
-                  for (const entry of entries) {
-                    if (!entry.text.includes(variant.value)) continue;
+                  for (const entryGroup of entryGroups) {
+                    for (const entry of entryGroup) {
+                      if (!entry.text.includes(variant.value)) continue;
 
-                    const score = scoreEntry(entry, variant.partial);
-                    if (!bestMatch || score > bestMatch.score) {
-                      bestMatch = { entry, score };
+                      const score = scoreEntry(entry, variant.partial);
+                      if (!bestMatch || score > bestMatch.score) {
+                        bestMatch = { entry, score };
+                      }
+                    }
+
+                    if (bestMatch && bestMatch.score >= 700) {
+                      break;
                     }
                   }
 

@@ -21,6 +21,14 @@ struct SearchView: View {
                 VStack(spacing: 16) {
                     searchBar
 
+                    if let pendingOpenItem {
+                        TickerOpenTransitionOverlay(
+                            ticker: pendingOpenItem.ticker,
+                            companyName: pendingOpenItem.companyName,
+                            detail: "初回は決算資料の取得があるため、数秒かかることがあります。"
+                        )
+                    }
+
                     if appModel.searchIsLoading {
                         ProgressView("検索中...")
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -48,18 +56,6 @@ struct SearchView: View {
                 .padding(20)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .allowsHitTesting(pendingOpenItem == nil)
-
-                if let pendingOpenItem {
-                    Color.black.opacity(0.14)
-                        .ignoresSafeArea()
-
-                    TickerOpenTransitionOverlay(
-                        ticker: pendingOpenItem.ticker,
-                        companyName: pendingOpenItem.companyName,
-                        detail: "初回は決算資料の取得があるため、数秒かかることがあります。"
-                    )
-                    .padding(20)
-                }
             }
             .navigationTitle("銘柄を検索")
             .toolbar {
@@ -272,31 +268,31 @@ struct TickerOpenTransitionOverlay: View {
     let detail: String
 
     var body: some View {
-        VStack(spacing: 12) {
+        HStack(alignment: .center, spacing: 14) {
             ProgressView()
-                .controlSize(.large)
+                .controlSize(.regular)
                 .tint(KabuyomiTheme.accentDeep)
 
-            VStack(spacing: 6) {
-                Text("\(ticker) を保存して開いています...")
-                    .font(.system(.headline, design: .rounded, weight: .bold))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(ticker) を開いています...")
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.ink)
-                    .multilineTextAlignment(.center)
 
                 Text(companyName)
-                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
                     .foregroundStyle(KabuyomiTheme.inkMuted)
-                    .multilineTextAlignment(.center)
 
                 Text(detail)
-                    .font(.system(.footnote, design: .rounded))
+                    .font(.system(.caption2, design: .rounded))
                     .foregroundStyle(KabuyomiTheme.inkMuted)
-                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .frame(maxWidth: .infinity)
-        .kabuyomiGlass(radius: 28, tint: Color.white.opacity(0.3), stroke: Color.white.opacity(0.58))
+        .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.22), stroke: Color.white.opacity(0.56))
     }
 }

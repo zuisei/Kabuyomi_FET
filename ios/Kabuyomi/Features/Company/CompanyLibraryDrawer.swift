@@ -10,7 +10,10 @@ struct ConversationLibraryDrawer: View {
     let starterCompanies: [StarterCompany]
     let searchResults: [SearchItem]
     let isSearchLoading: Bool
-    let selectTicker: (String) -> Void
+    let pendingTicker: String?
+    let pendingCompanyName: String?
+    let pendingDetail: String?
+    let selectTicker: (String, String) -> Void
     let openSearchResult: (SearchItem) -> Void
     let openSettings: () -> Void
     let close: () -> Void
@@ -23,6 +26,7 @@ struct ConversationLibraryDrawer: View {
         VStack(alignment: .leading, spacing: 18) {
             header
             searchField
+            pendingOpenBanner
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
@@ -37,6 +41,17 @@ struct ConversationLibraryDrawer: View {
         .padding(18)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(drawerShell)
+    }
+
+    @ViewBuilder
+    private var pendingOpenBanner: some View {
+        if let pendingTicker, let pendingCompanyName, let pendingDetail {
+            TickerOpenTransitionOverlay(
+                ticker: pendingTicker,
+                companyName: pendingCompanyName,
+                detail: pendingDetail
+            )
+        }
     }
 
     private var drawerShell: some View {
@@ -85,7 +100,7 @@ struct ConversationLibraryDrawer: View {
                         subtitle: drawerSubtitle(for: company),
                         isCurrent: company.ticker == currentTicker,
                         prominence: .primary,
-                        action: { selectTicker(company.ticker) }
+                        action: { selectTicker(company.ticker, company.companyName) }
                     )
                 }
             }
@@ -107,7 +122,7 @@ struct ConversationLibraryDrawer: View {
                         subtitle: drawerSubtitle(for: company),
                         isCurrent: company.ticker == currentTicker,
                         prominence: .standard,
-                        action: { selectTicker(company.ticker) }
+                        action: { selectTicker(company.ticker, company.companyName) }
                     )
                 }
             }
@@ -129,7 +144,7 @@ struct ConversationLibraryDrawer: View {
                         subtitle: "まず質問してみる",
                         isCurrent: company.ticker == currentTicker,
                         prominence: .subdued,
-                        action: { selectTicker(company.ticker) }
+                        action: { selectTicker(company.ticker, company.companyName) }
                     )
                 }
             }
