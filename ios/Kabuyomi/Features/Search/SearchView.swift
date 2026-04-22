@@ -5,6 +5,7 @@ struct SearchView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var searchTask: Task<Void, Never>?
+    @State private var pendingOpenItem: SearchItem?
     @FocusState private var isSearchFieldFocused: Bool
 
     var body: some View {
@@ -46,6 +47,19 @@ struct SearchView: View {
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .allowsHitTesting(pendingOpenItem == nil)
+
+                if let pendingOpenItem {
+                    Color.black.opacity(0.14)
+                        .ignoresSafeArea()
+
+                    TickerOpenTransitionOverlay(
+                        ticker: pendingOpenItem.ticker,
+                        companyName: pendingOpenItem.companyName,
+                        detail: "初回は決算資料の取得があるため、数秒かかることがあります。"
+                    )
+                    .padding(20)
+                }
             }
             .navigationTitle("銘柄を検索")
             .toolbar {
@@ -71,15 +85,20 @@ struct SearchView: View {
         .onDisappear {
             searchTask?.cancel()
             isSearchFieldFocused = false
+            pendingOpenItem = nil
         }
     }
 
     private func addSearchResult(_ item: SearchItem) {
+        guard pendingOpenItem == nil else { return }
         isSearchFieldFocused = false
+        pendingOpenItem = item
         Task {
             await appModel.addToWatchlist(item)
-            if appModel.activeConversationTicker == item.ticker {
+            if appModel.isTickerInWatchlist(item.ticker, cik: item.cik) {
                 dismiss()
+            } else if pendingOpenItem?.id == item.id {
+                pendingOpenItem = nil
             }
         }
     }
@@ -89,7 +108,7 @@ struct SearchView: View {
             Text("質問したい銘柄を保存")
                 .font(.system(.headline, design: .rounded, weight: .bold))
 
-            Text("v1 は 10-K / 10-Q に対応しています。20-F / 6-K 企業はまだ保存できません。")
+            Text("保存すると、そのまま会話画面を開きます。v1 は 10-K / 10-Q に対応しています。20-F / 6-K 企業はまだ保存できません。")
                 .font(.system(.footnote, design: .rounded))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
                 .lineSpacing(2)
@@ -198,7 +217,7 @@ private struct SearchResultCard: View {
 
                         Text(buttonTitle)
                     }
-                    .frame(minWidth: 82)
+                    .frame(minWidth: 112)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(isAdded ? KabuyomiTheme.inkMuted : KabuyomiTheme.accent)
@@ -224,14 +243,14 @@ private struct SearchResultCard: View {
 
     private var buttonTitle: String {
         if isAdding {
-            return "保存中"
+            return "開いています"
         }
 
         if isAdded {
             return "保存済み"
         }
 
-        return "保存"
+        return "保存して開く"
     }
 
     private func searchMetaPill(title: String, tint: Color) -> some View {
@@ -244,5 +263,40 @@ private struct SearchResultCard: View {
                 Capsule()
                     .fill(tint.opacity(0.08))
             )
+    }
+}
+
+struct TickerOpenTransitionOverlay: View {
+    let ticker: String
+    let companyName: String
+    let detail: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.large)
+                .tint(KabuyomiTheme.accentDeep)
+
+            VStack(spacing: 6) {
+                Text("\(ticker) を保存して開いています...")
+                    .font(.system(.headline, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                    .multilineTextAlignment(.center)
+
+                Text(companyName)
+                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .multilineTextAlignment(.center)
+
+                Text(detail)
+                    .font(.system(.footnote, design: .rounded))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .frame(maxWidth: .infinity)
+        .kabuyomiGlass(radius: 28, tint: Color.white.opacity(0.3), stroke: Color.white.opacity(0.58))
     }
 }

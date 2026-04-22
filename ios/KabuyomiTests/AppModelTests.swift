@@ -54,10 +54,10 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.rootConversationTicker, "AAPL")
     }
 
-    func testBootstrapClearsRestoredRecentOnlyTickerWithoutWatchlistOrLocalData() async {
-        UserDefaults.standard.set("MSFT", forKey: AppModel.activeConversationTickerKey)
-        UserDefaults.standard.set("MSFT", forKey: AppModel.lastViewedTickerKey)
-        UserDefaults.standard.set(["MSFT"], forKey: AppModel.recentTickersKey)
+    func testBootstrapClearsRestoredRecentOnlyNonStarterTickerWithoutWatchlistOrLocalData() async {
+        UserDefaults.standard.set("MU", forKey: AppModel.activeConversationTickerKey)
+        UserDefaults.standard.set("MU", forKey: AppModel.lastViewedTickerKey)
+        UserDefaults.standard.set(["MU"], forKey: AppModel.recentTickersKey)
         UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
 
         let model = makeAppModel()
@@ -68,6 +68,36 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.lastViewedTicker)
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.lastViewedTickerKey))
+        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+    }
+
+    func testBootstrapClearsRestoredSavedOnlyTickerWithoutLocalData() async {
+        UserDefaults.standard.set(["NVDA"], forKey: AppModel.savedTickersKey)
+        UserDefaults.standard.set("NVDA", forKey: AppModel.activeConversationTickerKey)
+        UserDefaults.standard.set("NVDA", forKey: AppModel.lastViewedTickerKey)
+        UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
+
+        let model = makeAppModel()
+
+        await model.bootstrap()
+
+        XCTAssertNil(model.activeConversationTicker)
+        XCTAssertNil(model.lastViewedTicker)
+        XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
+        XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.lastViewedTickerKey))
+        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+    }
+
+    func testRootConversationTickerIgnoresSavedOnlyTickerPlaceholderWithoutLocalData() async {
+        UserDefaults.standard.set(["NVDA"], forKey: AppModel.savedTickersKey)
+        UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
+
+        let model = makeAppModel()
+
+        await model.bootstrap()
+
+        XCTAssertEqual(model.watchlist.map(\.ticker), ["NVDA"])
+        XCTAssertEqual(model.watchlist.map(\.isPlaceholder), [true])
         XCTAssertEqual(model.rootConversationTicker, "AAPL")
     }
 

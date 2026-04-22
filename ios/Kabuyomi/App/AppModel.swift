@@ -150,7 +150,7 @@ final class AppModel {
     var rootConversationTicker: String {
         activeConversationTicker
             ?? lastViewedTicker
-            ?? savedTickers.first
+            ?? firstRestorableSavedTicker
             ?? starterCompanies.first?.ticker
             ?? "AAPL"
     }
@@ -1130,13 +1130,21 @@ final class AppModel {
             return true
         }
 
-        return isTickerInWatchlist(ticker) || isStarterTicker(ticker)
+        return isStarterTicker(ticker)
     }
 
     private func pendingDraftQuestion(for ticker: String) -> String? {
         guard pendingConversationTicker == ticker else { return nil }
         let trimmed = pendingConversationQuestion?.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    private var firstRestorableSavedTicker: String? {
+        if let cachedWatchlistTicker = watchlist.first(where: { !$0.isPlaceholder })?.ticker {
+            return cachedWatchlistTicker
+        }
+
+        return savedTickers.first(where: hasLocallyAvailableConversation(ticker:))
     }
 
     private func hasLocallyAvailableConversation(ticker: String) -> Bool {

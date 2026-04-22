@@ -21,6 +21,7 @@ struct CompanyView: View {
     @State private var selectedSource: LocalMessageSourceRef?
     @State private var libraryPanelID = UUID()
     @State private var summaryPanelID = UUID()
+    @State private var pendingLibraryOpenItem: SearchItem?
 
     init(ticker: String) {
         _currentTicker = State(initialValue: ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
@@ -100,6 +101,12 @@ struct CompanyView: View {
                         )
                         .id(libraryPanelID)
                         .frame(maxWidth: 356)
+                        .disabled(pendingLibraryOpenItem != nil)
+
+                        if let pendingLibraryOpenItem {
+                            drawerPendingOverlay(for: pendingLibraryOpenItem)
+                                .padding(16)
+                        }
 
                         CompanyDrawerEdgeBlendLayer(style: .library)
                     }
@@ -330,6 +337,7 @@ struct CompanyView: View {
 
     private func selectTicker(_ ticker: String) {
         let normalized = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        pendingLibraryOpenItem = nil
         guard normalized != currentTicker else {
             closePanels()
             return
@@ -348,18 +356,44 @@ struct CompanyView: View {
             return
         }
 
+        guard pendingLibraryOpenItem == nil else { return }
+
         let normalized = item.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if appModel.isTickerInWatchlist(normalized, cik: item.cik) {
             selectTicker(normalized)
             return
         }
 
+        pendingLibraryOpenItem = item
         Task {
             await appModel.addToWatchlist(item)
             if appModel.isTickerInWatchlist(normalized, cik: item.cik) {
                 selectTicker(normalized)
+            } else if pendingLibraryOpenItem?.id == item.id {
+                pendingLibraryOpenItem = nil
             }
         }
+    }
+
+    @ViewBuilder
+    private func drawerPendingOverlay(for item: SearchItem) -> some View {
+        ZStack {
+            Color.black.opacity(0.12)
+                .ignoresSafeArea()
+
+            VStack {
+                Spacer(minLength: 0)
+
+                TickerOpenTransitionOverlay(
+                    ticker: item.ticker,
+                    companyName: item.companyName,
+                    detail: "追加が終わり次第、そのまま会話へ移ります。"
+                )
+
+                Spacer(minLength: 0)
+            }
+        }
+        .transition(.opacity)
     }
 
     private func openPrimaryDocument(urlString: String) {

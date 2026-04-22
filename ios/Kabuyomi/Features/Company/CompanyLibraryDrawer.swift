@@ -412,6 +412,10 @@ private struct DrawerSearchRow: View {
         appModel.isTickerInWatchlist(item.ticker, cik: item.cik)
     }
 
+    private var isAdding: Bool {
+        appModel.isAddingTicker(item.ticker)
+    }
+
     var body: some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 12) {
@@ -435,28 +439,48 @@ private struct DrawerSearchRow: View {
 
                 Spacer()
 
-                Text(
-                    item.isSupportedInV1
-                        ? (isSaved ? "開く" : "保存")
-                        : item.availabilityBadgeTitle
-                )
-                    .font(.system(.caption, design: .rounded, weight: .bold))
-                    .foregroundStyle(item.isSupportedInV1 ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(
-                        Capsule().fill(
-                            item.isSupportedInV1
-                                ? AnyShapeStyle(KabuyomiTheme.accentSoft.opacity(0.58))
-                                : KabuyomiTheme.fill(for: .secondary)
-                        )
+                HStack(spacing: 6) {
+                    if isAdding {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(KabuyomiTheme.accentDeep)
+                    }
+
+                    Text(
+                        item.isSupportedInV1
+                            ? actionTitle
+                            : item.availabilityBadgeTitle
                     )
+                }
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .foregroundStyle(item.isSupportedInV1 ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule().fill(
+                        item.isSupportedInV1
+                            ? AnyShapeStyle(KabuyomiTheme.accentSoft.opacity(0.58))
+                            : KabuyomiTheme.fill(for: .secondary)
+                    )
+                )
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .kabuyomiCard(.muted, radius: 18)
         }
         .buttonStyle(.plain)
-        .disabled(!item.isSupportedInV1)
+        .disabled(!item.isSupportedInV1 || isAdding)
+    }
+
+    private var actionTitle: String {
+        if isAdding {
+            return "開いています"
+        }
+
+        if isSaved {
+            return "開く"
+        }
+
+        return "保存して開く"
     }
 }
