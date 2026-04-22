@@ -88,6 +88,22 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.rootConversationTicker, "AAPL")
     }
 
+    func testBootstrapClearsRestoredStarterTickerWithoutLocalData() async {
+        UserDefaults.standard.set("MSFT", forKey: AppModel.activeConversationTickerKey)
+        UserDefaults.standard.set("MSFT", forKey: AppModel.lastViewedTickerKey)
+        UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
+
+        let model = makeAppModel()
+
+        await model.bootstrap()
+
+        XCTAssertNil(model.activeConversationTicker)
+        XCTAssertNil(model.lastViewedTicker)
+        XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
+        XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.lastViewedTickerKey))
+        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+    }
+
     func testRootConversationTickerIgnoresSavedOnlyTickerPlaceholderWithoutLocalData() async {
         UserDefaults.standard.set(["NVDA"], forKey: AppModel.savedTickersKey)
         UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
@@ -99,6 +115,47 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.watchlist.map(\.ticker), ["NVDA"])
         XCTAssertEqual(model.watchlist.map(\.isPlaceholder), [true])
         XCTAssertEqual(model.rootConversationTicker, "AAPL")
+    }
+
+    func testLoadCompanyFailureClearsRestoredUnsavedStarterTickerSelection() async {
+        UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
+
+        let model = makeAppModel()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            switch request.url?.path {
+            case "/v1/usage":
+                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                let data = try TestFixtures.jsonData([
+                    "plan": "free",
+                    "chatsUsed": 0,
+                    "chatLimit": 10,
+                    "stocksUsed": 0,
+                    "stockLimit": 3,
+                    "dateJST": "2026-04-18"
+                ])
+                return (response, data)
+            case "/v1/company/MSFT":
+                let response = HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!
+                let data = try TestFixtures.jsonData(["error": "Internal server error"])
+                return (response, data)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        await model.bootstrap()
+        model.openConversation(for: "MSFT")
+        XCTAssertEqual(model.activeConversationTicker, "MSFT")
+
+        await model.loadCompany(ticker: "MSFT")
+
+        XCTAssertNil(model.activeConversationTicker)
+        XCTAssertNil(model.lastViewedTicker)
+        XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
+        XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.lastViewedTickerKey))
+        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+        XCTAssertNil(model.activeAlert)
     }
 
     func testBootstrapDoesNotBlockOnUsageRefresh() async {

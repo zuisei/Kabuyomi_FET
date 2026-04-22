@@ -739,7 +739,8 @@ final class AppModel {
         } catch {
             guard stateGeneration == self.stateGeneration else { return }
             guard !shouldIgnore(error) else { return }
-            if companyCache[ticker] == nil {
+            let recoveredSelection = clearUnavailableEphemeralSelectionIfNeeded(for: ticker)
+            if companyCache[ticker] == nil, !recoveredSelection {
                 presentAlert(for: error)
             }
         }
@@ -985,6 +986,47 @@ final class AppModel {
         !isStarterTicker(ticker)
     }
 
+    @discardableResult
+    private func clearUnavailableEphemeralSelectionIfNeeded(for ticker: String) -> Bool {
+        let normalized = normalizedTicker(ticker)
+        guard !isTickerInWatchlist(normalized) else { return false }
+        guard !hasLocallyAvailableConversation(ticker: normalized) else { return false }
+
+        var cleared = false
+
+        if activeConversationTicker == normalized {
+            activeConversationTicker = nil
+            UserDefaults.standard.removeObject(forKey: Self.activeConversationTickerKey)
+            cleared = true
+        }
+
+        if lastViewedTicker == normalized {
+            lastViewedTicker = nil
+            UserDefaults.standard.removeObject(forKey: Self.lastViewedTickerKey)
+            cleared = true
+        }
+
+        if pendingConversationTicker == normalized {
+            pendingConversationTicker = nil
+            pendingConversationQuestion = nil
+            UserDefaults.standard.removeObject(forKey: Self.pendingConversationTickerKey)
+            UserDefaults.standard.removeObject(forKey: Self.pendingConversationQuestionKey)
+            cleared = true
+        }
+
+        if recentTickers.contains(normalized) {
+            recentTickers.removeAll(where: { $0 == normalized })
+            UserDefaults.standard.set(recentTickers, forKey: Self.recentTickersKey)
+            cleared = true
+        }
+
+        if cleared {
+            loadHomeFromPersistence()
+        }
+
+        return cleared
+    }
+
     private func revokeLocalAccess(for ticker: String) {
         let normalized = normalizedTicker(ticker)
         accessRevokedTickers.insert(normalized)
@@ -1126,11 +1168,7 @@ final class AppModel {
     }
 
     private func shouldRestoreNavigationTicker(ticker: String) -> Bool {
-        if hasLocallyAvailableConversation(ticker: ticker) {
-            return true
-        }
-
-        return isStarterTicker(ticker)
+        hasLocallyAvailableConversation(ticker: ticker)
     }
 
     private func pendingDraftQuestion(for ticker: String) -> String? {
