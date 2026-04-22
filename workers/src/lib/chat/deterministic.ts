@@ -467,88 +467,64 @@ function summarizeRevenueBreakdown(
 ): { text: string; sourceIds: string[] } | null {
   type RevenueBucket = {
     label: string;
-    group: "primary" | "secondary";
     priority: number;
     sourceId: string;
   };
 
   const bucketDefinitions: Array<{
     label: string;
-    group: "primary" | "secondary";
     priority: number;
     patterns: RegExp[];
   }> = [
     {
       label: "車両販売・関連サービス",
-      group: "primary",
       priority: 10,
-      patterns: [/vehicle sales and services/i, /automotive sales/i, /vehicle sales/i]
+      patterns: [/vehicle sales and services/i, /automotive sales(?: revenue)?/i, /vehicle sales(?: revenue)?/i]
     },
     {
       label: "サービス・その他",
-      group: "primary",
       priority: 20,
       patterns: [/services and other/i]
     },
     {
-      label: "エネルギー生成・蓄電",
-      group: "primary",
+      label: "自動車リース",
       priority: 30,
-      patterns: [/energy generation and storage/i, /energy storage/i]
+      patterns: [/automotive leasing/i]
     },
     {
-      label: "準備金運用収益",
-      group: "primary",
+      label: "エネルギー生成・蓄電",
       priority: 40,
-      patterns: [/reserve income/i]
+      patterns: [/energy generation and storage revenue/i, /energy generation and storage/i]
     },
     {
       label: "サブスク・サービス",
-      group: "primary",
       priority: 50,
       patterns: [/subscription and services/i]
     },
     {
       label: "取引収益",
-      group: "primary",
       priority: 60,
       patterns: [/transaction revenue/i]
     },
     {
-      label: "その他収益",
-      group: "primary",
+      label: "準備金運用収益",
       priority: 70,
+      patterns: [/reserve income/i]
+    },
+    {
+      label: "その他収益",
+      priority: 80,
       patterns: [/other revenue/i]
     },
     {
       label: "製品売上",
-      group: "primary",
-      priority: 80,
+      priority: 90,
       patterns: [/product revenue/i]
     },
     {
       label: "サービス売上",
-      group: "primary",
-      priority: 90,
+      priority: 100,
       patterns: [/service revenue/i]
-    },
-    {
-      label: "規制クレジット",
-      group: "secondary",
-      priority: 110,
-      patterns: [/regulatory credits?/i]
-    },
-    {
-      label: "自動車リース",
-      group: "secondary",
-      priority: 120,
-      patterns: [/automotive leasing/i, /\bleasing\b/i]
-    },
-    {
-      label: "利息収入",
-      group: "secondary",
-      priority: 130,
-      patterns: [/interest income/i]
     }
   ];
 
@@ -560,6 +536,10 @@ function summarizeRevenueBreakdown(
     }
 
     const text = chunk.text;
+    if (!isRevenueBreakdownContext(text)) {
+      continue;
+    }
+
     for (const definition of bucketDefinitions) {
       if (!definition.patterns.some((pattern) => pattern.test(text))) {
         continue;
@@ -568,7 +548,6 @@ function summarizeRevenueBreakdown(
       if (!found.has(definition.label)) {
         found.set(definition.label, {
           label: definition.label,
-          group: definition.group,
           priority: definition.priority,
           sourceId: chunk.sourceId
         });
@@ -581,22 +560,50 @@ function summarizeRevenueBreakdown(
     return null;
   }
 
-  const primaryBuckets = buckets.filter((bucket) => bucket.group === "primary");
-  const headlineBuckets = (primaryBuckets.length > 0 ? primaryBuckets : buckets).slice(0, 4);
-  const secondaryBuckets = buckets
-    .filter((bucket) => bucket.group === "secondary" && !headlineBuckets.some((headline) => headline.label === bucket.label))
-    .slice(0, 2);
-  const sourceIds = Array.from(new Set([...headlineBuckets, ...secondaryBuckets].map((bucket) => bucket.sourceId)));
-  const answerParts = [`売上の主な区分は、${headlineBuckets.map((bucket) => bucket.label).join("、")}です。`];
-
-  if (secondaryBuckets.length > 0) {
-    answerParts.push(`補足すると、${secondaryBuckets.map((bucket) => bucket.label).join("、")} も含まれます。`);
-  }
+  const headlineBuckets = buckets.slice(0, 4);
+  const sourceIds = Array.from(new Set(headlineBuckets.map((bucket) => bucket.sourceId)));
 
   return {
-    text: answerParts.join(" "),
+    text: `売上の主な区分は、${headlineBuckets.map((bucket) => bucket.label).join("、")}です。`,
     sourceIds
   };
+}
+
+function isRevenueBreakdownContext(text: string): boolean {
+  const strongPositivePatterns = [
+    /revenue by/i,
+    /disaggregation of revenue/i,
+    /revenue from/i,
+    /automotive sales(?: revenue)?/i,
+    /automotive leasing/i,
+    /vehicle sales and services/i,
+    /services and other/i,
+    /energy generation and storage revenue/i,
+    /subscription and services/i,
+    /transaction revenue/i,
+    /reserve income/i,
+    /other revenue/i,
+    /product revenue/i,
+    /service revenue/i
+  ];
+  const disqualifyingPatterns = [
+    /sources? to fund/i,
+    /cash requirements?/i,
+    /operating cash inflows?/i,
+    /cash inflows?/i,
+    /liquidity/i,
+    /cash and investments portfolio/i,
+    /debt facilities?/i,
+    /equity offerings?/i,
+    /indebtedness/i,
+    /capital resources?/i
+  ];
+  const hasStrongPositive = strongPositivePatterns.some((pattern) => pattern.test(text));
+  if (!hasStrongPositive) {
+    return false;
+  }
+
+  return !disqualifyingPatterns.some((pattern) => pattern.test(text));
 }
 
 function summarizePerformanceStrength(

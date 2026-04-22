@@ -75,7 +75,10 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("売上の主な区分は");
     expect(response.answer).toContain("車両販売・関連サービス");
     expect(response.answer).toContain("サービス・その他");
+    expect(response.answer).toContain("自動車リース");
     expect(response.answer).toContain("エネルギー生成・蓄電");
+    expect(response.answer).not.toContain("利息収入");
+    expect(response.answer).not.toContain("規制クレジット");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S2", "S4"]);
     expect(response.responsePath).toBe("deterministic");
   });
@@ -1000,13 +1003,23 @@ function makeRevenueBreakdownFiling() {
         sortOrder: 2
       },
       {
+        sourceId: "S3",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7, filed 2026-01-29",
+        text: "Our operating cash inflows include cash from vehicle sales and related servicing, sales of energy generation and storage products, sales of regulatory credits and interest income on our cash and investments portfolio.",
+        startOffset: 109,
+        endOffset: 328,
+        sortOrder: 3
+      },
+      {
         sourceId: "S4",
         sectionType: "md_a",
         sectionTitle: "Item 7",
         sourceLabel: "10-K Item 7, filed 2026-01-29",
-        text: "Energy generation and storage revenue increased during the year, while regulatory credits also contributed.",
-        startOffset: 109,
-        endOffset: 218,
+        text: "Energy generation and storage revenue increased during the year.",
+        startOffset: 329,
+        endOffset: 394,
         sortOrder: 4
       }
     ]
