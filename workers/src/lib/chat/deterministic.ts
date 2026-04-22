@@ -479,7 +479,13 @@ function summarizeRevenueBreakdown(
     {
       label: "車両販売・関連サービス",
       priority: 10,
-      patterns: [/vehicle sales and services/i, /automotive sales(?: revenue)?/i, /vehicle sales(?: revenue)?/i]
+      patterns: [
+        /vehicle sales and services/i,
+        /vehicle sales and related servicing/i,
+        /deliveries and servicing of new and used vehicles/i,
+        /automotive sales(?: revenue)?/i,
+        /vehicle sales(?: revenue)?/i
+      ]
     },
     {
       label: "サービス・その他",
@@ -489,12 +495,17 @@ function summarizeRevenueBreakdown(
     {
       label: "自動車リース",
       priority: 30,
-      patterns: [/automotive leasing/i]
+      patterns: [/automotive leasing/i, /customer lease and financing payments/i]
     },
     {
       label: "エネルギー生成・蓄電",
       priority: 40,
-      patterns: [/energy generation and storage revenue/i, /energy generation and storage/i]
+      patterns: [
+        /energy generation and storage revenue/i,
+        /sales of energy generation and storage products/i,
+        /deployments and servicing of our energy storage products/i,
+        /energy generation and storage/i
+      ]
     },
     {
       label: "サブスク・サービス",
@@ -574,10 +585,15 @@ function isRevenueBreakdownContext(text: string): boolean {
     /revenue by/i,
     /disaggregation of revenue/i,
     /revenue from/i,
+    /deliveries and servicing of new and used vehicles/i,
+    /vehicle sales and related servicing/i,
     /automotive sales(?: revenue)?/i,
     /automotive leasing/i,
+    /customer lease and financing payments/i,
     /vehicle sales and services/i,
     /services and other/i,
+    /sales of energy generation and storage products/i,
+    /deployments and servicing of our energy storage products/i,
     /energy generation and storage revenue/i,
     /subscription and services/i,
     /transaction revenue/i,
@@ -598,12 +614,23 @@ function isRevenueBreakdownContext(text: string): boolean {
     /indebtedness/i,
     /capital resources?/i
   ];
+  const cashFallbackPatterns = [
+    /deliveries and servicing of new and used vehicles/i,
+    /vehicle sales and related servicing/i,
+    /sales of energy generation and storage products/i,
+    /deployments and servicing of our energy storage products/i,
+    /customer lease and financing payments/i
+  ];
   const hasStrongPositive = strongPositivePatterns.some((pattern) => pattern.test(text));
   if (!hasStrongPositive) {
     return false;
   }
 
-  return !disqualifyingPatterns.some((pattern) => pattern.test(text));
+  if (!disqualifyingPatterns.some((pattern) => pattern.test(text))) {
+    return true;
+  }
+
+  return cashFallbackPatterns.some((pattern) => pattern.test(text));
 }
 
 function summarizePerformanceStrength(

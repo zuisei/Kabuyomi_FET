@@ -83,6 +83,26 @@ describe("buildChatResponse", () => {
     expect(response.responsePath).toBe("deterministic");
   });
 
+  it("falls back to cash-source business lines when the filing lacks a clean revenue table chunk", async () => {
+    const filing = makeRevenueBreakdownCashFallbackFiling();
+
+    const response = await buildChatResponse(
+      filing,
+      "売上のセクターは？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.answer).toContain("売上の主な区分は");
+    expect(response.answer).toContain("車両販売・関連サービス");
+    expect(response.answer).toContain("自動車リース");
+    expect(response.answer).toContain("エネルギー生成・蓄電");
+    expect(response.answer).not.toContain("利息収入");
+    expect(response.answer).not.toContain("規制クレジット");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S2", "S4"]);
+    expect(response.responsePath).toBe("deterministic");
+  });
+
   it("anchors red-ink cause questions on profit evidence instead of revenue", async () => {
     const filing = makeLossFiling();
 
@@ -1007,9 +1027,9 @@ function makeRevenueBreakdownFiling() {
         sectionType: "md_a",
         sectionTitle: "Item 7",
         sourceLabel: "10-K Item 7, filed 2026-01-29",
-        text: "Our operating cash inflows include cash from vehicle sales and related servicing, sales of energy generation and storage products, sales of regulatory credits and interest income on our cash and investments portfolio.",
+        text: "Our operating cash inflows also included sales of regulatory credits and interest income on our cash and investments portfolio.",
         startOffset: 109,
-        endOffset: 328,
+        endOffset: 236,
         sortOrder: 3
       },
       {
@@ -1018,8 +1038,50 @@ function makeRevenueBreakdownFiling() {
         sectionTitle: "Item 7",
         sourceLabel: "10-K Item 7, filed 2026-01-29",
         text: "Energy generation and storage revenue increased during the year.",
-        startOffset: 329,
-        endOffset: 394,
+        startOffset: 237,
+        endOffset: 302,
+        sortOrder: 4
+      }
+    ]
+  } as any;
+}
+
+function makeRevenueBreakdownCashFallbackFiling() {
+  return {
+    filingKey: "v3:0001318605:000131860526000002",
+    ticker: "TSLA",
+    companyName: "Tesla, Inc.",
+    cik: "0001318605",
+    formType: "10-K",
+    filedAt: "2026-01-29",
+    periodOfReport: "2025-12-31",
+    primaryDocumentUrl: "https://example.com/tsla",
+    mdaText: "",
+    mdaTokenCount: 0,
+    extractorVersion: "v3",
+    promptVersion: "v1",
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    summary: { verdict: "", highlights: [], changes: [] },
+    metrics: [],
+    sourceChunks: [
+      {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7, filed 2026-01-29",
+        text: "Sources and Conditions of Liquidity Our sources to fund our material cash requirements are predominantly from our deliveries and servicing of new and used vehicles, deployments and servicing of our energy storage products, interest income, and proceeds from debt facilities and equity offerings, when applicable.",
+        startOffset: 0,
+        endOffset: 302,
+        sortOrder: 2
+      },
+      {
+        sourceId: "S4",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7, filed 2026-01-29",
+        text: "Our operating cash inflows include cash from vehicle sales and related servicing, sales of energy generation and storage products, customer lease and financing payments, sales of regulatory credits and interest income on our cash and investments portfolio.",
+        startOffset: 303,
+        endOffset: 562,
         sortOrder: 4
       }
     ]
