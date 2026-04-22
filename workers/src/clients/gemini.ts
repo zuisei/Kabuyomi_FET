@@ -6,6 +6,7 @@ import {
   normalizeQuoteTranslationResponse,
   normalizeSummaryResponse,
   polishJapaneseText,
+  stripAnswerFormattingArtifacts,
   stripEnglishParentheticals,
   isRecord
 } from "./gemini/normalize";
@@ -35,14 +36,14 @@ export async function generateSummary(env: Env, input: SummaryPromptInput): Prom
   }
 
   return {
-    verdict: stripEnglishParentheticals(polishJapaneseText(normalized.verdict)),
+    verdict: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(normalized.verdict))),
     highlights: normalized.highlights.map((line) => ({
       ...line,
-      text: stripEnglishParentheticals(polishJapaneseText(line.text))
+      text: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(line.text)))
     })),
     changes: normalized.changes.map((line) => ({
       ...line,
-      text: stripEnglishParentheticals(polishJapaneseText(line.text))
+      text: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(line.text)))
     }))
   };
 }
@@ -69,7 +70,7 @@ export async function generateChatAnswer(env: Env, input: ChatPromptInput): Prom
   }
 
   const recovered = recoverBroaderFallbackIfNeeded(input, {
-    answer: stripEnglishParentheticals(polishJapaneseText(normalized.answer)),
+    answer: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(normalized.answer))),
     sourceIds: normalized.sourceIds,
     usedRemoteModel: normalized.usedRemoteModel
   });

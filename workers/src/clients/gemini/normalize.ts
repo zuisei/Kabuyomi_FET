@@ -89,7 +89,7 @@ export function normalizeQuoteTranslationResponse(payload: unknown): string | nu
 export function polishJapaneseText(text: string): string {
   return text
     .replace(/\s+([。、！？])/g, "$1")
-    .replace(/([。、！？])([^\s])/g, "$1 $2")
+    .replace(/([。！？])([^\s])/g, "$1 $2")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
@@ -97,6 +97,21 @@ export function polishJapaneseText(text: string): string {
 export function stripEnglishParentheticals(text: string): string {
   return text
     .replace(/\s*\((?:YoY|MD&A|guidance|capital allocation|cash flow|operating margin|gross margin)[^)]+\)/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+export function stripAnswerFormattingArtifacts(text: string): string {
+  return text
+    .replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, "$1")
+    .replace(/\[(?:\s*S\d+\s*(?:,\s*S\d+\s*)*)\]/gi, "")
+    .replace(/\*\*\*([^*]+)\*\*\*/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(/(?:^|\s)[•・]\s+/g, " ")
+    .replace(/(?:^|\s)-\s+/g, " ")
+    .replace(/、\s+/g, "、")
+    .replace(/\s+:/g, ":")
     .replace(/\s{2,}/g, " ")
     .trim();
 }

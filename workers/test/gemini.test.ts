@@ -163,6 +163,83 @@ describe("Gemini summary fallback", () => {
 });
 
 describe("Gemini local chat fallback", () => {
+  it("strips markdown emphasis and inline source citations from model answers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer:
+                        "Teslaの売上区分は **車両販売・関連サービス**、**エネルギー生成・蓄電**、**その他** です。[S2, S4]",
+                      sourceIds: ["S2", "S4"]
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await generateChatAnswer(
+      {
+        GEMINI_API_KEY: "test-key"
+      } as never,
+      {
+        question: "売上のセクターは？",
+        filing: {
+          filingKey: "v1:0000000000:000000000000000999",
+          ticker: "TSLA",
+          companyName: "Tesla, Inc.",
+          cik: "0001318605",
+          formType: "10-K",
+          filedAt: "2026-01-29",
+          periodOfReport: "2025-12-31",
+          primaryDocumentUrl: "https://example.com",
+          mdaText: "",
+          mdaTokenCount: 0,
+          metrics: [],
+          generatedAt: "2026-04-14T00:00:00.000Z",
+          extractorVersion: "v1",
+          promptVersion: "v1",
+          summary: { verdict: "", highlights: [], changes: [] },
+          sourceChunks: [
+            {
+              sourceId: "S2",
+              sectionType: "md_a",
+              sectionTitle: "Item 7",
+              sourceLabel: "10-K Item 7",
+              text: "Automotive sales remained the largest revenue line.",
+              startOffset: 0,
+              endOffset: 48,
+              sortOrder: 2
+            },
+            {
+              sourceId: "S4",
+              sectionType: "md_a",
+              sectionTitle: "Item 7",
+              sourceLabel: "10-K Item 7",
+              text: "Energy generation and storage revenue increased year over year.",
+              startOffset: 49,
+              endOffset: 110,
+              sortOrder: 4
+            }
+          ]
+        }
+      }
+    );
+
+    expect(response.answer).toBe("Teslaの売上区分は 車両販売・関連サービス、エネルギー生成・蓄電、その他 です。");
+    expect(response.sourceIds).toEqual(["S2", "S4"]);
+  });
+
   it("matches Japanese questions against source text without whitespace tokenization", async () => {
     const response = await generateChatAnswer({} as never, {
       question: "利益率悪化の主因は？",

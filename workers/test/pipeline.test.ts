@@ -62,6 +62,24 @@ describe("buildChatResponse", () => {
     expect(response.sources.every((source) => source.sourceUrl === filing.primaryDocumentUrl)).toBe(true);
   });
 
+  it("answers revenue sector questions deterministically with business buckets", async () => {
+    const filing = makeRevenueBreakdownFiling();
+
+    const response = await buildChatResponse(
+      filing,
+      "売上のセクターは？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.answer).toContain("売上の主な区分は");
+    expect(response.answer).toContain("車両販売・関連サービス");
+    expect(response.answer).toContain("サービス・その他");
+    expect(response.answer).toContain("エネルギー生成・蓄電");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S2", "S4"]);
+    expect(response.responsePath).toBe("deterministic");
+  });
+
   it("anchors red-ink cause questions on profit evidence instead of revenue", async () => {
     const filing = makeLossFiling();
 
@@ -948,6 +966,48 @@ function makeLossFiling() {
         endOffset: 0,
         tagName: "NetIncomeLoss",
         sortOrder: 10
+      }
+    ]
+  } as any;
+}
+
+function makeRevenueBreakdownFiling() {
+  return {
+    filingKey: "v3:0001318605:000131860526000001",
+    ticker: "TSLA",
+    companyName: "Tesla, Inc.",
+    cik: "0001318605",
+    formType: "10-K",
+    filedAt: "2026-01-29",
+    periodOfReport: "2025-12-31",
+    primaryDocumentUrl: "https://example.com/tsla",
+    mdaText: "",
+    mdaTokenCount: 0,
+    extractorVersion: "v3",
+    promptVersion: "v1",
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    summary: { verdict: "", highlights: [], changes: [] },
+    metrics: [],
+    sourceChunks: [
+      {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7, filed 2026-01-29",
+        text: "Revenue by automotive sales, services and other, and automotive leasing remained the core of the business.",
+        startOffset: 0,
+        endOffset: 108,
+        sortOrder: 2
+      },
+      {
+        sourceId: "S4",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7, filed 2026-01-29",
+        text: "Energy generation and storage revenue increased during the year, while regulatory credits also contributed.",
+        startOffset: 109,
+        endOffset: 218,
+        sortOrder: 4
       }
     ]
   } as any;

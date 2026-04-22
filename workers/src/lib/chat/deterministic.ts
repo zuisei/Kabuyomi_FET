@@ -5,6 +5,7 @@ import { buildSecFilingSource, dedupeChatSources, type ChatEvidenceSource, type 
 export interface DeterministicChatAnswer {
   strategy:
     | "margin_snapshot"
+    | "revenue_breakdown"
     | "revenue_drivers"
     | "contrastive_market_reaction"
     | "cash_generation"
@@ -27,6 +28,9 @@ export function buildDeterministicMetricAnswer(
     /(前回決算との違い|前回との違い|前回比|今回の一番大きい変化|何が変わった|どこが変わった|変化点|今回の変化)/.test(
       normalizedQuestion
     );
+  const asksRevenueBreakdown =
+    /(売上|sales|revenue)/.test(normalizedQuestion) &&
+    /(セクター|sector|セグメント|segment|事業|business|部門|内訳|構成|柱|源泉|カテゴリ)/.test(normalizedQuestion);
   const asksRevenueDrivers =
     /(売上|増収|成長|growth|revenue)/.test(normalizedQuestion) &&
     /(支え|押し上げ|牽引|ドライバ|主因|要因|原因|理由|どの変化|何が)/.test(normalizedQuestion);
@@ -51,6 +55,11 @@ export function buildDeterministicMetricAnswer(
   if (asksChangeOverview) {
     const response = buildChangeOverviewAnswer(filing, normalizedQuestion);
     return response ? { strategy: "change_overview", response } : null;
+  }
+
+  if (asksRevenueBreakdown) {
+    const response = buildRevenueBreakdownAnswer(filing);
+    return response ? { strategy: "revenue_breakdown", response } : null;
   }
 
   if (asksRevenueDrivers) {
@@ -217,6 +226,23 @@ function buildRevenueDriversAnswer(filing: FilingCacheRecord): ChatResponsePaylo
 
   return {
     answer: answerParts.join(" "),
+    sources: dedupeChatSources(sources)
+  };
+}
+
+function buildRevenueBreakdownAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {
+  const breakdown = summarizeRevenueBreakdown(filing.sourceChunks);
+  if (!breakdown) {
+    return null;
+  }
+
+  const sources = breakdown.sourceIds.flatMap((sourceId) => {
+    const source = filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId);
+    return source ? [buildSecFilingSource(source)] : [];
+  });
+
+  return {
+    answer: breakdown.text,
     sources: dedupeChatSources(sources)
   };
 }
@@ -432,6 +458,143 @@ function summarizeRevenueDrivers(
 
   return {
     text: `提出資料では、${points.join("、")}の売上増が伸びを支えたと説明しています。`,
+    sourceIds
+  };
+}
+
+function summarizeRevenueBreakdown(
+  sourceChunks: SourceChunkRecord[]
+): { text: string; sourceIds: string[] } | null {
+  type RevenueBucket = {
+    label: string;
+    group: "primary" | "secondary";
+    priority: number;
+    sourceId: string;
+  };
+
+  const bucketDefinitions: Array<{
+    label: string;
+    group: "primary" | "secondary";
+    priority: number;
+    patterns: RegExp[];
+  }> = [
+    {
+      label: "車両販売・関連サービス",
+      group: "primary",
+      priority: 10,
+      patterns: [/vehicle sales and services/i, /automotive sales/i, /vehicle sales/i]
+    },
+    {
+      label: "サービス・その他",
+      group: "primary",
+      priority: 20,
+      patterns: [/services and other/i]
+    },
+    {
+      label: "エネルギー生成・蓄電",
+      group: "primary",
+      priority: 30,
+      patterns: [/energy generation and storage/i, /energy storage/i]
+    },
+    {
+      label: "準備金運用収益",
+      group: "primary",
+      priority: 40,
+      patterns: [/reserve income/i]
+    },
+    {
+      label: "サブスク・サービス",
+      group: "primary",
+      priority: 50,
+      patterns: [/subscription and services/i]
+    },
+    {
+      label: "取引収益",
+      group: "primary",
+      priority: 60,
+      patterns: [/transaction revenue/i]
+    },
+    {
+      label: "その他収益",
+      group: "primary",
+      priority: 70,
+      patterns: [/other revenue/i]
+    },
+    {
+      label: "製品売上",
+      group: "primary",
+      priority: 80,
+      patterns: [/product revenue/i]
+    },
+    {
+      label: "サービス売上",
+      group: "primary",
+      priority: 90,
+      patterns: [/service revenue/i]
+    },
+    {
+      label: "規制クレジット",
+      group: "secondary",
+      priority: 110,
+      patterns: [/regulatory credits?/i]
+    },
+    {
+      label: "自動車リース",
+      group: "secondary",
+      priority: 120,
+      patterns: [/automotive leasing/i, /\bleasing\b/i]
+    },
+    {
+      label: "利息収入",
+      group: "secondary",
+      priority: 130,
+      patterns: [/interest income/i]
+    }
+  ];
+
+  const found = new Map<string, RevenueBucket>();
+
+  for (const chunk of sourceChunks) {
+    if (chunk.sectionType !== "md_a") {
+      continue;
+    }
+
+    const text = chunk.text;
+    for (const definition of bucketDefinitions) {
+      if (!definition.patterns.some((pattern) => pattern.test(text))) {
+        continue;
+      }
+
+      if (!found.has(definition.label)) {
+        found.set(definition.label, {
+          label: definition.label,
+          group: definition.group,
+          priority: definition.priority,
+          sourceId: chunk.sourceId
+        });
+      }
+    }
+  }
+
+  const buckets = Array.from(found.values()).sort((left, right) => left.priority - right.priority);
+  if (buckets.length === 0) {
+    return null;
+  }
+
+  const primaryBuckets = buckets.filter((bucket) => bucket.group === "primary");
+  const headlineBuckets = (primaryBuckets.length > 0 ? primaryBuckets : buckets).slice(0, 4);
+  const secondaryBuckets = buckets
+    .filter((bucket) => bucket.group === "secondary" && !headlineBuckets.some((headline) => headline.label === bucket.label))
+    .slice(0, 2);
+  const sourceIds = Array.from(new Set([...headlineBuckets, ...secondaryBuckets].map((bucket) => bucket.sourceId)));
+  const answerParts = [`売上の主な区分は、${headlineBuckets.map((bucket) => bucket.label).join("、")}です。`];
+
+  if (secondaryBuckets.length > 0) {
+    answerParts.push(`補足すると、${secondaryBuckets.map((bucket) => bucket.label).join("、")} も含まれます。`);
+  }
+
+  return {
+    text: answerParts.join(" "),
     sourceIds
   };
 }
