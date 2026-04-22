@@ -4,13 +4,19 @@ struct ChatTopBar: View {
     let ticker: String
     let companyName: String?
     let formType: String?
+    let companyWebsiteURL: URL?
     let isSaved: Bool
     let isLoading: Bool
     let canOpenSummary: Bool
     let openLibrary: () -> Void
+    let openCompanyWebsite: () -> Void
     let openSummary: () -> Void
     let toggleSaved: () -> Void
     let refresh: () -> Void
+
+    private var isResolvingCompanyWebsite: Bool {
+        isLoading && companyWebsiteURL == nil && companyName != nil
+    }
 
     var body: some View {
         HStack(spacing: 14) {
@@ -77,10 +83,38 @@ struct ChatTopBar: View {
     }
 
     private var topBarTitle: some View {
+        Group {
+            if companyWebsiteURL != nil {
+                Button(action: openCompanyWebsite) {
+                    topBarTitleContent(isLink: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(ticker) の会社サイトを開く")
+                .accessibilityHint("企業ホームページまたは投資家向けページを開きます")
+            } else {
+                topBarTitleContent(isLink: false)
+            }
+        }
+    }
+
+    private func topBarTitleContent(isLink: Bool) -> some View {
         VStack(spacing: 2) {
-            Text(ticker)
-                .font(.system(.title3, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.ink)
+            HStack(spacing: 6) {
+                Text(ticker)
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+
+                if isLink {
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                } else if isResolvingCompanyWebsite {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(KabuyomiTheme.accentDeep)
+                }
+            }
+
             if let companyName {
                 Text(companyName)
                     .font(.system(.caption, design: .rounded, weight: .medium))
@@ -90,6 +124,12 @@ struct ChatTopBar: View {
                 Text(formType)
                     .font(.system(.caption, design: .rounded, weight: .medium))
                     .foregroundStyle(KabuyomiTheme.inkMuted)
+            }
+
+            if isResolvingCompanyWebsite {
+                Text("会社サイトを確認中...")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
             }
         }
         .padding(.horizontal, 16)

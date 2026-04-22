@@ -7,6 +7,7 @@ struct ConversationTimeline: View {
     let isSending: Bool
     let suggestions: [String]
     let historicalSuggestions: [String]
+    let openSource: (LocalMessageSourceRef) -> Void
     @Binding var draftQuestion: String
 
     var body: some View {
@@ -37,7 +38,8 @@ struct ConversationTimeline: View {
                                 followUpSuggestions: latestAssistantIndex == index
                                     ? buildFollowUpQuestions(for: company, precedingUserPrompt: prompt)
                                     : [],
-                                applySuggestion: { draftQuestion = $0 }
+                                applySuggestion: { draftQuestion = $0 },
+                                openSource: openSource
                             )
                         }
 
@@ -48,7 +50,8 @@ struct ConversationTimeline: View {
                                 precedingUserPrompt: latestVisibleUserPrompt,
                                 recoverySuggestions: [],
                                 followUpSuggestions: [],
-                                applySuggestion: { _ in }
+                                applySuggestion: { _ in },
+                                openSource: openSource
                             )
 
                             PendingAssistantStatusRow(company: company, pendingChat: pendingChat)
@@ -470,16 +473,16 @@ struct ConversationEmptyState: View {
 
         if openingExample.isEmpty {
             if let historyExample {
-                return "\(company.companyName) の今回の filing で、最初に確認したい点をそのまま聞けます。たとえば \(historyExample) のような履歴比較にもすぐ進めます。"
+                return "\(company.companyName) の今回の決算資料で、最初に確認したい点をそのまま聞けます。たとえば \(historyExample) のような履歴比較にもすぐ進めます。"
             }
-            return "\(company.companyName) の今回の filing で、最初に確認したい点をそのまま聞けます。"
+            return "\(company.companyName) の今回の決算資料で、最初に確認したい点をそのまま聞けます。"
         }
 
         if let historyExample {
-            return "\(company.companyName) の今回の filing で、最初に確認したい点をそのまま聞けます。たとえば \(openingExample) から入り、\(historyExample) のような履歴比較にもすぐ進めます。"
+            return "\(company.companyName) の今回の決算資料で、最初に確認したい点をそのまま聞けます。たとえば \(openingExample) から入り、\(historyExample) のような履歴比較にもすぐ進めます。"
         }
 
-        return "\(company.companyName) の今回の filing で、最初に確認したい点をそのまま聞けます。たとえば \(openingExample) から入ると全体像を掴みやすくなります。"
+        return "\(company.companyName) の今回の決算資料で、最初に確認したい点をそのまま聞けます。たとえば \(openingExample) から入ると全体像を掴みやすくなります。"
     }
 }
 

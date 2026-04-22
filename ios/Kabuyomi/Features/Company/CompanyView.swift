@@ -1,4 +1,7 @@
+import OSLog
 import SwiftUI
+import UIKit
+import WebKit
 
 private enum CompanySidePanel {
     case library
@@ -15,6 +18,7 @@ struct CompanyView: View {
     @State private var activePanel: CompanySidePanel?
     @State private var librarySearchTask: Task<Void, Never>?
     @State private var settingsPresented = false
+    @State private var selectedSource: LocalMessageSourceRef?
     @State private var libraryPanelID = UUID()
     @State private var summaryPanelID = UUID()
 
@@ -59,6 +63,11 @@ struct CompanyView: View {
 
     private var isCurrentTickerSaved: Bool {
         appModel.isTickerInWatchlist(currentTicker, cik: company?.cik)
+    }
+
+    private var companyWebsiteURL: URL? {
+        guard let rawValue = company?.companyWebsiteUrl else { return nil }
+        return URL(string: rawValue)
     }
 
     var body: some View {
@@ -158,6 +167,13 @@ struct CompanyView: View {
             SettingsView()
                 .presentationDragIndicator(.visible)
         }
+        .sheet(item: $selectedSource) { source in
+            if let company {
+                SourceEvidenceSheet(company: company, source: source)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
     }
 
     private var mainContent: some View {
@@ -166,10 +182,12 @@ struct CompanyView: View {
                 ticker: currentTicker,
                 companyName: company?.companyName,
                 formType: company?.formType,
+                companyWebsiteURL: companyWebsiteURL,
                 isSaved: isCurrentTickerSaved,
                 isLoading: appModel.companyIsLoading,
                 canOpenSummary: company != nil,
                 openLibrary: { openPanel(.library) },
+                openCompanyWebsite: openCompanyWebsite,
                 openSummary: {
                     if company != nil {
                         openPanel(.summary)
@@ -187,6 +205,7 @@ struct CompanyView: View {
                     isSending: appModel.chatIsSending,
                     suggestions: buildSuggestedQuestions(for: company),
                     historicalSuggestions: buildHistoricalQuestions(for: company),
+                    openSource: openChatSource,
                     draftQuestion: $question
                 )
             } else {
@@ -250,6 +269,8 @@ struct CompanyView: View {
     }
 
     private func openPanel(_ panel: CompanySidePanel) {
+        dismissKeyboard()
+
         switch panel {
         case .library:
             libraryPanelID = UUID()
@@ -269,6 +290,7 @@ struct CompanyView: View {
     }
 
     private func openSettingsScreen() {
+        dismissKeyboard()
         closePanels()
         Task {
             try? await Task.sleep(for: .milliseconds(180))
@@ -341,8 +363,948 @@ struct CompanyView: View {
     }
 
     private func openPrimaryDocument(urlString: String) {
+        dismissKeyboard()
         guard let url = URL(string: urlString) else { return }
         openURL(url)
+    }
+
+    private func openCompanyWebsite() {
+        dismissKeyboard()
+        guard let url = companyWebsiteURL else { return }
+        openURL(url)
+    }
+
+    private func openChatSource(_ source: LocalMessageSourceRef) {
+        dismissKeyboard()
+        selectedSource = source
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+private struct SourceEvidenceSheet: View {
+    private static let logger = Logger(subsystem: "app.kabuyomi.ios", category: "quote_translation")
+
+    let company: CompanyPayload
+    let source: LocalMessageSourceRef
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @State private var selectedDocumentRequest: SourceDocumentRequest?
+    @State private var previewMode: SourcePreviewMode
+    @State private var previewTranslationState: PreviewTranslationState
+
+    init(company: CompanyPayload, source: LocalMessageSourceRef) {
+        self.company = company
+        self.source = source
+
+        let preview = Self.resolvedPreviewText(for: source, in: company)
+        _previewMode = State(initialValue: shouldOfferPreviewTranslation(for: preview) ? .translated : .original)
+        _previewTranslationState = State(initialValue: .idle)
+    }
+
+    private var matchedChunk: SourceChunkPayload? {
+        matchedSourceChunk(for: source, in: company)
+    }
+
+    private var sourceURL: URL? {
+        resolvedSourceURL(for: source, in: company)
+    }
+
+    private var searchTerms: [String] {
+        sourceDocumentSearchTerms(for: source, in: company)
+    }
+
+    private var manualHint: String? {
+        sourceDocumentManualHint(for: source, in: company)
+    }
+
+    private var title: String {
+        investorFacingSourceLabel(for: source, in: company)
+    }
+
+    private var previewText: String {
+        Self.resolvedPreviewText(for: source, in: company)
+    }
+
+    private var offersPreviewTranslation: Bool {
+        shouldOfferPreviewTranslation(for: previewText)
+    }
+
+    private var displayedPreviewText: String {
+        switch previewMode {
+        case .original:
+            return previewText
+        case .translated:
+            switch previewTranslationState {
+            case .ready(let translated):
+                return translated
+            case .idle, .loading, .failed:
+                return previewText
+            }
+        }
+    }
+
+    private var isPreviewTranslationPending: Bool {
+        guard previewMode == .translated else { return false }
+
+        switch previewTranslationState {
+        case .idle, .loading:
+            return true
+        case .ready, .failed:
+            return false
+        }
+    }
+
+    private var previewTranslationStatusText: String? {
+        guard previewMode == .translated else { return nil }
+
+        switch previewTranslationState {
+        case .idle, .loading:
+            return nil
+        case .failed(let message):
+            return message
+        case .ready:
+            return nil
+        }
+    }
+
+    private var previewTranslationTaskID: String {
+        guard offersPreviewTranslation, previewMode == .translated else {
+            return "\(source.id.uuidString)-off"
+        }
+        return "\(source.id.uuidString)-translated"
+    }
+
+    private var detailLabel: String {
+        let raw = matchedChunk?.sectionTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let raw, !raw.isEmpty {
+            return raw
+        }
+        return source.sourceLabelSnapshot
+    }
+
+    private var openButtonTitle: String {
+        switch source.sourceKind {
+        case .webSupplement:
+            return "外部サイトを開く"
+        case .secFiling, .historicalFiling:
+            return "該当箇所を原文で開く"
+        }
+    }
+
+    var body: some View {
+        navigationContent
+            .task(id: previewTranslationTaskID) {
+                await loadPreviewTranslationIfNeeded()
+            }
+    }
+
+    private var navigationContent: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("この回答はこの根拠を見ています")
+                            .font(.system(.caption, design: .rounded, weight: .bold))
+                            .foregroundStyle(KabuyomiTheme.accentDeep)
+
+                        Text(title)
+                            .font(.system(.title3, design: .rounded, weight: .bold))
+                            .foregroundStyle(KabuyomiTheme.ink)
+
+                        Label(source.sourceKind.groundingCaption, systemImage: source.sourceKind.systemImage)
+                            .font(.system(.footnote, design: .rounded, weight: .semibold))
+                            .foregroundStyle(KabuyomiTheme.inkMuted)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("出典ラベル")
+                            .font(.system(.caption, design: .rounded, weight: .bold))
+                            .foregroundStyle(KabuyomiTheme.accentDeep)
+
+                        Text(detailLabel)
+                            .font(.system(.footnote, design: .rounded, weight: .medium))
+                            .foregroundStyle(KabuyomiTheme.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("引用プレビュー")
+                            .font(.system(.caption, design: .rounded, weight: .bold))
+                            .foregroundStyle(KabuyomiTheme.accentDeep)
+
+                        if offersPreviewTranslation {
+                            previewModeToggle
+
+                            Text("翻訳はこのプレビューだけの別処理です。下のボタンでは原文を開きます。")
+                                .font(.system(.caption2, design: .rounded, weight: .semibold))
+                                .foregroundStyle(KabuyomiTheme.inkMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            if isPreviewTranslationPending {
+                                previewTranslationLoadingBanner
+                            }
+
+                            if let status = previewTranslationStatusText {
+                                Text(status)
+                                    .font(.system(.caption2, design: .rounded, weight: .semibold))
+                                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                            }
+
+                            Text(displayedPreviewText)
+                                .font(.system(.body, design: .rounded, weight: .medium))
+                                .foregroundStyle(isPreviewTranslationPending ? KabuyomiTheme.inkSoft : KabuyomiTheme.ink)
+                                .lineSpacing(4)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .opacity(isPreviewTranslationPending ? 0.82 : 1)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.22), stroke: Color.white.opacity(0.55))
+                        .animation(.easeInOut(duration: 0.2), value: isPreviewTranslationPending)
+                    }
+
+                    if let sourceURL {
+                        if source.sourceKind == .webSupplement {
+                            Button {
+                                openURL(sourceURL)
+                            } label: {
+                                Label(openButtonTitle, systemImage: "safari")
+                                    .font(.system(.body, design: .rounded, weight: .bold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(KabuyomiTheme.accentDeep)
+                        } else {
+                            Button {
+                                selectedDocumentRequest = SourceDocumentRequest(
+                                    title: title,
+                                    url: sourceURL,
+                                    searchTerms: searchTerms,
+                                    manualHint: manualHint,
+                                    searchMode: sourceDocumentSearchMode(for: source, in: company)
+                                )
+                            } label: {
+                                Label(openButtonTitle, systemImage: "doc.text.magnifyingglass")
+                                    .font(.system(.body, design: .rounded, weight: .bold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(KabuyomiTheme.accentDeep)
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .background(KabuyomiTheme.background.ignoresSafeArea())
+            .navigationTitle("根拠")
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $selectedDocumentRequest) { request in
+                SourceDocumentViewerSheet(request: request)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+            .toolbar {
+                if source.sourceKind != .webSupplement,
+                   let sourceURL {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Safari") {
+                            openURL(sourceURL)
+                        }
+                        .font(.system(.body, design: .rounded, weight: .semibold))
+                    }
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("閉じる") {
+                        dismiss()
+                    }
+                    .font(.system(.body, design: .rounded, weight: .semibold))
+                }
+            }
+        }
+    }
+
+    private var previewModeToggle: some View {
+        HStack(spacing: 12) {
+            Text("原文")
+                .font(.system(.caption, design: .rounded, weight: previewMode == .original ? .bold : .semibold))
+                .foregroundStyle(previewMode == .original ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
+
+            Toggle(
+                "",
+                isOn: Binding(
+                    get: { previewMode == .translated },
+                    set: {
+                        if $0, case .failed = previewTranslationState {
+                            previewTranslationState = .idle
+                        }
+                        previewMode = $0 ? .translated : .original
+                    }
+                )
+            )
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .tint(KabuyomiTheme.accentDeep)
+
+            Text("翻訳")
+                .font(.system(.caption, design: .rounded, weight: previewMode == .translated ? .bold : .semibold))
+                .foregroundStyle(previewMode == .translated ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var previewTranslationLoadingBanner: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(KabuyomiTheme.accentDeep)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("翻訳中...")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+
+                Text("いまは原文を先に表示しています。数秒かかることがあります。")
+                    .font(.system(.caption2, design: .rounded, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.45))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.55), lineWidth: 1)
+        )
+    }
+
+    private static func resolvedPreviewText(for source: LocalMessageSourceRef, in company: CompanyPayload) -> String {
+        let matchedChunk = matchedSourceChunk(for: source, in: company)
+        let preferred = matchedChunk?.text ?? source.excerpt
+        let trimmed = normalizedSourcePreviewText(preferred)
+        return trimmed.isEmpty ? "この根拠の本文プレビューはまだありません。" : trimmed
+    }
+
+    @MainActor
+    private func loadPreviewTranslationIfNeeded() async {
+        guard offersPreviewTranslation, previewMode == .translated else { return }
+        guard case .idle = previewTranslationState else { return }
+
+        let trimmed = previewText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        previewTranslationState = .loading
+
+        do {
+            Self.logger.debug("request started length=\(trimmed.count, privacy: .public) source=\(source.sourceLabelSnapshot, privacy: .public)")
+            let response = try await APIClient().translateQuote(text: trimmed, targetLanguage: "ja")
+            let translated = response.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !translated.isEmpty, translated != trimmed else {
+                throw APIError.server("Translation returned unchanged text")
+            }
+
+            Self.logger.debug("request succeeded model=\(response.modelName, privacy: .public) outputLength=\(translated.count, privacy: .public)")
+            previewTranslationState = .ready(translated)
+        } catch is CancellationError {
+            Self.logger.debug("request cancelled")
+            previewTranslationState = .idle
+        } catch {
+            Self.logger.error("request failed error=\(String(describing: error), privacy: .public)")
+            if let fallback = fallbackPreviewTranslation(for: trimmed) {
+                Self.logger.debug("fallback used outputLength=\(fallback.count, privacy: .public)")
+                previewTranslationState = .ready(fallback)
+            } else {
+                previewTranslationState = .failed("翻訳を取得できなかったので、原文を表示しています。")
+            }
+        }
+    }
+}
+
+private enum SourcePreviewMode {
+    case original
+    case translated
+}
+
+private enum PreviewTranslationState: Equatable {
+    case idle
+    case loading
+    case ready(String)
+    case failed(String)
+}
+
+func shouldOfferPreviewTranslation(for text: String) -> Bool {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return false }
+    return trimmed.range(of: #"[ぁ-んァ-ヶ一-龠]"#, options: .regularExpression) == nil
+}
+
+func fallbackPreviewTranslation(for text: String) -> String? {
+    let localized = localizedAssistantDisplayText(text).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !localized.isEmpty else { return nil }
+    guard localized != text.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+    guard localized.range(of: #"[ぁ-んァ-ヶ一-龠]"#, options: .regularExpression) != nil else { return nil }
+    return localized
+}
+
+func normalizedSourcePreviewText(_ text: String, limit: Int = 520) -> String {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return "" }
+
+    var normalized = ""
+    normalized.reserveCapacity(trimmed.count + 16)
+
+    var previousVisibleScalar: UnicodeScalar?
+    var scalarBeforePreviousVisible: UnicodeScalar?
+    var consecutiveLowercaseCount = 0
+    var lastWasWhitespace = false
+
+    for scalar in trimmed.unicodeScalars {
+        if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+            if !lastWasWhitespace, !normalized.isEmpty {
+                normalized.append(" ")
+            }
+            consecutiveLowercaseCount = 0
+            lastWasWhitespace = true
+            continue
+        }
+
+        if let previousVisibleScalar,
+           shouldInsertPreviewSeparator(
+               after: previousVisibleScalar,
+               before: scalar,
+               priorVisible: scalarBeforePreviousVisible,
+               consecutiveLowercaseCount: consecutiveLowercaseCount
+           ),
+           !normalized.hasSuffix(" ") {
+            normalized.append(" ")
+        }
+
+        normalized.unicodeScalars.append(scalar)
+        scalarBeforePreviousVisible = previousVisibleScalar
+        previousVisibleScalar = scalar
+        consecutiveLowercaseCount = isASCIILowercase(scalar) ? (consecutiveLowercaseCount + 1) : 0
+        lastWasWhitespace = false
+    }
+
+    normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard normalized.count > limit else { return normalized }
+
+    let prefix = String(normalized.prefix(limit))
+    let boundary =
+        prefix.range(of: ". ", options: .backwards)
+        ?? prefix.range(of: "; ", options: .backwards)
+        ?? prefix.range(of: ", ", options: .backwards)
+    let clipped = boundary.map { String(prefix[..<$0.lowerBound]) } ?? prefix
+    return clipped.trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+}
+
+private func shouldInsertPreviewSeparator(
+    after previous: UnicodeScalar,
+    before current: UnicodeScalar,
+    priorVisible: UnicodeScalar?,
+    consecutiveLowercaseCount: Int
+) -> Bool {
+    if isASCIILowercase(previous) && isASCIIUppercase(current) && consecutiveLowercaseCount >= 2 {
+        return true
+    }
+    if isASCIIDigit(previous) && isASCIIUppercase(current) {
+        return true
+    }
+    if isSentencePunctuation(previous),
+       let priorVisible,
+       (isASCIILowercase(priorVisible) || isASCIIDigit(priorVisible)),
+       (isASCIIUppercase(current) || isASCIIDigit(current)) {
+        return true
+    }
+    return false
+}
+
+private func isASCIILowercase(_ scalar: UnicodeScalar) -> Bool {
+    (97...122).contains(scalar.value)
+}
+
+private func isASCIIUppercase(_ scalar: UnicodeScalar) -> Bool {
+    (65...90).contains(scalar.value)
+}
+
+private func isASCIIDigit(_ scalar: UnicodeScalar) -> Bool {
+    (48...57).contains(scalar.value)
+}
+
+private func isSentencePunctuation(_ scalar: UnicodeScalar) -> Bool {
+    scalar == "." || scalar == "!" || scalar == "?"
+}
+
+private struct SourceDocumentRequest: Identifiable, Equatable {
+    let title: String
+    let url: URL
+    let searchTerms: [String]
+    let manualHint: String?
+    let searchMode: SourceDocumentSearchMode
+
+    var id: String {
+        url.absoluteString + "::" + searchMode.rawValue + "::" + searchTerms.joined(separator: "|")
+    }
+}
+
+private enum SourceDocumentSearchStatus: Equatable {
+    case loading
+    case matched(String)
+    case failed(String?)
+    case webError(String)
+
+    var title: String {
+        switch self {
+        case .loading:
+            return "該当箇所を探しています"
+        case .matched:
+            return "該当箇所の近くまで移動しました"
+        case .failed:
+            return "自動位置合わせができませんでした"
+        case .webError:
+            return "原文を開けませんでした"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .loading:
+            return "見出しか引用文を手がかりに、原文の中で位置を合わせます。"
+        case .matched(let term):
+            return "「\(term)」を手がかりにスクロールしています。"
+        case .failed(let hint):
+            if let hint, !hint.isEmpty {
+                return "ページ内検索を使うなら「\(hint)」を入れてください。"
+            }
+            return "引用プレビューを手がかりに、ページ内検索を使ってください。"
+        case .webError(let message):
+            return message
+        }
+    }
+}
+
+private struct SourceDocumentViewerSheet: View {
+    let request: SourceDocumentRequest
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @State private var searchStatus: SourceDocumentSearchStatus = .loading
+
+    private var visibleHints: [String] {
+        var hints: [String] = []
+
+        if let manualHint = request.manualHint,
+           !manualHint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            hints.append(manualHint)
+        }
+
+        for term in request.searchTerms where hints.count < 3 && !hints.contains(term) {
+            hints.append(term)
+        }
+
+        return hints
+    }
+
+    private var statusDetailText: String {
+        switch searchStatus {
+        case .loading where request.searchMode == .tabular:
+            return "指標名や表の行を手がかりに、原文の中で位置を合わせます。"
+        case .failed(let hint) where request.searchMode == .tabular:
+            if let hint, !hint.isEmpty {
+                return "ページ内検索を使うなら「\(hint)」や financial statements の表見出しで探してください。"
+            }
+            return "financial statements の表見出しや指標名でページ内検索を使ってください。"
+        default:
+            return searchStatus.detail
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                statusCard
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+
+                SourceDocumentWebView(
+                    url: request.url,
+                    searchTerms: request.searchTerms,
+                    searchMode: request.searchMode,
+                    searchStatus: $searchStatus
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(Color.white.opacity(0.55), lineWidth: 1)
+                )
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+            }
+            .background(KabuyomiTheme.background.ignoresSafeArea())
+            .navigationTitle(request.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("閉じる") {
+                        dismiss()
+                    }
+                    .font(.system(.body, design: .rounded, weight: .semibold))
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Safari") {
+                        openURL(request.url)
+                    }
+                    .font(.system(.body, design: .rounded, weight: .semibold))
+                }
+            }
+        }
+    }
+
+    private var statusCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(searchStatus.title)
+                .font(.system(.headline, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.ink)
+
+            Text(statusDetailText)
+                .font(.system(.footnote, design: .rounded, weight: .medium))
+                .foregroundStyle(KabuyomiTheme.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !visibleHints.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(visibleHints, id: \.self) { hint in
+                            Text(hint)
+                                .font(.system(.caption, design: .rounded, weight: .semibold))
+                                .foregroundStyle(KabuyomiTheme.accentDeep)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.62)))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.22), stroke: Color.white.opacity(0.55))
+    }
+}
+
+private struct SourceDocumentWebView: UIViewRepresentable {
+    let url: URL
+    let searchTerms: [String]
+    let searchMode: SourceDocumentSearchMode
+    @Binding var searchStatus: SourceDocumentSearchStatus
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        webView.allowsBackForwardNavigationGestures = true
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.isOpaque = false
+        webView.backgroundColor = UIColor.clear
+        webView.scrollView.backgroundColor = UIColor.clear
+        context.coordinator.load(url: url, in: webView)
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        context.coordinator.parent = self
+        if context.coordinator.loadedURL != url {
+            context.coordinator.load(url: url, in: webView)
+        } else if context.coordinator.lastSearchTerms != searchTerms || context.coordinator.lastSearchMode != searchMode {
+            context.coordinator.lastSearchTerms = searchTerms
+            context.coordinator.lastSearchMode = searchMode
+            context.coordinator.runSearch(in: webView)
+        }
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var parent: SourceDocumentWebView
+        var loadedURL: URL?
+        var lastSearchTerms: [String] = []
+        var lastSearchMode: SourceDocumentSearchMode
+
+        init(parent: SourceDocumentWebView) {
+            self.parent = parent
+            self.lastSearchMode = parent.searchMode
+        }
+
+        func load(url: URL, in webView: WKWebView) {
+            loadedURL = url
+            lastSearchTerms = parent.searchTerms
+            lastSearchMode = parent.searchMode
+            parent.searchStatus = .loading
+            webView.load(URLRequest(url: url))
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            runSearch(in: webView)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            parent.searchStatus = .webError(error.localizedDescription)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFailProvisionalNavigation navigation: WKNavigation!,
+            withError error: Error
+        ) {
+            parent.searchStatus = .webError(error.localizedDescription)
+        }
+
+        func runSearch(in webView: WKWebView) {
+            let searchTerms = parent.searchTerms.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            guard !searchTerms.isEmpty else {
+                parent.searchStatus = .failed(nil)
+                return
+            }
+
+            let jsonData = (try? JSONSerialization.data(withJSONObject: searchTerms)) ?? Data("[]".utf8)
+            let encodedTerms = String(decoding: jsonData, as: UTF8.self)
+            let searchMode = parent.searchMode.rawValue
+            let script = """
+            (function() {
+              const terms = \(encodedTerms);
+              const searchMode = "\(searchMode)";
+              const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim().toLowerCase();
+              const textFor = (element) => normalize(element.innerText || element.textContent || "");
+              const selectors =
+                searchMode === "tabular"
+                  ? "h1,h2,h3,h4,h5,h6,p,li,div,table,tbody,thead,tr,td,th,strong,b,span"
+                  : "h1,h2,h3,h4,h5,h6,p,li,div,td,th,strong,b";
+
+              const hasTableOfContentsContext = (element) => {
+                let node = element;
+                let depth = 0;
+                while (node && depth < 5) {
+                  const label = normalize(
+                    (node.getAttribute && (node.getAttribute("aria-label") || node.getAttribute("title"))) || ""
+                  );
+                  const text = textFor(node).slice(0, 800);
+                  if (label.includes("table of contents") || text.includes("table of contents")) {
+                    return true;
+                  }
+                  node = node.parentElement;
+                  depth += 1;
+                }
+                return false;
+              };
+
+              const entries = Array.from(document.querySelectorAll(selectors)).map((element) => {
+                const text = textFor(element);
+                if (!text) return null;
+                if (searchMode === "tabular") {
+                  if (text.length < 3 || text.length > 2600) return null;
+                } else if (text.length < 20 || text.length > 2200) {
+                  return null;
+                }
+                const tag = (element.tagName || "").toUpperCase();
+                if (["SCRIPT", "STYLE", "NOSCRIPT"].includes(tag)) return null;
+
+                const links = Array.from(element.querySelectorAll("a"));
+                const linkTextLength = links.reduce((sum, link) => sum + textFor(link).length, 0);
+                const linkDensity = linkTextLength / Math.max(text.length, 1);
+                const inTable = Boolean(element.closest("table"));
+                const inNav = Boolean(element.closest("nav,[role='navigation']"));
+                const tocContext = hasTableOfContentsContext(element);
+                const headingLike = /^H[1-6]$/.test(tag) || ["STRONG", "B", "TH"].includes(tag);
+                const rowLike = tag === "TR";
+                const tableCellLike = tag === "TD" || tag === "TH";
+                const proseLike = !headingLike && !inTable && !inNav && linkDensity < 0.18 && text.length >= 80;
+
+                return {
+                  element,
+                  text,
+                  tag,
+                  linkDensity,
+                  inTable,
+                  inNav,
+                  tocContext,
+                  headingLike,
+                  rowLike,
+                  tableCellLike,
+                  proseLike
+                };
+              }).filter(Boolean);
+
+              const entryByElement = new Map(entries.map((entry) => [entry.element, entry]));
+
+              const clearHighlight = () => {
+                document.querySelectorAll("[data-kabuyomi-highlight='1']").forEach((element) => {
+                  element.style.outline = "";
+                  element.style.background = "";
+                  element.style.borderRadius = "";
+                  element.style.scrollMarginTop = "";
+                  element.removeAttribute("data-kabuyomi-highlight");
+                });
+              };
+
+              const findCompanionEntry = (entry) => {
+                if (searchMode === "tabular" && (entry.rowLike || entry.tableCellLike || entry.inTable)) {
+                  return entry;
+                }
+                if (!entry.headingLike) return entry;
+
+                let sibling = entry.element.nextElementSibling;
+                let steps = 0;
+
+                while (sibling && steps < 5) {
+                  const direct = entryByElement.get(sibling);
+                  if (direct && direct.proseLike && !direct.tocContext) {
+                    return direct;
+                  }
+
+                  const nested = entries.find((candidate) =>
+                    sibling.contains(candidate.element) && candidate.proseLike && !candidate.tocContext
+                  );
+                  if (nested) {
+                    return nested;
+                  }
+
+                  sibling = sibling.nextElementSibling;
+                  steps += 1;
+                }
+
+                return entry;
+              };
+
+              const focusEntry = (entry, term) => {
+                const target = findCompanionEntry(entry);
+                const element = target.element;
+                clearHighlight();
+                element.setAttribute("data-kabuyomi-highlight", "1");
+                element.style.outline = "3px solid rgba(176, 106, 42, 0.95)";
+                element.style.background = "rgba(255, 226, 179, 0.55)";
+                element.style.borderRadius = "8px";
+                element.style.scrollMarginTop = "120px";
+                element.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
+                return {
+                  matched: term,
+                  preview: (element.innerText || element.textContent || "").trim().slice(0, 280)
+                };
+              };
+
+              const scoreEntry = (entry, partial) => {
+                if (searchMode === "tabular") {
+                  let score = partial ? 520 : 1080;
+
+                  if (entry.rowLike) score += 420;
+                  if (entry.tableCellLike) score += 280;
+                  if (entry.inTable) score += 220;
+                  if (entry.tag === "TABLE" || entry.tag === "TBODY" || entry.tag === "THEAD") score -= 160;
+                  if (entry.text.length >= 8 && entry.text.length <= 240) score += 120;
+                  if (entry.text.length > 600) score -= 120;
+
+                  if (entry.headingLike) score -= 100;
+                  if (entry.inNav) score -= 260;
+                  if (entry.tocContext) score -= 700;
+                  if (entry.linkDensity > 0.20) score -= 420;
+                  if (entry.text.length < 6) score -= 260;
+
+                  return score;
+                }
+
+                let score = partial ? 420 : 1000;
+
+                if (entry.proseLike) score += 320;
+                if (entry.tag === "P") score += 180;
+                if (entry.tag === "LI") score += 80;
+                if (entry.tag === "DIV") score += 60;
+                if (entry.text.length >= 80 && entry.text.length <= 1400) score += 60;
+
+                if (entry.headingLike) score -= 220;
+                if (entry.inTable) score -= 260;
+                if (entry.inNav) score -= 260;
+                if (entry.tocContext) score -= 700;
+                if (entry.linkDensity > 0.20) score -= 420;
+                if (entry.text.length < 60) score -= 200;
+
+                return score;
+              };
+
+              for (const rawTerm of terms) {
+                const term = normalize(rawTerm);
+                if (!term) continue;
+
+                const variants = [{ value: term, partial: false }];
+                if (term.length > 48) {
+                  variants.push({
+                    value: term.slice(0, Math.min(96, Math.max(48, Math.floor(term.length * 0.7)))),
+                    partial: true
+                  });
+                }
+
+                let bestMatch = null;
+
+                for (const variant of variants) {
+                  for (const entry of entries) {
+                    if (!entry.text.includes(variant.value)) continue;
+
+                    const score = scoreEntry(entry, variant.partial);
+                    if (!bestMatch || score > bestMatch.score) {
+                      bestMatch = { entry, score };
+                    }
+                  }
+
+                  if (bestMatch && bestMatch.score >= 700) {
+                    break;
+                  }
+                }
+
+                if (bestMatch) {
+                  return focusEntry(bestMatch.entry, rawTerm);
+                }
+              }
+
+              return null;
+            })();
+            """
+
+            webView.evaluateJavaScript(script) { [weak self] value, _ in
+                guard let self else { return }
+
+                if let result = value as? [String: Any],
+                   let matched = result["matched"] as? String,
+                   !matched.isEmpty {
+                    DispatchQueue.main.async {
+                        self.parent.searchStatus = .matched(matched)
+                    }
+                    return
+                }
+
+                DispatchQueue.main.async {
+                    self.parent.searchStatus = .failed(searchTerms.first)
+                }
+            }
+        }
     }
 }
 

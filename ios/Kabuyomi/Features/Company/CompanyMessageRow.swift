@@ -8,6 +8,7 @@ struct ConversationMessageRow: View {
     let recoverySuggestions: [String]
     let followUpSuggestions: [String]
     let applySuggestion: (String) -> Void
+    let openSource: (LocalMessageSourceRef) -> Void
 
     var body: some View {
         VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 8) {
@@ -51,21 +52,10 @@ struct ConversationMessageRow: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(message.sources) { source in
-                                HStack(spacing: 6) {
-                                    Text(source.sourceKind.badgeTitle)
-                                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                                        .foregroundStyle(sourceBadgeForeground(for: source))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 3)
-                                        .background(Capsule().fill(sourceBadgeBackground(for: source)))
-
-                                    Label(displaySourceLabel(for: source), systemImage: source.sourceKind.systemImage)
-                                        .font(.system(.caption2, design: .rounded, weight: .semibold))
-                                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                                Button(action: { openSource(source) }) {
+                                    sourceChip(for: source)
                                 }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -101,7 +91,7 @@ struct ConversationMessageRow: View {
         let kinds = Set(message.sources.map(\.sourceKind))
 
         if kinds.contains(.historicalFiling) && kinds.contains(.secFiling) {
-            return "最新 filing と過去提出資料を併用"
+            return "最新決算資料と過去資料を併用"
         }
 
         if kinds.contains(.historicalFiling) && kinds.contains(.webSupplement) {
@@ -109,7 +99,7 @@ struct ConversationMessageRow: View {
         }
 
         if kinds.contains(.secFiling) && kinds.contains(.webSupplement) {
-            return "SEC filing を起点に外部補足あり"
+            return "SEC資料を起点に外部補足あり"
         }
 
         if comparisonLimitationNotice != nil {
@@ -207,13 +197,30 @@ struct ConversationMessageRow: View {
     }
 
     private func displaySourceLabel(for source: LocalMessageSourceRef) -> String {
-        if let matchedChunk = company.sourceChunks.first(where: {
-            $0.sourceLabel == source.sourceLabelSnapshot || $0.sectionTitle == source.sourceLabelSnapshot
-        }) {
-            return investorFacingSourceLabel(for: matchedChunk, in: company)
-        }
+        investorFacingSourceLabel(for: source, in: company)
+    }
 
-        return investorFacingSourceLabel(rawLabel: source.sourceLabelSnapshot, in: company)
+    @ViewBuilder
+    private func sourceChip(for source: LocalMessageSourceRef) -> some View {
+        HStack(spacing: 6) {
+            Text(source.sourceKind.badgeTitle)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(sourceBadgeForeground(for: source))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(sourceBadgeBackground(for: source)))
+
+            Label(displaySourceLabel(for: source), systemImage: source.sourceKind.systemImage)
+                .font(.system(.caption2, design: .rounded, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.accentDeep)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.accentDeep.opacity(0.55))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
     }
 
     private var messageMetaLine: some View {
@@ -284,7 +291,7 @@ struct ConversationMessageRow: View {
 
         return AssistantComparisonNotice(
             title: "この beta では他社比較はまだ限定的です",
-            message: "今回の回答は主に \(company.ticker) 単体の filing をもとに整理しています。代わりに、同社の前回比や今回の変化はすぐ追えます。"
+            message: "今回の回答は主に \(company.ticker) 単体の今回の決算資料をもとに整理しています。代わりに、同社の前回比や今回の変化はすぐ追えます。"
         )
     }
 
@@ -295,10 +302,10 @@ struct ConversationMessageRow: View {
 
     private var fallbackCopy: String {
         if comparisonLimitationCopy != nil {
-            return "代わりに、この filing から確認できる同社の前回比や注目点を続けて見ていけます。"
+            return "代わりに、この決算資料から確認できる同社の前回比や注目点を続けて見ていけます。"
         }
 
-        return "この filing ではその論点を十分に確認できませんでした。代わりに、この資料から追いやすいポイントを続けて見ていけます。"
+        return "この決算資料ではその論点を十分に確認できませんでした。代わりに、ここから追いやすいポイントを続けて見ていけます。"
     }
 }
 
@@ -573,7 +580,7 @@ func structureAssistantMessage(_ text: String) -> AssistantMessageStructure {
     let normalizedSentences = sentences.compactMap(normalizeAssistantSentence)
     guard !normalizedSentences.isEmpty else {
         return AssistantMessageStructure(
-            conclusion: "この filing だけでは、これ以上の切り分けは難しいです。",
+            conclusion: "この決算資料だけでは、これ以上の切り分けは難しいです。",
             evidence: [],
             limitations: []
         )
@@ -651,6 +658,7 @@ private func isLimitationSentence(_ sentence: String) -> Bool {
 private func isUnavailableMessage(_ text: String) -> Bool {
     let normalized = text.lowercased()
     let patterns = [
+        "この決算資料の範囲では確認できません",
         "この filing の提供コンテキストでは確認できません",
         "十分確認できません",
         "確認できません",
@@ -698,7 +706,7 @@ func localizedAssistantDisplayText(_ text: String) -> String {
         || candidateNormalized.contains("investors are cautioned")
         || candidateNormalized.contains("actual results and events")
         || candidateNormalized.contains("could cause actual results") {
-        return "この filing だけでは、これ以上の切り分けは難しいです。"
+        return "この決算資料だけでは、これ以上の切り分けは難しいです。"
     }
 
     let strippedItemReference = trimmed.replacingOccurrences(

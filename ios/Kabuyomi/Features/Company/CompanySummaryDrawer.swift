@@ -171,7 +171,7 @@ private struct SummaryLeadCard: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                Text(summarySentence ?? "この filing の要点を短く押さえ、そのまま会話で深掘りできます。")
+                Text(summarySentence ?? "この決算資料の要点を短く押さえ、そのまま会話で深掘りできます。")
                     .font(.system(.title3, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.ink)
                     .lineSpacing(4)

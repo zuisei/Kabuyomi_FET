@@ -9,9 +9,10 @@ import {
 
 const METRIC_TAGS = {
   revenue: [
-    "RevenueFromContractWithCustomerExcludingAssessedTax",
     "Revenues",
-    "SalesRevenueNet"
+    "SalesRevenueNet",
+    // Prefer total top-line metrics before contract-only revenue components.
+    "RevenueFromContractWithCustomerExcludingAssessedTax"
   ],
   netIncome: ["NetIncomeLoss", "ProfitLoss"],
   epsBasic: ["EarningsPerShareBasic"],

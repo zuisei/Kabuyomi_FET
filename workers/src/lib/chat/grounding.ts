@@ -12,6 +12,7 @@ export interface ChatEvidenceSource {
   sectionType: string;
   sourceLabel: string;
   excerpt: string;
+  sourceUrl?: string;
 }
 
 export interface ChatResponsePayload {
@@ -20,7 +21,7 @@ export interface ChatResponsePayload {
   responsePath?: ChatResponsePath;
 }
 
-export const CONTEXT_UNAVAILABLE_ANSWER = "この filing の提供コンテキストでは確認できません。";
+export const CONTEXT_UNAVAILABLE_ANSWER = "この決算資料の範囲では確認できません。";
 
 export function dedupeChatSources(sources: ChatEvidenceSource[]): ChatEvidenceSource[] {
   const deduped: ChatEvidenceSource[] = [];
@@ -41,6 +42,27 @@ export function buildSecFilingSource(source: SourceChunkRecord): ChatEvidenceSou
     sectionType: source.sectionType,
     sourceLabel: source.sourceLabel,
     excerpt: source.text.slice(0, 220)
+  };
+}
+
+export function attachCurrentFilingSourceUrls(
+  response: ChatResponsePayload,
+  primaryDocumentUrl: string
+): ChatResponsePayload {
+  if (!primaryDocumentUrl) {
+    return response;
+  }
+
+  return {
+    ...response,
+    sources: response.sources.map((source) =>
+      source.sourceKind === "sec_filing" && !source.sourceUrl
+        ? {
+            ...source,
+            sourceUrl: primaryDocumentUrl
+          }
+        : source
+    )
   };
 }
 

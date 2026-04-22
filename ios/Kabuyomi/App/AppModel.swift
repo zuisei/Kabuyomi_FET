@@ -361,7 +361,7 @@ final class AppModel {
         let stateGeneration = self.stateGeneration
         guard aiConsentGranted else {
             activeAlert = AppAlertState(
-                message: "AI 利用前に、質問内容と filing コンテキストを外部 AI モデルへ送信することへの同意が必要です。\n個人情報や口座情報は入力しないでください。",
+                message: "AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モデルへ送信することへの同意が必要です。\n個人情報や口座情報は入力しないでください。",
                 kind: .aiConsent
             )
             return false
@@ -521,7 +521,7 @@ final class AppModel {
         activeAlert = AppAlertState(
             message: """
 保存済みデータと会話履歴をこの端末から削除します。
-取得済み filing も消え、利用状況は新規ユーザー状態に戻る可能性があります。
+取得済みの決算資料も消え、利用状況は新規ユーザー状態に戻る可能性があります。
 端末識別情報は再生成され、最初からやり直す状態に戻ります。
 """,
             kind: .resetConfirmation

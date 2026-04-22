@@ -12,6 +12,7 @@ enum TestFixtures {
             filedAt: "2024-11-01",
             periodOfReport: "2024-09-30",
             primaryDocumentUrl: "https://www.sec.gov/Archives/\(ticker).htm",
+            companyWebsiteUrl: "https://www.\(ticker.lowercased()).com",
             summary: SummaryPayload(
                 verdict: "\(ticker) は増収増益でした。",
                 highlights: [
@@ -130,7 +131,8 @@ enum TestFixtures {
                     sourceKind: .secFiling,
                     sectionType: "xbrl_metric",
                     sourceLabel: "OperatingIncomeLoss",
-                    excerpt: "123456000000"
+                    excerpt: "123456000000",
+                    sourceUrl: "https://www.sec.gov/Archives/AAPL.htm"
                 )
             ],
             responsePath: .gemini,
@@ -170,6 +172,7 @@ enum TestFixtures {
                 "filedAt": company.filedAt,
                 "periodOfReport": company.periodOfReport,
                 "primaryDocumentUrl": company.primaryDocumentUrl,
+                "companyWebsiteUrl": jsonField(company.companyWebsiteUrl),
                 "summary": [
                     "verdict": company.summary.verdict,
                     "highlights": company.summary.highlights.map {
@@ -248,6 +251,7 @@ enum TestFixtures {
             "filedAt": company.filedAt,
             "periodOfReport": company.periodOfReport,
             "primaryDocumentUrl": company.primaryDocumentUrl,
+            "companyWebsiteUrl": jsonField(company.companyWebsiteUrl),
             "summary": [
                 "verdict": company.summary.verdict,
                 "highlights": company.summary.highlights.map {

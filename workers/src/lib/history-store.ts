@@ -17,6 +17,7 @@ type HistoricalSource = {
   sectionType: string;
   sourceLabel: string;
   excerpt: string;
+  sourceUrl?: string;
 };
 
 export interface HistoricalChatResponse {
@@ -79,6 +80,7 @@ interface HistoricalMetricRow {
   unit: string;
   yoyPercent: number | null;
   sourceId: string;
+  primaryDocumentUrl?: string;
 }
 
 interface SegmentHighlightRow {
@@ -91,6 +93,7 @@ interface SegmentHighlightRow {
   label: string;
   summary: string;
   sourceId: string | null;
+  primaryDocumentUrl?: string;
 }
 
 type SegmentHighlightInsert = {
@@ -191,7 +194,7 @@ export async function maybeBuildHistoricalChatResponse(
 
   const groups = groupMetricRows(metricRows);
   const asksMargin = /(利益率|マージン|採算)/.test(question.replace(/\s+/g, "").toLowerCase());
-  const asksDrivers = /(地域|事業|セグメント|支え|牽引|ドライバ|要因|背景)/.test(question.replace(/\s+/g, "").toLowerCase());
+  const asksDrivers = /(地域|事業|セグメント|支え|牽引|ドライバ|要因|原因|背景)/.test(question.replace(/\s+/g, "").toLowerCase());
 
   const answerParts = [`この${HISTORY_YEARS}年の${filing.formType === "10-Q" ? "四半期" : "年次"}提出資料ベースで見ると、`];
   const sources: HistoricalSource[] = [];
@@ -628,7 +631,8 @@ async function loadHistoricalMetricRows(
       m.value AS value,
       m.unit AS unit,
       m.yoy_percent AS yoyPercent,
-      m.source_id AS sourceId
+      m.source_id AS sourceId,
+      f.primary_document_url AS primaryDocumentUrl
     FROM metric_history m
     JOIN filings f ON f.filing_key = m.filing_key
     WHERE f.cik = ? AND f.form_type = ? AND m.period_end >= ? AND m.logical_name IN (${placeholders})
@@ -657,7 +661,8 @@ async function loadSegmentHighlights(
       s.dimension AS dimension,
       s.label AS label,
       s.summary AS summary,
-      s.source_id AS sourceId
+      s.source_id AS sourceId,
+      f.primary_document_url AS primaryDocumentUrl
     FROM segment_highlights s
     JOIN filings f ON f.filing_key = s.filing_key
     WHERE f.cik = ? AND f.form_type = ? AND s.period_end >= ?
@@ -680,7 +685,7 @@ function selectHistoricalMetricNames(question: string): MetricSnapshot["logicalN
   if (/(営業利益|operatingincome|本業)/.test(normalized)) {
     metrics.push("operatingIncome");
   }
-  if (/(純利益|netincome|利益|儲)/.test(normalized)) {
+  if (/(純利益|netincome|利益|儲|赤字|黒字|損失|loss)/.test(normalized)) {
     metrics.push("netIncome");
   }
   if (/(キャッシュ|cash|現金)/.test(normalized)) {
@@ -797,7 +802,8 @@ function buildHistoricalMetricSource(row: HistoricalMetricRow): HistoricalSource
     sourceStrength: "filing_primary",
     sectionType: "historical_metric",
     sourceLabel: `${row.formType} filed ${row.filedAt} · period ${row.periodEnd}`,
-    excerpt: `${metricLabel(row.logicalName)}: ${formatMetricValue(row.value, row.unit)} (${row.periodEnd})`
+    excerpt: `${metricLabel(row.logicalName)}: ${formatMetricValue(row.value, row.unit)} (${row.periodEnd})`,
+    sourceUrl: row.primaryDocumentUrl
   };
 }
 
@@ -808,7 +814,8 @@ function buildSegmentSource(row: SegmentHighlightRow): HistoricalSource {
     sourceStrength: "filing_primary",
     sectionType: "historical_segment",
     sourceLabel: `${row.formType} filed ${row.filedAt} · period ${row.periodEnd}`,
-    excerpt: `${row.label}: ${row.summary}`
+    excerpt: `${row.label}: ${row.summary}`,
+    sourceUrl: row.primaryDocumentUrl
   };
 }
 

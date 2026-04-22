@@ -3,6 +3,7 @@ import { generateSummary } from "../../clients/gemini";
 import { buildPrimaryDocumentUrl, fetchFilingAssets, fetchMetricSnapshots } from "../../clients/sec";
 import { extractMDASectionWithDiagnostics } from "../../extractors/mda";
 import { AppError } from "../errors";
+import { extractCompanyWebsiteUrl } from "./company-website";
 import { logEvent } from "../logging";
 import { metricLabel } from "../metrics";
 import type { RemoteConfig } from "../remote-config";
@@ -20,6 +21,7 @@ export async function ingestFiling(
   const fetchStartedAt = Date.now();
   let metrics: MetricSnapshot[];
   let primaryDocumentUrl: string;
+  let companyWebsiteUrl: string | undefined;
   let html = "";
   let extractedText = "";
   let extractedTokenCount = 0;
@@ -55,6 +57,10 @@ export async function ingestFiling(
     const fetched = await fetchFilingAssets(filing, comparisonFiling, env);
     html = fetched.html;
     primaryDocumentUrl = fetched.primaryDocumentUrl;
+    companyWebsiteUrl = extractCompanyWebsiteUrl(html, {
+      companyName: filing.companyName,
+      primaryDocumentUrl
+    });
     metrics = fetched.metrics;
     const fetchedAt = Date.now();
     const { result: extracted, diagnostics } = extractMDASectionWithDiagnostics(html, filing.formType);
@@ -144,6 +150,7 @@ export async function ingestFiling(
     filedAt: filing.filedAt,
     periodOfReport: filing.periodOfReport,
     primaryDocumentUrl,
+    companyWebsiteUrl,
     mdaText: extractedText,
     mdaTokenCount: extractedTokenCount,
     metrics,

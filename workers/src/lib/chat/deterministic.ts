@@ -29,12 +29,12 @@ export function buildDeterministicMetricAnswer(
     );
   const asksRevenueDrivers =
     /(売上|増収|成長|growth|revenue)/.test(normalizedQuestion) &&
-    /(支え|押し上げ|牽引|ドライバ|主因|要因|理由|どの変化|何が)/.test(normalizedQuestion);
+    /(支え|押し上げ|牽引|ドライバ|主因|要因|原因|理由|どの変化|何が)/.test(normalizedQuestion);
   const asksCashGeneration =
     /(キャッシュフロー|cashflow|cash flow|現金|お金.*稼|稼げてる)/.test(normalizedQuestion) &&
     !/(還元|自社株買い|buyback|repurchase|配当|dividend|株主還元)/.test(normalizedQuestion);
   const asksAboutMargin = /(利益率|マージン|採算)/.test(normalizedQuestion);
-  const asksAboutCause = /(主因|要因|理由|なぜ)/.test(normalizedQuestion);
+  const asksAboutCause = /(主因|要因|原因|理由|なぜ)/.test(normalizedQuestion);
   const asksAboutImprovement = /(改善|向上|良化)/.test(normalizedQuestion);
   const asksAboutDeterioration = /(悪化|低下|下落|落ち込|鈍化)/.test(normalizedQuestion);
   const asksAboutChange = /(どう|変化|推移|なった)/.test(normalizedQuestion);
@@ -163,7 +163,7 @@ export function shouldRecoverFromWeakModelSources(
 ): boolean {
   const normalized = question.replace(/\s+/g, "").toLowerCase();
   const asksBroadReasoning =
-    ((/(売上|sales|revenue)/.test(normalized) && /(主因|要因|理由|なぜ|支え|ドライバ|牽引)/.test(normalized)) ||
+    ((/(売上|sales|revenue)/.test(normalized) && /(主因|要因|原因|理由|なぜ|支え|ドライバ|牽引)/.test(normalized)) ||
       /(株価|市場|反応|好感|嫌気|織り込|織込|shareprice|stockprice|marketreaction|ガイダンス|見通し|予想|guidance|outlook|来期|次四半期|還元|自社株買い|buyback|repurchase|配当|dividend|capitalallocation|株主還元)/.test(
         normalized
       ) ||
@@ -383,7 +383,7 @@ function buildChangeOverviewAnswer(
   }
 
   if (/(前回決算|前回との違い|前回比)/.test(normalizedQuestion)) {
-    answerParts.push("なお、この filing でそのまま比べやすいのは直前四半期ではなく前年同期比です。");
+    answerParts.push("なお、この決算資料でそのまま比べやすいのは直前四半期ではなく前年同期比です。");
   }
 
   return {
@@ -579,14 +579,14 @@ function buildFilingStockContextJudgment(
   }
 
   if (score >= 1) {
-    return "filingベースで見ると、足元はやや強めです。";
+    return "今回の決算資料だけで見ると、足元はやや強めです。";
   }
 
   if (score <= -1) {
-    return "filingベースで見ると、足元は慎重寄りです。";
+    return "今回の決算資料だけで見ると、足元は慎重寄りです。";
   }
 
-  return "filingベースで見ると、強弱はまだらです。";
+  return "今回の決算資料だけで見ると、強弱はまだらです。";
 }
 
 function isBroadStockContextQuestion(normalizedQuestion: string): boolean {

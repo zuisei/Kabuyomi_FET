@@ -1,5 +1,5 @@
 import type { SummaryRecord } from "../../env";
-import { ChatModelResponseSchema, SummaryResponseSchema } from "../../lib/contracts";
+import { ChatModelResponseSchema, QuoteTranslationResponseSchema, SummaryResponseSchema } from "../../lib/contracts";
 import type { GeminiChatAnswer } from "./types";
 
 export function parseJsonishText(text: string): unknown {
@@ -63,6 +63,27 @@ export function normalizeChatResponse(payload: unknown): GeminiChatAnswer | null
         usedRemoteModel: true
       }
     : null;
+}
+
+export function normalizeQuoteTranslationResponse(payload: unknown): string | null {
+  const parsed = QuoteTranslationResponseSchema.safeParse(payload);
+  if (parsed.success) {
+    return parsed.data.translatedText.trim();
+  }
+
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const translatedText = firstString(
+    payload.translatedText,
+    payload.translation,
+    payload.text,
+    payload.answer,
+    payload.response
+  );
+
+  return translatedText?.trim() || null;
 }
 
 export function polishJapaneseText(text: string): string {

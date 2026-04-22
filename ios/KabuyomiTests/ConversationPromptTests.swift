@@ -19,13 +19,13 @@ final class ConversationPromptTests: XCTestCase {
             """
             売上高は 451.8億ドル で、前年同期比 15.9%増 です。 \
             A detailed discussion of these and other risks and uncertainties that could cause actual results and events to differ materially from such forward-looking statements is included elsewhere. \
-            この filing だけでは、これ以上の切り分けは難しいです。
+            この決算資料だけでは、これ以上の切り分けは難しいです。
             """
         )
 
         XCTAssertEqual(structure.conclusion, "売上高は 451.8億ドル で、前年同期比 15.9%増 です。")
         XCTAssertFalse(structure.evidence.contains { $0.contains("A detailed discussion") })
-        XCTAssertTrue(structure.limitations.contains("この filing だけでは、これ以上の切り分けは難しいです。"))
+        XCTAssertTrue(structure.limitations.contains("この決算資料だけでは、これ以上の切り分けは難しいです。"))
     }
 
     func testLocalizedAssistantDisplayTextStripsLongEnglishBoilerplateWhenJapaneseExists() {

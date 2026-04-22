@@ -271,10 +271,10 @@ function buildInsufficientHistoricalResponse(
       ? "必要な過去年だけ自動補完しましたが、まだ比較できるだけの履歴が足りません。"
       : hydration.attempted
         ? `必要な過去年の補完を試しましたが、まだ比較できるだけの履歴が足りません。${describeHydrationReason(hydration)}`
-        : `現時点では比較に足る過去年の提出資料がまだ揃っていません。${describeHydrationReason(hydration)}`;
+        : `現時点では比較に足る過去年の決算資料がまだ揃っていません。${describeHydrationReason(hydration)}`;
 
   return {
-    answer: `${requirementCopy} ${hydrationCopy} いま確実に確認できるのは最新 filing の内容までです。`,
+    answer: `${requirementCopy} ${hydrationCopy} いま確実に確認できるのは最新の決算資料の内容までです。`,
     sources: [buildSecFilingSource(source)]
   };
 }
@@ -353,7 +353,7 @@ function normalizeReasonForUser(reason: string): string {
     return "ticker 情報未解決";
   }
   if (reason === "no_comparable_candidates") {
-    return "比較対象の過去年 filing が不足";
+    return "比較対象の過去年の決算資料が不足";
   }
   if (/timed out/i.test(reason)) {
     return "履歴補完が一定時間内に終わらなかった";
@@ -375,7 +375,7 @@ function buildLatestFilingFallback(filing: FilingCacheRecord, question: string):
       filing.sourceChunks.find((chunk) => chunk.sectionType === "xbrl_metric");
 
     return {
-      answer: `最新 filing の範囲では、${buildMetricObservationSentence(metric)} いま確実に言えるのは直近1期の数字までです。`,
+      answer: `最新の決算資料の範囲では、${buildMetricObservationSentence(metric)} いま確実に言えるのは直近1期の数字までです。`,
       sources: metricSource ? [buildSecFilingSource(metricSource)] : []
     };
   }
@@ -388,8 +388,8 @@ function buildLatestFilingFallback(filing: FilingCacheRecord, question: string):
 
   return {
     answer: verdict
-      ? `最新 filing の範囲では、${verdict} いま確実に言えるのは直近1期の内容までです。`
-      : "最新 filing の範囲では、いま確実に言えるのは直近1期の内容までです。",
+      ? `最新の決算資料の範囲では、${verdict} いま確実に言えるのは直近1期の内容までです。`
+      : "最新の決算資料の範囲では、いま確実に言えるのは直近1期の内容までです。",
     sources: source ? [buildSecFilingSource(source)] : []
   };
 }
@@ -407,7 +407,7 @@ function selectFallbackMetric(
   if (/(営業利益|operatingincome|本業)/.test(normalized)) {
     preferred.push("operatingIncome");
   }
-  if (/(純利益|netincome|利益|儲)/.test(normalized)) {
+  if (/(純利益|netincome|利益|儲|赤字|黒字|損失|loss)/.test(normalized)) {
     preferred.push("netIncome");
   }
   if (/(eps|一株|pershare)/.test(normalized)) {

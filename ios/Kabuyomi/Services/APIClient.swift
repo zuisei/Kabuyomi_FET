@@ -140,6 +140,28 @@ struct APIClient {
         )
     }
 
+    func translateQuote(
+        text: String,
+        sourceLanguage: String? = nil,
+        targetLanguage: String = "ja"
+    ) async throws -> QuoteTranslationResponse {
+        var body: [String: String] = [
+            "text": text,
+            "targetLanguage": targetLanguage
+        ]
+        if let sourceLanguage,
+           !sourceLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["sourceLanguage"] = sourceLanguage
+        }
+
+        return try await sendRequest(
+            path: "/v1/translate-quote",
+            method: "POST",
+            headers: requestHeaders(),
+            body: body
+        )
+    }
+
     func fetchUsage() async throws -> UsagePayload {
         try await sendRequest(
             path: "/v1/usage",

@@ -79,6 +79,20 @@ final class AppModelTests: XCTestCase {
         XCTAssertLessThan(elapsed, .seconds(0.5))
     }
 
+    func testNormalizedSourcePreviewTextCompactsAndClipsLongEnglishChunks() {
+        let raw = """
+        The strength in foreign currencies relative to the U.S. dollar had a net favorable year-over-year impact on Europe net sales during the first quarter of 2026.Greater ChinaGreater China net sales increased during the first quarter of 2026 compared to the same quarter in 2025 due to higher net sales of iPhone.JapanJapan net sales increased during the first quarter of 2026 compared to the same quarter in 2025 primarily due to higher net sales of iPhone and iPad. The weakness in the yen relative to the U.S. dollar had an unfavorable year-over-year impact on Japan net sales during the first quarter of 2026.Rest of Asia PacificRest of Asia Pacific net sales increased during the first quarter of 2026 compared to the same quarter in 2025 primarily due to higher net sales of iPhone and Services.Apple Inc.
+        """
+
+        let preview = normalizedSourcePreviewText(raw, limit: 450)
+
+        XCTAssertLessThanOrEqual(preview.count, 451)
+        XCTAssertTrue(preview.hasSuffix("…"))
+        XCTAssertTrue(preview.contains("2026. Greater China Greater China"))
+        XCTAssertTrue(preview.contains("higher net sales of iPhone"))
+        XCTAssertFalse(preview.contains("i Phone"))
+    }
+
     func testResetLocalDataRestoresConversationEntryState() throws {
         let persistence = PersistenceController(inMemory: true)
         let company = TestFixtures.companyPayload()
@@ -1038,6 +1052,74 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.isTickerInWatchlist("MSFT"))
         XCTAssertEqual(model.watchlist.map(\.ticker), ["MSFT"])
         XCTAssertEqual(model.companyPayload(for: "MSFT")?.filingKey, msft.filingKey)
+    }
+
+    func testSourceDocumentSearchTermsPreferMatchedExcerptBeforeSectionHeading() {
+        let company = TestFixtures.companyPayload()
+        let source = LocalMessageSourceRef(
+            id: UUID(),
+            sourceIdSnapshot: "md1",
+            sourceKind: .secFiling,
+            sourceLabelSnapshot: "Item 7",
+            excerpt: "Management discussion fallback",
+            sourceUrl: company.primaryDocumentUrl
+        )
+
+        let terms = sourceDocumentSearchTerms(for: source, in: company)
+
+        XCTAssertEqual(terms.first, "Services revenue increased year over year.")
+        XCTAssertEqual(terms.last, "Item 7")
+    }
+
+    func testSourceDocumentManualHintUsesExcerptBeforeGenericLabel() {
+        let company = TestFixtures.companyPayload()
+        let source = LocalMessageSourceRef(
+            id: UUID(),
+            sourceIdSnapshot: nil,
+            sourceKind: .secFiling,
+            sourceLabelSnapshot: "Part I Item 2",
+            excerpt: "Revenue increased year over year because Services and iPhone both grew.",
+            sourceUrl: company.primaryDocumentUrl
+        )
+
+        XCTAssertEqual(
+            sourceDocumentManualHint(for: source, in: company),
+            "Revenue increased year over year because Services and iPhone both grew."
+        )
+    }
+
+    func testSourceDocumentSearchTermsForXBRLPreferMetricAnchorsOverSyntheticNumericText() {
+        let company = TestFixtures.companyPayload()
+        let source = LocalMessageSourceRef(
+            id: UUID(),
+            sourceIdSnapshot: "metric-op",
+            sourceKind: .secFiling,
+            sourceLabelSnapshot: "OperatingIncomeLoss",
+            excerpt: "123456000000",
+            sourceUrl: company.primaryDocumentUrl
+        )
+
+        let terms = sourceDocumentSearchTerms(for: source, in: company)
+
+        XCTAssertEqual(terms.first, "income from operations")
+        XCTAssertEqual(sourceDocumentManualHint(for: source, in: company), "income from operations")
+        XCTAssertEqual(sourceDocumentSearchMode(for: source, in: company), .tabular)
+        XCTAssertFalse(terms.contains("123456000000"))
+    }
+
+    func testPreviewTranslationIsOfferedForEnglishSourcePreview() {
+        XCTAssertTrue(shouldOfferPreviewTranslation(for: "Trade and other international disputes can have an adverse impact on the overall macroeconomic environment."))
+        XCTAssertFalse(shouldOfferPreviewTranslation(for: "提出資料の本文に、増減要因や事業上の論点の説明があります。"))
+    }
+
+    func testPreviewTranslationFallbackUsesLocalizedHeuristicWhenAvailable() {
+        XCTAssertEqual(
+            fallbackPreviewTranslation(for: "Management's Discussion and Analysis of Financial Condition and Results of Operations"),
+            "提出資料の本文に、増減要因や事業上の論点の説明があります。"
+        )
+        XCTAssertNil(
+            fallbackPreviewTranslation(for: "Trade and other international disputes can have an adverse impact on the overall macroeconomic environment.")
+        )
     }
 
     private func makeAppModel(persistence: PersistenceController = PersistenceController(inMemory: true)) -> AppModel {

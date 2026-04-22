@@ -64,7 +64,7 @@ function shouldUseWebSupplement(question: string, answer: string): boolean {
   const normalized = question.replace(/\s+/g, "").toLowerCase();
   const asksGrowthDrivers =
     /(支え|押し上げ|牽引|ドライバー|contributors?|drivers?)/.test(normalized) ||
-    (/(主因|要因|理由|背景)/.test(normalized) && /(売上|増収|成長|growth|revenue|需要|株価|市場|反応)/.test(normalized));
+    (/(主因|要因|原因|理由|背景)/.test(normalized) && /(売上|増収|成長|growth|revenue|需要|株価|市場|反応)/.test(normalized));
   const asksCurrentOrMarketContext =
     /(株価|shareprice|stockprice|買いか|売りか|投資判断|おすすめ|最近|直近|市場|反応|ニュース|報道|話題)/.test(
       normalized
@@ -74,6 +74,8 @@ function shouldUseWebSupplement(question: string, answer: string): boolean {
       normalized
     );
   const hasFilingLimitSignal =
+    answer.includes("この決算資料だけでは") ||
+    answer.includes("この決算資料以外") ||
     answer.includes("この filing だけでは") ||
     answer.includes("この filing 以外") ||
     answer.includes("この先を言い切ることはできません") ||
@@ -106,9 +108,9 @@ function buildStockReactionMergedAnswer(
   const miniChart = buildStockReactionMiniChart(supplement);
   const trimmedFilingAnswer = trimStockContextLimitation(filingAnswer);
   return `${reaction}${miniChart ? ` ${miniChart}` : ""} ${trimmedFilingAnswer} ${buildStrengthExplanation(supplement, {
-    article: "値動き自体は外部報道ベースで、なぜそう見られたかの整理は filing ベースです。",
+    article: "値動き自体は外部報道ベースで、なぜそう見られたかの整理は今回の決算資料に基づいています。",
     snippet:
-      "値動き自体は検索 snippet ベースの弱い外部補足で、なぜそう見られたかの整理は filing ベースです。"
+      "値動き自体は検索 snippet ベースの弱い外部補足で、なぜそう見られたかの整理は今回の決算資料に基づいています。"
   })}`;
 }
 
@@ -220,13 +222,13 @@ function buildWebSupplementSentence(supplement: WebSupplementRecord, question: s
 
   if (asksContrastiveReaction) {
     return buildStrengthExplanation(supplement, {
-      article: `外部補足では ${supplement.publisher} が、${points.join("、")}に触れており、市場は懸念よりこちらを強く見た可能性があります。これは filing 外の補足です。`,
+      article: `外部補足では ${supplement.publisher} が、${points.join("、")}に触れており、市場は懸念よりこちらを強く見た可能性があります。これは決算資料の外側の補足です。`,
       snippet: `検索 snippet の弱い外部補足では ${supplement.publisher} が、${points.join("、")}に触れています。記事本文までは確認できていないため、SEC 根拠より弱い補足として扱ってください。`
     });
   }
 
   return buildStrengthExplanation(supplement, {
-    article: `外部補足では ${supplement.publisher} が、${points.join("、")}に触れています。これは filing 外の補足です。`,
+    article: `外部補足では ${supplement.publisher} が、${points.join("、")}に触れています。これは決算資料の外側の補足です。`,
     snippet: `検索 snippet の弱い外部補足では ${supplement.publisher} が、${points.join("、")}に触れています。記事本文までは確認できていないため、SEC 根拠より弱い補足として扱ってください。`
   });
 }
@@ -252,7 +254,8 @@ function buildWebSupplementSource(supplement: WebSupplementRecord) {
     sourceStrength: supplement.evidenceStrength,
     sectionType: "web_search",
     sourceLabel: `${labelPrefix} · ${supplement.publisher} · ${truncateText(supplement.title, 80)}`,
-    excerpt: truncateText(`${excerptPrefix}${supplement.snippet || supplement.title}`, 220)
+    excerpt: truncateText(`${excerptPrefix}${supplement.snippet || supplement.title}`, 220),
+    sourceUrl: supplement.url
   };
 }
 

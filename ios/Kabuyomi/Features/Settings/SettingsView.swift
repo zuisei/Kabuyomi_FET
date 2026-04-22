@@ -182,7 +182,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("AI 利用への同意")
                             .font(.system(.body, design: .rounded, weight: .semibold))
-                        Text("質問内容と SEC filing コンテキストが外部 AI モデルに送信されます。個人情報は入力しないでください。")
+                        Text("質問内容と対象の決算資料の抜粋が外部 AI モデルに送信されます。個人情報は入力しないでください。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
@@ -273,7 +273,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("ローカルデータ")
                     .font(.system(.headline, design: .rounded, weight: .bold))
-                Text("保存銘柄、取得済み filing、チャット履歴をこの端末から削除し、端末識別情報を再生成して最初からやり直す状態に戻します。利用状況は新規ユーザー状態に戻る可能性があります。")
+                Text("保存銘柄、取得済みの決算資料、チャット履歴をこの端末から削除し、端末識別情報を再生成して最初からやり直す状態に戻します。利用状況は新規ユーザー状態に戻る可能性があります。")
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
                 Button("データをリセット", role: .destructive) {
@@ -298,15 +298,15 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "AI 利用時に送信する情報",
-                body: "AI チャットを有効化した場合、質問文、対象企業の filing metadata、抽出済み MD&A、抽出済み XBRL 指標を外部 AI モデルに送信します。個人情報や機密情報は入力しないでください。"
+                body: "AI チャットを有効化した場合、質問文、対象企業の決算資料メタデータ、抽出済み MD&A、抽出済み XBRL 指標を外部 AI モデルに送信します。個人情報や機密情報は入力しないでください。"
             ),
             LegalSection(
                 title: "第三者サービス",
-                body: "API と利用制限管理には Cloudflare、SEC filing 取得には SEC と sec-fetcher、AI 応答には外部 AI モデルを利用します。beta 環境では一部の技術ログがサービス品質確認のために記録されます。"
+                body: "API と利用制限管理には Cloudflare、SEC の決算資料取得には SEC と sec-fetcher、AI 応答には外部 AI モデルを利用します。beta 環境では一部の技術ログがサービス品質確認のために記録されます。"
             ),
             LegalSection(
                 title: "保存期間",
-                body: "ローカルの保存銘柄、取得済み filing、チャット履歴はアプリ内に保存され、設定画面の「データをリセット」で削除できます。サーバー側の filing cache は再利用と運用確認のため保持されます。"
+                body: "ローカルの保存銘柄、取得済みの決算資料、チャット履歴はアプリ内に保存され、設定画面の「データをリセット」で削除できます。サーバー側の決算資料キャッシュは再利用と運用確認のため保持されます。"
             )
         ]
     }

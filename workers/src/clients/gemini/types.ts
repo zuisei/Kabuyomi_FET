@@ -16,6 +16,12 @@ export interface ChatPromptInput {
   question: string;
 }
 
+export interface QuoteTranslationPromptInput {
+  text: string;
+  sourceLanguage?: string;
+  targetLanguage: "ja";
+}
+
 export interface GeminiChatAnswer {
   answer: string;
   sourceIds: string[];

@@ -59,6 +59,24 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("どの要因がいちばん効いたかを厳密に切り分けるには追加情報が必要です");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+    expect(response.sources.every((source) => source.sourceUrl === filing.primaryDocumentUrl)).toBe(true);
+  });
+
+  it("anchors red-ink cause questions on profit evidence instead of revenue", async () => {
+    const filing = makeLossFiling();
+
+    const response = await buildChatResponse(
+      filing,
+      "赤字の原因は？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.answer).toContain("純利益は -38.5億ドル");
+    expect(response.answer).toContain("デジタル資産の評価損益");
+    expect(response.answer).not.toContain("売上高は 4.8億ドル");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S10", "S2"]);
+    expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
   });
 
   it("uses D1-backed history only for trend-style questions", async () => {
@@ -76,7 +94,8 @@ describe("buildChatResponse", () => {
           value: 143756000000,
           unit: "USD",
           yoyPercent: 15.7,
-          sourceId: "S9"
+          sourceId: "S9",
+          primaryDocumentUrl: "https://historical.example.com/aapl-q"
         },
         {
           filingKey: "v3:0000320193:000032019325000111",
@@ -89,7 +108,8 @@ describe("buildChatResponse", () => {
           value: 119580000000,
           unit: "USD",
           yoyPercent: 2.1,
-          sourceId: "S9"
+          sourceId: "S9",
+          primaryDocumentUrl: "https://historical.example.com/aapl-q"
         }
       ]
     });
@@ -105,6 +125,7 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("2023-12-30");
     expect(response.answer).toContain("2025-12-27");
     expect(response.sources.every((source) => source.sourceKind === "historical_filing")).toBe(true);
+    expect(response.sources.every((source) => source.sourceUrl === "https://historical.example.com/aapl-q")).toBe(true);
   });
 
   it("degrades to the latest filing with a reason when historical storage is temporarily unavailable", async () => {
@@ -167,7 +188,7 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: false }
     );
 
-    expect(response.answer).toContain("filingベースで見ると、足元はやや強めです");
+    expect(response.answer).toContain("今回の決算資料だけで見ると、足元はやや強めです");
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
     expect(response.answer).toContain("営業利益は 508.5億ドル");
     expect(response.answer).toContain("株の強弱をみるには");
@@ -218,6 +239,9 @@ describe("buildChatResponse", () => {
     expect(response.sources[0]?.sourceKind).toBe("sec_filing");
     expect(response.sources[1]?.sourceKind).toBe("sec_filing");
     expect(response.sources[2]?.sourceKind).toBe("web_supplement");
+    expect(response.sources[0]?.sourceUrl).toBe(filing.primaryDocumentUrl);
+    expect(response.sources[1]?.sourceUrl).toBe(filing.primaryDocumentUrl);
+    expect(response.sources[2]?.sourceUrl).toBe("https://www.reuters.com/business/apple-earnings");
     expect(response.sources[2]?.sourceStrength).toBe("supplement_snippet");
     expect(response.sources[2]?.sourceLabel).toContain("Weak external supplement");
     expect(response.sources[2]?.excerpt).toContain("Search snippet:");
@@ -541,8 +565,8 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("外部報道ベースでは、決算後に株価は 3.2% 上昇で反応しています");
     expect(response.answer).toContain("反応チャート:");
     expect(response.answer).toContain("↗ 3.2%");
-    expect(response.answer).toContain("filingベースで見ると、足元はやや強めです");
-    expect(response.answer).toContain("値動き自体は検索 snippet ベースの弱い外部補足で、なぜそう見られたかの整理は filing ベースです");
+    expect(response.answer).toContain("今回の決算資料だけで見ると、足元はやや強めです");
+    expect(response.answer).toContain("値動き自体は検索 snippet ベースの弱い外部補足で、なぜそう見られたかの整理は今回の決算資料に基づいています");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S12", "W1"]);
     expect(response.sources.at(-1)?.sourceKind).toBe("web_supplement");
     expect(response.sources.at(-1)?.sourceStrength).toBe("supplement_snippet");
@@ -852,6 +876,79 @@ function makeDriverRichFiling() {
         sortOrder: 7
       },
       ...base.sourceChunks
+    ]
+  } as any;
+}
+
+function makeLossFiling() {
+  return {
+    filingKey: "v3:0001599999:000159999926000001",
+    ticker: "LOSS",
+    companyName: "Lossy Corp",
+    cik: "0001599999",
+    formType: "10-K",
+    filedAt: "2026-02-05",
+    periodOfReport: "2025-12-31",
+    primaryDocumentUrl: "https://example.com/loss",
+    mdaText: "",
+    mdaTokenCount: 0,
+    extractorVersion: "v3",
+    promptVersion: "v1",
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    summary: { verdict: "", highlights: [], changes: [] },
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "Revenues",
+        value: 480000000,
+        unit: "USD",
+        periodEnd: "2025-12-31",
+        comparisonValue: 466000000,
+        yoyPercent: 3.0
+      },
+      {
+        logicalName: "netIncome",
+        tagUsed: "NetIncomeLoss",
+        value: -3848152000,
+        unit: "USD",
+        periodEnd: "2025-12-31",
+        comparisonValue: 2965190000,
+        yoyPercent: -229.8
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7, filed 2026-02-05",
+        text: "Net loss was primarily due to a $5.9 billion unrealized fair value loss on digital assets, partially offset by operating income from the software business.",
+        startOffset: 0,
+        endOffset: 151,
+        sortOrder: 2
+      },
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (Revenues)",
+        text: "売上高: 480000000 USD / 比較値: 466000000 / YoY: 3.0%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "Revenues",
+        sortOrder: 9
+      },
+      {
+        sourceId: "S10",
+        sectionType: "xbrl_metric",
+        sectionTitle: "純利益",
+        sourceLabel: "XBRL 純利益 (NetIncomeLoss)",
+        text: "純利益: -3848152000 USD / 比較値: 2965190000 / YoY: -229.8%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "NetIncomeLoss",
+        sortOrder: 10
+      }
     ]
   } as any;
 }

@@ -97,6 +97,7 @@ struct CompanyPayload: Codable, Hashable {
     let filedAt: String
     let periodOfReport: String
     let primaryDocumentUrl: String
+    let companyWebsiteUrl: String?
     let summary: SummaryPayload
     let metrics: [MetricPayload]
     let historicalOverview: HistoricalOverviewPayload?
@@ -199,6 +200,11 @@ struct ChatResponse: Decodable {
     let usage: UsagePayload
 }
 
+struct QuoteTranslationResponse: Decodable {
+    let translatedText: String
+    let modelName: String
+}
+
 enum MessageSourceKind: String, Decodable, Hashable {
     case secFiling = "sec_filing"
     case historicalFiling = "historical_filing"
@@ -213,9 +219,9 @@ enum MessageSourceKind: String, Decodable, Hashable {
     var groundingCaption: String {
         switch self {
         case .secFiling:
-            "SEC filing 根拠"
+            "SEC資料根拠"
         case .historicalFiling:
-            "過去提出資料根拠"
+            "過去資料根拠"
         case .webSupplement:
             "外部補足"
         }
@@ -250,6 +256,7 @@ struct ChatSourcePayload: Decodable, Identifiable, Hashable {
     let sectionType: String
     let sourceLabel: String
     let excerpt: String
+    let sourceUrl: String?
 
     var id: String { sourceId }
 }
@@ -352,9 +359,11 @@ struct LocalChatMessage: Identifiable, Hashable {
 
 struct LocalMessageSourceRef: Identifiable, Hashable {
     let id: UUID
+    let sourceIdSnapshot: String?
     let sourceKind: MessageSourceKind
     let sourceLabelSnapshot: String
     let excerpt: String
+    let sourceUrl: String?
 }
 
 enum MetricLabeler {

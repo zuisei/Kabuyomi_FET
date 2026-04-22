@@ -51,8 +51,14 @@ struct ComposerBar: View {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.9))
+                            .frame(width: 32, height: 32)
+                            .background(
+                                Circle()
+                                    .fill(Color.white.opacity(0.72))
+                            )
                     }
                     .buttonStyle(.plain)
+                    .contentShape(Circle())
                     .accessibilityLabel("入力内容を消去")
                 }
 

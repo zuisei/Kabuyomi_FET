@@ -1,4 +1,4 @@
-import type { ChatPromptInput, SummaryPromptInput } from "./types";
+import type { ChatPromptInput, QuoteTranslationPromptInput, SummaryPromptInput } from "./types";
 
 export function buildSummaryPrompt(input: SummaryPromptInput): string {
   return [
@@ -31,7 +31,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "Use the explicit unavailable answer only as a true last resort.",
     "Before refusing, first look for the closest supported filing facts such as metrics, MD&A explanations, demand comments, risk language, liquidity or capital return comments, and any outlook language that is actually present in the provided context.",
     "If the exact question is broader than the filing but related facts exist, answer with those closest supported filing facts first, then say what remains outside the filing.",
-    "If no material part of the answer is supported anywhere in the provided context, reply with: この filing の提供コンテキストでは確認できません。",
+    "If no material part of the answer is supported anywhere in the provided context, reply with: この決算資料の範囲では確認できません。",
     "Never provide investment advice, price targets, or analyst comparisons.",
     "Write the answer in natural Japanese.",
     "Assume the user may be new to U.S. stocks and does not want to read English filings directly.",
@@ -49,6 +49,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "For prompts such as 前回との違い, 何が変わった, or 一番大きい変化, start with the biggest filing-backed numeric change, then add one short business explanation if the filing provides it.",
     "If the exact question is broader than the filing but related facts exist, do not refuse immediately. Answer with the closest supported facts from the filing, then state what remains outside the filing.",
     "If the user asks about a driver, cause, or contributor but the provided support is only a metric, explain the observed change and clearly state that the driver cannot be isolated from that metric alone.",
+    "If the user asks why the company is in the red, why losses widened, or why net income is negative, anchor the answer on net income or operating income evidence and any filing text about losses, valuation changes, costs, taxes, or impairments. Do not switch to a revenue-only answer unless no profit-related evidence exists at all.",
     "If the user asks why the stock moved or what investors want to know, distinguish backward-looking results from forward-looking expectations.",
     "If the answer is only partially supported, say what is supported and what is still not confirmable from this filing context.",
     "Every supported answer must cite at least one SEC filing sourceId from the provided Sources list.",
@@ -70,6 +71,25 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "",
     "Sources:",
     JSON.stringify(input.filing.sourceChunks)
+  ].join("\n");
+}
+
+export function buildQuoteTranslationPrompt(input: QuoteTranslationPromptInput): string {
+  return [
+    "You translate short SEC filing excerpts into natural Japanese.",
+    "Return JSON with key translatedText.",
+    "Translate as literally as possible while remaining fluent in Japanese.",
+    "Do not summarize, explain, add context, or omit caveats.",
+    "Preserve numbers, percentages, dates, company names, product names, ticker symbols, and filing terminology.",
+    "If an English proper noun or official term is better left untranslated, keep it.",
+    "Keep the same tone and level of certainty as the source.",
+    "Do not wrap the answer in markdown fences.",
+    "",
+    `Target language: ${input.targetLanguage}`,
+    `Source language hint: ${input.sourceLanguage ?? "auto"}`,
+    "",
+    "Source text:",
+    input.text
   ].join("\n");
 }
 
@@ -122,5 +142,15 @@ export function chatResponseJsonSchema() {
       }
     },
     required: ["answer", "sourceIds"]
+  };
+}
+
+export function quoteTranslationResponseJsonSchema() {
+  return {
+    type: "object",
+    properties: {
+      translatedText: { type: "string" }
+    },
+    required: ["translatedText"]
   };
 }

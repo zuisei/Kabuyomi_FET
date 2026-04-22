@@ -17,6 +17,7 @@ export async function serializeCompanyResponse(
     filedAt: filing.filedAt,
     periodOfReport: filing.periodOfReport,
     primaryDocumentUrl: filing.primaryDocumentUrl,
+    companyWebsiteUrl: filing.companyWebsiteUrl,
     summary: filing.summary,
     metrics: filing.metrics,
     historicalOverview,

@@ -19,6 +19,11 @@ final class PersistenceController {
             container.persistentStoreDescriptions.first?.url = URL(fileURLWithPath: "/dev/null")
         }
 
+        container.persistentStoreDescriptions.forEach { description in
+            description.shouldMigrateStoreAutomatically = true
+            description.shouldInferMappingModelAutomatically = true
+        }
+
         container.loadPersistentStores { _, error in
             if let error {
                 fatalError("Failed to load persistent store: \(error)")
@@ -115,6 +120,7 @@ final class PersistenceController {
                 filedAt: Self.dayString(from: filing.filedAt),
                 periodOfReport: Self.dayString(from: filing.periodOfReport),
                 primaryDocumentUrl: filing.primaryDocumentUrl,
+                companyWebsiteUrl: filing.companyWebsiteUrl.map(Self.detachedString),
                 summary: SummaryPayload(
                     verdict: summary.verdictText,
                     highlights: summary.itemArray.filter { $0.kind == "highlight" }.map(summaryItemPayload(from:)),
@@ -129,16 +135,18 @@ final class PersistenceController {
             let messages = filing.chatMessageArray.map { message in
                 LocalChatMessage(
                     id: message.id,
-                    role: message.role,
-                    content: message.content,
+                    role: Self.detachedString(message.role),
+                    content: Self.detachedString(message.content),
                     createdAt: message.createdAt,
-                    modelName: message.modelName,
+                    modelName: Self.detachedString(message.modelName),
                     sources: message.sourceRefArray.map {
                         LocalMessageSourceRef(
                             id: $0.id,
+                            sourceIdSnapshot: $0.sourceIdSnapshot.map(Self.detachedString),
                             sourceKind: MessageSourceKind(rawValue: $0.sourceKindSnapshot ?? "") ?? .secFiling,
-                            sourceLabelSnapshot: $0.sourceLabelSnapshot,
-                            excerpt: $0.excerpt
+                            sourceLabelSnapshot: Self.detachedString($0.sourceLabelSnapshot),
+                            excerpt: Self.detachedString($0.excerpt),
+                            sourceUrl: $0.sourceUrlSnapshot.map(Self.detachedString)
                         )
                     }
                 )
@@ -160,12 +168,15 @@ final class PersistenceController {
             stock.addedAt = Date()
         }
 
-        let filing = try fetchOrCreateFiling(key: company.filingKey, stock: stock)
+        let accessionNumber = company.filingKey.split(separator: ":").last.map(String.init) ?? company.filingKey
+        let filing = try fetchOrCreateFiling(key: company.filingKey, accessionNumber: accessionNumber, stock: stock)
+        filing.filingKey = company.filingKey
         filing.formType = company.formType
         filing.filedAt = Self.parseDate(company.filedAt) ?? Date()
         filing.periodOfReport = Self.parseDate(company.periodOfReport) ?? filing.filedAt
-        filing.accessionNumber = company.filingKey.split(separator: ":").last.map(String.init) ?? company.filingKey
+        filing.accessionNumber = accessionNumber
         filing.primaryDocumentUrl = company.primaryDocumentUrl
+        filing.companyWebsiteUrl = company.companyWebsiteUrl
         filing.mdaText = company.sourceChunks.filter { $0.sectionType == "md_a" }.map(\.text).joined(separator: "\n\n")
         filing.mdaTokenCount = Int32(max(0, filing.mdaText.count / 4))
         filing.extractorVersion = company.filingKey.split(separator: ":").first.map(String.init) ?? "v1"
@@ -203,9 +214,11 @@ final class PersistenceController {
         for source in response.sources {
             let ref = MessageSourceRefEntity(context: viewContext)
             ref.id = UUID()
+            ref.sourceIdSnapshot = source.sourceId
             ref.sourceKindSnapshot = source.sourceKind.rawValue
             ref.sourceLabelSnapshot = source.sourceLabel
             ref.excerpt = source.excerpt
+            ref.sourceUrlSnapshot = source.sourceUrl
             ref.chatMessage = assistantMessage
             ref.sourceChunk = filing.sourceChunkArray.first(where: { $0.sourceId == source.sourceId })
         }
@@ -279,9 +292,16 @@ final class PersistenceController {
         return stock
     }
 
-    private func fetchOrCreateFiling(key: String, stock: StockEntity) throws -> FilingEntity {
+    private func fetchOrCreateFiling(key: String, accessionNumber: String, stock: StockEntity) throws -> FilingEntity {
         if let filing = try fetchFiling(key: key) {
             return filing
+        }
+
+        let request = FilingEntity.fetchRequest()
+        request.fetchLimit = 1
+        request.predicate = NSPredicate(format: "stock == %@ AND accessionNumber == %@", stock, accessionNumber)
+        if let existing = try viewContext.fetch(request).first {
+            return existing
         }
 
         let filing = FilingEntity(context: viewContext)
@@ -292,6 +312,7 @@ final class PersistenceController {
         filing.periodOfReport = Date()
         filing.accessionNumber = ""
         filing.primaryDocumentUrl = ""
+        filing.companyWebsiteUrl = nil
         filing.mdaText = ""
         filing.mdaTokenCount = 0
         filing.extractorVersion = "v1"
@@ -473,5 +494,9 @@ final class PersistenceController {
 
     static func dayString(from date: Date) -> String {
         dayFormatter.string(from: date)
+    }
+
+    private static func detachedString(_ value: String) -> String {
+        String(decoding: Array(value.utf8), as: UTF8.self)
     }
 }

@@ -5,6 +5,7 @@ import { logErrorEvent, logEvent, logWarnEvent } from "../logging";
 import { DEFAULT_REMOTE_CONFIG, type RemoteConfig } from "../remote-config";
 import { buildDeterministicMetricAnswer, shouldRecoverFromWeakModelSources } from "./deterministic";
 import {
+  attachCurrentFilingSourceUrls,
   buildSecFilingSource,
   CONTEXT_UNAVAILABLE_ANSWER,
   ensureFilingGroundedResponse,
@@ -42,8 +43,12 @@ export async function buildChatResponse(
       ticker: filing.ticker,
       path: responsePath
     });
+    const responseWithUrls = attachCurrentFilingSourceUrls(
+      ensureFilingGroundedResponse(historical),
+      filing.primaryDocumentUrl
+    );
     return {
-      ...ensureFilingGroundedResponse(historical),
+      ...responseWithUrls,
       responsePath
     };
   }
@@ -63,8 +68,9 @@ export async function buildChatResponse(
       env,
       resolvedConfig
     );
+    const responseWithUrls = attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl);
     return {
-      ...response,
+      ...responseWithUrls,
       responsePath: "deterministic"
     };
   }
@@ -104,8 +110,9 @@ export async function buildChatResponse(
         env,
         resolvedConfig
       );
+      const responseWithUrls = attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl);
       return {
-        ...response,
+        ...responseWithUrls,
         responsePath: "fallback"
       };
     }
@@ -144,8 +151,9 @@ export async function buildChatResponse(
         env,
         resolvedConfig
       );
+      const responseWithUrls = attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl);
       return {
-        ...response,
+        ...responseWithUrls,
         responsePath: "fallback"
       };
     }
@@ -175,8 +183,9 @@ export async function buildChatResponse(
         env,
         resolvedConfig
       );
+      const responseWithUrls = attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl);
       return {
-        ...response,
+        ...responseWithUrls,
         responsePath: "fallback"
       };
     }
@@ -204,8 +213,9 @@ export async function buildChatResponse(
     env,
     resolvedConfig
   );
+  const responseWithUrls = attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl);
   return {
-    ...response,
+    ...responseWithUrls,
     responsePath
   };
 }

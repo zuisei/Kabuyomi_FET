@@ -3,6 +3,7 @@ import type { RemoteConfig } from "./lib/remote-config";
 export interface Env {
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
+  GEMINI_TRANSLATION_MODEL?: string;
   GEMINI_TIMEOUT_MS?: string;
   SEC_USER_AGENT: string;
   SEC_FETCHER_BASE_URL?: string;
@@ -86,6 +87,7 @@ export interface FilingCacheRecord {
   filedAt: string;
   periodOfReport: string;
   primaryDocumentUrl: string;
+  companyWebsiteUrl?: string;
   mdaText: string;
   mdaTokenCount: number;
   metrics: MetricSnapshot[];

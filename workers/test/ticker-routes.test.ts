@@ -196,7 +196,8 @@ describe("ticker-aware routes", () => {
         ticker: "BRK-A",
         companyName: "Berkshire Hathaway Inc.",
         cik: "0001067983",
-        primaryDocumentUrl: "https://example.com/brk10q.htm"
+        primaryDocumentUrl: "https://example.com/brk10q.htm",
+        companyWebsiteUrl: "https://www.berkshirehathaway.com"
       }) as never
     );
 
@@ -215,7 +216,8 @@ describe("ticker-aware routes", () => {
 
     expect(response?.status).toBe(200);
     await expect(response?.json()).resolves.toMatchObject({
-      ticker: "BRK-B"
+      ticker: "BRK-B",
+      companyWebsiteUrl: "https://www.berkshirehathaway.com"
     });
     expect(mockEnsureCompanyAccessAllowed).toHaveBeenCalledWith(
       identity,

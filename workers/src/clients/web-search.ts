@@ -86,7 +86,7 @@ function analyzeWebIntent(question: string): WebIntentProfile {
 
   const asksDrivers =
     /(支え|押し上げ|牽引|ドライバー|contributors?|drivers?|growthdrivers?|revenuegrowth)/.test(normalized) ||
-    (/(主因|要因|理由|背景)/.test(normalized) && /(売上|増収|成長|growth|revenue|需要|株価|市場|反応)/.test(normalized));
+    (/(主因|要因|原因|理由|背景)/.test(normalized) && /(売上|増収|成長|growth|revenue|需要|株価|市場|反応)/.test(normalized));
   const asksStockPrice = /(株価|shareprice|stockprice|株価反応|marketreaction)/.test(normalized);
   const asksStockContext =
     /(株の調子|株調子|株の動き|株どう|株はどう|最近株|最近の株|直近株|足元株|足元の株|stockperformance|shareperformance)/.test(

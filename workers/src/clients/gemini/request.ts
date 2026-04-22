@@ -1,32 +1,60 @@
 import type { Env } from "../../env";
 import { logEvent } from "../../lib/logging";
 import { parseJsonishText } from "./normalize";
-import { chatResponseJsonSchema, summaryResponseJsonSchema } from "./prompts";
+import { chatResponseJsonSchema, quoteTranslationResponseJsonSchema, summaryResponseJsonSchema } from "./prompts";
 
 export const DEFAULT_GEMINI_MODEL = "gemma-4-31b-it";
+export const DEFAULT_GEMINI_TRANSLATION_MODEL = "gemma-4-26b-a4b-it";
 const DEFAULT_GEMINI_TIMEOUT_MS = 12_000;
+const RETRYABLE_GEMINI_STATUS_CODES = new Set([429, 500, 503, 504]);
 
 export async function invokeGemini(
   env: Env,
   prompt: string,
-  kind: "summary" | "chat"
+  kind: "summary" | "chat" | "quote_translation"
 ): Promise<unknown> {
-  const model = resolveGeminiModel(env);
+  const model = kind === "quote_translation" ? resolveGeminiTranslationModel(env) : resolveGeminiModel(env);
   const timeoutMs = resolveGeminiTimeoutMs(env);
-  const responseJsonSchema = kind === "summary" ? summaryResponseJsonSchema() : chatResponseJsonSchema();
+  const responseJsonSchema =
+    kind === "summary"
+      ? summaryResponseJsonSchema()
+      : kind === "chat"
+        ? chatResponseJsonSchema()
+        : quoteTranslationResponseJsonSchema();
+  const translationFallbackModel = kind === "quote_translation" ? resolveGeminiTranslationFallbackModel(env) : null;
   const attempts = kind === "summary"
     ? [
         {
+          model,
           includeSchema: true,
           generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseJsonSchema }
         }
       ]
+    : kind === "quote_translation"
+      ? [
+          {
+            model,
+            includeSchema: true,
+            generationConfig: { temperature: 0.1, responseMimeType: "application/json", responseJsonSchema }
+          },
+          { model, includeSchema: false, generationConfig: { temperature: 0.1, responseMimeType: "application/json" } },
+          ...(translationFallbackModel
+            ? [
+                {
+                  model: translationFallbackModel,
+                  includeSchema: false,
+                  generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
+                }
+              ]
+            : [])
+        ]
     : [
         {
+          model,
           includeSchema: true,
           generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseJsonSchema }
         },
-        { includeSchema: false, generationConfig: { temperature: 0.2, responseMimeType: "application/json" } }
+        { model, includeSchema: false, generationConfig: { temperature: 0.2, responseMimeType: "application/json" } }
       ];
 
   for (const [index, attempt] of attempts.entries()) {
@@ -36,7 +64,7 @@ export async function invokeGemini(
 
     try {
       response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${attempt.model}:generateContent`,
         {
           method: "POST",
           headers: {
@@ -62,12 +90,13 @@ export async function invokeGemini(
         (error instanceof DOMException && error.name === "AbortError");
       logEvent("gemini_request_failed", {
         kind,
-        model,
+        model: attempt.model,
         includeSchema: attempt.includeSchema,
         timeoutMs,
         reason: timedOut ? "timeout" : "network_error"
       });
       if (attempts[index + 1]) {
+        await waitBeforeGeminiRetry(index);
         continue;
       }
       throw error;
@@ -79,12 +108,13 @@ export async function invokeGemini(
       const bodyPreview = (await response.text()).slice(0, 240);
       logEvent("gemini_request_failed", {
         kind,
-        model,
+        model: attempt.model,
         status: response.status,
         includeSchema: attempt.includeSchema,
         bodyPreview
       });
-      if (attempt.includeSchema && attempts[index + 1]) {
+      if (attempts[index + 1] && (attempt.includeSchema || RETRYABLE_GEMINI_STATUS_CODES.has(response.status))) {
+        await waitBeforeGeminiRetry(index);
         continue;
       }
       throw new Error(`Gemini request failed (${response.status})`);
@@ -92,7 +122,7 @@ export async function invokeGemini(
 
     logEvent("gemini_request_succeeded", {
       kind,
-      model,
+      model: attempt.model,
       status: response.status,
       includeSchema: attempt.includeSchema
     });
@@ -103,7 +133,7 @@ export async function invokeGemini(
     const text = payload.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
     logEvent("gemini_response_preview", {
       kind,
-      model,
+      model: attempt.model,
       includeSchema: attempt.includeSchema,
       textPreview: text.slice(0, 240)
     });
@@ -131,7 +161,27 @@ export function resolveGeminiModel(env: Env): string {
   return raw.startsWith("models/") ? raw.slice("models/".length) : raw;
 }
 
+export function resolveGeminiTranslationModel(env: Env): string {
+  const raw = env.GEMINI_TRANSLATION_MODEL?.trim();
+  if (!raw) {
+    return DEFAULT_GEMINI_TRANSLATION_MODEL;
+  }
+
+  return raw.startsWith("models/") ? raw.slice("models/".length) : raw;
+}
+
+function resolveGeminiTranslationFallbackModel(env: Env): string | null {
+  const fallback = resolveGeminiModel(env);
+  const primary = resolveGeminiTranslationModel(env);
+  return fallback == primary ? null : fallback;
+}
+
 function resolveGeminiTimeoutMs(env: Env): number {
   const parsed = Number.parseInt(env.GEMINI_TIMEOUT_MS ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_GEMINI_TIMEOUT_MS;
+}
+
+async function waitBeforeGeminiRetry(attemptIndex: number) {
+  const delayMs = Math.min(250 * (attemptIndex + 1), 750);
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
 }

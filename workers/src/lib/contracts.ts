@@ -12,6 +12,12 @@ export const ChatRequestSchema = z.object({
   question: z.string().trim().min(1).max(1_000)
 });
 
+export const TranslateQuoteRequestSchema = z.object({
+  text: z.string().trim().min(1).max(3_000),
+  sourceLanguage: z.string().trim().min(2).max(16).optional(),
+  targetLanguage: z.enum(["ja"]).default("ja")
+});
+
 export const BackfillHistoryRequestSchema = z.object({
   tickers: z.array(z.string().trim().min(1).max(16)).max(50).optional(),
   years: z.number().int().min(1).max(5).default(3),
@@ -66,7 +72,8 @@ export const SourceSchema = z.object({
   sourceStrength: ChatSourceStrengthSchema.default("filing_primary"),
   sectionType: z.string(),
   sourceLabel: z.string(),
-  excerpt: z.string()
+  excerpt: z.string(),
+  sourceUrl: z.string().url().optional()
 });
 
 export const SummaryResponseSchema = z.object({
@@ -89,10 +96,14 @@ export const ChatModelResponseSchema = z.object({
   answer: z.string(),
   sourceIds: z.array(z.string())
 }).superRefine((value, ctx) => {
-  if (value.sourceIds.length === 0 && value.answer !== "この filing の提供コンテキストでは確認できません。") {
+  if (value.sourceIds.length === 0 && value.answer !== "この決算資料の範囲では確認できません。") {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "sourceIds are required unless the answer explicitly states the context is unavailable"
     });
   }
+});
+
+export const QuoteTranslationResponseSchema = z.object({
+  translatedText: z.string().trim().min(1)
 });

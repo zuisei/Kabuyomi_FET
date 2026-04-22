@@ -85,7 +85,7 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
   const anchorSource = selectFallbackAnchorSource(input.filing.sourceChunks);
   if (!anchorSource) {
     return {
-      answer: "この filing の提供コンテキストでは確認できません。",
+      answer: "この決算資料の範囲では確認できません。",
       sourceIds: []
     };
   }
@@ -100,7 +100,11 @@ export function recoverBroaderFallbackIfNeeded(
   input: ChatPromptInput,
   response: GeminiChatAnswer
 ): GeminiChatAnswer {
-  if (response.answer === "この filing の提供コンテキストでは確認できません。" && response.sourceIds.length === 0) {
+  if (
+    (response.answer === "この決算資料の範囲では確認できません。"
+      || response.answer === "この filing の提供コンテキストでは確認できません。")
+    && response.sourceIds.length === 0
+  ) {
     return localChatFallback(input);
   }
 
@@ -121,7 +125,7 @@ function analyzeQuestion(question: string): QuestionProfile {
 
   return {
     normalized,
-    asksCause: /(主因|要因|理由|なぜ|背景|支え|押し上げ|牽引|どの変化|何が|driver|cause|why)/.test(normalized),
+    asksCause: /(主因|要因|原因|理由|なぜ|背景|支え|押し上げ|牽引|どの変化|何が|driver|cause|why)/.test(normalized),
     asksDetail: /(詳しく|詳細|deep|detail|breakdown|かみ砕)/.test(normalized),
     asksGuidance: /(guidance|outlook|見通し|来期|次四半期)/.test(normalized),
     asksMarketReaction: /(市場|反応|上げ|下げ|好感|嫌気|marketreaction)/.test(normalized),
@@ -136,7 +140,9 @@ function analyzeQuestion(question: string): QuestionProfile {
     ),
     asksRevenue: /(売上|revenue|sales|growth|増収)/.test(normalized),
     asksProfitability: /(利益率|マージン|粗利|採算|margin|profitability)/.test(normalized),
-    asksProfit: /(利益|profit|income|earnings|eps)/.test(normalized),
+    asksProfit: /(赤字|黒字|損失|欠損|純利益|利益|netincome|netloss|netincome\(loss\)|net loss|profit|income|earnings|eps|loss)/.test(
+      normalized
+    ),
     asksCashFlow: /(キャッシュフロー|cashflow|cash flow|現金|創出|お金.*稼|稼げてる)/.test(normalized),
     asksRisk: /(リスク|懸念|逆風|不確実|不透明|risk|uncertain|uncertainty|macro)/.test(normalized),
     asksTariff: /(関税|tariff)/.test(normalized),
@@ -207,6 +213,9 @@ function selectRelevantNarrative(
   const findNarrative = (pattern: RegExp) => narratives.find((chunk) => pattern.test(chunk.text.toLowerCase()));
   const driverNarrative =
     findNarrative(/iphone|services|cloud|ads|americas|china|japan|asia|higher net sales|demand/) ?? narratives[0];
+  const profitNarrative = findNarrative(
+    /net loss|net income|loss due to|loss was primarily due to|fair value|impairment|digital asset|bitcoin|interest expense|operating expenses|selling, general and administrative|research and development|income tax|valuation allowance/
+  );
   const marginNarrative = findNarrative(
     /margin|pricing|gross margin|profitability|cost|inflation|component|supply chain|販促|コスト/
   );
@@ -233,6 +242,14 @@ function selectRelevantNarrative(
 
   if (profile.asksRisk) {
     return riskNarrative ?? driverNarrative;
+  }
+
+  if (profile.asksProfit && profile.asksCause) {
+    return profitNarrative ?? marginNarrative ?? riskNarrative ?? driverNarrative;
+  }
+
+  if (profile.asksProfit) {
+    return profitNarrative ?? marginNarrative ?? driverNarrative;
   }
 
   if (profile.asksProfitability) {
@@ -392,20 +409,24 @@ function buildMetricLimitation(profile: QuestionProfile): string {
     return "どの事業や地域が売上高を押し上げたかまでは分かりません。";
   }
 
+  if (profile.asksProfit && profile.asksCause) {
+    return "赤字や利益悪化の主因を断定するには、本文の補足も見たいところです。";
+  }
+
   if (profile.asksRisk || profile.asksTariff) {
-    return "どのリスクがどこまで業績に効くかは、この filing だけでは断定できません。";
+    return "どのリスクがどこまで業績に効くかは、この決算資料だけでは断定できません。";
   }
 
   if (profile.asksCashFlow && profile.asksCapitalAllocation) {
-    return "配当や自社株買いが十分かどうかは、この filing だけでは分かりません。";
+    return "配当や自社株買いが十分かどうかは、この決算資料だけでは分かりません。";
   }
 
   if (profile.asksCapitalAllocation) {
-    return "還元方針の十分性や今後の水準は、この filing だけでは言い切れません。";
+    return "還元方針の十分性や今後の水準は、この決算資料だけでは言い切れません。";
   }
 
   if (profile.asksCashFlow) {
-    return "現金創出の持続性までは、この filing だけでは断定できません。";
+    return "現金創出の持続性までは、この決算資料だけでは断定できません。";
   }
 
   if (profile.asksGuidance || profile.asksForecast) {
@@ -416,19 +437,19 @@ function buildMetricLimitation(profile: QuestionProfile): string {
     return "利益率がなぜ動いたかを断定するには、本文の補足も見たいところです。";
   }
 
-  return "この filing だけでは、これ以上の切り分けは難しいです。";
+  return "この決算資料だけでは、これ以上の切り分けは難しいです。";
 }
 
 function buildClosestContextLead(profile: QuestionProfile): string {
   if (profile.asksStockPrice || profile.asksRecommendation) {
-    return "株価の方向や買いかどうかは、この filing だけでは決められません。";
+    return "株価の方向や買いかどうかは、この決算資料だけでは決められません。";
   }
 
   if (profile.asksMarketReaction) {
-    return "株価の反応には市場予想や外部ニュースも効くので、filing だけでは決め打ちできません。";
+    return "株価の反応には市場予想や外部ニュースも効くので、この決算資料だけでは決め打ちできません。";
   }
 
-  return "この filing から確認できる範囲で、近い事実を整理します。";
+  return "この決算資料から確認できる範囲で、近い事実を整理します。";
 }
 
 function buildClosestContextLimitation(profile: QuestionProfile): string {
@@ -441,10 +462,10 @@ function buildClosestContextLimitation(profile: QuestionProfile): string {
   }
 
   if (profile.asksGuidance || profile.asksForecast) {
-    return "具体的な見通しや外部予想との比較は、この filing 以外の情報も必要です。";
+    return "具体的な見通しや外部予想との比較は、この決算資料以外の情報も必要です。";
   }
 
-  return "この filing だけではここから先は断定できません。";
+  return "この決算資料だけではここから先は断定できません。";
 }
 
 function buildNarrativeFallbackLimitation(profile: QuestionProfile): string | null {
@@ -458,23 +479,27 @@ function buildNarrativeFallbackLimitation(profile: QuestionProfile): string | nu
   }
 
   if (profile.asksGuidance || profile.asksForecast) {
-    return "具体的な数値見通しや外部予想との比較は、この filing 以外の情報も必要です。";
+    return "具体的な数値見通しや外部予想との比較は、この決算資料以外の情報も必要です。";
   }
 
   if (profile.asksRisk || profile.asksTariff) {
-    return "どのリスクが実際に表面化するかは、この filing だけでは断定できません。";
+    return "どのリスクが実際に表面化するかは、この決算資料だけでは断定できません。";
   }
 
   if (profile.asksCapitalAllocation) {
-    return "還元余力や今後の方針までは、この filing 断片だけでは言い切れません。";
+    return "還元余力や今後の方針までは、この決算資料の断片だけでは言い切れません。";
   }
 
   if (profile.asksRevenue && (profile.asksCause || profile.asksDetail)) {
-    return "どの要因がいちばん効いたかの厳密な切り分けは、この filing 断片だけでは難しいです。";
+    return "どの要因がいちばん効いたかの厳密な切り分けは、この決算資料の断片だけでは難しいです。";
+  }
+
+  if (profile.asksProfit && profile.asksCause) {
+    return "赤字や利益悪化の主因を断定するには、追加の本文記述も見たいところです。";
   }
 
   if (profile.asksProfitability && profile.asksCause) {
-    return "利益率に最も効いた要因を断定するには、追加の filing 記述も見たいところです。";
+    return "利益率に最も効いた要因を断定するには、追加の本文記述も見たいところです。";
   }
 
   return null;
@@ -502,14 +527,14 @@ function buildStockContextLeadFromFallback(
   }
 
   if (score >= 1) {
-    return "filingベースで見ると、足元はやや強めです。";
+    return "今回の決算資料だけで見ると、足元はやや強めです。";
   }
 
   if (score <= -1) {
-    return "filingベースで見ると、足元は慎重寄りです。";
+    return "今回の決算資料だけで見ると、足元は慎重寄りです。";
   }
 
-  return "filingベースで見ると、強弱はまだらです。";
+  return "今回の決算資料だけで見ると、強弱はまだらです。";
 }
 
 function buildTariffNarrativeSentence(source: SourceChunkRecord): string {
@@ -546,6 +571,22 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
     return "提出資料の一般的な注意書きや案内文で、この論点の深掘りには向きません。";
   }
 
+  if (/(digital asset|bitcoin)/.test(lowered) && /(fair value|impairment|loss)/.test(lowered)) {
+    return "本文では、ビットコインなどデジタル資産の評価損益が利益を大きく動かしたと説明しています。";
+  }
+
+  if (/(interest expense|debt)/.test(lowered)) {
+    return "本文では、支払利息などの金融費用が利益の重荷になった可能性に触れています。";
+  }
+
+  if (/(selling, general and administrative|research and development|operating expenses|compensation|expense)/.test(lowered)) {
+    return "本文では、販管費や開発費などの費用が利益の重荷になった可能性に触れています。";
+  }
+
+  if (/(income tax|tax expense|valuation allowance)/.test(lowered)) {
+    return "本文では、税金関連の要因が利益を大きく動かした可能性に触れています。";
+  }
+
   const regionalDrivers = [
     { region: "米州", pattern: /americas[\s\S]*?higher net sales of ([^.]+)\./i },
     { region: "中国", pattern: /greater china[\s\S]*?higher net sales of ([^.]+)\./i },
@@ -561,7 +602,9 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
 
   const generalDriverMatch = trimmed.match(/(?:primarily due to|driven by|helped by|powered by)\s+([^.]+)\./i);
   if (generalDriverMatch?.[1]) {
-    return `本文では、${translateDriverList(generalDriverMatch[1])} が主な押し上げ要因と説明しています。`;
+    return profile.asksProfit && profile.asksCause
+      ? `本文では、${translateDriverList(generalDriverMatch[1])} が利益を押し下げた要因と説明しています。`
+      : `本文では、${translateDriverList(generalDriverMatch[1])} が主な押し上げ要因と説明しています。`;
   }
 
   if (/demand remained resilient|strong demand|healthy demand|demand rebound/.test(lowered)) {

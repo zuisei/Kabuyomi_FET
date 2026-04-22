@@ -51,6 +51,23 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(response.usage.stocksUsed, 1)
     }
 
+    func testFetchCompanyDecodesCompanyWebsiteURLWhenPresent() async throws {
+        let client = makeClient(context: standardContext) { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/company/AAPL")
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.companyPayloadData()
+            )
+        }
+
+        let company = try await client.fetchCompany(ticker: "AAPL")
+
+        XCTAssertEqual(company.companyWebsiteUrl, "https://www.aapl.com")
+    }
+
     func testFetchUsageSendsDeviceHeader() async throws {
         let client = makeClient(context: standardContext) { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/usage")
@@ -148,7 +165,8 @@ final class APIClientTests: XCTestCase {
                             "sourceKind": "sec_filing",
                             "sectionType": "xbrl_metric",
                             "sourceLabel": "OperatingIncomeLoss",
-                            "excerpt": "123456000000"
+                            "excerpt": "123456000000",
+                            "sourceUrl": "https://www.sec.gov/Archives/AAPL.htm"
                         ]
                     ],
                     "responsePath": "gemini",
@@ -172,6 +190,7 @@ final class APIClientTests: XCTestCase {
 
         XCTAssertEqual(response.responsePath, .gemini)
         XCTAssertEqual(response.modelName, "gemini-2.5-flash")
+        XCTAssertEqual(response.sources.first?.sourceUrl, "https://www.sec.gov/Archives/AAPL.htm")
     }
 
     func testSendChatDecodesLegacyResponseWithoutResponsePath() async throws {
@@ -212,6 +231,34 @@ final class APIClientTests: XCTestCase {
 
         XCTAssertNil(response.responsePath)
         XCTAssertNil(response.modelName)
+    }
+
+    func testTranslateQuoteSendsDeviceHeaderAndDecodesResponse() async throws {
+        let client = makeClient(context: standardContext) { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/translate-quote")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+
+            let body = try XCTUnwrap(Self.requestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+            XCTAssertEqual(json["text"], "Revenue increased year over year.")
+            XCTAssertEqual(json["targetLanguage"], "ja")
+            XCTAssertNil(json["sourceLanguage"])
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "translatedText": "売上高は前年同期比で増加しました。",
+                    "modelName": "gemma-4-26b-a4b-it"
+                ])
+            )
+        }
+
+        let response = try await client.translateQuote(text: "Revenue increased year over year.")
+
+        XCTAssertEqual(response.translatedText, "売上高は前年同期比で増加しました。")
+        XCTAssertEqual(response.modelName, "gemma-4-26b-a4b-it")
     }
 
     func testRemoveFromWatchlistSendsDeviceHeaderAndJSONBody() async throws {

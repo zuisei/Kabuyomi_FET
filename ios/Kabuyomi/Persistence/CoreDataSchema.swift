@@ -22,6 +22,7 @@ final class FilingEntity: NSManagedObject {
     @NSManaged var periodOfReport: Date
     @NSManaged var accessionNumber: String
     @NSManaged var primaryDocumentUrl: String
+    @NSManaged var companyWebsiteUrl: String?
     @NSManaged var mdaText: String
     @NSManaged var mdaTokenCount: Int32
     @NSManaged var extractorVersion: String
@@ -98,9 +99,11 @@ final class ChatMessageEntity: NSManagedObject {
 @objc(MessageSourceRefEntity)
 final class MessageSourceRefEntity: NSManagedObject {
     @NSManaged var id: UUID
+    @NSManaged var sourceIdSnapshot: String?
     @NSManaged var sourceKindSnapshot: String?
     @NSManaged var sourceLabelSnapshot: String
     @NSManaged var excerpt: String
+    @NSManaged var sourceUrlSnapshot: String?
     @NSManaged var chatMessage: ChatMessageEntity?
     @NSManaged var sourceChunk: SourceChunkEntity?
 }
@@ -198,6 +201,7 @@ enum CoreDataSchema {
             attribute("periodOfReport", type: .dateAttributeType),
             attribute("accessionNumber", type: .stringAttributeType),
             attribute("primaryDocumentUrl", type: .stringAttributeType),
+            attribute("companyWebsiteUrl", type: .stringAttributeType, optional: true),
             attribute("mdaText", type: .stringAttributeType),
             attribute("mdaTokenCount", type: .integer32AttributeType),
             attribute("extractorVersion", type: .stringAttributeType),
@@ -261,9 +265,11 @@ enum CoreDataSchema {
         let messageSourceRef = entity(name: "MessageSourceRefEntity", className: NSStringFromClass(MessageSourceRefEntity.self))
         messageSourceRef.properties = [
             attribute("id", type: .UUIDAttributeType),
+            attribute("sourceIdSnapshot", type: .stringAttributeType, optional: true),
             attribute("sourceKindSnapshot", type: .stringAttributeType, optional: true),
             attribute("sourceLabelSnapshot", type: .stringAttributeType),
-            attribute("excerpt", type: .stringAttributeType)
+            attribute("excerpt", type: .stringAttributeType),
+            attribute("sourceUrlSnapshot", type: .stringAttributeType, optional: true)
         ]
 
         let stockFilings = relationship("filings", destination: filing, toMany: true, deleteRule: .cascadeDeleteRule)

@@ -14,6 +14,7 @@ import { handleChatRoute } from "./routes/chat";
 import { handleCompanyRoute } from "./routes/company";
 import { handleInternalBackfillHistoryRoute } from "./routes/internal-backfill-history";
 import { handleSearchRoute } from "./routes/search";
+import { handleTranslateQuoteRoute } from "./routes/translate-quote";
 import type { RouteHandler } from "./routes/types";
 import { handleUsageRoute } from "./routes/usage";
 import { handleWatchlistAddRoute } from "./routes/watchlist-add";
@@ -28,6 +29,7 @@ const apiRoutes: RouteHandler[] = [
   handleWatchlistRemoveRoute,
   handleCompanyRoute,
   handleChatRoute,
+  handleTranslateQuoteRoute,
   handleUsageRoute,
   handleBillingSyncRoute
 ];

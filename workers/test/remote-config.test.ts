@@ -72,4 +72,16 @@ describe("remote config", () => {
     expect(config.dailyRefreshEnabled).toBe(false);
     expect(config.webSupplementEnabled).toBe(true);
   });
+
+  it("forces a reingest-worthy extractor version when remote config is still on v1", async () => {
+    const config = await loadRemoteConfig({
+      KABUYOMI_CACHE: {
+        get: async () => ({
+          extractorVersion: "v1"
+        })
+      }
+    } as never);
+
+    expect(config.extractorVersion).toBe(DEFAULT_REMOTE_CONFIG.extractorVersion);
+  });
 });

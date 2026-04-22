@@ -23,6 +23,8 @@ export interface RemoteConfig {
   trackedTickers: string[];
 }
 
+const CURRENT_EXTRACTOR_VERSION = "v2";
+
 export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   freeStockLimit: 3,
   freeDailyChatLimit: 10,
@@ -32,7 +34,7 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   chatEnabled: true,
   webSupplementEnabled: false,
   maintenanceMode: false,
-  extractorVersion: "v1",
+  extractorVersion: CURRENT_EXTRACTOR_VERSION,
   promptVersion: "v1",
   dailyRefreshEnabled: true,
   dailyRefreshBatchSize: DEFAULT_TRACKED_TICKERS.length,
@@ -55,6 +57,7 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
   return {
     ...DEFAULT_REMOTE_CONFIG,
     ...payload,
+    extractorVersion: normalizeExtractorVersion(payload.extractorVersion),
     trackedTickers: normalizeTrackedTickers(Array.isArray(payload.trackedTickers) ? payload.trackedTickers : []).slice(
       0,
       DEFAULT_TRACKED_TICKERS.length
@@ -72,4 +75,13 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
       DEFAULT_REMOTE_CONFIG.dailyRefreshConcurrency
     )
   };
+}
+
+function normalizeExtractorVersion(rawValue: unknown): string {
+  const trimmed = typeof rawValue === "string" ? rawValue.trim() : "";
+  if (!trimmed || trimmed === "v1") {
+    return CURRENT_EXTRACTOR_VERSION;
+  }
+
+  return trimmed;
 }
