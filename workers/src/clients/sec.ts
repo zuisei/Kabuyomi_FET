@@ -71,10 +71,44 @@ export interface TickerSnapshotEnvelope {
   data?: unknown[][];
 }
 
+interface TickerSnapshot {
+  updatedAt: string;
+  items: TickerRecord[];
+  searchIndex: TickerSearchIndexEntry[];
+}
+
+interface TickerSearchIndexEntry {
+  item: TickerRecord;
+  tickerInput: string;
+  tickerLower: string;
+  companyNameLower: string;
+  tickerAlias: string | null;
+  compactTicker: string;
+}
+
+interface TickerSearchContext {
+  normalizedQuery: string;
+  lowerQuery: string;
+  queryAlias: string | null;
+  compactQuery: string | null;
+  baseTickerFallback: string | null;
+}
+
+interface TickerSnapshotMemoryCache {
+  snapshot?: TickerSnapshot;
+  expiresAt: number;
+  loadPromise?: Promise<TickerSnapshot>;
+}
+
+const SEARCH_RESULT_LIMIT = 20;
+const TICKER_SNAPSHOT_MEMORY_TTL_MS = 5 * 60 * 1000;
+const TICKER_SEARCH_SCORE_ORDER = [0, 1, 1.5, 1.75, 2, 3, 4, 5, 6, 7, 8] as const;
+const tickerSnapshotMemoryCaches = new WeakMap<KVNamespace, TickerSnapshotMemoryCache>();
+
 export async function searchTickers(query: string, env: Env): Promise<{ items: TickerRecord[]; updatedAt: string | null }> {
   const snapshot = await getTickerSnapshot(env);
   const normalizedQuery = query.trim();
-  const rankedItems = sortTickerSearchResults(snapshot.items, normalizedQuery).slice(0, 20);
+  const rankedItems = selectTickerSearchResults(snapshot.searchIndex, normalizedQuery, SEARCH_RESULT_LIMIT);
   const items = await enrichTickerSearchResults(rankedItems, normalizedQuery, env);
 
   return {
@@ -84,24 +118,7 @@ export async function searchTickers(query: string, env: Env): Promise<{ items: T
 }
 
 export function sortTickerSearchResults(items: TickerRecord[], normalizedQuery: string): TickerRecord[] {
-  return items
-    .map((item) => ({
-      item,
-      score: scoreTickerSearch(item, normalizedQuery)
-    }))
-    .filter((candidate): candidate is { item: TickerRecord; score: number } => candidate.score !== null)
-    .sort((left, right) => {
-      if (left.score !== right.score) {
-        return left.score - right.score;
-      }
-
-      if (left.item.ticker.length !== right.item.ticker.length) {
-        return left.item.ticker.length - right.item.ticker.length;
-      }
-
-      return left.item.ticker.localeCompare(right.item.ticker);
-    })
-    .map((candidate) => candidate.item);
+  return selectTickerSearchResults(buildTickerSearchIndex(items), normalizedQuery, Number.POSITIVE_INFINITY);
 }
 
 const SEARCH_FORM_TYPE_CACHE_TTL_SECONDS = 24 * 60 * 60;
@@ -202,66 +219,168 @@ function normalizeLatestRawForm(forms: readonly string[]): string | null {
   return normalized ? normalized : null;
 }
 
-function scoreTickerSearch(item: TickerRecord, query: string): number | null {
-  const normalizedQuery = normalizeTickerInput(query);
-  const lowerQuery = normalizedQuery.toLowerCase();
-  const ticker = item.ticker.toLowerCase();
-  const companyName = item.companyName.toLowerCase();
-  const queryAlias = normalizeClassTickerAlias(normalizedQuery);
-  const tickerAlias = normalizeClassTickerAlias(item.ticker);
-  const baseTickerFallback = normalizeSeriesBaseTickerFallback(normalizedQuery);
+function selectTickerSearchResults(
+  index: TickerSearchIndexEntry[],
+  query: string,
+  limit: number
+): TickerRecord[] {
+  const context = buildTickerSearchContext(query);
+  if (!context) {
+    return [];
+  }
 
-  if (ticker === lowerQuery) {
+  const buckets = new Map<number, TickerSearchIndexEntry[]>();
+  const bounded = Number.isFinite(limit);
+  const perBucketLimit = bounded ? Math.max(0, Math.floor(limit)) : Number.POSITIVE_INFINITY;
+  if (perBucketLimit === 0) {
+    return [];
+  }
+
+  for (const entry of index) {
+    const score = scoreTickerSearchEntry(entry, context);
+    if (score === null) {
+      continue;
+    }
+
+    let bucket = buckets.get(score);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(score, bucket);
+    }
+
+    if (bounded) {
+      insertBoundedTickerSearchEntry(bucket, entry, perBucketLimit);
+    } else {
+      bucket.push(entry);
+    }
+  }
+
+  const results: TickerRecord[] = [];
+  for (const score of TICKER_SEARCH_SCORE_ORDER) {
+    const bucket = buckets.get(score);
+    if (!bucket) {
+      continue;
+    }
+
+    if (!bounded) {
+      bucket.sort(compareTickerSearchEntry);
+    }
+
+    for (const entry of bucket) {
+      results.push(entry.item);
+      if (bounded && results.length >= perBucketLimit) {
+        return results;
+      }
+    }
+  }
+
+  return results;
+}
+
+function buildTickerSearchContext(query: string): TickerSearchContext | null {
+  const normalizedQuery = normalizeTickerInput(query);
+  if (!normalizedQuery) {
+    return null;
+  }
+
+  const parsedAlias = parseTickerAliasInput(normalizedQuery);
+  return {
+    normalizedQuery,
+    lowerQuery: normalizedQuery.toLowerCase(),
+    queryAlias: parsedAlias ? `${parsedAlias.baseTicker}.${parsedAlias.suffix}` : null,
+    compactQuery: parsedAlias?.compactTicker ?? null,
+    baseTickerFallback: parsedAlias?.baseTicker ?? null
+  };
+}
+
+function scoreTickerSearchEntry(
+  entry: TickerSearchIndexEntry,
+  context: TickerSearchContext
+): number | null {
+  if (entry.tickerLower === context.lowerQuery) {
     return 0;
   }
 
-  if (queryAlias && tickerAlias === queryAlias) {
+  if (context.queryAlias && entry.tickerAlias === context.queryAlias) {
     return 1;
   }
 
-  if (matchesCompactTickerAlias(normalizedQuery, item.ticker)) {
+  if (context.compactQuery && entry.compactTicker === context.compactQuery) {
     return 1.5;
   }
 
-  if (baseTickerFallback && normalizeTickerInput(item.ticker) === baseTickerFallback) {
+  if (context.baseTickerFallback && entry.tickerInput === context.baseTickerFallback) {
     return 1.75;
   }
 
-  if (ticker.startsWith(lowerQuery)) {
+  if (entry.tickerInput.startsWith(context.normalizedQuery)) {
     return 2;
   }
 
-  if (queryAlias && tickerAlias?.startsWith(queryAlias)) {
+  if (context.queryAlias && entry.tickerAlias?.startsWith(context.queryAlias)) {
     return 3;
   }
 
-  if (companyName === lowerQuery) {
+  if (entry.companyNameLower === context.lowerQuery) {
     return 4;
   }
 
-  if (companyName.startsWith(lowerQuery)) {
+  if (entry.companyNameLower.startsWith(context.lowerQuery)) {
     return 5;
   }
 
-  if (ticker.includes(lowerQuery)) {
+  if (entry.tickerLower.includes(context.lowerQuery)) {
     return 6;
   }
 
-  if (queryAlias && tickerAlias?.includes(queryAlias)) {
+  if (context.queryAlias && entry.tickerAlias?.includes(context.queryAlias)) {
     return 7;
   }
 
-  if (companyName.includes(lowerQuery)) {
+  if (entry.companyNameLower.includes(context.lowerQuery)) {
     return 8;
   }
 
   return null;
 }
 
+function insertBoundedTickerSearchEntry(
+  bucket: TickerSearchIndexEntry[],
+  entry: TickerSearchIndexEntry,
+  limit: number
+): void {
+  let insertAt = bucket.findIndex((candidate) => compareTickerSearchEntry(entry, candidate) < 0);
+  if (insertAt === -1) {
+    insertAt = bucket.length;
+  }
+
+  if (insertAt >= limit) {
+    return;
+  }
+
+  bucket.splice(insertAt, 0, entry);
+  if (bucket.length > limit) {
+    bucket.length = limit;
+  }
+}
+
+function compareTickerSearchEntry(left: TickerSearchIndexEntry, right: TickerSearchIndexEntry): number {
+  if (left.item.ticker.length !== right.item.ticker.length) {
+    return left.item.ticker.length - right.item.ticker.length;
+  }
+
+  if (left.item.ticker === right.item.ticker) {
+    return 0;
+  }
+
+  return left.item.ticker < right.item.ticker ? -1 : 1;
+}
+
 export async function refreshTickerSnapshot(env: Env): Promise<void> {
   const payload = await fetchTickerSnapshotFromFetcher(env);
-  const snapshot = normalizeTickerSnapshot(payload, new Date().toISOString());
-  await env.KABUYOMI_CACHE.put("tickers_snapshot", JSON.stringify(snapshot));
+  const normalized = normalizeTickerSnapshot(payload, new Date().toISOString());
+  await env.KABUYOMI_CACHE.put("tickers_snapshot", JSON.stringify(normalized));
+  cacheTickerSnapshot(env, buildTickerSnapshot(normalized));
 }
 
 export async function lookupTicker(ticker: string, env: Env): Promise<TickerRecord | null> {
@@ -271,22 +390,30 @@ export async function lookupTicker(ticker: string, env: Env): Promise<TickerReco
   }
 
   const snapshot = await getTickerSnapshot(env);
-  const exactMatch = snapshot.items.find((item) => normalizeTickerInput(item.ticker) === normalizedTicker);
+  const exactMatch = snapshot.searchIndex.find((entry) => entry.tickerInput === normalizedTicker)?.item;
   if (exactMatch) {
     return exactMatch;
   }
 
-  const aliasMatch = snapshot.items.find((item) => matchesClassTickerAlias(normalizedTicker, item.ticker));
+  const normalizedAlias = normalizeClassTickerAlias(normalizedTicker);
+  const aliasMatch = normalizedAlias
+    ? snapshot.searchIndex.find((entry) => entry.tickerAlias === normalizedAlias)?.item
+    : undefined;
   if (aliasMatch) {
     return aliasMatch;
   }
 
-  const compactAliasMatch = snapshot.items.find((item) => matchesCompactTickerAlias(normalizedTicker, item.ticker));
+  const parsedAlias = parseTickerAliasInput(normalizedTicker);
+  const compactAliasMatch = parsedAlias
+    ? snapshot.searchIndex.find((entry) => entry.compactTicker === parsedAlias.compactTicker)?.item
+    : undefined;
   if (compactAliasMatch) {
     return compactAliasMatch;
   }
 
-  return resolveBaseTickerFallback(normalizedTicker, snapshot.items);
+  return parsedAlias
+    ? snapshot.searchIndex.find((entry) => entry.tickerInput === parsedAlias.baseTicker)?.item ?? null
+    : null;
 }
 
 export async function listTickersByCik(cik: string, env: Env): Promise<string[]> {
@@ -696,16 +823,79 @@ function normalizeTickerSnapshot(raw: unknown, updatedAt = new Date().toISOStrin
   };
 }
 
-async function getTickerSnapshot(env: Env): Promise<{ updatedAt: string; items: TickerRecord[] }> {
+async function getTickerSnapshot(env: Env): Promise<TickerSnapshot> {
+  const cache = tickerSnapshotMemoryCaches.get(env.KABUYOMI_CACHE);
+  const now = Date.now();
+  if (cache?.snapshot && cache.expiresAt > now) {
+    return cache.snapshot;
+  }
+
+  if (cache?.loadPromise) {
+    return cache.loadPromise;
+  }
+
+  const loadPromise = loadTickerSnapshot(env);
+  tickerSnapshotMemoryCaches.set(env.KABUYOMI_CACHE, {
+    snapshot: cache?.snapshot,
+    expiresAt: cache?.expiresAt ?? 0,
+    loadPromise
+  });
+
+  try {
+    const snapshot = await loadPromise;
+    cacheTickerSnapshot(env, snapshot);
+    return snapshot;
+  } catch (error) {
+    if (cache?.snapshot) {
+      tickerSnapshotMemoryCaches.set(env.KABUYOMI_CACHE, {
+        snapshot: cache.snapshot,
+        expiresAt: cache.expiresAt
+      });
+    } else {
+      tickerSnapshotMemoryCaches.delete(env.KABUYOMI_CACHE);
+    }
+    throw error;
+  }
+}
+
+async function loadTickerSnapshot(env: Env): Promise<TickerSnapshot> {
   const cached = await env.KABUYOMI_CACHE.get("tickers_snapshot", "json");
   const snapshot = normalizeTickerSnapshot(cached);
   if (snapshot.items.length > 0) {
-    return snapshot;
+    return buildTickerSnapshot(snapshot);
   }
 
   await refreshTickerSnapshot(env);
   const refreshed = await env.KABUYOMI_CACHE.get("tickers_snapshot", "json");
-  return normalizeTickerSnapshot(refreshed);
+  return buildTickerSnapshot(normalizeTickerSnapshot(refreshed));
+}
+
+function cacheTickerSnapshot(env: Env, snapshot: TickerSnapshot): void {
+  tickerSnapshotMemoryCaches.set(env.KABUYOMI_CACHE, {
+    snapshot,
+    expiresAt: Date.now() + TICKER_SNAPSHOT_MEMORY_TTL_MS
+  });
+}
+
+function buildTickerSnapshot(snapshot: { updatedAt: string; items: TickerRecord[] }): TickerSnapshot {
+  return {
+    ...snapshot,
+    searchIndex: buildTickerSearchIndex(snapshot.items)
+  };
+}
+
+function buildTickerSearchIndex(items: TickerRecord[]): TickerSearchIndexEntry[] {
+  return items.map((item) => {
+    const tickerInput = normalizeTickerInput(item.ticker);
+    return {
+      item,
+      tickerInput,
+      tickerLower: tickerInput.toLowerCase(),
+      companyNameLower: item.companyName.toLowerCase(),
+      tickerAlias: normalizeClassTickerAlias(tickerInput),
+      compactTicker: normalizeCompactTicker(tickerInput)
+    };
+  });
 }
 
 function normalizeTickerInput(value: string): string {
