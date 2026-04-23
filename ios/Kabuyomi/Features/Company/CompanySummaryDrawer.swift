@@ -1,10 +1,37 @@
 import SwiftUI
 
+func summarySignalSegmentWidths(
+    totalWidth: CGFloat,
+    counts: [Int],
+    spacing: CGFloat = 6,
+    minimumVisibleWidth: CGFloat = 10
+) -> [CGFloat] {
+    guard !counts.isEmpty else { return [] }
+
+    let spacingTotal = spacing * CGFloat(max(counts.count - 1, 0))
+    let availableWidth = max(totalWidth - spacingTotal, 0)
+    guard availableWidth > 0 else { return Array(repeating: 0, count: counts.count) }
+
+    let baselineWidth = min(minimumVisibleWidth, availableWidth / CGFloat(counts.count))
+    let totalCount = counts.reduce(0, +)
+
+    guard totalCount > 0 else {
+        return Array(repeating: baselineWidth, count: counts.count)
+    }
+
+    let remainingWidth = max(availableWidth - baselineWidth * CGFloat(counts.count), 0)
+    return counts.map { count in
+        guard count > 0 else { return baselineWidth }
+        return baselineWidth + remainingWidth * CGFloat(count) / CGFloat(totalCount)
+    }
+}
+
 struct SummaryDrawer: View {
     let company: CompanyPayload
     let positiveInsights: [FilingInsight]
     let negativeInsights: [FilingInsight]
     let focusInsights: [FilingInsight]
+    let openSource: (LocalMessageSourceRef) -> Void
     let openOriginal: () -> Void
     let close: () -> Void
 
@@ -35,12 +62,14 @@ struct SummaryDrawer: View {
                     InvestorDriverBoard(
                         company: company,
                         positiveInsights: Array(positiveInsights.prefix(3)),
-                        negativeInsights: Array(negativeInsights.prefix(3))
+                        negativeInsights: Array(negativeInsights.prefix(3)),
+                        openSource: openSource
                     )
 
                     InvestorFocusBoard(
                         company: company,
-                        focusInsights: Array(focusInsights.prefix(3))
+                        focusInsights: Array(focusInsights.prefix(3)),
+                        openSource: openSource
                     )
 
                     InvestorChangeBoard(
@@ -240,10 +269,6 @@ private struct SummarySignalMeter: View {
     let negativeCount: Int
     let focusCount: Int
 
-    private var total: Double {
-        Double(max(positiveCount + negativeCount + focusCount, 1))
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -253,18 +278,26 @@ private struct SummarySignalMeter: View {
             }
 
             GeometryReader { geometry in
+                let segmentWidths = summarySignalSegmentWidths(
+                    totalWidth: geometry.size.width,
+                    counts: [positiveCount, negativeCount, focusCount]
+                )
+
                 HStack(spacing: 6) {
                     SummarySignalSegment(
-                        width: geometry.size.width * CGFloat(Double(positiveCount) / total),
-                        tint: KabuyomiTheme.positive
+                        width: segmentWidths[0],
+                        tint: KabuyomiTheme.positive,
+                        isActive: positiveCount > 0
                     )
                     SummarySignalSegment(
-                        width: geometry.size.width * CGFloat(Double(negativeCount) / total),
-                        tint: KabuyomiTheme.negative
+                        width: segmentWidths[1],
+                        tint: KabuyomiTheme.negative,
+                        isActive: negativeCount > 0
                     )
                     SummarySignalSegment(
-                        width: geometry.size.width * CGFloat(Double(focusCount) / total),
-                        tint: KabuyomiTheme.accentDeep
+                        width: segmentWidths[2],
+                        tint: KabuyomiTheme.accentDeep,
+                        isActive: focusCount > 0
                     )
                 }
             }
@@ -276,11 +309,12 @@ private struct SummarySignalMeter: View {
 private struct SummarySignalSegment: View {
     let width: CGFloat
     let tint: Color
+    let isActive: Bool
 
     var body: some View {
         Capsule()
-            .fill(tint.opacity(width > 0 ? 0.9 : 0.16))
-            .frame(width: max(width, 10))
+            .fill(tint.opacity(isActive ? 0.9 : 0.16))
+            .frame(width: width)
     }
 }
 
@@ -852,6 +886,7 @@ private struct InvestorDriverBoard: View {
     let company: CompanyPayload
     let positiveInsights: [FilingInsight]
     let negativeInsights: [FilingInsight]
+    let openSource: (LocalMessageSourceRef) -> Void
 
     var body: some View {
         SummaryBoardCard(
@@ -867,7 +902,8 @@ private struct InvestorDriverBoard: View {
                 tint: KabuyomiTheme.positive,
                 systemImage: "arrow.up.right.circle.fill",
                 insights: positiveInsights,
-                emptyMessage: "明確な良い材料はまだ切り出されていません。"
+                emptyMessage: "明確な良い材料はまだ切り出されていません。",
+                openSource: openSource
             )
 
             InvestorInsightLane(
@@ -877,7 +913,8 @@ private struct InvestorDriverBoard: View {
                 tint: KabuyomiTheme.negative,
                 systemImage: "arrow.down.right.circle.fill",
                 insights: negativeInsights,
-                emptyMessage: "明確に気をつけたい材料はまだ切り出されていません。"
+                emptyMessage: "明確に気をつけたい材料はまだ切り出されていません。",
+                openSource: openSource
             )
         }
     }
@@ -891,6 +928,7 @@ private struct InvestorInsightLane: View {
     let systemImage: String
     let insights: [FilingInsight]
     let emptyMessage: String
+    let openSource: (LocalMessageSourceRef) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -924,7 +962,8 @@ private struct InvestorInsightLane: View {
                         company: company,
                         index: index + 1,
                         insight: insight,
-                        tint: tint
+                        tint: tint,
+                        openSource: openSource
                     )
                 }
             }
@@ -937,6 +976,7 @@ private struct InvestorInsightRow: View {
     let index: Int
     let insight: FilingInsight
     let tint: Color
+    let openSource: (LocalMessageSourceRef) -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -953,7 +993,11 @@ private struct InvestorInsightRow: View {
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
 
-                InsightSourceChips(company: company, sourceIds: insight.sourceIds)
+                InsightSourceChips(
+                    company: company,
+                    sourceIds: insight.sourceIds,
+                    openSource: openSource
+                )
             }
         }
         .padding(14)
@@ -965,6 +1009,7 @@ private struct InvestorInsightRow: View {
 private struct InvestorFocusBoard: View {
     let company: CompanyPayload
     let focusInsights: [FilingInsight]
+    let openSource: (LocalMessageSourceRef) -> Void
 
     var body: some View {
         SummaryBoardCard(
@@ -982,30 +1027,82 @@ private struct InvestorFocusBoard: View {
                     .kabuyomiCard(.muted, radius: 18)
             } else {
                 ForEach(Array(focusInsights.enumerated()), id: \.element.id) { index, insight in
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .top, spacing: 10) {
-                            Text("Q\(index + 1)")
-                                .font(.system(.caption, design: .rounded, weight: .bold))
-                                .foregroundStyle(KabuyomiTheme.accentDeep)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+                    let primarySource = primarySourceReference(sourceIds: insight.sourceIds, in: company)
 
-                            Text(insight.text)
-                                .font(.system(.body, design: .rounded))
-                                .foregroundStyle(KabuyomiTheme.inkSoft)
-                                .lineSpacing(4)
-                                .fixedSize(horizontal: false, vertical: true)
+                    Group {
+                        if let primarySource {
+                            Button(action: { openSource(primarySource) }) {
+                                InvestorFocusInsightCard(
+                                    company: company,
+                                    index: index + 1,
+                                    insight: insight,
+                                    isInteractive: true
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            InvestorFocusInsightCard(
+                                company: company,
+                                index: index + 1,
+                                insight: insight,
+                                isInteractive: false
+                            )
                         }
-
-                        InsightSourceChips(company: company, sourceIds: insight.sourceIds)
                     }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .kabuyomiCard(.secondary, radius: 20)
                 }
             }
         }
+    }
+}
+
+private struct InvestorFocusInsightCard: View {
+    let company: CompanyPayload
+    let index: Int
+    let insight: FilingInsight
+    let isInteractive: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Text("Q\(index)")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+
+                Text(insight.text)
+                    .font(.system(.body, design: .rounded))
+                    .foregroundStyle(KabuyomiTheme.inkSoft)
+                    .lineSpacing(4)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if isInteractive {
+                    Spacer(minLength: 8)
+
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                        .padding(8)
+                        .background(Circle().fill(KabuyomiTheme.accentSoft.opacity(0.45)))
+                }
+            }
+
+            InsightSourceChips(
+                company: company,
+                sourceIds: insight.sourceIds,
+                openSource: nil
+            )
+
+            if isInteractive {
+                Text("タップで根拠を開く")
+                    .font(.system(.caption2, design: .rounded, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep.opacity(0.82))
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .kabuyomiCard(.secondary, radius: 20)
     }
 }
 
@@ -1063,34 +1160,56 @@ private struct SummaryBoardCard<Content: View>: View {
     }
 }
 
+struct InsightSourceChip: Identifiable, Hashable {
+    let label: String
+    let source: LocalMessageSourceRef?
+
+    var id: String {
+        "\(label):\(source?.sourceIdSnapshot ?? "none")"
+    }
+}
+
+func insightSourceChips(sourceIds: [String], in company: CompanyPayload) -> [InsightSourceChip] {
+    var seen = Set<String>()
+
+    return sourceIds.compactMap { sourceId in
+        guard let chunk = company.sourceChunks.first(where: { $0.sourceId == sourceId }) else {
+            let fallback = "提出資料"
+            guard seen.insert(fallback).inserted else { return nil }
+            return InsightSourceChip(label: fallback, source: nil)
+        }
+
+        let label = investorFacingSourceLabel(for: chunk, in: company)
+        guard seen.insert(label).inserted else { return nil }
+        return InsightSourceChip(
+            label: label,
+            source: sourceReference(from: chunk, in: company)
+        )
+    }
+}
+
 private struct InsightSourceChips: View {
     let company: CompanyPayload
     let sourceIds: [String]
+    let openSource: ((LocalMessageSourceRef) -> Void)?
 
-    private var chips: [String] {
-        var seen = Set<String>()
-        return sourceIds.compactMap { sourceId in
-            guard let chunk = company.sourceChunks.first(where: { $0.sourceId == sourceId }) else {
-                let fallback = "提出資料"
-                return seen.insert(fallback).inserted ? fallback : nil
-            }
-
-            let label = investorFacingSourceLabel(for: chunk, in: company)
-            return seen.insert(label).inserted ? label : nil
-        }
+    private var chips: [InsightSourceChip] {
+        insightSourceChips(sourceIds: sourceIds, in: company)
     }
 
     var body: some View {
         if !chips.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(Array(chips.prefix(2)), id: \.self) { chip in
-                        Label(chip, systemImage: "bookmark")
-                            .font(.system(.caption2, design: .rounded, weight: .semibold))
-                            .foregroundStyle(KabuyomiTheme.accentDeep)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+                    ForEach(Array(chips.prefix(2))) { chip in
+                        if let source = chip.source, let openSource {
+                            Button(action: { openSource(source) }) {
+                                sourceChipLabel(chip.label)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            sourceChipLabel(chip.label)
+                        }
                     }
 
                     if chips.count > 2 {
@@ -1104,5 +1223,14 @@ private struct InsightSourceChips: View {
                 }
             }
         }
+    }
+
+    private func sourceChipLabel(_ label: String) -> some View {
+        Label(label, systemImage: "bookmark")
+            .font(.system(.caption2, design: .rounded, weight: .semibold))
+            .foregroundStyle(KabuyomiTheme.accentDeep)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
     }
 }

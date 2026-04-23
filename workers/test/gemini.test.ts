@@ -158,7 +158,8 @@ describe("Gemini summary fallback", () => {
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(response.verdict).toContain("Test Corp");
+    expect(response.provider).toBe("fallback");
+    expect(response.summary.verdict).toContain("Test Corp");
   });
 });
 

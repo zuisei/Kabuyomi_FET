@@ -8,9 +8,12 @@ vi.mock("../src/clients/sec", () => ({
 
 vi.mock("../src/clients/gemini", () => ({
   generateSummary: vi.fn(async () => ({
-    verdict: "metrics only",
-    highlights: [],
-    changes: []
+    summary: {
+      verdict: "metrics only",
+      highlights: [],
+      changes: []
+    },
+    provider: "fallback"
   }))
 }));
 
@@ -72,5 +75,6 @@ describe("ingestFiling metrics-only mode", () => {
     expect(record.mdaTokenCount).toBe(0);
     expect(record.sourceChunks.every((chunk) => chunk.sectionType === "xbrl_metric")).toBe(true);
     expect(record.metrics).toHaveLength(2);
+    expect(record.contentMode).toBe("metrics_only");
   });
 });

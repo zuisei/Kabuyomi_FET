@@ -14,10 +14,16 @@ import { buildChatPrompt, buildQuoteTranslationPrompt, buildSummaryPrompt } from
 import { invokeGemini, resolveGeminiTranslationModel } from "./gemini/request";
 import type { ChatPromptInput, GeminiChatAnswer, QuoteTranslationPromptInput, SummaryPromptInput } from "./gemini/types";
 
-export async function generateSummary(env: Env, input: SummaryPromptInput): Promise<SummaryRecord> {
+export async function generateSummary(
+  env: Env,
+  input: SummaryPromptInput
+): Promise<{ summary: SummaryRecord; provider: "gemini" | "fallback" }> {
   if (!env.GEMINI_API_KEY) {
     logEvent("gemini_fallback_used", { kind: "summary", reason: "missing_api_key" });
-    return localSummaryFallback(input);
+    return {
+      summary: localSummaryFallback(input),
+      provider: "fallback"
+    };
   }
 
   let response: unknown;
@@ -25,26 +31,35 @@ export async function generateSummary(env: Env, input: SummaryPromptInput): Prom
     response = await invokeGemini(env, buildSummaryPrompt(input), "summary");
   } catch {
     logEvent("gemini_fallback_used", { kind: "summary", reason: "request_failed" });
-    return localSummaryFallback(input);
+    return {
+      summary: localSummaryFallback(input),
+      provider: "fallback"
+    };
   }
 
   const normalized = normalizeSummaryResponse(response);
   if (!normalized) {
     logSchemaMismatch("summary", response);
     logEvent("gemini_fallback_used", { kind: "summary", reason: "schema_validation_failed" });
-    return localSummaryFallback(input);
+    return {
+      summary: localSummaryFallback(input),
+      provider: "fallback"
+    };
   }
 
   return {
-    verdict: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(normalized.verdict))),
-    highlights: normalized.highlights.map((line) => ({
-      ...line,
-      text: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(line.text)))
-    })),
-    changes: normalized.changes.map((line) => ({
-      ...line,
-      text: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(line.text)))
-    }))
+    summary: {
+      verdict: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(normalized.verdict))),
+      highlights: normalized.highlights.map((line) => ({
+        ...line,
+        text: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(line.text)))
+      })),
+      changes: normalized.changes.map((line) => ({
+        ...line,
+        text: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(line.text)))
+      }))
+    },
+    provider: "gemini"
   };
 }
 

@@ -167,6 +167,14 @@ export async function ensureHistoricalArtifacts(record: FilingCacheRecord, env: 
   await Promise.all(tasks);
 }
 
+export async function upsertHistoricalIndex(record: FilingCacheRecord, env: Partial<Env>): Promise<void> {
+  if (!hasHistoricalBindings(env)) {
+    return;
+  }
+
+  await persistHistoryIndex(record, env);
+}
+
 export async function maybeBuildHistoricalChatResponse(
   filing: FilingCacheRecord,
   question: string,
@@ -243,13 +251,16 @@ export async function maybeBuildHistoricalChatResponse(
 
 export async function loadHistoricalOverview(
   filing: FilingCacheRecord,
-  env: Partial<Env>
+  env: Partial<Env>,
+  options: { allowPersistence?: boolean } = {}
 ): Promise<HistoricalOverviewPayload | null> {
   if (!hasHistoricalBindings(env)) {
     return null;
   }
 
-  await ensureHistoricalArtifacts(filing, env);
+  if (options.allowPersistence !== false) {
+    await ensureHistoricalArtifacts(filing, env);
+  }
 
   const logicalNames: MetricSnapshot["logicalName"][] = [
     "revenue",
@@ -472,7 +483,7 @@ async function normalizeIndexedFilingTicker(
   ]);
 }
 
-function buildArchiveObjectKey(filingKey: string): string {
+export function buildArchiveObjectKey(filingKey: string): string {
   return `${ARCHIVE_PREFIX}/${filingKey}.json`;
 }
 

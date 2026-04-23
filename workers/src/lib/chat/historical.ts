@@ -1,16 +1,14 @@
 import type { Env, FilingCacheRecord, FilingReference, MetricSnapshot } from "../../env";
 import { fetchSubmissions, listSupportedFilings, lookupTicker, pickComparisonFiling } from "../../clients/sec";
 import { ensureHistoricalFilingStored } from "../filings/history-persistence";
+import { selectHistoricalAutohydrationCandidates } from "../history-autohydration";
 import { hasHistoricalBindings, isHistoricalQuestion, maybeBuildHistoricalChatResponse } from "../history-store";
 import { logErrorEvent, logEvent, logWarnEvent } from "../logging";
 import { formatMetricValue, formatYoYDelta, metricLabel } from "../metrics";
 import type { RemoteConfig } from "../remote-config";
 import { buildSecFilingSource, type ChatResponsePayload } from "./grounding";
 
-const AUTO_HYDRATION_YEARS = 3;
-const AUTO_HYDRATION_MAX_PRIOR_FILINGS = 2;
 const AUTO_HYDRATION_TIMEOUT_MS = 6_000;
-const SAME_QUARTER_MATCH_WINDOW_DAYS = 45;
 
 type HydrationAttempt = {
   attempted: boolean;
@@ -20,11 +18,28 @@ type HydrationAttempt = {
   status: "skipped" | "completed" | "failed" | "timed_out";
 };
 
+type HistoricalHydrationOptions = {
+  executionContext?: Pick<ExecutionContext, "waitUntil">;
+};
+
+type HistoricalHydrationPreparation =
+  | {
+      status: "ready";
+      tickerRecord: NonNullable<Awaited<ReturnType<typeof lookupTicker>>>;
+      submissions: Awaited<ReturnType<typeof fetchSubmissions>>;
+      candidates: FilingReference[];
+    }
+  | {
+      status: "skipped";
+      reason: "ticker_not_found" | "no_comparable_candidates";
+    };
+
 export async function maybeBuildHistoricalChatResponseWithHydration(
   filing: FilingCacheRecord,
   question: string,
   env: Env,
-  config: RemoteConfig
+  config: RemoteConfig,
+  options: HistoricalHydrationOptions = {}
 ): Promise<ChatResponsePayload | null> {
   if (!isHistoricalQuestion(question)) {
     return null;
@@ -61,7 +76,27 @@ export async function maybeBuildHistoricalChatResponseWithHydration(
     return initial;
   }
 
-  const hydration = await hydrateHistoricalCoverageForChat(filing, env, config);
+  const contentMode = resolveHistoricalHydrationContentMode(question);
+  if (options.executionContext) {
+    enqueueHistoricalHydration(filing, env, config, options.executionContext, contentMode);
+    return buildHistoricalDegradeResponse(filing, question, "履歴比較をバックグラウンドで準備中のため");
+  }
+
+  const preparation = await prepareHistoricalHydration(filing, env);
+  if (preparation.status === "skipped") {
+    return buildInsufficientHistoricalResponse(filing, {
+      attempted: false,
+      selectedCount: 0,
+      hydratedCount: 0,
+      status: "skipped",
+      reason: preparation.reason
+    });
+  }
+
+  const hydration = await hydrateHistoricalCoverageForChat(filing, env, config, {
+    contentMode,
+    preparation
+  });
   if (hydration.hydratedCount > 0) {
     try {
       const retried = await maybeBuildHistoricalChatResponse(filing, question, env);
@@ -107,96 +142,46 @@ export async function maybeBuildHistoricalChatResponseWithHydration(
   return buildInsufficientHistoricalResponse(filing, hydration);
 }
 
-export function selectHistoricalAutohydrationCandidates(
-  current: Pick<FilingReference, "formType" | "accessionNumber" | "periodOfReport">,
-  filings: FilingReference[]
-): FilingReference[] {
-  const currentAccession = normalizeAccession(current.accessionNumber);
-  const windowStart = subtractYearsIsoDate(current.periodOfReport, AUTO_HYDRATION_YEARS);
-  const candidates = filings
-    .filter((candidate) => candidate.formType === current.formType)
-    .filter((candidate) => normalizeAccession(candidate.accessionNumber) !== currentAccession)
-    .filter((candidate) => candidate.periodOfReport < current.periodOfReport)
-    .filter((candidate) => candidate.periodOfReport >= windowStart)
-    .sort((left, right) => right.periodOfReport.localeCompare(left.periodOfReport));
-
-  if (current.formType === "10-K") {
-    return candidates.slice(0, AUTO_HYDRATION_MAX_PRIOR_FILINGS);
-  }
-
-  const selected: FilingReference[] = [];
-  const remaining = [...candidates];
-  for (let yearOffset = 1; yearOffset <= AUTO_HYDRATION_MAX_PRIOR_FILINGS; yearOffset += 1) {
-    const targetDate = subtractYearsIsoDate(current.periodOfReport, yearOffset);
-    const bestIndex = findClosestQuarterMatchIndex(remaining, targetDate);
-    if (bestIndex === -1) {
-      continue;
-    }
-
-    selected.push(remaining.splice(bestIndex, 1)[0]!);
-  }
-
-  return selected;
-}
-
 async function hydrateHistoricalCoverageForChat(
   filing: FilingCacheRecord,
   env: Env,
-  config: RemoteConfig
+  config: RemoteConfig,
+  options: {
+    contentMode?: "full" | "metrics_only";
+    preparation?: Extract<HistoricalHydrationPreparation, { status: "ready" }>;
+  } = {}
 ): Promise<HydrationAttempt> {
   try {
-    const tickerRecord = await lookupTicker(filing.ticker, env);
-    if (!tickerRecord) {
-      logWarnEvent("chat_historical_hydration_skipped", {
-        filingKey: filing.filingKey,
-        ticker: filing.ticker,
-        reason: "ticker_not_found"
-      });
+    const preparation = options.preparation ?? (await prepareHistoricalHydration(filing, env));
+    if (preparation.status === "skipped") {
       return {
         attempted: false,
         selectedCount: 0,
         hydratedCount: 0,
         status: "skipped",
-        reason: "ticker_not_found"
+        reason: preparation.reason
       };
     }
-
-    const submissions = await fetchSubmissions(tickerRecord.cik, env);
-    const candidates = selectHistoricalAutohydrationCandidates(
-      {
-        formType: filing.formType,
-        accessionNumber: filing.filingKey.split(":")[2] ?? filing.filingKey,
-        periodOfReport: filing.periodOfReport
-      },
-      listSupportedFilings(tickerRecord, submissions)
-    );
-
-    if (candidates.length === 0) {
-      logWarnEvent("chat_historical_hydration_skipped", {
-        filingKey: filing.filingKey,
-        ticker: filing.ticker,
-        reason: "no_comparable_candidates"
-      });
-      return {
-        attempted: false,
-        selectedCount: 0,
-        hydratedCount: 0,
-        status: "skipped",
-        reason: "no_comparable_candidates"
-      };
-    }
+    const contentMode = options.contentMode ?? "full";
 
     logEvent("chat_historical_hydration_attempted", {
       filingKey: filing.filingKey,
       ticker: filing.ticker,
-      selectedCount: candidates.length,
-      timeoutMs: AUTO_HYDRATION_TIMEOUT_MS
+      selectedCount: preparation.candidates.length,
+      timeoutMs: AUTO_HYDRATION_TIMEOUT_MS,
+      contentMode
     });
 
     let hydratedCount = 0;
-    for (const candidate of candidates) {
+    for (const candidate of preparation.candidates) {
       await withTimeout(
-        ensureHistoricalFilingStored(candidate, pickComparisonFiling(tickerRecord, submissions, candidate), env, config),
+        ensureHistoricalFilingStored(
+          candidate,
+          pickComparisonFiling(preparation.tickerRecord, preparation.submissions, candidate),
+          env,
+          config,
+          { contentMode }
+        ),
         AUTO_HYDRATION_TIMEOUT_MS,
         `historical hydration timed out for ${candidate.ticker}:${candidate.accessionNumber}`
       );
@@ -205,7 +190,7 @@ async function hydrateHistoricalCoverageForChat(
 
     return {
       attempted: true,
-      selectedCount: candidates.length,
+      selectedCount: preparation.candidates.length,
       hydratedCount,
       status: "completed"
     };
@@ -220,12 +205,124 @@ async function hydrateHistoricalCoverageForChat(
     });
     return {
       attempted: true,
-      selectedCount: 0,
+      selectedCount: options.preparation?.candidates.length ?? 0,
       hydratedCount: 0,
       status,
       reason
     };
   }
+}
+
+async function prepareHistoricalHydration(
+  filing: FilingCacheRecord,
+  env: Env
+): Promise<HistoricalHydrationPreparation> {
+  const tickerRecord = await lookupTicker(filing.ticker, env);
+  if (!tickerRecord) {
+    logWarnEvent("chat_historical_hydration_skipped", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      reason: "ticker_not_found"
+    });
+    return {
+      status: "skipped",
+      reason: "ticker_not_found"
+    };
+  }
+
+  const submissions = await fetchSubmissions(tickerRecord.cik, env);
+  const candidates = selectHistoricalAutohydrationCandidates(
+    {
+      formType: filing.formType,
+      accessionNumber: filing.filingKey.split(":")[2] ?? filing.filingKey,
+      periodOfReport: filing.periodOfReport
+    },
+    listSupportedFilings(tickerRecord, submissions)
+  );
+
+  if (candidates.length === 0) {
+    logWarnEvent("chat_historical_hydration_skipped", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      reason: "no_comparable_candidates"
+    });
+    return {
+      status: "skipped",
+      reason: "no_comparable_candidates"
+    };
+  }
+
+  return {
+    status: "ready",
+    tickerRecord,
+    submissions,
+    candidates
+  };
+}
+
+function enqueueHistoricalHydration(
+  filing: FilingCacheRecord,
+  env: Env,
+  config: RemoteConfig,
+  executionContext: Pick<ExecutionContext, "waitUntil">,
+  contentMode: "full" | "metrics_only"
+): void {
+  executionContext.waitUntil(
+    (async () => {
+      const preparation = await prepareHistoricalHydration(filing, env);
+      if (preparation.status === "skipped") {
+        logWarnEvent("chat_historical_hydration_skipped", {
+          filingKey: filing.filingKey,
+          ticker: filing.ticker,
+          reason: preparation.reason,
+          mode: "background"
+        });
+        return;
+      }
+
+      logEvent("chat_historical_hydration_enqueued", {
+        filingKey: filing.filingKey,
+        ticker: filing.ticker,
+        formType: filing.formType,
+        selectedCount: preparation.candidates.length,
+        contentMode
+      });
+
+      const hydration = await hydrateHistoricalCoverageForChat(filing, env, config, {
+        contentMode,
+        preparation
+      });
+
+      if (hydration.hydratedCount > 0) {
+        logEvent("chat_historical_autohydrated", {
+          filingKey: filing.filingKey,
+          ticker: filing.ticker,
+          formType: filing.formType,
+          hydratedCount: hydration.hydratedCount,
+          mode: "background"
+        });
+        return;
+      }
+
+      logWarnEvent("chat_historical_insufficient", {
+        filingKey: filing.filingKey,
+        ticker: filing.ticker,
+        formType: filing.formType,
+        selectedCount: hydration.selectedCount,
+        hydratedCount: hydration.hydratedCount,
+        status: hydration.status,
+        reason: hydration.reason ?? "history_still_insufficient",
+        mode: "background"
+      });
+    })()
+  );
+}
+
+function resolveHistoricalHydrationContentMode(question: string): "full" | "metrics_only" {
+  const normalized = question.replace(/\s+/g, "").toLowerCase();
+  return /(地域|事業|セグメント|支え|牽引|ドライバ|driver|要因|原因|理由|背景|segment)/.test(normalized)
+    ? "full"
+    : "metrics_only";
 }
 
 function buildHistoricalDegradeResponse(
@@ -297,36 +394,6 @@ function describeHydrationReason(hydration: HydrationAttempt): string {
   }
 
   return "";
-}
-
-function findClosestQuarterMatchIndex(candidates: FilingReference[], targetDate: string): number {
-  const targetMs = new Date(targetDate).getTime();
-  let bestIndex = -1;
-  let bestDistance = Number.POSITIVE_INFINITY;
-
-  for (let index = 0; index < candidates.length; index += 1) {
-    const distanceDays = Math.abs(new Date(candidates[index]!.periodOfReport).getTime() - targetMs) / (24 * 60 * 60 * 1000);
-    if (distanceDays > SAME_QUARTER_MATCH_WINDOW_DAYS) {
-      continue;
-    }
-
-    if (distanceDays < bestDistance) {
-      bestDistance = distanceDays;
-      bestIndex = index;
-    }
-  }
-
-  return bestIndex;
-}
-
-function normalizeAccession(value: string): string {
-  return value.replaceAll("-", "").trim();
-}
-
-function subtractYearsIsoDate(input: string, years: number): string {
-  const date = new Date(input);
-  date.setUTCFullYear(date.getUTCFullYear() - years);
-  return date.toISOString().slice(0, 10);
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {

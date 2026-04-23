@@ -133,6 +133,7 @@ struct CompanyView: View {
                             positiveInsights: buildPositiveInsights(for: company),
                             negativeInsights: buildNegativeInsights(for: company),
                             focusInsights: buildFocusInsights(for: company),
+                            openSource: openChatSource,
                             openOriginal: { openPrimaryDocument(urlString: company.primaryDocumentUrl) },
                             close: closePanels
                         )

@@ -5,6 +5,30 @@ enum SourceDocumentSearchMode: String, Equatable {
     case tabular
 }
 
+func sourceReference(from chunk: SourceChunkPayload, in company: CompanyPayload) -> LocalMessageSourceRef {
+    let sourceLabel = chunk.sectionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        ? chunk.sourceLabel
+        : chunk.sectionTitle
+
+    return LocalMessageSourceRef(
+        id: UUID(),
+        sourceIdSnapshot: chunk.sourceId,
+        sourceKind: .secFiling,
+        sourceLabelSnapshot: sourceLabel,
+        excerpt: chunk.text,
+        sourceUrl: company.primaryDocumentUrl
+    )
+}
+
+func primarySourceReference(sourceIds: [String], in company: CompanyPayload) -> LocalMessageSourceRef? {
+    sourceIds.lazy
+        .compactMap { sourceId in
+            company.sourceChunks.first(where: { $0.sourceId == sourceId })
+        }
+        .map { sourceReference(from: $0, in: company) }
+        .first
+}
+
 func investorFacingSourceLabel(for chunk: SourceChunkPayload, in company: CompanyPayload) -> String {
     if chunk.sectionType == "xbrl_metric" {
         if let tagName = chunk.tagName,

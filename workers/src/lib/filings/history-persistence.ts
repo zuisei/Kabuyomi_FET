@@ -1,5 +1,13 @@
-import type { Env, FilingCacheRecord, FilingReference } from "../../env";
+import type { Env, FilingCacheRecord, FilingReference, TickerRecord } from "../../env";
+import {
+  type SubmissionResponse,
+  fetchSubmissions,
+  listSupportedFilings,
+  lookupTicker,
+  pickComparisonFiling
+} from "../../clients/sec";
 import { loadArchivedFilingByKey, ensureHistoricalArtifacts, hasHistoricalBindings } from "../history-store";
+import { selectHistoricalAutohydrationCandidates } from "../history-autohydration";
 import { logEvent } from "../logging";
 import type { RemoteConfig } from "../remote-config";
 import { buildFilingKey } from "../../clients/sec";
@@ -29,6 +37,30 @@ export function enqueueHistoricalPersistence(
   }
 
   void task;
+}
+
+export function enqueueHistoricalCoveragePreload(
+  record: Pick<FilingCacheRecord, "filingKey" | "ticker" | "formType" | "periodOfReport">,
+  env: Env,
+  config: RemoteConfig,
+  executionContext?: Pick<ExecutionContext, "waitUntil">,
+  options: {
+    tickerRecord?: TickerRecord;
+    submissions?: SubmissionResponse;
+  } = {}
+): void {
+  if (!executionContext || !hasHistoricalBindings(env)) {
+    return;
+  }
+
+  const task = preloadHistoricalCoverage(record, env, config, options).catch((error) => {
+    logEvent("history_preload_failed", {
+      filingKey: record.filingKey,
+      ticker: record.ticker,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+  });
+  executionContext.waitUntil(task);
 }
 
 export async function ensureHistoricalFilingStored(
@@ -63,4 +95,53 @@ export async function ensureHistoricalFilingStored(
   } finally {
     await releaseLock();
   }
+}
+
+async function preloadHistoricalCoverage(
+  record: Pick<FilingCacheRecord, "filingKey" | "ticker" | "formType" | "periodOfReport">,
+  env: Env,
+  config: RemoteConfig,
+  options: {
+    tickerRecord?: TickerRecord;
+    submissions?: SubmissionResponse;
+  }
+): Promise<void> {
+  const tickerRecord = options.tickerRecord ?? (await lookupTicker(record.ticker, env));
+  if (!tickerRecord) {
+    return;
+  }
+
+  const submissions = options.submissions ?? (await fetchSubmissions(tickerRecord.cik, env));
+  const candidates = selectHistoricalAutohydrationCandidates(
+    {
+      formType: record.formType,
+      accessionNumber: record.filingKey.split(":")[2] ?? record.filingKey,
+      periodOfReport: record.periodOfReport
+    },
+    listSupportedFilings(tickerRecord, submissions)
+  );
+  if (candidates.length === 0) {
+    return;
+  }
+
+  logEvent("history_preload_enqueued", {
+    filingKey: record.filingKey,
+    ticker: record.ticker,
+    selectedCount: candidates.length,
+    contentMode: "metrics_only"
+  });
+
+  let hydratedCount = 0;
+  for (const candidate of candidates) {
+    await ensureHistoricalFilingStored(candidate, pickComparisonFiling(tickerRecord, submissions, candidate), env, config, {
+      contentMode: "metrics_only"
+    });
+    hydratedCount += 1;
+  }
+
+  logEvent("history_preload_completed", {
+    filingKey: record.filingKey,
+    ticker: record.ticker,
+    hydratedCount
+  });
 }

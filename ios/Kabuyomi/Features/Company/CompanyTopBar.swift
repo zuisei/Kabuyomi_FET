@@ -132,10 +132,10 @@ struct ChatTopBar: View {
                     .foregroundStyle(KabuyomiTheme.accentDeep)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .frame(maxWidth: 220)
-        .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.22), stroke: Color.white.opacity(0.58))
+        .contentShape(Rectangle())
     }
 
     private func iconButton(

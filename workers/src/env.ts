@@ -93,6 +93,8 @@ export interface FilingCacheRecord {
   metrics: MetricSnapshot[];
   sourceChunks: SourceChunkRecord[];
   summary: SummaryRecord;
+  summaryProvider?: "gemini" | "fallback";
+  contentMode?: "full" | "metrics_only";
   generatedAt: string;
   extractorVersion: string;
   promptVersion: string;

@@ -18,7 +18,8 @@ export async function buildChatResponse(
   filing: FilingCacheRecord,
   question: string,
   env: Env,
-  config?: Partial<RemoteConfig>
+  config?: Partial<RemoteConfig>,
+  options: { executionContext?: Pick<ExecutionContext, "waitUntil"> } = {}
 ): Promise<ChatResponsePayload> {
   const resolvedConfig: RemoteConfig = {
     ...DEFAULT_REMOTE_CONFIG,
@@ -26,7 +27,7 @@ export async function buildChatResponse(
   };
   let historical = null;
   try {
-    historical = await maybeBuildHistoricalChatResponseWithHydration(filing, question, env, resolvedConfig);
+    historical = await maybeBuildHistoricalChatResponseWithHydration(filing, question, env, resolvedConfig, options);
   } catch (error) {
     logErrorEvent("chat_historical_answer_failed", {
       filingKey: filing.filingKey,

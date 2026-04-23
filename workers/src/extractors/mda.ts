@@ -1,5 +1,3 @@
-import { parseHTML } from "linkedom";
-
 const TOKEN_BUDGET = 15_000;
 const MIN_SECTION_CHARS = 2_400;
 
@@ -44,10 +42,9 @@ function normalizeFilingTextWithDiagnostics(
   const sanitizeStartedAt = nowMs();
   const sanitizedHtml = sanitizeHtmlForTextExtraction(html);
   const sanitizedAt = nowMs();
-  const { document } = parseHTML(sanitizedHtml);
-  const parsedAt = nowMs();
-  const text = document.body.textContent ?? sanitizedHtml;
+  const text = htmlToText(sanitizedHtml);
   const textReadAt = nowMs();
+  const parsedAt = textReadAt;
 
   const normalized = text
     .replace(/\u00a0/g, " ")
@@ -298,6 +295,53 @@ function sanitizeHtmlForTextExtraction(html: string): string {
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ");
+}
+
+function htmlToText(html: string): string {
+  return decodeHtmlEntities(
+    html
+      .replace(/<\/?(?:div|p|tr|table|section|article|header|footer|li|ul|ol|br|hr|h[1-6]|td|th)\b[^>]*>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+  );
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (entity, body: string) => {
+    const normalizedBody = body.toLowerCase();
+    if (normalizedBody === "nbsp") {
+      return " ";
+    }
+    if (normalizedBody === "amp") {
+      return "&";
+    }
+    if (normalizedBody === "lt") {
+      return "<";
+    }
+    if (normalizedBody === "gt") {
+      return ">";
+    }
+    if (normalizedBody === "quot") {
+      return "\"";
+    }
+    if (normalizedBody === "apos" || normalizedBody === "#39") {
+      return "'";
+    }
+
+    const codePoint = normalizedBody.startsWith("#x")
+      ? Number.parseInt(normalizedBody.slice(2), 16)
+      : normalizedBody.startsWith("#")
+        ? Number.parseInt(normalizedBody.slice(1), 10)
+        : Number.NaN;
+    if (!Number.isFinite(codePoint)) {
+      return entity;
+    }
+
+    try {
+      return String.fromCodePoint(codePoint);
+    } catch {
+      return entity;
+    }
+  });
 }
 
 function nowMs(): number {

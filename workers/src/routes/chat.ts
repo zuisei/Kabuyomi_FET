@@ -40,7 +40,9 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
     const startedAt = Date.now();
     const answer = await (async () => {
       try {
-        return await buildChatResponse(requestedFiling, payload.question, env, config);
+        return await buildChatResponse(requestedFiling, payload.question, env, config, {
+          executionContext: ctx
+        });
       } catch (error) {
         try {
           await refundChatQuota(identity, env, config);

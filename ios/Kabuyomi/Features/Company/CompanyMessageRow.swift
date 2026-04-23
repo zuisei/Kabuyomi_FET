@@ -37,7 +37,7 @@ struct ConversationMessageRow: View {
                 .frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
 
                 if message.role == "user" {
-                    avatarBubble(label: "You", accent: true)
+                    avatarBubble(label: "私", accent: true)
                 }
             }
 
@@ -594,11 +594,7 @@ func structureAssistantMessage(_ text: String) -> AssistantMessageStructure {
         .map(\.text)
     let baseSentences = regularSentences.isEmpty ? limitationSentences : regularSentences
 
-    let firstSentenceLength = baseSentences.first?.count ?? 0
-    let canExtendConclusion = firstSentenceLength < 42
-        && baseSentences.count > 1
-        && isConclusionFriendlySentence(baseSentences[1])
-    let conclusionCount = canExtendConclusion ? 2 : 1
+    let conclusionCount = preferredConclusionSentenceCount(baseSentences)
     let conclusion = baseSentences.prefix(conclusionCount).joined(separator: " ")
     let evidence = regularSentences.isEmpty ? [] : Array(baseSentences.dropFirst(conclusionCount))
     let filteredLimitations = regularSentences.isEmpty ? Array(limitationSentences.dropFirst(conclusionCount)) : limitationSentences
@@ -608,6 +604,27 @@ func structureAssistantMessage(_ text: String) -> AssistantMessageStructure {
         evidence: evidence,
         limitations: filteredLimitations
     )
+}
+
+private func preferredConclusionSentenceCount(_ sentences: [String]) -> Int {
+    guard !sentences.isEmpty else { return 0 }
+
+    let firstSentenceLength = sentences[0].count
+    let canExtendConclusion = firstSentenceLength < 42
+        && sentences.count > 1
+        && isConclusionFriendlySentence(sentences[1])
+    var conclusionCount = canExtendConclusion ? 2 : 1
+
+    if let enumerationStart = sentences.indices.prefix(2).first(where: { isEnumeratedReasonSentence(sentences[$0]) }) {
+        var enumerationEnd = enumerationStart
+        while sentences.indices.contains(enumerationEnd + 1),
+              isEnumeratedReasonSentence(sentences[enumerationEnd + 1]) {
+            enumerationEnd += 1
+        }
+        conclusionCount = max(conclusionCount, enumerationEnd + 1)
+    }
+
+    return min(conclusionCount, sentences.count)
 }
 
 private func splitAssistantSentences(_ text: String) -> [String] {
@@ -755,6 +772,22 @@ private func isConclusionFriendlySentence(_ sentence: String) -> Bool {
 
     let latinCount = sentence.unicodeScalars.filter(\.isASCII).count
     return latinCount < max(18, sentence.count / 2)
+}
+
+private func isEnumeratedReasonSentence(_ sentence: String) -> Bool {
+    let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return false }
+
+    let patterns = [
+        #"^(?:[0-9０-９]+|[一二三四五六七八九十]+)つ目"#,
+        #"^第[一二三四五六七八九十0-9０-９]+"#,
+        #"^(?i)(?:first|second|third|firstly|secondly|thirdly)\b"#,
+        #"^(?:まず|次に|最後に)"#
+    ]
+
+    return patterns.contains { pattern in
+        trimmed.range(of: pattern, options: .regularExpression) != nil
+    }
 }
 
 private func stripMixedEnglishBoilerplate(from text: String) -> String {

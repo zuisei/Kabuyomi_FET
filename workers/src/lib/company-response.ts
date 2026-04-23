@@ -4,9 +4,11 @@ import { loadHistoricalOverview } from "./history-store";
 export async function serializeCompanyResponse(
   filing: FilingCacheRecord,
   env: Partial<Env> = {},
-  options: { displayTicker?: string } = {}
+  options: { displayTicker?: string; allowHistoricalPersistence?: boolean } = {}
 ) {
-  const historicalOverview = await loadHistoricalOverview(filing, env);
+  const historicalOverview = await loadHistoricalOverview(filing, env, {
+    allowPersistence: options.allowHistoricalPersistence ?? false
+  });
 
   return {
     filingKey: filing.filingKey,

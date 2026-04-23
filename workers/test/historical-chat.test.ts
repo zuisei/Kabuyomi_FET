@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FilingReference } from "../src/env";
-import { selectHistoricalAutohydrationCandidates } from "../src/lib/chat/historical";
+import { selectHistoricalAutohydrationCandidates } from "../src/lib/history-autohydration";
 
 function makeFiling(
   formType: FilingReference["formType"],

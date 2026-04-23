@@ -200,6 +200,86 @@ describe("buildChatResponse", () => {
     expect(response.sources[0]?.sourceKind).toBe("sec_filing");
   });
 
+  it("queues historical hydration in waitUntil and returns a fallback immediately", async () => {
+    const filing = makeTestFiling();
+    const historyEnv = makeHistoryEnv({ metricRows: [] });
+    const cache = new Map<string, unknown>([
+      [
+        "tickers_snapshot",
+        {
+          updatedAt: "2026-04-15T00:00:00.000Z",
+          items: [
+            {
+              ticker: "AAPL",
+              companyName: "Apple Inc.",
+              cik: "0000320193",
+              exchange: "Nasdaq"
+            }
+          ]
+        }
+      ]
+    ]);
+    const scheduled: Promise<unknown>[] = [];
+
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? ""));
+      if (body.cik !== "0000320193") {
+        throw new Error(`Unexpected fetch body: ${JSON.stringify(body)}`);
+      }
+
+      return new Response(JSON.stringify({
+        name: "Apple Inc.",
+        filings: {
+          recent: {
+            form: ["10-Q", "10-Q", "10-Q"],
+            accessionNumber: [
+              "0000320193-26-000057",
+              "0000320193-25-000093",
+              "0000320193-24-000091"
+            ],
+            primaryDocument: ["a10q.htm", "prior10q.htm", "older10q.htm"],
+            filingDate: ["2026-02-03", "2025-05-02", "2024-05-03"],
+            reportDate: ["2025-12-28", "2024-12-29", "2023-12-30"]
+          }
+        }
+      }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await buildChatResponse(
+      filing,
+      "この3年の売上推移は？",
+      {
+        ...historyEnv,
+        KABUYOMI_CACHE: {
+          get: async (key: string) => cache.get(key),
+          put: async (key: string, value: unknown) => {
+            cache.set(key, value);
+          }
+        },
+        SEC_FETCHER_BASE_URL: "http://127.0.0.1:8789",
+        SEC_FETCHER_SHARED_SECRET: "secret"
+      } as never,
+      { webSupplementEnabled: false },
+      {
+        executionContext: {
+          waitUntil(promise: Promise<unknown>) {
+            scheduled.push(promise);
+          }
+        }
+      }
+    );
+
+    expect(response.answer).toContain("バックグラウンドで準備中");
+    expect(response.responsePath).toBe("fallback");
+    expect(scheduled).toHaveLength(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await scheduled[0];
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("explains why the stock can rise despite uncertainty by separating risks from strengths", async () => {
     const filing = makeMarketContrastFiling();
 

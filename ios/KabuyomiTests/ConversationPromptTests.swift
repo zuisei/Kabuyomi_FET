@@ -44,6 +44,28 @@ final class ConversationPromptTests: XCTestCase {
         XCTAssertEqual(text, "売上高は 451.8億ドル で、前年同期比 15.9%増 です。")
     }
 
+    func testStructureAssistantMessageKeepsEnumeratedReasonsInConclusion() {
+        let structure = structureAssistantMessage(
+            """
+            NVIDIAは主に2つの事業で稼いでいます。\
+            1つ目はコンピューティングとネットワーク事業で、AIや加速コンピューティングという新しい技術への移行に伴い、データセンター向けの計算機やネットワーク機器の需要が急増しています。\
+            2つ目はグラフィックス事業で、Blackwellという最新の設計に基づいた商品の販売で収益を上げています。\
+            特にデータセンター向けの事業が伸びた結果、2026年度の営業利益は1,301億4,100万ドルとなり、前年比で57％増加しました。
+            """
+        )
+
+        XCTAssertEqual(
+            structure.conclusion,
+            """
+            NVIDIAは主に2つの事業で稼いでいます。 1つ目はコンピューティングとネットワーク事業で、AIや加速コンピューティングという新しい技術への移行に伴い、データセンター向けの計算機やネットワーク機器の需要が急増しています。 2つ目はグラフィックス事業で、Blackwellという最新の設計に基づいた商品の販売で収益を上げています。
+            """
+        )
+        XCTAssertEqual(
+            structure.evidence,
+            ["特にデータセンター向けの事業が伸びた結果、2026年度の営業利益は1,301億4,100万ドルとなり、前年比で57％増加しました。"]
+        )
+    }
+
     func testPendingAssistantViewStateStartsWithThinking() {
         let submittedAt = Date()
 
@@ -71,5 +93,176 @@ final class ConversationPromptTests: XCTestCase {
         XCTAssertEqual(state.badge, "Searching")
         XCTAssertEqual(state.title, "比較に必要な提出資料を探しています")
         XCTAssertEqual(state.detail, "同四半期ベースで必要な過去年だけ補完しています。")
+    }
+
+    func testShouldDisplayPendingOptimisticMessageWhileAwaitingPersistence() {
+        let submittedAt = Date()
+        let chatHistory = [
+            LocalChatMessage(
+                id: UUID(),
+                role: "user",
+                content: "前回決算との違いは？",
+                createdAt: submittedAt.addingTimeInterval(-30),
+                modelName: "local",
+                sources: []
+            )
+        ]
+
+        XCTAssertTrue(
+            shouldDisplayPendingOptimisticMessage(
+                chatHistory: chatHistory,
+                pendingChat: PendingChatState(
+                    ticker: "AAPL",
+                    question: "今回の一番大きい変化は？",
+                    submittedAt: submittedAt
+                )
+            )
+        )
+    }
+
+    func testShouldHidePendingOptimisticMessageAfterCurrentUserMessageIsPersisted() {
+        let submittedAt = Date()
+        let chatHistory = [
+            LocalChatMessage(
+                id: UUID(),
+                role: "user",
+                content: "今回の一番大きい変化は？",
+                createdAt: submittedAt.addingTimeInterval(0.2),
+                modelName: "local",
+                sources: []
+            ),
+            LocalChatMessage(
+                id: UUID(),
+                role: "assistant",
+                content: "売上高の伸びが大きいです。",
+                createdAt: submittedAt.addingTimeInterval(0.21),
+                modelName: "",
+                sources: []
+            )
+        ]
+
+        XCTAssertFalse(
+            shouldDisplayPendingOptimisticMessage(
+                chatHistory: chatHistory,
+                pendingChat: PendingChatState(
+                    ticker: "AAPL",
+                    question: "今回の一番大きい変化は？",
+                    submittedAt: submittedAt
+                )
+            )
+        )
+    }
+
+    func testShouldDisplayPendingAssistantStatusWhileAwaitingResponsePersistence() {
+        let submittedAt = Date()
+        let chatHistory = [
+            LocalChatMessage(
+                id: UUID(),
+                role: "user",
+                content: "今回の一番大きい変化は？",
+                createdAt: submittedAt.addingTimeInterval(0.1),
+                modelName: "local",
+                sources: []
+            )
+        ]
+
+        XCTAssertTrue(
+            shouldDisplayPendingAssistantStatus(
+                chatHistory: chatHistory,
+                pendingChat: PendingChatState(
+                    ticker: "AAPL",
+                    question: "今回の一番大きい変化は？",
+                    submittedAt: submittedAt
+                )
+            )
+        )
+    }
+
+    func testShouldHidePendingAssistantStatusAfterAssistantMessageIsPersisted() {
+        let submittedAt = Date()
+        let chatHistory = [
+            LocalChatMessage(
+                id: UUID(),
+                role: "user",
+                content: "今回の一番大きい変化は？",
+                createdAt: submittedAt.addingTimeInterval(0.2),
+                modelName: "local",
+                sources: []
+            ),
+            LocalChatMessage(
+                id: UUID(),
+                role: "assistant",
+                content: "売上高の伸びが大きいです。",
+                createdAt: submittedAt.addingTimeInterval(0.21),
+                modelName: "",
+                sources: []
+            )
+        ]
+
+        XCTAssertFalse(
+            shouldDisplayPendingAssistantStatus(
+                chatHistory: chatHistory,
+                pendingChat: PendingChatState(
+                    ticker: "AAPL",
+                    question: "今回の一番大きい変化は？",
+                    submittedAt: submittedAt
+                )
+            )
+        )
+    }
+
+    func testSummarySignalSegmentWidthsStayWithinTotalWidthAfterSpacing() {
+        let widths = summarySignalSegmentWidths(
+            totalWidth: 240,
+            counts: [4, 3, 2]
+        )
+
+        XCTAssertEqual(widths.count, 3)
+        XCTAssertEqual(widths.reduce(0, +) + 12, 240, accuracy: 0.001)
+    }
+
+    func testSummarySignalSegmentWidthsKeepZeroCountSegmentVisibleWithoutOverflow() {
+        let widths = summarySignalSegmentWidths(
+            totalWidth: 180,
+            counts: [3, 0, 1]
+        )
+
+        XCTAssertEqual(widths.count, 3)
+        XCTAssertGreaterThan(widths[1], 0)
+        XCTAssertEqual(widths.reduce(0, +) + 12, 180, accuracy: 0.001)
+    }
+
+    func testPrimarySourceReferenceUsesFirstMatchedSourceId() {
+        let company = TestFixtures.companyPayload()
+
+        let source = primarySourceReference(sourceIds: ["missing", "metric-op"], in: company)
+
+        XCTAssertEqual(source?.sourceIdSnapshot, "metric-op")
+        XCTAssertEqual(source?.sourceKind, .secFiling)
+        XCTAssertEqual(source?.sourceUrl, company.primaryDocumentUrl)
+    }
+
+    func testPrimarySourceReferenceReturnsNilWhenInsightHasNoKnownSource() {
+        let company = TestFixtures.companyPayload()
+
+        XCTAssertNil(primarySourceReference(sourceIds: ["missing"], in: company))
+    }
+
+    func testInsightSourceChipsIncludeTappableXBRLSource() {
+        let company = TestFixtures.companyPayload()
+
+        let chips = insightSourceChips(sourceIds: ["metric-op"], in: company)
+
+        XCTAssertEqual(chips.map(\.label), ["営業利益（XBRL）"])
+        XCTAssertEqual(chips.first?.source?.sourceIdSnapshot, "metric-op")
+    }
+
+    func testInsightSourceChipsDeduplicateLabelsWhileKeepingFirstSource() {
+        let company = TestFixtures.companyPayload()
+
+        let chips = insightSourceChips(sourceIds: ["metric-op", "metric-op"], in: company)
+
+        XCTAssertEqual(chips.count, 1)
+        XCTAssertEqual(chips.first?.source?.sourceIdSnapshot, "metric-op")
     }
 }

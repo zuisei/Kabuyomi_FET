@@ -8,12 +8,14 @@ import {
 } from "../../clients/sec";
 import { AppError } from "../errors";
 import { loadArchivedFilingByKey } from "../history-store";
-import { logEvent } from "../logging";
+import { logEvent, logWarnEvent } from "../logging";
 import type { RemoteConfig } from "../remote-config";
 import { buildCacheKey, buildTickerAliasKeys, isCurrentCacheRecord, loadCachedLatestFiling } from "./cache";
-import { enqueueHistoricalPersistence } from "./history-persistence";
+import { backfillCompanyWebsite, enqueueContentUpgrade, isMetricsOnlyRecord, needsCompanyWebsiteBackfill } from "./content-upgrade";
+import { enqueueHistoricalCoveragePreload, enqueueHistoricalPersistence } from "./history-persistence";
 import { ingestFiling } from "./ingest";
 import { acquireFilingLock } from "./lock";
+import { enqueueSummaryUpgrade } from "./summary-upgrade";
 
 export async function ensureLatestFiling(
   ticker: string,
@@ -30,9 +32,10 @@ export async function ensureLatestFiling(
   if (!options.forceRemoteCheck) {
     const cachedByTicker = await loadCachedLatestFiling(normalizedTicker, env, config);
     if (cachedByTicker && isCurrentCacheRecord(cachedByTicker, config)) {
-      enqueueHistoricalPersistence(cachedByTicker, env, options.executionContext);
-      logLatestFilingReady("cache_alias", normalizedTicker, cachedByTicker.filingKey, startedAt, options.forceRemoteCheck);
-      return cachedByTicker;
+      const hydrated = await maybeBackfillCompanyWebsite(cachedByTicker, env);
+      enqueueHistoricalSideEffects(hydrated, env, config, options.executionContext);
+      logLatestFilingReady("cache_alias", normalizedTicker, hydrated.filingKey, startedAt, options.forceRemoteCheck);
+      return hydrated;
     }
   }
 
@@ -65,18 +68,26 @@ export async function ensureLatestFiling(
     const cached = await env.KABUYOMI_CACHE.get(cacheKey, "json");
     if (cached && isCurrentCacheRecord(cached as FilingCacheRecord, config)) {
       await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
-      enqueueHistoricalPersistence(cached as FilingCacheRecord, env, options.executionContext);
+      const hydrated = await maybeBackfillCompanyWebsite(cached as FilingCacheRecord, env);
+      enqueueHistoricalSideEffects(hydrated, env, config, options.executionContext, {
+        tickerRecord,
+        submissions
+      });
       logLatestFilingReady("cache_record", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
-      return cached as FilingCacheRecord;
+      return hydrated;
     }
 
     const archived = await loadArchivedFilingByKey(filingKey, env);
     if (archived && isCurrentCacheRecord(archived, config)) {
       await env.KABUYOMI_CACHE.put(cacheKey, JSON.stringify(archived));
       await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
-      enqueueHistoricalPersistence(archived, env, options.executionContext);
+      const hydrated = await maybeBackfillCompanyWebsite(archived, env);
+      enqueueHistoricalSideEffects(hydrated, env, config, options.executionContext, {
+        tickerRecord,
+        submissions
+      });
       logLatestFilingReady("archive", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
-      return archived;
+      return hydrated;
     }
   }
 
@@ -86,25 +97,39 @@ export async function ensureLatestFiling(
       const secondRead = await env.KABUYOMI_CACHE.get(cacheKey, "json");
       if (secondRead && isCurrentCacheRecord(secondRead as FilingCacheRecord, config)) {
         await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
-        enqueueHistoricalPersistence(secondRead as FilingCacheRecord, env, options.executionContext);
+        const hydrated = await maybeBackfillCompanyWebsite(secondRead as FilingCacheRecord, env);
+        enqueueHistoricalSideEffects(hydrated, env, config, options.executionContext, {
+          tickerRecord,
+          submissions
+        });
         logLatestFilingReady("cache_record_after_lock", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
-        return secondRead as FilingCacheRecord;
+        return hydrated;
       }
 
       const secondArchived = await loadArchivedFilingByKey(filingKey, env);
       if (secondArchived && isCurrentCacheRecord(secondArchived, config)) {
         await env.KABUYOMI_CACHE.put(cacheKey, JSON.stringify(secondArchived));
         await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
-        enqueueHistoricalPersistence(secondArchived, env, options.executionContext);
+        const hydrated = await maybeBackfillCompanyWebsite(secondArchived, env);
+        enqueueHistoricalSideEffects(hydrated, env, config, options.executionContext, {
+          tickerRecord,
+          submissions
+        });
         logLatestFilingReady("archive_after_lock", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
-        return secondArchived;
+        return hydrated;
       }
     }
 
-    const record = await ingestFiling(current, pickComparisonFiling(tickerRecord, submissions, current), env, config);
+    const record = await ingestFiling(current, pickComparisonFiling(tickerRecord, submissions, current), env, config, {
+      summaryMode: "default",
+      contentMode: "full"
+    });
     await env.KABUYOMI_CACHE.put(cacheKey, JSON.stringify(record));
     await cacheLatestFilingAlias(config.extractorVersion, current.ticker, filingKey, env);
-    enqueueHistoricalPersistence(record, env, options.executionContext);
+    enqueueHistoricalSideEffects(record, env, config, options.executionContext, {
+      tickerRecord,
+      submissions
+    });
     logLatestFilingReady("ingest", current.ticker, filingKey, startedAt, options.forceRemoteCheck);
     return record;
   } finally {
@@ -135,4 +160,41 @@ function logLatestFilingReady(
     forceRemoteCheck: Boolean(forceRemoteCheck),
     totalMs: Date.now() - startedAt
   });
+}
+
+function enqueueHistoricalSideEffects(
+  record: FilingCacheRecord,
+  env: Env,
+  config: RemoteConfig,
+  executionContext?: Pick<ExecutionContext, "waitUntil">,
+  options: {
+    tickerRecord?: TickerRecord;
+    submissions?: Awaited<ReturnType<typeof fetchSubmissions>>;
+  } = {}
+): void {
+  enqueueHistoricalPersistence(record, env, executionContext);
+  enqueueHistoricalCoveragePreload(record, env, config, executionContext, options);
+  if (isMetricsOnlyRecord(record)) {
+    enqueueContentUpgrade(record, env, executionContext);
+    return;
+  }
+
+  enqueueSummaryUpgrade(record, env, executionContext);
+}
+
+async function maybeBackfillCompanyWebsite(record: FilingCacheRecord, env: Env): Promise<FilingCacheRecord> {
+  if (!needsCompanyWebsiteBackfill(record)) {
+    return record;
+  }
+
+  try {
+    return await backfillCompanyWebsite(record, env);
+  } catch (error) {
+    logWarnEvent("filing_company_website_backfill_failed", {
+      filingKey: record.filingKey,
+      ticker: record.ticker,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    return record;
+  }
 }

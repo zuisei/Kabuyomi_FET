@@ -121,7 +121,8 @@ describe("handleChatRoute", () => {
       expect.objectContaining({ filingKey: "filing-1" }),
       "利益率は改善した？",
       expect.anything(),
-      expect.anything()
+      expect.anything(),
+      { executionContext: ctx }
     );
     expect(mockConsumeChatQuota.mock.invocationCallOrder[0]).toBeLessThan(
       mockBuildChatResponse.mock.invocationCallOrder[0]!

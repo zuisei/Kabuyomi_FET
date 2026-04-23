@@ -25,10 +25,6 @@ struct ComposerBar: View {
             }
 
             HStack(alignment: .center, spacing: 12) {
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-
                 TextField(
                     "",
                     text: $question,
@@ -44,30 +40,32 @@ struct ComposerBar: View {
                 .submitLabel(.send)
                 .onSubmit(sendAction)
 
-                if !trimmedQuestion.isEmpty {
-                    Button {
-                        question = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.9))
-                            .frame(width: 32, height: 32)
-                            .background(
-                                Circle()
-                                    .fill(Color.white.opacity(0.72))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .contentShape(Circle())
-                    .accessibilityLabel("入力内容を消去")
+                Button {
+                    question = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.9))
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle()
+                                .fill(Color.white.opacity(0.72))
+                        )
                 }
+                .buttonStyle(.plain)
+                .contentShape(Circle())
+                .accessibilityLabel("入力内容を消去")
+                .accessibilityHidden(trimmedQuestion.isEmpty)
+                .opacity(trimmedQuestion.isEmpty ? 0 : 1)
+                .allowsHitTesting(!trimmedQuestion.isEmpty)
+                .animation(.easeInOut(duration: 0.15), value: trimmedQuestion.isEmpty)
 
                 Button(action: sendAction) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 18, weight: .bold))
-                    .frame(width: 44, height: 44)
-                    .foregroundStyle(sendDisabled ? KabuyomiTheme.inkMuted : .white)
-                    .background(sendButtonBackground)
+                        .frame(width: 44, height: 44)
+                        .foregroundStyle(sendDisabled ? KabuyomiTheme.inkMuted : .white)
+                        .background(sendButtonBackground)
                 }
                 .buttonStyle(.plain)
                 .disabled(sendDisabled)

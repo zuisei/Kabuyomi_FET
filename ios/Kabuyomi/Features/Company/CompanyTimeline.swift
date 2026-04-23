@@ -11,6 +11,37 @@ func resolveConversationIdleState(draftQuestion: String) -> ConversationIdleStat
     return .drafted(question: trimmed)
 }
 
+func shouldDisplayPendingOptimisticMessage(
+    chatHistory: [LocalChatMessage],
+    pendingChat: PendingChatState?
+) -> Bool {
+    guard let pendingChat else { return false }
+
+    let pendingQuestion = pendingChat.question.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let latestPersistedUserMessage = chatHistory.last(where: { $0.role == "user" }) else {
+        return true
+    }
+
+    let latestPersistedQuestion = latestPersistedUserMessage.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard latestPersistedQuestion == pendingQuestion else {
+        return true
+    }
+
+    return latestPersistedUserMessage.createdAt < pendingChat.submittedAt
+}
+
+func shouldDisplayPendingAssistantStatus(
+    chatHistory: [LocalChatMessage],
+    pendingChat: PendingChatState?
+) -> Bool {
+    guard let pendingChat else { return false }
+    guard let latestPersistedAssistantMessage = chatHistory.last(where: { $0.role != "user" }) else {
+        return true
+    }
+
+    return latestPersistedAssistantMessage.createdAt < pendingChat.submittedAt
+}
+
 struct ConversationTimeline: View {
     let company: CompanyPayload
     let chatHistory: [LocalChatMessage]
@@ -55,17 +86,21 @@ struct ConversationTimeline: View {
                         }
 
                         if let pendingChat {
-                            ConversationMessageRow(
-                                company: company,
-                                message: pendingChat.optimisticUserMessage,
-                                precedingUserPrompt: latestVisibleUserPrompt,
-                                recoverySuggestions: [],
-                                followUpSuggestions: [],
-                                applySuggestion: { _ in },
-                                openSource: openSource
-                            )
+                            if shouldDisplayPendingOptimisticMessage(chatHistory: chatHistory, pendingChat: pendingChat) {
+                                ConversationMessageRow(
+                                    company: company,
+                                    message: pendingChat.optimisticUserMessage,
+                                    precedingUserPrompt: latestVisibleUserPrompt,
+                                    recoverySuggestions: [],
+                                    followUpSuggestions: [],
+                                    applySuggestion: { _ in },
+                                    openSource: openSource
+                                )
+                            }
 
-                            PendingAssistantStatusRow(company: company, pendingChat: pendingChat)
+                            if shouldDisplayPendingAssistantStatus(chatHistory: chatHistory, pendingChat: pendingChat) {
+                                PendingAssistantStatusRow(company: company, pendingChat: pendingChat)
+                            }
                         } else if isSending {
                             AssistantTypingRow(ticker: company.ticker)
                         }
@@ -76,14 +111,6 @@ struct ConversationTimeline: View {
                             historicalQuestions: Array(historicalSuggestions.prefix(4)),
                             selectQuestion: { draftQuestion = $0 }
                         )
-
-                        if idleState == .intro {
-                            ConversationEmptyState(
-                                company: company,
-                                suggestions: Array(suggestions.prefix(3)),
-                                historicalSuggestions: Array(historicalSuggestions.prefix(2))
-                            )
-                        }
                     }
 
                     Color.clear

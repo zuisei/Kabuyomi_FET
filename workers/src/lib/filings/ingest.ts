@@ -102,7 +102,7 @@ export async function ingestFiling(
   const sourceChunks = buildSourceChunks(filing, extractedText, metrics);
   const summaryEnv = summaryMode === "fallback_only" ? ({ ...env, GEMINI_API_KEY: undefined } as Env) : env;
   const summaryStartedAt = Date.now();
-  const summary = await generateSummary(summaryEnv, {
+  const generatedSummary = await generateSummary(summaryEnv, {
     filingKey,
     ticker: filing.ticker,
     companyName: filing.companyName,
@@ -122,6 +122,7 @@ export async function ingestFiling(
     contentMode,
     fetchMs: fetchedAt - fetchStartedAt,
     summaryMs: finishedAt - summaryStartedAt,
+    summaryProvider: generatedSummary.provider,
     totalMs: finishedAt - startedAt,
     htmlChars: html.length,
     metricsCount: metrics.length,
@@ -155,7 +156,9 @@ export async function ingestFiling(
     mdaTokenCount: extractedTokenCount,
     metrics,
     sourceChunks,
-    summary,
+    summary: generatedSummary.summary,
+    summaryProvider: generatedSummary.provider,
+    contentMode,
     generatedAt: new Date().toISOString(),
     extractorVersion: config.extractorVersion,
     promptVersion: config.promptVersion

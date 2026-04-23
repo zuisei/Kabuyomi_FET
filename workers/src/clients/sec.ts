@@ -521,7 +521,6 @@ function resolveFact(
       }
     : null;
 }
-
 function selectBestFact(
   units: Record<string, ConceptFact[]> | undefined,
   filing: FilingReference,
