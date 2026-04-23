@@ -1,4 +1,3 @@
-import { parseHTML } from "linkedom";
 import { normalizeFilingText } from "../../extractors/mda";
 
 const WEBSITE_HINT_RE =
@@ -7,6 +6,8 @@ const BARE_URL_RE =
   /\b(?:https?:\/\/|www\.)[a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s<>()\],;]*)?/gi;
 const DOMAIN_ONLY_RE =
   /\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s<>()\],;]*)?/gi;
+const ANCHOR_RE =
+  /<a\b[^>]*href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a>/gi;
 const BLOCKED_HOST_SUFFIXES = [
   "sec.gov",
   "xbrl.org",
@@ -65,17 +66,18 @@ function collectAnchorCandidates(
   companyTokens: string[],
   candidates: Map<string, number>
 ) {
-  const { document } = parseHTML(html);
-  const anchors = [...document.querySelectorAll("a[href]")];
-
-  for (const anchor of anchors) {
-    const rawHref = anchor.getAttribute("href");
+  for (const match of html.matchAll(ANCHOR_RE)) {
+    const rawHref = match[1] ?? match[2] ?? match[3];
     const normalized = normalizeCandidateUrl(rawHref, primaryDocumentUrl);
     if (!normalized) {
       continue;
     }
 
-    const context = `${anchor.textContent ?? ""} ${anchor.parentElement?.textContent ?? ""}`;
+    const anchorStart = match.index ?? 0;
+    const anchorHtml = match[0] ?? "";
+    const context = htmlSnippetToText(
+      html.slice(Math.max(0, anchorStart - 160), Math.min(html.length, anchorStart + anchorHtml.length + 160))
+    );
     const score = scoreCandidate(normalized, context, companyTokens, 45);
     if (score > 0) {
       retainHigherScore(candidates, normalized, score);
@@ -220,4 +222,13 @@ function surroundingContext(text: string, index: number, length: number): string
   const start = Math.max(0, index - 90);
   const end = Math.min(text.length, index + length + 90);
   return text.slice(start, end);
+}
+
+function htmlSnippetToText(snippet: string): string {
+  return snippet
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
 }

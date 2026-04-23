@@ -42,4 +42,29 @@ describe("extractCompanyWebsiteUrl", () => {
       })
     ).toBe("https://www.apple.com/");
   });
+
+  it("extracts investor relations domains from circle-style available information text", () => {
+    const html = `
+      <html>
+        <body>
+          <p>
+            Available Information
+            Our website is located at www.circle.com, and our investor relations website is located at
+            www.investor.circle.com.
+          </p>
+          <p>
+            In addition to filings with the SEC and our investor relations page, we use our blog located at
+            www.circle.com/blog and press releases located at www.circle.com/pressroom.
+          </p>
+        </body>
+      </html>
+    `;
+
+    expect(
+      extractCompanyWebsiteUrl(html, {
+        companyName: "Circle Internet Group, Inc.",
+        primaryDocumentUrl: "https://www.sec.gov/Archives/edgar/data/1876042/000187604226000062/crcl-20251231.htm"
+      })
+    ).toBe("https://www.investor.circle.com/");
+  });
 });
