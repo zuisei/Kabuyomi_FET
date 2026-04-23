@@ -275,5 +275,87 @@ export const REVENUE_REGRESSION_CASES: RevenueRegressionCase[] = [
       value: 53_265_000_000,
       comparisonValue: 45_408_000_000
     }
+  },
+  {
+    name: "prefers current-period revenue on a lower-priority tag over stale higher-priority Apple revenue tags",
+    currentFiling: filingReference({
+      cik: "0000320193",
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      exchange: "Nasdaq",
+      formType: "10-Q",
+      accessionNumber: "0000320193-26-000006",
+      primaryDocument: "aapl-20251227.htm",
+      filedAt: "2026-01-30",
+      periodOfReport: "2025-12-27"
+    }),
+    comparisonFiling: filingReference({
+      cik: "0000320193",
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      exchange: "Nasdaq",
+      formType: "10-Q",
+      accessionNumber: "0000320193-25-000008",
+      primaryDocument: "aapl-20241228.htm",
+      filedAt: "2025-01-31",
+      periodOfReport: "2024-12-28"
+    }),
+    payload: {
+      concepts: {
+        SalesRevenueNet: {
+          units: {
+            USD: [
+              {
+                val: 45_408_000_000,
+                form: "10-Q",
+                filed: "2017-08-02",
+                start: "2017-04-02",
+                end: "2017-07-01"
+              },
+              {
+                val: 53_265_000_000,
+                form: "10-Q",
+                filed: "2018-08-01",
+                start: "2018-04-01",
+                end: "2018-06-30"
+              }
+            ]
+          }
+        },
+        RevenueFromContractWithCustomerExcludingAssessedTax: {
+          units: {
+            USD: [
+              {
+                val: 124_300_000_000,
+                form: "10-Q",
+                filed: "2025-01-31",
+                start: "2024-09-29",
+                end: "2024-12-28"
+              },
+              {
+                val: 124_300_000_000,
+                form: "10-Q",
+                filed: "2026-01-30",
+                start: "2024-09-29",
+                end: "2024-12-28"
+              },
+              {
+                val: 143_756_000_000,
+                form: "10-Q",
+                filed: "2026-01-30",
+                start: "2025-09-28",
+                end: "2025-12-27"
+              }
+            ]
+          }
+        }
+      },
+      companyFacts: null
+    },
+    expected: {
+      tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+      value: 143_756_000_000,
+      comparisonValue: 124_300_000_000
+    }
   }
 ];

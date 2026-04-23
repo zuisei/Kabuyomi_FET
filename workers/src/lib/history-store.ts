@@ -377,7 +377,6 @@ export async function backfillHistoricalFilings(
           .bind(`${config.extractorVersion}:${filingReference.cik}:${filingKey}`)
           .first<{ filing_key: string; ticker: string }>();
         consumedInBatch += 1;
-        remainingBudget -= 1;
 
         if (existingIndexed?.filing_key) {
           if (existingIndexed.ticker !== tickerRecord.ticker) {
@@ -391,6 +390,7 @@ export async function backfillHistoricalFilings(
           continue;
         }
 
+        remainingBudget -= 1;
         const comparisonFiling = pickComparisonFiling(tickerRecord, submissions, filingReference);
         const stored = await ensureStoredFiling(filingReference, comparisonFiling, env as Env, config);
         processedFilings.push({

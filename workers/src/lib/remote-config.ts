@@ -23,7 +23,7 @@ export interface RemoteConfig {
   trackedTickers: string[];
 }
 
-const CURRENT_EXTRACTOR_VERSION = "v5";
+const CURRENT_EXTRACTOR_VERSION = "v6";
 
 export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   freeStockLimit: 3,

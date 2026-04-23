@@ -294,6 +294,65 @@ describe("SEC filing selection", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps fulfilled latest-form hydrations when a sibling SEC lookup fails", async () => {
+    const cache = new Map<string, unknown>([
+      [
+        "tickers_snapshot",
+        {
+          updatedAt: "2026-04-15T00:00:00.000Z",
+          items: [
+            { ticker: "GE", companyName: "GE Aerospace", cik: "0000040545", exchange: "NYSE" },
+            { ticker: "GEF", companyName: "Greif, Inc.", cik: "0000043920", exchange: "NYSE" }
+          ]
+        }
+      ]
+    ]);
+
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? ""));
+      if (body.cik === "0000040545") {
+        return new Response(JSON.stringify({
+          name: "GE Aerospace",
+          filings: {
+            recent: {
+              form: ["10-K"],
+              accessionNumber: ["0000040545-26-000001"],
+              primaryDocument: ["ge10k.htm"],
+              filingDate: ["2026-02-13"],
+              reportDate: ["2025-12-31"]
+            }
+          }
+        }), { status: 200 });
+      }
+
+      if (body.cik === "0000043920") {
+        throw new Error("temporary SEC outage");
+      }
+
+      throw new Error(`Unexpected fetch body: ${JSON.stringify(body)}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await searchTickers("ge", {
+      KABUYOMI_CACHE: {
+        get: async (key: string) => cache.get(key),
+        put: async (key: string, value: unknown) => {
+          cache.set(key, value);
+        }
+      },
+      SEC_FETCHER_BASE_URL: "http://127.0.0.1:8789",
+      SEC_FETCHER_SHARED_SECRET: "secret"
+    } as never);
+
+    expect(result.items.map((item) => [item.ticker, item.latestFormType])).toEqual([
+      ["GE", "10-K"],
+      ["GEF", undefined]
+    ]);
+    expect(cache.get("search_latest_form_type:GE")).toBe("10-K");
+    expect(cache.has("search_latest_form_type:GEF")).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it("ranks separator-alias class ticker queries against the resolved ticker", () => {
     const ranked = sortTickerSearchResults(
       [

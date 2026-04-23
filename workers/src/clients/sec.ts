@@ -23,6 +23,8 @@ const METRIC_TAGS = {
   ]
 } as const;
 
+const METRIC_TAG_LIST = [...new Set(Object.values(METRIC_TAGS).flat())];
+
 type MetricName = keyof typeof METRIC_TAGS;
 
 interface SubmissionRecent {
@@ -131,26 +133,32 @@ async function enrichTickerSearchResults(
     return hydrated;
   }
 
-  try {
-    const resolved = await Promise.all(
-      unresolved.map(async (item) => ({
-        ticker: item.ticker,
-        latestFormType: await fetchAndCacheLatestFormType(item, env)
-      }))
-    );
-    const byTicker = new Map(resolved.map((entry) => [entry.ticker, entry.latestFormType] as const));
+  const resolved = await Promise.allSettled(
+    unresolved.map(async (item) => ({
+      ticker: item.ticker,
+      latestFormType: await fetchAndCacheLatestFormType(item, env)
+    }))
+  );
+  const byTicker = new Map<string, string | null>();
 
-    return hydrated.map((item) =>
-      byTicker.has(item.ticker)
-        ? {
-            ...item,
-            latestFormType: byTicker.get(item.ticker) ?? undefined
-          }
-        : item
-    );
-  } catch {
+  for (const entry of resolved) {
+    if (entry.status === "fulfilled") {
+      byTicker.set(entry.value.ticker, entry.value.latestFormType);
+    }
+  }
+
+  if (byTicker.size === 0) {
     return hydrated;
   }
+
+  return hydrated.map((item) =>
+    byTicker.has(item.ticker)
+      ? {
+          ...item,
+          latestFormType: byTicker.get(item.ticker) ?? undefined
+        }
+      : item
+  );
 }
 
 async function loadCachedLatestFormType(
@@ -380,11 +388,7 @@ export async function fetchMetricSnapshots(
   comparisonFiling: FilingReference | null,
   env: Env
 ): Promise<MetricSnapshot[]> {
-  const fetcherPayload = await fetchMetricsFromFetcher(
-    filing.cik,
-    [...new Set(Object.values(METRIC_TAGS).flat())],
-    env
-  );
+  const fetcherPayload = await fetchMetricsFromFetcher(filing.cik, METRIC_TAG_LIST, env);
   return buildMetricSnapshotsFromFetcherPayload(filing, comparisonFiling, fetcherPayload);
 }
 
@@ -393,11 +397,7 @@ export async function fetchFilingAssets(
   comparisonFiling: FilingReference | null,
   env: Env
 ): Promise<FilingHtmlResponse & { metrics: MetricSnapshot[] }> {
-  const fetcherPayload = await fetchFilingAssetsFromFetcher(
-    filing,
-    [...new Set(Object.values(METRIC_TAGS).flat())],
-    env
-  );
+  const fetcherPayload = await fetchFilingAssetsFromFetcher(filing, METRIC_TAG_LIST, env);
   return {
     html: fetcherPayload.html,
     primaryDocumentUrl: fetcherPayload.primaryDocumentUrl,
@@ -475,31 +475,58 @@ function resolveFact(
   concepts: Record<string, ConceptResponse | null>,
   companyFacts: CompanyFactsResponse | null
 ): { tagUsed: string; unit: string; fact: ConceptFact } | null {
-  for (const tag of METRIC_TAGS[logicalName]) {
-    const concept = concepts[tag] ?? null;
-    const fact = selectBestFact(concept?.units, filing, logicalName === "epsBasic");
-    if (fact) {
-      return { tagUsed: tag, unit: fact.unit, fact: fact.fact };
-    }
-  }
-
   const usGaap = companyFacts?.facts?.["us-gaap"] ?? {};
+  let bestCandidate:
+    | {
+        tagUsed: string;
+        unit: string;
+        fact: ConceptFact;
+        score: number;
+        tagPriority: number;
+      }
+    | null = null;
 
-  for (const tag of METRIC_TAGS[logicalName]) {
-    const concept = usGaap[tag];
-    const fact = selectBestFact(concept?.units, filing, logicalName === "epsBasic");
-    if (fact) {
-      return { tagUsed: tag, unit: fact.unit, fact: fact.fact };
+  for (const [tagPriority, tag] of METRIC_TAGS[logicalName].entries()) {
+    const sources = [concepts[tag] ?? null, usGaap[tag] ?? null];
+
+    for (const concept of sources) {
+      const fact = selectBestFact(concept?.units, filing, logicalName === "epsBasic");
+      if (!fact) {
+        continue;
+      }
+
+      const candidate = {
+        tagUsed: tag,
+        unit: fact.unit,
+        fact: fact.fact,
+        score: fact.score,
+        tagPriority
+      };
+
+      if (
+        !bestCandidate ||
+        candidate.score < bestCandidate.score ||
+        (candidate.score === bestCandidate.score && candidate.tagPriority < bestCandidate.tagPriority)
+      ) {
+        bestCandidate = candidate;
+      }
     }
   }
 
-  return null;
+  return bestCandidate
+    ? {
+        tagUsed: bestCandidate.tagUsed,
+        unit: bestCandidate.unit,
+        fact: bestCandidate.fact
+      }
+    : null;
 }
+
 function selectBestFact(
   units: Record<string, ConceptFact[]> | undefined,
   filing: FilingReference,
   isEPS: boolean
-): { unit: string; fact: ConceptFact } | null {
+): { unit: string; fact: ConceptFact; score: number } | null {
   if (!units) {
     return null;
   }
@@ -537,7 +564,7 @@ function selectBestFact(
 
   flattened.sort((left, right) => left.score - right.score);
   const best = flattened[0];
-  return best ? { unit: best.unit, fact: best.fact } : null;
+  return best ? { unit: best.unit, fact: best.fact, score: best.score } : null;
 }
 
 function inferSameFilingComparisonReference(filing: FilingReference): FilingReference | null {

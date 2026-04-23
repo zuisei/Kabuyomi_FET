@@ -115,32 +115,58 @@ export function createSecService(config = readConfig()) {
 
     async fetchMetrics({ cik, tags }) {
       const normalizedCik = String(cik).padStart(10, "0");
-      const conceptEntriesPromise = Promise.all(
-        tags.map(async (tag) => [
-          tag,
-          await secJson(
-            `https://data.sec.gov/api/xbrl/companyconcept/CIK${normalizedCik}/us-gaap/${tag}.json`,
-            {
-              allowNotFound: true,
-              cacheTtlMs: CACHE_TTL.concept
-            }
-          )
-        ])
+      const requestedTags = [...new Set(tags.map((tag) => String(tag).trim()).filter(Boolean))];
+      if (requestedTags.length === 0) {
+        return { concepts: {}, companyFacts: null };
+      }
+
+      const companyFacts = await secJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${normalizedCik}.json`, {
+        cacheTtlMs: CACHE_TTL.companyFacts
+      });
+      const { concepts: companyFactsConcepts, missingTags } = extractRequestedConceptsFromCompanyFacts(
+        companyFacts,
+        requestedTags
       );
-
-      const companyFactsPromise =
-        tags.length > 0
-          ? secJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${normalizedCik}.json`, {
-              cacheTtlMs: CACHE_TTL.companyFacts
-            })
-          : Promise.resolve(null);
-
-      const [conceptEntries, companyFacts] = await Promise.all([conceptEntriesPromise, companyFactsPromise]);
-      const concepts = Object.fromEntries(conceptEntries);
+      const fallbackEntries =
+        missingTags.length > 0
+          ? await Promise.all(
+              missingTags.map(async (tag) => [
+                tag,
+                await secJson(
+                  `https://data.sec.gov/api/xbrl/companyconcept/CIK${normalizedCik}/us-gaap/${tag}.json`,
+                  {
+                    allowNotFound: true,
+                    cacheTtlMs: CACHE_TTL.concept
+                  }
+                )
+              ])
+            )
+          : [];
+      const fallbackConcepts = Object.fromEntries(fallbackEntries);
+      const concepts = Object.fromEntries(
+        requestedTags.map((tag) => [tag, companyFactsConcepts[tag] ?? fallbackConcepts[tag] ?? null])
+      );
 
       return { concepts, companyFacts };
     }
   };
+}
+
+function extractRequestedConceptsFromCompanyFacts(companyFacts, tags) {
+  const usGaap = companyFacts?.facts?.["us-gaap"];
+  const concepts = {};
+  const missingTags = [];
+
+  for (const tag of tags) {
+    if (usGaap && Object.prototype.hasOwnProperty.call(usGaap, tag)) {
+      concepts[tag] = usGaap[tag];
+      continue;
+    }
+
+    missingTags.push(tag);
+  }
+
+  return { concepts, missingTags };
 }
 
 async function expandSubmissionHistory(root, secJson) {

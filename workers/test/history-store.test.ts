@@ -223,6 +223,84 @@ describe("history backfill guardrails", () => {
     });
   });
 
+  it("does not spend total-cap budget on already indexed filings", async () => {
+    vi.mocked(lookupTicker).mockReset();
+    vi.mocked(fetchSubmissions).mockReset();
+    vi.mocked(listSupportedFilings).mockReset();
+    vi.mocked(lookupTicker).mockResolvedValue({
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      cik: "0000320193",
+      exchange: "Nasdaq"
+    } as never);
+    vi.mocked(fetchSubmissions).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
+    vi.mocked(listSupportedFilings).mockReturnValue([
+      makeFiling("AAPL", "10-K", "0001-01", "2025-12-31"),
+      makeFiling("AAPL", "10-K", "0001-02", "2024-12-31")
+    ]);
+
+    let lookupCount = 0;
+    const env = {
+      DB: {
+        prepare: vi.fn((sql: string) => ({
+          bind: vi.fn(() => ({
+            first: vi.fn().mockImplementation(async () => {
+              if (!sql.includes("SELECT filing_key, ticker FROM filings")) {
+                return null;
+              }
+
+              lookupCount += 1;
+              return lookupCount === 1
+                ? {
+                    filing_key: "v1:0000000001:000101",
+                    ticker: "AAPL"
+                  }
+                : null;
+            })
+          }))
+        })),
+        batch: vi.fn().mockResolvedValue([])
+      },
+      FILINGS_BUCKET: {
+        get: vi.fn(),
+        put: vi.fn(),
+        head: vi.fn()
+      }
+    };
+    const ensureStoredFiling = vi.fn(async (filing: FilingReference) => ({
+      filingKey: `v1:${filing.cik}:${filing.accessionNumber.replaceAll("-", "")}`
+    }));
+
+    const result = await backfillHistoricalFilings(
+      {
+        tickers: ["AAPL"],
+        years: 3,
+        forms: ["10-K"],
+        maxFilingsPerTicker: 2,
+        maxTotalFilings: 1
+      },
+      env as never,
+      { extractorVersion: "v1" } as never,
+      ensureStoredFiling as never
+    );
+
+    expect(ensureStoredFiling).toHaveBeenCalledTimes(1);
+    expect(ensureStoredFiling.mock.calls[0]?.[0].accessionNumber).toBe("0001-02");
+    expect(result.processedFilings).toEqual([
+      {
+        ticker: "AAPL",
+        filingKey: "v1:0000000001:000102"
+      }
+    ]);
+    expect(result.skippedFilings).toEqual([
+      {
+        ticker: "AAPL",
+        filingKey: "v1:0000000001:000101",
+        reason: "already_indexed"
+      }
+    ]);
+  });
+
   it("honors explicit total filing caps above the default batch size", async () => {
     vi.mocked(lookupTicker).mockImplementation(async (ticker: string) => ({
       ticker,
