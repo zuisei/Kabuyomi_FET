@@ -2,6 +2,14 @@ import XCTest
 @testable import Kabuyomi
 
 final class ConversationPromptTests: XCTestCase {
+    func testResolveConversationIdleStateTreatsPrefilledQuestionAsDraft() {
+        XCTAssertEqual(resolveConversationIdleState(draftQuestion: "   "), .intro)
+        XCTAssertEqual(
+            resolveConversationIdleState(draftQuestion: " 利益率は改善した？ "),
+            .drafted(question: "利益率は改善した？")
+        )
+    }
+
     func testBuildFollowUpQuestionsFallsBackToHistoricalForPeerComparison() {
         let company = TestFixtures.companyPayload()
 

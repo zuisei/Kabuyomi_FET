@@ -1,5 +1,16 @@
 import SwiftUI
 
+enum ConversationIdleState: Equatable {
+    case intro
+    case drafted(question: String)
+}
+
+func resolveConversationIdleState(draftQuestion: String) -> ConversationIdleState {
+    let trimmed = draftQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return .intro }
+    return .drafted(question: trimmed)
+}
+
 struct ConversationTimeline: View {
     let company: CompanyPayload
     let chatHistory: [LocalChatMessage]
@@ -66,11 +77,13 @@ struct ConversationTimeline: View {
                             selectQuestion: { draftQuestion = $0 }
                         )
 
-                        ConversationEmptyState(
-                            company: company,
-                            suggestions: Array(suggestions.prefix(3)),
-                            historicalSuggestions: Array(historicalSuggestions.prefix(2))
-                        )
+                        if idleState == .intro {
+                            ConversationEmptyState(
+                                company: company,
+                                suggestions: Array(suggestions.prefix(3)),
+                                historicalSuggestions: Array(historicalSuggestions.prefix(2))
+                            )
+                        }
                     }
 
                     Color.clear
@@ -101,6 +114,10 @@ struct ConversationTimeline: View {
 
     private var hasStartedConversation: Bool {
         !chatHistory.isEmpty || pendingChat != nil
+    }
+
+    private var idleState: ConversationIdleState {
+        resolveConversationIdleState(draftQuestion: draftQuestion)
     }
 
     private var latestAssistantIndex: Int? {

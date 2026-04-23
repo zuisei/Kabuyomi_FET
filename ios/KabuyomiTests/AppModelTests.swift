@@ -235,6 +235,42 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.activeAlert?.kind, .aiConsent)
     }
 
+    func testConfirmAIConsentAfterBlockedSendDoesNotTriggerChatRequestOrUsageMutation() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let company = TestFixtures.companyPayload()
+        try persistence.saveCompany(company, searchItem: nil)
+
+        let model = makeAppModel(persistence: persistence)
+        model.usage = UsagePayload(
+            plan: "free",
+            chatsUsed: 0,
+            chatLimit: 10,
+            stocksUsed: 0,
+            stockLimit: 3,
+            dateJST: "2026-04-23",
+            savedTickers: [],
+            accessMode: nil
+        )
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            XCTFail("Unexpected network request: \(request.url?.path ?? "")")
+            throw URLError(.badServerResponse)
+        }
+
+        let didSend = await model.sendChat(question: "売上高は？", ticker: "AAPL")
+
+        XCTAssertFalse(didSend)
+        XCTAssertEqual(model.activeAlert?.kind, .aiConsent)
+        XCTAssertFalse(model.chatIsSending)
+        XCTAssertNil(model.pendingChat(for: "AAPL"))
+
+        model.confirmAIConsent()
+
+        XCTAssertTrue(model.aiConsentGranted)
+        XCTAssertNil(model.activeAlert)
+        XCTAssertEqual(model.usage?.chatsUsed, 0)
+    }
+
     func testResetLocalDataClearsRecentStateAndRotatesDeviceIdentity() async throws {
         let persistence = PersistenceController(inMemory: true)
         let company = TestFixtures.companyPayload()

@@ -29,6 +29,7 @@ struct CompanyView: View {
     @State private var summaryPanelID = UUID()
     @State private var pendingLibraryOpenItem: SearchItem?
     @State private var pendingDrawerTickerOpen: PendingDrawerTickerOpen?
+    @State private var pendingConsentSubmission: String?
 
     init(ticker: String) {
         _currentTicker = State(initialValue: ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
@@ -160,6 +161,7 @@ struct CompanyView: View {
         }
         .onChange(of: currentTicker) { _, newValue in
             question = ""
+            pendingConsentSubmission = nil
             libraryQuery = ""
             librarySearchTask?.cancel()
             Task { await appModel.search(query: "") }
@@ -176,6 +178,16 @@ struct CompanyView: View {
         }
         .onDisappear {
             librarySearchTask?.cancel()
+            pendingConsentSubmission = nil
+        }
+        .onChange(of: appModel.activeAlert?.id) { _, newValue in
+            guard newValue == nil, let pendingConsentSubmission else { return }
+
+            self.pendingConsentSubmission = nil
+
+            if appModel.aiConsentGranted {
+                submitQuestion(pendingConsentSubmission)
+            }
         }
         .sheet(isPresented: $settingsPresented) {
             SettingsView()
@@ -332,7 +344,18 @@ struct CompanyView: View {
     private func sendCurrentQuestion() {
         let prompt = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return }
+        guard appModel.aiConsentGranted else {
+            pendingConsentSubmission = prompt
+            appModel.requestAIConsent()
+            return
+        }
+        submitQuestion(prompt)
+    }
 
+    private func submitQuestion(_ prompt: String) {
+        guard company != nil else { return }
+
+        dismissKeyboard()
         question = ""
         Task {
             let didSend = await appModel.sendChat(question: prompt, ticker: currentTicker)

@@ -47,6 +47,10 @@ final class AppModel {
     private static let isRunningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     static let aiConsentKey = "kabuyomi.aiConsentGranted"
+    static let aiConsentAlertMessage = """
+AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モデルへ送信することへの同意が必要です。
+個人情報や口座情報は入力しないでください。
+"""
     static let savedTickersKey = "kabuyomi.savedTickers"
     static let recentTickersKey = "kabuyomi.recentTickers"
     static let lastViewedTickerKey = "kabuyomi.lastViewedTicker"
@@ -360,10 +364,7 @@ final class AppModel {
         let normalized = normalizedTicker(ticker)
         let stateGeneration = self.stateGeneration
         guard aiConsentGranted else {
-            activeAlert = AppAlertState(
-                message: "AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モデルへ送信することへの同意が必要です。\n個人情報や口座情報は入力しないでください。",
-                kind: .aiConsent
-            )
+            requestAIConsent()
             return false
         }
         guard let company = companyPayload(for: normalized) else {
@@ -515,6 +516,13 @@ final class AppModel {
 
     func dismissAlert() {
         activeAlert = nil
+    }
+
+    func requestAIConsent() {
+        activeAlert = AppAlertState(
+            message: Self.aiConsentAlertMessage,
+            kind: .aiConsent
+        )
     }
 
     func requestResetLocalDataConfirmation() {
