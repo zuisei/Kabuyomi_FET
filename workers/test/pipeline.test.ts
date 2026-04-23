@@ -56,7 +56,7 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
     expect(response.answer).toContain("15.7%増");
     expect(response.answer).toContain("iPhone");
-    expect(response.answer).toContain("どの要因がいちばん効いたかを厳密に切り分けるには追加情報が必要です");
+    expect(response.answer).toContain("まず本文で名前が出ている地域・製品を伸びの候補として見る");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
     expect(response.sources.every((source) => source.sourceUrl === filing.primaryDocumentUrl)).toBe(true);
@@ -378,10 +378,10 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: false }
     );
 
-    expect(response.answer).toContain("今回の決算資料だけで見ると、足元はやや強めです");
+    expect(response.answer).toContain("今回の決算から見ると、足元はやや強めです");
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
     expect(response.answer).toContain("営業利益は 508.5億ドル");
-    expect(response.answer).toContain("株の強弱をみるには");
+    expect(response.answer).toContain("実際の株価推移や決算後ニュースをこの決算の数字と並べる");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S12", "S6"]);
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
   });
@@ -585,7 +585,7 @@ describe("buildChatResponse", () => {
 
     expect(response.responsePath).toBe("fallback");
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
-    expect(response.answer).toContain("この先を言い切ることはできません");
+    expect(response.answer).toContain("見通しは、会社が出している需要・リスクの言い方");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
   });
@@ -669,7 +669,7 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: true }
     );
 
-    expect(response.answer).toContain("この先を言い切ることはできません");
+    expect(response.answer).toContain("見通しは、会社が出している需要・リスクの言い方");
     expect(response.answer).toContain("検索 snippet の弱い外部補足では Reuters が");
     expect(response.answer).toContain("会社見通し");
     expect(response.sources.map((source) => source.sourceKind)).toEqual(["sec_filing", "sec_filing", "web_supplement"]);
@@ -755,7 +755,7 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("外部報道ベースでは、決算後に株価は 3.2% 上昇で反応しています");
     expect(response.answer).toContain("反応チャート:");
     expect(response.answer).toContain("↗ 3.2%");
-    expect(response.answer).toContain("今回の決算資料だけで見ると、足元はやや強めです");
+    expect(response.answer).toContain("今回の決算から見ると、足元はやや強めです");
     expect(response.answer).toContain("値動き自体は検索 snippet ベースの弱い外部補足で、なぜそう見られたかの整理は今回の決算資料に基づいています");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S12", "W1"]);
     expect(response.sources.at(-1)?.sourceKind).toBe("web_supplement");

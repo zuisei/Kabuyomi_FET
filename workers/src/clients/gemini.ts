@@ -184,6 +184,16 @@ function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: strin
   }
 
   if (asksContextualReasoning) {
+    const answerLooksUnavailableOnly =
+      /(確認できません|分かりません|わかりません|not enough context|cannot confirm)/.test(normalizedAnswer) &&
+      !/(売上高|営業利益|純利益|営業cf|キャッシュフロー|前年比|前年同期比|revenue|operating income|net income|cash flow|本文|提出資料|需要|リスク|不確実|自社株買い|配当|株価|市場|反応)/.test(
+        normalizedAnswer
+      );
+
+    if (answerLooksUnavailableOnly) {
+      return true;
+    }
+
     const answerLooksMetricOnly =
       /(売上高|営業利益|純利益|営業cf|キャッシュフロー|前年比|前年同期比|revenue|operating income|net income|cash flow)/.test(
         normalizedAnswer

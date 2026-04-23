@@ -465,8 +465,6 @@ private struct InvestorChangeBoard: View {
                     .kabuyomiCard(.muted, radius: 18)
             } else {
                 VStack(spacing: 0) {
-                    InvestorChangeTableHeader()
-
                     ForEach(Array(comparableMetrics.enumerated()), id: \.element.id) { index, metric in
                         InvestorChangeTableRow(metric: metric, isLast: index == comparableMetrics.count - 1)
                     }
@@ -486,30 +484,19 @@ private struct InvestorChangeBoard: View {
     }
 }
 
-private struct InvestorChangeTableHeader: View {
-    var body: some View {
-        HStack(spacing: 10) {
-            Text("項目")
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text("今回")
-                .frame(maxWidth: .infinity, alignment: .trailing)
-
-            Text("前年")
-                .frame(maxWidth: .infinity, alignment: .trailing)
-
-            Text("YoY")
-                .frame(width: 62, alignment: .trailing)
-        }
-        .font(.system(.caption, design: .rounded, weight: .bold))
-        .foregroundStyle(KabuyomiTheme.inkMuted)
-        .padding(.bottom, 10)
-    }
-}
-
 private struct InvestorChangeTableRow: View {
     let metric: MetricPayload
     let isLast: Bool
+
+    private var currentValueText: String {
+        formattedMetricValue(metric)
+    }
+
+    private var comparisonValueText: String {
+        metric.comparisonValue.map {
+            formattedMetricValue($0, logicalName: metric.logicalName, unit: metric.unit)
+        } ?? "—"
+    }
 
     private var yoyText: String {
         metric.yoyPercent.map { formattedSignedYoY($0) } ?? "—"
@@ -522,34 +509,57 @@ private struct InvestorChangeTableRow: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(MetricLabeler.title(for: metric.logicalName))
-                    .font(.system(.subheadline, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(MetricLabeler.title(for: metric.logicalName))
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                        .lineLimit(1)
 
-                Text(formattedMetricValue(metric))
-                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    Spacer(minLength: 8)
 
-                Text(metric.comparisonValue.map { formattedMetricValue($0, logicalName: metric.logicalName) } ?? "—")
-                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.inkSoft)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    Text(yoyText)
+                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                        .foregroundStyle(yoyTint)
+                        .lineLimit(1)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(yoyTint.opacity(0.14)))
+                }
 
-                Text(yoyText)
-                    .font(.system(.footnote, design: .rounded, weight: .bold))
-                    .foregroundStyle(yoyTint)
-                    .frame(width: 62, alignment: .trailing)
+                HStack(alignment: .top, spacing: 10) {
+                    InvestorChangeValueBlock(title: "今回", value: currentValueText, tint: KabuyomiTheme.ink)
+                    InvestorChangeValueBlock(title: "前年", value: comparisonValueText, tint: KabuyomiTheme.inkSoft)
+                }
             }
-            .padding(.vertical, 11)
+            .padding(.vertical, 12)
 
             if !isLast {
                 Divider()
                     .overlay(Color.white.opacity(0.7))
             }
         }
+    }
+}
+
+private struct InvestorChangeValueBlock: View {
+    let title: String
+    let value: String
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(.caption2, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+            Text(value)
+                .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -729,7 +739,7 @@ private struct InvestorHistoricalTableRow: View {
             return point.value.formatted(.number.precision(.fractionLength(2)))
         }
 
-        return formattedMetricValue(point.value, logicalName: series.logicalName)
+        return formattedMetricValue(point.value, logicalName: series.logicalName, unit: point.unit)
     }
 }
 
@@ -888,10 +898,15 @@ private struct InvestorMetricMapRow: View {
                     Text(formattedMetricValue(metric))
                         .font(.system(.headline, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                        .monospacedDigit()
                     if let comparisonValue = metric.comparisonValue {
-                        Text("前年 \(formattedMetricValue(comparisonValue, logicalName: metric.logicalName))")
+                        Text("前年 \(formattedMetricValue(comparisonValue, logicalName: metric.logicalName, unit: metric.unit))")
                             .font(.system(.caption, design: .rounded, weight: .medium))
                             .foregroundStyle(KabuyomiTheme.inkMuted)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.82)
                     }
                 }
 

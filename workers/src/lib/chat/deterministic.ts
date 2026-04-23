@@ -222,7 +222,11 @@ function buildRevenueDriversAnswer(filing: FilingCacheRecord): ChatResponsePaylo
   if (narrative) {
     answerParts.push(narrative.text);
   }
-  answerParts.push("ただし、どの要因がいちばん効いたかを厳密に切り分けるには追加情報が必要です。");
+  answerParts.push(
+    narrative
+      ? "一番効いた順番までは置かず、まず本文で名前が出ている地域・製品を伸びの候補として見るのが自然です。"
+      : "事業別・地域別の押し上げ役は、本文の追加説明があるともう一段絞れます。"
+  );
 
   return {
     answer: answerParts.join(" "),
@@ -278,7 +282,7 @@ function buildStockContextAnswer(filing: FilingCacheRecord): ChatResponsePayload
     answerParts.push(`一方で、提出資料では${risk.text}。`);
   }
 
-  answerParts.push("株の強弱をみるには、実際の株価推移や決算後ニュースも併せて確認する必要があります。");
+  answerParts.push("このあと見るなら、実際の株価推移や決算後ニュースをこの決算の数字と並べると強弱を掴みやすいです。");
 
   return {
     answer: answerParts.join(" "),
@@ -329,7 +333,7 @@ function buildContrastiveMarketReactionAnswer(filing: FilingCacheRecord): ChatRe
   }
 
   answerParts.push("そのため、「不確実さはあるが、足元の業績や需要は想定より強い」と受け取られても不思議ではありません。");
-  answerParts.push("ただし、実際に株価を押し上げた理由を一つに断定することはできません。");
+  answerParts.push("一つだけに絞るより、決算の強さと外部要因を分けて見るのが近いです。");
 
   return {
     answer: answerParts.join(" "),
@@ -350,7 +354,7 @@ function buildCashGenerationAnswer(filing: FilingCacheRecord): ChatResponsePaylo
   }
 
   return {
-    answer: buildMetricObservationSentence(metric),
+    answer: `${buildMetricObservationSentence(metric)} この数字がプラスで伸びているなら、本業からの現金創出は確認できます。`,
     sources: [buildSecFilingSource(source)]
   };
 }
@@ -776,14 +780,14 @@ function buildFilingStockContextJudgment(
   }
 
   if (score >= 1) {
-    return "今回の決算資料だけで見ると、足元はやや強めです。";
+    return "今回の決算から見ると、足元はやや強めです。";
   }
 
   if (score <= -1) {
-    return "今回の決算資料だけで見ると、足元は慎重寄りです。";
+    return "今回の決算から見ると、足元は慎重寄りです。";
   }
 
-  return "今回の決算資料だけで見ると、強弱はまだらです。";
+  return "今回の決算から見ると、強弱はまだらです。";
 }
 
 function isBroadStockContextQuestion(normalizedQuestion: string): boolean {

@@ -287,6 +287,10 @@ struct ConversationContextCard: View {
     let historicalQuestions: [String]
     let selectQuestion: (String) -> Void
 
+    private let promptColumns = [
+        GridItem(.adaptive(minimum: 150), spacing: 10, alignment: .top)
+    ]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 10) {
@@ -366,17 +370,14 @@ struct ConversationContextCard: View {
             }
             .foregroundStyle(KabuyomiTheme.accentDeep)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(questions, id: \.self) { question in
-                        ConversationPromptChip(
-                            text: question,
-                            systemImage: icon,
-                            action: { selectQuestion(question) }
-                        )
-                    }
+            LazyVGrid(columns: promptColumns, alignment: .leading, spacing: 10) {
+                ForEach(questions, id: \.self) { question in
+                    ConversationPromptChip(
+                        text: question,
+                        systemImage: icon,
+                        action: { selectQuestion(question) }
+                    )
                 }
-                .padding(.trailing, 20)
             }
         }
     }
@@ -397,19 +398,22 @@ struct ConversationPromptChip: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 Image(systemName: systemImage)
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .padding(.top, 1)
 
                 Text(text)
                     .font(.system(.footnote, design: .rounded, weight: .semibold))
                     .foregroundStyle(KabuyomiTheme.ink)
                     .multilineTextAlignment(.leading)
-                    .lineLimit(2)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.86)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
             .background(
                 Capsule()
                     .fill(Color.white.opacity(0.88))

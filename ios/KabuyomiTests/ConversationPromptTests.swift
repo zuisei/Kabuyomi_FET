@@ -85,6 +85,30 @@ final class ConversationPromptTests: XCTestCase {
         )
     }
 
+    func testStructureAssistantMessageDoesNotTreatEveryTadashiAsLimitation() {
+        let structure = structureAssistantMessage(
+            """
+            売上高は 1,437.6億ドル で、前年同期比 15.7%増 です。\
+            ただし、サービスも伸びています。
+            """
+        )
+
+        XCTAssertEqual(
+            structure.conclusion,
+            "売上高は 1,437.6億ドル で、前年同期比 15.7%増 です。 ただし、サービスも伸びています。"
+        )
+        XCTAssertTrue(structure.limitations.isEmpty)
+    }
+
+    func testUnavailableMessageRequiresMoreThanPartialCaveat() {
+        XCTAssertTrue(isUnavailableMessage("この決算資料の範囲では確認できません。"))
+        XCTAssertFalse(
+            isUnavailableMessage(
+                "売上高は 1,437.6億ドル で、前年同期比 15.7%増 です。どの要因が一番効いたかは追加情報があると絞れます。"
+            )
+        )
+    }
+
     func testPendingAssistantViewStateStartsWithThinking() {
         let submittedAt = Date()
 
@@ -284,6 +308,31 @@ final class ConversationPromptTests: XCTestCase {
         let summary = historicalMetricSummaryText(for: company.historicalOverview?.series ?? [])
 
         XCTAssertEqual(summary, "表示指標: 売上高")
+    }
+
+    func testFormattedMetricValueGroupsLargeRevenueLikeWorkerAnswers() {
+        let metric = MetricPayload(
+            logicalName: "revenue",
+            tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+            value: 143_756_000_000,
+            unit: "USD",
+            periodEnd: "2026-03-28",
+            comparisonValue: 124_300_000_000,
+            yoyPercent: 15.7
+        )
+
+        XCTAssertEqual(formattedMetricValue(metric), "1,437.6億ドル")
+        XCTAssertEqual(
+            formattedMetricValue(124_300_000_000, logicalName: metric.logicalName, unit: metric.unit),
+            "1,243億ドル"
+        )
+    }
+
+    func testFormattedMetricValueKeepsUnknownCurrencyUnitInsteadOfCallingItDollars() {
+        XCTAssertEqual(
+            formattedMetricValue(1_234_567, logicalName: "revenue", unit: "JPY"),
+            "1,234,567 JPY"
+        )
     }
 
     func testPrimarySourceReferenceUsesFirstMatchedSourceId() {

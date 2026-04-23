@@ -335,7 +335,8 @@ describe("Gemini local chat fallback", () => {
     expect(response.sourceIds).toEqual(["S9"]);
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
     expect(response.answer).toContain("15.7%増");
-    expect(response.answer).toContain("どの事業や地域が売上高を押し上げたかまでは分かりません");
+    expect(response.answer).toContain("事業別・地域別の押し上げ役は");
+    expect(response.answer).not.toContain("分かりません");
   });
 
   it("treats red-ink cause questions as profit questions instead of revenue questions", async () => {
@@ -483,9 +484,9 @@ describe("Gemini local chat fallback", () => {
     });
 
     expect(response.sourceIds).toEqual(["S9", "S1"]);
-    expect(response.answer).toContain("株価の方向や買いかどうかは");
+    expect(response.answer).toContain("買いかどうかの判断そのものは出さず");
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
-    expect(response.answer).toContain("まず決算書で確認できる変化");
+    expect(response.answer).toContain("株価推移、決算後ニュース、会社見通し");
   });
 
   it("treats broad recent stock-context questions as context requests, not raw metric prompts", async () => {
@@ -548,9 +549,9 @@ describe("Gemini local chat fallback", () => {
     });
 
     expect(response.sourceIds).toEqual(["S9", "S1"]);
-    expect(response.answer).toContain("今回の決算資料だけで見ると、足元はやや強めです");
+    expect(response.answer).toContain("今回の決算から見ると、足元はやや強めです");
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
-    expect(response.answer).toContain("株価推移や決算後ニュースを別で見るのが安全です");
+    expect(response.answer).toContain("株価推移や決算後ニュースをこの数字と並べる");
   });
 
   it("uses cash flow as the anchor for capital-allocation style questions", async () => {
@@ -604,7 +605,7 @@ describe("Gemini local chat fallback", () => {
 
     expect(response.sourceIds).toEqual(["S11"]);
     expect(response.answer).toContain("営業CFは 312億ドル");
-    expect(response.answer).toContain("配当や自社株買いが十分か");
+    expect(response.answer).toContain("営業キャッシュフロー、手元資金、配当・自社株買いの実行額");
   });
 
   it("understands plain Japanese cash-generation questions", async () => {
@@ -865,8 +866,96 @@ describe("Gemini local chat fallback", () => {
     });
 
     expect(response.sourceIds).toEqual(["S9", "S1"]);
-    expect(response.answer).toContain("株価の方向や買いかどうかは");
+    expect(response.answer).toContain("買いかどうかの判断そのものは出さず");
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
+  });
+
+  it("recovers when Gemini declines with a soft unsupported answer and no sources", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer: "この決算資料の範囲では確認できません。外部情報が必要です。",
+                      sourceIds: []
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        })
+      })
+    );
+
+    const response = await generateChatAnswer({ GEMINI_API_KEY: "test-key" } as never, {
+      question: "この先株価は上がる？",
+      filing: {
+        filingKey: "v2:0000000000:000000000000000005",
+        ticker: "TEST",
+        companyName: "Test Corp",
+        cik: "0000000000",
+        formType: "10-Q",
+        filedAt: "2026-04-14",
+        periodOfReport: "2026-03-31",
+        primaryDocumentUrl: "https://example.com",
+        mdaText: "",
+        mdaTokenCount: 0,
+        metrics: [
+          {
+            logicalName: "revenue",
+            tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+            value: 143756000000,
+            unit: "USD",
+            periodEnd: "2026-03-31",
+            comparisonValue: 124300000000,
+            yoyPercent: 15.7
+          }
+        ],
+        generatedAt: "2026-04-14T00:00:00.000Z",
+        extractorVersion: "v2",
+        promptVersion: "v1",
+        summary: {
+          verdict: "",
+          highlights: [],
+          changes: []
+        },
+        sourceChunks: [
+          {
+            sourceId: "S7",
+            sectionType: "md_a",
+            sectionTitle: "Part I, Item 2",
+            sourceLabel: "10-Q Part I Item 2",
+            text: "Demand remained resilient across several customer groups despite a volatile macro environment.",
+            startOffset: 0,
+            endOffset: 87,
+            sortOrder: 1
+          },
+          {
+            sourceId: "S9",
+            sectionType: "xbrl_metric",
+            sectionTitle: "売上高",
+            sourceLabel: "XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)",
+            text: "売上高: 143756000000 USD / 比較値: 124300000000 / YoY: 15.7%",
+            startOffset: 0,
+            endOffset: 0,
+            tagName: "RevenueFromContractWithCustomerExcludingAssessedTax",
+            sortOrder: 9
+          }
+        ]
+      }
+    });
+
+    expect(response.sourceIds).toEqual(["S9", "S7"]);
+    expect(response.answer).toContain("売上高は 1,437.6億ドル");
+    expect(response.answer).not.toContain("確認できません");
   });
 
   it("recovers metric-only guidance answers into filing-first context", async () => {
@@ -954,7 +1043,7 @@ describe("Gemini local chat fallback", () => {
 
     expect(response.sourceIds).toEqual(["S9", "S7"]);
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
-    expect(response.answer).toContain("この先を言い切ることはできません");
+    expect(response.answer).toContain("見通しは、会社が出している需要・リスクの言い方");
   });
 
   it("recovers revenue-only remote answers when the user asked about red-ink causes", async () => {
@@ -1410,7 +1499,7 @@ describe("Gemini local chat fallback", () => {
     });
 
     expect(response.sourceIds).toEqual(["S9", "S1"]);
-    expect(response.answer).toContain("今回の決算資料だけで見ると、足元はやや強めです");
+    expect(response.answer).toContain("今回の決算から見ると、足元はやや強めです");
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
   });
 });

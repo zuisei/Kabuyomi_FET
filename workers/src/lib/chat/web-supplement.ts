@@ -82,7 +82,14 @@ function shouldUseWebSupplement(question: string, answer: string): boolean {
     answer.includes("断定できません") ||
     answer.includes("切り分けられません") ||
     answer.includes("追加情報が必要です") ||
-    answer.includes("別情報で確認");
+    answer.includes("別情報で確認") ||
+    answer.includes("次期の数字") ||
+    answer.includes("市場予想を追加") ||
+    answer.includes("精度が上が") ||
+    answer.includes("もう一段絞れます") ||
+    answer.includes("伸びの候補") ||
+    answer.includes("次に見るなら") ||
+    answer.includes("判断しやすい");
 
   return (
     asksCurrentOrMarketContext ||

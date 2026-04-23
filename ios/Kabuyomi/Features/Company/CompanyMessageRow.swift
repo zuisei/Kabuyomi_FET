@@ -105,7 +105,7 @@ struct ConversationMessageRow: View {
         }
 
         if comparisonLimitationNotice != nil {
-            return "比較は限定的"
+            return "比較の範囲あり"
         }
 
         if kinds.contains(.historicalFiling) {
@@ -142,7 +142,7 @@ struct ConversationMessageRow: View {
             return "同じ軸で続きを見る"
         }
 
-        return "続きを聞く"
+        return "続きを見る"
     }
 
     @ViewBuilder
@@ -276,7 +276,7 @@ struct ConversationMessageRow: View {
     }
 
     private var recoverySuggestionTitle: String {
-        isPeerComparisonQuestion ? "代わりに履歴比較なら確認できます" : "代わりに次は確認できます"
+        isPeerComparisonQuestion ? "同社の履歴比較で見る" : "次に見られるポイント"
     }
 
     private var isPeerComparisonQuestion: Bool {
@@ -292,22 +292,22 @@ struct ConversationMessageRow: View {
         }
 
         return AssistantComparisonNotice(
-            title: "この beta では他社比較はまだ限定的です",
-            message: "今回の回答は主に \(company.ticker) 単体の今回の決算資料をもとに整理しています。代わりに、同社の前回比や今回の変化はすぐ追えます。"
+            title: "この回答の範囲",
+            message: "今はまず \(company.ticker) の今回の決算資料から読める変化を整理しています。競合比較は、比較先の同じ期間の資料が揃うと精度が上がります。"
         )
     }
 
     private var comparisonLimitationCopy: String? {
         guard isPeerComparisonQuestion else { return nil }
-        return "この beta では他社比較はまだ限定的です。"
+        return "今はまず同社の決算資料から読める変化を整理します。"
     }
 
     private var fallbackCopy: String {
         if comparisonLimitationCopy != nil {
-            return "代わりに、この決算資料から確認できる同社の前回比や注目点を続けて見ていけます。"
+            return "同社の前回比や今回の注目点なら、この画面からそのまま続けて見られます。"
         }
 
-        return "この決算資料ではその論点を十分に確認できませんでした。代わりに、ここから追いやすいポイントを続けて見ていけます。"
+        return "この決算資料だけで断定できる材料は薄めです。近い数字や論点から、続けて確認できます。"
     }
 }
 
@@ -385,7 +385,7 @@ private struct AssistantStructuredBubble: View {
             }
 
             if !structure.limitations.isEmpty {
-                AssistantSectionBlock(title: "限界 / 追加確認", tint: KabuyomiTheme.negative) {
+                AssistantSectionBlock(title: "補足 / 次に見る点", tint: KabuyomiTheme.negative) {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(structure.limitations.enumerated()), id: \.offset) { _, sentence in
                             AssistantSentenceRow(text: sentence)
@@ -405,7 +405,7 @@ private struct AssistantFallbackBubble: View {
         VStack(alignment: .leading, spacing: 12) {
             if let comparisonLimitation {
                 AssistantInlineNotice(
-                    title: "比較質問は限定対応です",
+                    title: "この回答の範囲",
                     message: comparisonLimitation
                 )
             }
@@ -660,11 +660,15 @@ private func isLimitationSentence(_ sentence: String) -> Bool {
         "確認できません",
         "十分確認できません",
         "特定できません",
-        "限定的",
         "だけでは",
+        "断定できません",
+        "分かりません",
+        "わかりません",
         "切り分け",
-        "ただし",
-        "資料では",
+        "追加情報",
+        "別情報",
+        "外部",
+        "精度が上が",
         "不明",
         "cannot",
         "not enough",
@@ -674,18 +678,33 @@ private func isLimitationSentence(_ sentence: String) -> Bool {
     return patterns.contains(where: { normalized.contains($0.lowercased()) })
 }
 
-private func isUnavailableMessage(_ text: String) -> Bool {
-    let normalized = text.lowercased()
-    let patterns = [
+func isUnavailableMessage(_ text: String) -> Bool {
+    let compact = text
+        .lowercased()
+        .replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
+        .trimmingCharacters(in: CharacterSet(charactersIn: "。.!！?？"))
+
+    let exactPatterns = [
         "この決算資料の範囲では確認できません",
-        "この filing の提供コンテキストでは確認できません",
-        "十分確認できません",
-        "確認できません",
-        "cannot confirm",
-        "not enough context"
+        "このfilingの提供コンテキストでは確認できません"
     ]
 
-    return patterns.contains(where: { normalized.contains($0.lowercased()) })
+    if exactPatterns.contains(compact) {
+        return true
+    }
+
+    let unavailablePatterns = [
+        "確認できません",
+        "十分確認できません",
+        "分かりません",
+        "わかりません",
+        "cannotconfirm",
+        "notenoughcontext"
+    ]
+    let containsUnavailablePhrase = unavailablePatterns.contains(where: { compact.contains($0) })
+    guard containsUnavailablePhrase else { return false }
+
+    return compact.count <= 70 && !hasAssistantFactSignal(text)
 }
 
 func localizedAssistantDisplayText(_ text: String) -> String {
@@ -747,6 +766,18 @@ func localizedAssistantDisplayText(_ text: String) -> String {
 
 private func containsJapaneseCharacters(_ text: String) -> Bool {
     text.range(of: #"[ぁ-んァ-ヶ一-龠]"#, options: .regularExpression) != nil
+}
+
+private func hasAssistantFactSignal(_ text: String) -> Bool {
+    let normalized = text.lowercased()
+    let patterns = [
+        #"売上高|営業利益|純利益|営業キャッシュフロー|前年同期比|比較値|億ドル|%|revenue|operating income|net income|cash flow"#,
+        #"\d"#
+    ]
+
+    return patterns.contains { pattern in
+        normalized.range(of: pattern, options: .regularExpression) != nil
+    }
 }
 
 private struct NormalizedAssistantSentence {

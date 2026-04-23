@@ -100,11 +100,7 @@ export function recoverBroaderFallbackIfNeeded(
   input: ChatPromptInput,
   response: GeminiChatAnswer
 ): GeminiChatAnswer {
-  if (
-    (response.answer === "この決算資料の範囲では確認できません。"
-      || response.answer === "この filing の提供コンテキストでは確認できません。")
-    && response.sourceIds.length === 0
-  ) {
+  if (response.sourceIds.length === 0 && isUnavailableOnlyAnswer(response.answer)) {
     return localChatFallback(input);
   }
 
@@ -286,7 +282,10 @@ function buildMetricFallbackAnswer(
     parts.push(buildNarrativeContext(narrative, profile));
   }
 
-  parts.push(buildMetricLimitation(profile));
+  const nextStep = buildMetricNextStep(profile, Boolean(narrative));
+  if (nextStep) {
+    parts.push(nextStep);
+  }
 
   return {
     answer: parts.join(" "),
@@ -404,49 +403,53 @@ function buildNarrativeContext(narrative: SourceChunkRecord, profile: QuestionPr
   return summarizeNarrativeEvidence(narrative, profile);
 }
 
-function buildMetricLimitation(profile: QuestionProfile): string {
+function buildMetricNextStep(profile: QuestionProfile, hasNarrative: boolean): string | null {
   if (profile.asksRevenue && (profile.asksCause || profile.asksDetail)) {
-    return "どの事業や地域が売上高を押し上げたかまでは分かりません。";
+    return hasNarrative
+      ? "一番効いた順番までは置かず、まずこの本文説明と売上の伸びをセットで見るのが近いです。"
+      : "数字だけで見ると売上は伸びています。事業別・地域別の押し上げ役は、本文の追加説明があるともう一段絞れます。";
   }
 
   if (profile.asksProfit && profile.asksCause) {
-    return "赤字や利益悪化の主因を断定するには、本文の補足も見たいところです。";
+    return hasNarrative
+      ? "主因はこの本文説明を軸に、費用・評価損益・税金の数字と合わせると見えやすいです。"
+      : "数字だけなら、利益の悪化幅を先に押さえてから費用や評価損益の本文を探す流れになります。";
   }
 
   if (profile.asksRisk || profile.asksTariff) {
-    return "どのリスクがどこまで業績に効くかは、この決算資料だけでは断定できません。";
+    return "業績への効き方は、ここではリスクとして置かれている段階です。数字とあわせて次の決算で実際の影響を見るのがよさそうです。";
   }
 
   if (profile.asksCashFlow && profile.asksCapitalAllocation) {
-    return "配当や自社株買いが十分かどうかは、この決算資料だけでは分かりません。";
+    return "還元の十分性は、営業キャッシュフロー、手元資金、配当・自社株買いの実行額を並べると判断しやすいです。";
   }
 
   if (profile.asksCapitalAllocation) {
-    return "還元方針の十分性や今後の水準は、この決算資料だけでは言い切れません。";
+    return "方針の強弱は、今回の実行額と会社コメントを並べて見るのが近いです。";
   }
 
   if (profile.asksCashFlow) {
-    return "現金創出の持続性までは、この決算資料だけでは断定できません。";
+    return "持続性は、次の期も営業キャッシュフローが同じ方向で出るかを見ると判断しやすいです。";
   }
 
   if (profile.asksGuidance || profile.asksForecast) {
-    return "この先を言い切ることはできません。";
+    return "見通しは、会社が出している需要・リスクの言い方と次期の数字をセットで見るのが近いです。";
   }
 
   if (profile.asksProfitability && profile.asksCause) {
-    return "利益率がなぜ動いたかを断定するには、本文の補足も見たいところです。";
+    return "利益率の動きは、売上の伸び、コスト、価格、製品構成を順番に見ると整理しやすいです。";
   }
 
-  return "この決算資料だけでは、これ以上の切り分けは難しいです。";
+  return null;
 }
 
 function buildClosestContextLead(profile: QuestionProfile): string {
   if (profile.asksStockPrice || profile.asksRecommendation) {
-    return "株価の方向や買いかどうかは、この決算資料だけでは決められません。";
+    return "買いかどうかの判断そのものは出さず、まず決算から読める強弱を整理します。";
   }
 
   if (profile.asksMarketReaction) {
-    return "株価の反応には市場予想や外部ニュースも効くので、この決算資料だけでは決め打ちできません。";
+    return "株価反応そのものは外部要因も混ざるので、まず決算側で好感・警戒されやすい材料を分けます。";
   }
 
   return "この決算資料から確認できる範囲で、近い事実を整理します。";
@@ -454,18 +457,18 @@ function buildClosestContextLead(profile: QuestionProfile): string {
 
 function buildClosestContextLimitation(profile: QuestionProfile): string {
   if (profile.asksStockPrice || profile.asksRecommendation) {
-    return "まず決算書で確認できる変化を押さえ、そのうえで市場価格や投資判断は別情報で確認するのが安全です。";
+    return "次に見るなら、同じ期間の株価推移、決算後ニュース、会社見通しを合わせると判断しやすいです。";
   }
 
   if (profile.asksStockContext) {
-    return "まず決算で確認できる数字を押さえ、そのうえで株価推移や決算後ニュースを別で見るのが安全です。";
+    return "次に見るなら、株価推移や決算後ニュースをこの数字と並べると強弱を掴みやすいです。";
   }
 
   if (profile.asksGuidance || profile.asksForecast) {
-    return "具体的な見通しや外部予想との比較は、この決算資料以外の情報も必要です。";
+    return "具体的な見通しや外部予想との比較は、会社コメントや市場予想を追加すると精度が上がります。";
   }
 
-  return "この決算資料だけではここから先は断定できません。";
+  return "ここから先は、同じ論点の本文や外部データがあるともう一段絞れます。";
 }
 
 function buildNarrativeFallbackLimitation(profile: QuestionProfile): string | null {
@@ -479,27 +482,27 @@ function buildNarrativeFallbackLimitation(profile: QuestionProfile): string | nu
   }
 
   if (profile.asksGuidance || profile.asksForecast) {
-    return "具体的な数値見通しや外部予想との比較は、この決算資料以外の情報も必要です。";
+    return "数値見通しや市場予想と並べると、強弱はもう少し判断しやすくなります。";
   }
 
   if (profile.asksRisk || profile.asksTariff) {
-    return "どのリスクが実際に表面化するかは、この決算資料だけでは断定できません。";
+    return "実際に業績へ出るかは、次の数字や会社コメントとセットで追うのがよさそうです。";
   }
 
   if (profile.asksCapitalAllocation) {
-    return "還元余力や今後の方針までは、この決算資料の断片だけでは言い切れません。";
+    return "還元余力は、手元資金・営業キャッシュフロー・実行額を並べると見やすいです。";
   }
 
   if (profile.asksRevenue && (profile.asksCause || profile.asksDetail)) {
-    return "どの要因がいちばん効いたかの厳密な切り分けは、この決算資料の断片だけでは難しいです。";
+    return "一番効いた順番までは置かず、まず本文で名前が出ている要因を伸びの候補として見ます。";
   }
 
   if (profile.asksProfit && profile.asksCause) {
-    return "赤字や利益悪化の主因を断定するには、追加の本文記述も見たいところです。";
+    return "主因はこの本文説明を軸に、費用・評価損益・税金の数字と合わせると見えやすいです。";
   }
 
   if (profile.asksProfitability && profile.asksCause) {
-    return "利益率に最も効いた要因を断定するには、追加の本文記述も見たいところです。";
+    return "利益率は、コスト、価格、製品構成のどれが効いたかを順に照らすと整理しやすいです。";
   }
 
   return null;
@@ -527,14 +530,14 @@ function buildStockContextLeadFromFallback(
   }
 
   if (score >= 1) {
-    return "今回の決算資料だけで見ると、足元はやや強めです。";
+    return "今回の決算から見ると、足元はやや強めです。";
   }
 
   if (score <= -1) {
-    return "今回の決算資料だけで見ると、足元は慎重寄りです。";
+    return "今回の決算から見ると、足元は慎重寄りです。";
   }
 
-  return "今回の決算資料だけで見ると、強弱はまだらです。";
+  return "今回の決算から見ると、強弱はまだらです。";
 }
 
 function buildTariffNarrativeSentence(source: SourceChunkRecord): string {
@@ -568,7 +571,7 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
       lowered
     )
   ) {
-    return "提出資料の一般的な注意書きや案内文で、この論点の深掘りには向きません。";
+    return "提出資料の一般的な注意書きや案内文が中心で、材料としては弱めです。";
   }
 
   if (/(digital asset|bitcoin)/.test(lowered) && /(fair value|impairment|loss)/.test(lowered)) {
@@ -624,7 +627,7 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
   }
 
   if (!containsJapaneseCharacters(trimmed)) {
-    return "提出資料の本文に、この論点に関する説明がありますが、この断片だけでは要因を言い切れません。";
+    return "提出資料の本文に、この論点に関する説明があります。本文全体と数字を並べると、どの要因が強いかを追いやすくなります。";
   }
 
   const excerpt = truncateExcerpt(trimmed, 140).replace(/^「|」$/g, "");
@@ -681,4 +684,26 @@ function truncateExcerpt(text: string, limit: number): string {
 
 function containsJapaneseCharacters(text: string): boolean {
   return /[ぁ-んァ-ヶ一-龠]/.test(text);
+}
+
+function isUnavailableOnlyAnswer(answer: string): boolean {
+  const compact = answer
+    .replace(/\s+/g, "")
+    .replace(/[。.!！?？]+$/g, "")
+    .toLowerCase();
+
+  if (
+    compact === "この決算資料の範囲では確認できません" ||
+    compact === "このfilingの提供コンテキストでは確認できません"
+  ) {
+    return true;
+  }
+
+  const hasUnavailablePhrase =
+    /(確認できません|分かりません|わかりません|cannotconfirm|notenoughcontext)/.test(compact);
+  const hasFactSignal = /(売上高|営業利益|純利益|営業キャッシュフロー|前年同期比|比較値|本文では|提出資料では|\d|%)/.test(
+    compact
+  );
+
+  return hasUnavailablePhrase && !hasFactSignal && compact.length <= 90;
 }

@@ -149,14 +149,14 @@ func investorTone(
 }
 
 func formattedMetricValue(_ metric: MetricPayload) -> String {
-    formattedMetricValue(metric.value, logicalName: metric.logicalName)
+    formattedMetricValue(metric.value, logicalName: metric.logicalName, unit: metric.unit)
 }
 
-func formattedMetricValue(_ value: Double, logicalName: String) -> String {
+func formattedMetricValue(_ value: Double, logicalName: String, unit: String = "USD") -> String {
     if logicalName == "epsBasic" {
         return value.formatted(.number.precision(.fractionLength(2)))
     }
-    return formattedCurrencyLikeMetric(value)
+    return formattedCurrencyLikeMetric(value, unit: unit)
 }
 
 func formattedYoY(_ yoyPercent: Double) -> String {
@@ -246,7 +246,7 @@ private func localizedMetricInsightFromSource(sourceIds: [String], company: Comp
         }
 
         if let comparisonValue = metric.comparisonValue {
-            return "\(MetricLabeler.title(for: metric.logicalName))は \(formattedMetricValue(metric))、比較値は \(formattedMetricValue(comparisonValue, logicalName: metric.logicalName)) です。"
+            return "\(MetricLabeler.title(for: metric.logicalName))は \(formattedMetricValue(metric))、比較値は \(formattedMetricValue(comparisonValue, logicalName: metric.logicalName, unit: metric.unit)) です。"
         }
     }
 
@@ -257,7 +257,18 @@ private func containsJapaneseText(_ value: String) -> Bool {
     value.range(of: #"[ぁ-んァ-ン一-龥]"#, options: .regularExpression) != nil
 }
 
-private func formattedCurrencyLikeMetric(_ value: Double) -> String {
+private func formattedCurrencyLikeMetric(_ value: Double, unit: String) -> String {
+    guard unit.uppercased() == "USD" else {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 1
+        let formatted = formatter.string(from: NSNumber(value: value)) ?? value.formatted(.number.precision(.fractionLength(0 ... 1)))
+        return [formatted, unit].filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
     let absolute = abs(value)
 
     if absolute >= 1_000_000_000_000 {
@@ -279,7 +290,7 @@ private func formattedJapaneseCompact(_ value: Double) -> String {
     value.formatted(
         .number
             .precision(.fractionLength(0 ... 1))
-            .grouping(.never)
+            .locale(Locale(identifier: "ja_JP"))
     )
 }
 
