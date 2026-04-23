@@ -27,7 +27,7 @@ export function enqueueContentUpgrade(
   }
 
   executionContext.waitUntil(
-    upgradeContent(record, env).catch((error) => {
+    upgradeMetricsOnlyRecord(record, env).catch((error) => {
       logErrorEvent("filing_content_upgrade_failed", {
         filingKey: record.filingKey,
         ticker: record.ticker,
@@ -35,6 +35,90 @@ export function enqueueContentUpgrade(
       });
     })
   );
+}
+
+export async function upgradeMetricsOnlyRecord(record: FilingCacheRecord, env: Env): Promise<FilingCacheRecord | null> {
+  if (!isMetricsOnlyRecord(record)) {
+    return record;
+  }
+
+  const releaseLock = await acquireFilingLock(record.filingKey, env);
+  try {
+    const current = (await loadFilingByKey(record.filingKey, env)) ?? record;
+    if (!isMetricsOnlyRecord(current)) {
+      return current;
+    }
+
+    const filing = buildFilingReference(current);
+    if (!filing) {
+      logEvent("filing_content_upgrade_skipped", {
+        filingKey: current.filingKey,
+        ticker: current.ticker,
+        reason: "missing_filing_reference"
+      });
+      return null;
+    }
+
+    logEvent("filing_content_upgrade_attempted", {
+      filingKey: current.filingKey,
+      ticker: current.ticker
+    });
+
+    const html = await fetchFilingHtml(filing, env);
+    const { result: extracted, diagnostics } = extractMDASectionWithDiagnostics(html, filing.formType);
+    if (!extracted) {
+      logEvent("filing_content_upgrade_skipped", {
+        filingKey: current.filingKey,
+        ticker: current.ticker,
+        reason: "mda_extraction_failed",
+        inputHtmlChars: diagnostics.inputHtmlChars,
+        normalizedChars: diagnostics.normalizedChars
+      });
+      return null;
+    }
+
+    const companyWebsiteUrl = extractCompanyWebsiteUrl(html, {
+      companyName: current.companyName,
+      primaryDocumentUrl: current.primaryDocumentUrl
+    });
+    const sourceChunks = buildSourceChunks(filing, extracted.text, current.metrics);
+    const generated = await generateSummary(env, {
+      filingKey: current.filingKey,
+      ticker: current.ticker,
+      companyName: current.companyName,
+      formType: current.formType,
+      filedAt: current.filedAt,
+      periodOfReport: current.periodOfReport,
+      metrics: current.metrics,
+      sourceChunks
+    });
+
+    const upgraded: FilingCacheRecord = {
+      ...current,
+      primaryDocumentUrl: current.primaryDocumentUrl,
+      companyWebsiteUrl,
+      mdaText: extracted.text,
+      mdaTokenCount: extracted.tokenCount,
+      sourceChunks,
+      summary: generated.summary,
+      summaryProvider: generated.provider,
+      contentMode: "full",
+      generatedAt: new Date().toISOString()
+    };
+    await persistUpgradedRecord(upgraded, env);
+
+    logEvent("filing_content_upgraded", {
+      filingKey: current.filingKey,
+      ticker: current.ticker,
+      summaryProvider: generated.provider,
+      sourceChunkCount: sourceChunks.length,
+      mdaTokenCount: extracted.tokenCount
+    });
+
+    return upgraded;
+  } finally {
+    await releaseLock();
+  }
 }
 
 export async function backfillCompanyWebsite(record: FilingCacheRecord, env: Env): Promise<FilingCacheRecord> {
@@ -91,84 +175,6 @@ export async function backfillCompanyWebsite(record: FilingCacheRecord, env: Env
     });
 
     return upgraded;
-  } finally {
-    await releaseLock();
-  }
-}
-
-async function upgradeContent(record: FilingCacheRecord, env: Env): Promise<void> {
-  const releaseLock = await acquireFilingLock(record.filingKey, env);
-  try {
-    const current = (await loadFilingByKey(record.filingKey, env)) ?? record;
-    if (!isMetricsOnlyRecord(current)) {
-      return;
-    }
-
-    const filing = buildFilingReference(current);
-    if (!filing) {
-      logEvent("filing_content_upgrade_skipped", {
-        filingKey: current.filingKey,
-        ticker: current.ticker,
-        reason: "missing_filing_reference"
-      });
-      return;
-    }
-
-    logEvent("filing_content_upgrade_attempted", {
-      filingKey: current.filingKey,
-      ticker: current.ticker
-    });
-
-    const html = await fetchFilingHtml(filing, env);
-    const { result: extracted, diagnostics } = extractMDASectionWithDiagnostics(html, filing.formType);
-    if (!extracted) {
-      logEvent("filing_content_upgrade_skipped", {
-        filingKey: current.filingKey,
-        ticker: current.ticker,
-        reason: "mda_extraction_failed",
-        inputHtmlChars: diagnostics.inputHtmlChars,
-        normalizedChars: diagnostics.normalizedChars
-      });
-      return;
-    }
-
-    const companyWebsiteUrl = extractCompanyWebsiteUrl(html, {
-      companyName: current.companyName,
-      primaryDocumentUrl: current.primaryDocumentUrl
-    });
-    const sourceChunks = buildSourceChunks(filing, extracted.text, current.metrics);
-    const generated = await generateSummary(env, {
-      filingKey: current.filingKey,
-      ticker: current.ticker,
-      companyName: current.companyName,
-      formType: current.formType,
-      filedAt: current.filedAt,
-      periodOfReport: current.periodOfReport,
-      metrics: current.metrics,
-      sourceChunks
-    });
-
-    const upgraded: FilingCacheRecord = {
-      ...current,
-      primaryDocumentUrl: current.primaryDocumentUrl,
-      companyWebsiteUrl,
-      mdaText: extracted.text,
-      mdaTokenCount: extracted.tokenCount,
-      sourceChunks,
-      summary: generated.summary,
-      summaryProvider: generated.provider,
-      contentMode: "full",
-      generatedAt: new Date().toISOString()
-    };
-    await persistUpgradedRecord(upgraded, env);
-
-    logEvent("filing_content_upgraded", {
-      filingKey: current.filingKey,
-      ticker: current.ticker,
-      summaryProvider: generated.provider,
-      sourceChunkCount: sourceChunks.length,
-      mdaTokenCount: extracted.tokenCount
-    });
   } finally {
     await releaseLock();
   }

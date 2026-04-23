@@ -6,7 +6,7 @@ import {
   lookupTicker,
   pickComparisonFiling
 } from "../../clients/sec";
-import { loadArchivedFilingByKey, ensureHistoricalArtifacts, hasHistoricalBindings } from "../history-store";
+import { loadArchivedFilingByKey, ensureHistoricalArtifacts, hasHistoricalBindings, upsertHistoricalArtifacts } from "../history-store";
 import { selectHistoricalAutohydrationCandidates } from "../history-autohydration";
 import { logEvent } from "../logging";
 import type { RemoteConfig } from "../remote-config";
@@ -71,18 +71,23 @@ export async function ensureHistoricalFilingStored(
   options: { contentMode?: "full" | "metrics_only" } = {}
 ): Promise<FilingCacheRecord> {
   const filingKey = buildFilingKey(config.extractorVersion, filing);
+  const requiresFullContent = options.contentMode !== "metrics_only";
   const archived = await loadArchivedFilingByKey(filingKey, env);
   if (archived && isCurrentCacheRecord(archived, config)) {
-    await ensureHistoricalArtifacts(archived, env);
-    return archived;
+    if (!requiresFullContent || !isMetricsOnlyRecord(archived)) {
+      await ensureHistoricalArtifacts(archived, env);
+      return archived;
+    }
   }
 
   const releaseLock = await acquireFilingLock(filingKey, env);
   try {
     const secondArchived = await loadArchivedFilingByKey(filingKey, env);
     if (secondArchived && isCurrentCacheRecord(secondArchived, config)) {
-      await ensureHistoricalArtifacts(secondArchived, env);
-      return secondArchived;
+      if (!requiresFullContent || !isMetricsOnlyRecord(secondArchived)) {
+        await ensureHistoricalArtifacts(secondArchived, env);
+        return secondArchived;
+      }
     }
 
     // Historical backfills only need filing-grounded metrics and MD&A chunks, so skip Gemini summary spend.
@@ -90,7 +95,11 @@ export async function ensureHistoricalFilingStored(
       summaryMode: "fallback_only",
       contentMode: options.contentMode ?? "full"
     });
-    await ensureHistoricalArtifacts(record, env);
+    if (requiresFullContent) {
+      await upsertHistoricalArtifacts(record, env);
+    } else {
+      await ensureHistoricalArtifacts(record, env);
+    }
     return record;
   } finally {
     await releaseLock();
@@ -144,4 +153,8 @@ async function preloadHistoricalCoverage(
     ticker: record.ticker,
     hydratedCount
   });
+}
+
+function isMetricsOnlyRecord(record: FilingCacheRecord): boolean {
+  return record.contentMode === "metrics_only";
 }

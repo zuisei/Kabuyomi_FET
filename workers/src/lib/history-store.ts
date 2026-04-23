@@ -175,6 +175,19 @@ export async function upsertHistoricalIndex(record: FilingCacheRecord, env: Part
   await persistHistoryIndex(record, env);
 }
 
+export async function upsertHistoricalArtifacts(record: FilingCacheRecord, env: Partial<Env>): Promise<void> {
+  if (!hasHistoricalBindings(env)) {
+    return;
+  }
+
+  await Promise.all([
+    env.FILINGS_BUCKET.put(buildArchiveObjectKey(record.filingKey), JSON.stringify(record), {
+      httpMetadata: { contentType: "application/json" }
+    }),
+    persistHistoryIndex(record, env)
+  ]);
+}
+
 export async function maybeBuildHistoricalChatResponse(
   filing: FilingCacheRecord,
   question: string,
