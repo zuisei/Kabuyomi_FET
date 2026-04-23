@@ -17,7 +17,7 @@ function createState() {
 }
 
 describe("EntitlementDO", () => {
-  it("stores and returns an entitlement payload for valid input", async () => {
+  it("does not mint a pro entitlement from an unverified active client claim", async () => {
     const entitlement = new EntitlementDO(createState() as never);
 
     const response = await entitlement.fetch(
@@ -28,6 +28,30 @@ describe("EntitlementDO", () => {
           originalTransactionId: "tx-123",
           active: true,
           productId: "app.kabuyomi.pro.monthly"
+        })
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      plan: "free",
+      quotaSubject: expect.stringMatching(/^free:[a-f0-9]{64}$/),
+      productId: null
+    });
+  });
+
+  it("stores a pro entitlement only for an internally server-verified mutation", async () => {
+    const entitlement = new EntitlementDO(createState() as never);
+
+    const response = await entitlement.fetch(
+      new Request("https://do/entitlement", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          originalTransactionId: "tx-123",
+          active: true,
+          productId: "app.kabuyomi.pro.monthly",
+          serverVerified: true
         })
       })
     );

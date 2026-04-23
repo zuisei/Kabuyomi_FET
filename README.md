@@ -67,7 +67,7 @@ Unit tests live under `ios/KabuyomiTests/` and can be run with `xcodebuild test`
 - `/v1/watchlist/add` saves a ticker. `/v1/watchlist/remove` removes it and returns updated usage.
 - `/v1/chat` returns `responsePath`; `modelName` is populated only when the answer actually used the remote Gemini path.
 - `resetLocalData()` is a full "start over" reset: local saved data and chat history are cleared, device identity is regenerated, and usage may come back in a new-user state.
-- `/v1/billing/sync` stores the current StoreKit entitlement keyed by `originalTransactionId`. Requests carrying `x-kabuyomi-original-transaction-id` resolve to the synced `pro` quota subject.
+- `/v1/billing/sync` is fail-closed for active client claims until App Store server verification is added. Active `productId` claims return `403`; inactive sync clears to a free entitlement keyed by `originalTransactionId`.
 
 ## Storage And History
 

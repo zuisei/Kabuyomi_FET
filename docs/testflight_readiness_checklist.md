@@ -52,7 +52,7 @@ Treat the current code as the source of truth over older specs. The ship target 
 - [ ] Confirm `dailyRefreshEnabled` and any background tracked ticker list are intentional for beta load, and are not being described as the user saved ticker source of truth.
 - [ ] Confirm the tracked history seed still matches the intended top-30 U.S. issuer roster and remains issuer-normalized across class shares.
 - [ ] Confirm `/v1/watchlist/add` and `/v1/watchlist/remove` return updated usage with the current saved ticker semantics.
-- [ ] Confirm `/v1/billing/sync` returns a synced entitlement payload in the target environment and that requests with `x-kabuyomi-original-transaction-id` resolve to `pro` usage.
+- [ ] Confirm `/v1/billing/sync` rejects active client claims until App Store server verification is added, and inactive sync resolves to free usage.
 - [ ] Run remote D1 migration if the target environment is fresh.
 
 Reference commands:

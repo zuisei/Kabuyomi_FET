@@ -33,7 +33,9 @@ export class EntitlementDO {
       return this.reply({ error: error.publicMessage }, error.status);
     }
 
-    const payload = await buildSyncedEntitlement(body.originalTransactionId, body.productId, body.active);
+    const payload = await buildSyncedEntitlement(body.originalTransactionId, body.productId, body.active, {
+      serverVerified: body.serverVerified
+    });
     await this.state.storage.put(CURRENT_ENTITLEMENT_KEY, payload);
     return this.reply(payload, 200);
   }

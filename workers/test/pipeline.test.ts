@@ -273,10 +273,79 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("バックグラウンドで準備中");
     expect(response.responsePath).toBe("fallback");
     expect(scheduled).toHaveLength(1);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await scheduled[0];
 
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not tell the user to retry later when historical hydration has no comparable candidates", async () => {
+    const filing = makeTestFiling();
+    const historyEnv = makeHistoryEnv({ metricRows: [] });
+    const cache = new Map<string, unknown>([
+      [
+        "tickers_snapshot",
+        {
+          updatedAt: "2026-04-15T00:00:00.000Z",
+          items: [
+            {
+              ticker: "AAPL",
+              companyName: "Apple Inc.",
+              cik: "0000320193",
+              exchange: "Nasdaq"
+            }
+          ]
+        }
+      ]
+    ]);
+    const scheduled: Promise<unknown>[] = [];
+
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        name: "Apple Inc.",
+        filings: {
+          recent: {
+            form: ["10-Q"],
+            accessionNumber: ["0000320193-26-000006"],
+            primaryDocument: ["a10q.htm"],
+            filingDate: ["2026-01-30"],
+            reportDate: ["2025-12-27"]
+          }
+        }
+      }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await buildChatResponse(
+      filing,
+      "この3年の売上推移は？",
+      {
+        ...historyEnv,
+        KABUYOMI_CACHE: {
+          get: async (key: string) => cache.get(key),
+          put: async (key: string, value: unknown) => {
+            cache.set(key, value);
+          }
+        },
+        SEC_FETCHER_BASE_URL: "http://127.0.0.1:8789",
+        SEC_FETCHER_SHARED_SECRET: "secret"
+      } as never,
+      { webSupplementEnabled: false },
+      {
+        executionContext: {
+          waitUntil(promise: Promise<unknown>) {
+            scheduled.push(promise);
+          }
+        }
+      }
+    );
+
+    expect(response.answer).not.toContain("バックグラウンドで準備中");
+    expect(response.answer).not.toContain("少し時間を置いて");
+    expect(response.answer).toContain("比較対象の過去年の決算資料が不足");
+    expect(response.responsePath).toBe("fallback");
+    expect(scheduled).toHaveLength(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

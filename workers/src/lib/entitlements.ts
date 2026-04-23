@@ -1,6 +1,6 @@
 import type { Env } from "../env";
 import { AppError } from "./errors";
-import { logErrorEvent } from "./logging";
+import { logErrorEvent, logWarnEvent } from "./logging";
 import { resolvePlanFromBilling, type AccessPlan } from "./billing-catalog";
 
 export const ORIGINAL_TRANSACTION_ID_HEADER = "x-kabuyomi-original-transaction-id";
@@ -18,13 +18,23 @@ export async function syncBillingEntitlement(
   env: Env,
   request: { originalTransactionId: string; productId?: string; active: boolean }
 ): Promise<SyncedEntitlement> {
+  if (request.active) {
+    logWarnEvent("billing_sync_unverified_active_claim_rejected", {
+      productId: request.productId ?? "nil"
+    });
+    throw new AppError(403, "Billing verification is required");
+  }
+
   return fetchEntitlementRecord(
     env,
     request.originalTransactionId,
     new Request(ENTITLEMENT_DO_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(request)
+      body: JSON.stringify({
+        ...request,
+        serverVerified: false
+      })
     }),
     "billing_sync_failed"
   );
@@ -55,16 +65,20 @@ export async function loadActiveEntitlementFromRequest(request: Request, env: En
 export async function buildSyncedEntitlement(
   originalTransactionId: string,
   productId: string | null | undefined,
-  active: boolean
+  active: boolean,
+  options: { serverVerified?: boolean } = {}
 ): Promise<SyncedEntitlement> {
-  const plan = resolvePlanFromBilling(productId, active);
+  const serverVerified = options.serverVerified === true;
+  const trustedActive = serverVerified ? active : false;
+  const trustedProductId = serverVerified ? productId : null;
+  const plan = resolvePlanFromBilling(trustedProductId, trustedActive);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(originalTransactionId));
   const hex = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 
   return {
     plan,
     quotaSubject: `${plan}:${hex}`,
-    productId: productId ?? null,
+    productId: trustedProductId ?? null,
     syncedAt: new Date().toISOString()
   };
 }

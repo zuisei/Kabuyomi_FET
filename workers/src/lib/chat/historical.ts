@@ -77,12 +77,18 @@ export async function maybeBuildHistoricalChatResponseWithHydration(
   }
 
   const contentMode = resolveHistoricalHydrationContentMode(question);
-  if (options.executionContext) {
-    enqueueHistoricalHydration(filing, env, config, options.executionContext, contentMode);
-    return buildHistoricalDegradeResponse(filing, question, "履歴比較をバックグラウンドで準備中のため");
+  let preparation: HistoricalHydrationPreparation;
+  try {
+    preparation = await prepareHistoricalHydration(filing, env);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    logErrorEvent("chat_historical_hydration_prepare_failed", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      reason
+    });
+    return buildHistoricalDegradeResponse(filing, question, "履歴補完の準備が一時的に失敗したため");
   }
-
-  const preparation = await prepareHistoricalHydration(filing, env);
   if (preparation.status === "skipped") {
     return buildInsufficientHistoricalResponse(filing, {
       attempted: false,
@@ -91,6 +97,11 @@ export async function maybeBuildHistoricalChatResponseWithHydration(
       status: "skipped",
       reason: preparation.reason
     });
+  }
+
+  if (options.executionContext) {
+    enqueueHistoricalHydration(filing, env, config, options.executionContext, contentMode, preparation);
+    return buildHistoricalDegradeResponse(filing, question, "履歴比較をバックグラウンドで準備中のため");
   }
 
   const hydration = await hydrateHistoricalCoverageForChat(filing, env, config, {
@@ -265,21 +276,11 @@ function enqueueHistoricalHydration(
   env: Env,
   config: RemoteConfig,
   executionContext: Pick<ExecutionContext, "waitUntil">,
-  contentMode: "full" | "metrics_only"
+  contentMode: "full" | "metrics_only",
+  preparation: Extract<HistoricalHydrationPreparation, { status: "ready" }>
 ): void {
   executionContext.waitUntil(
     (async () => {
-      const preparation = await prepareHistoricalHydration(filing, env);
-      if (preparation.status === "skipped") {
-        logWarnEvent("chat_historical_hydration_skipped", {
-          filingKey: filing.filingKey,
-          ticker: filing.ticker,
-          reason: preparation.reason,
-          mode: "background"
-        });
-        return;
-      }
-
       logEvent("chat_historical_hydration_enqueued", {
         filingKey: filing.filingKey,
         ticker: filing.ticker,

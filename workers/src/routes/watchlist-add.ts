@@ -55,7 +55,10 @@ export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env,
     : await promoteSavedTickerAlias(identity, tickerRecord.ticker, env, config, { relatedTickers });
 
   return json({
-    company: await serializeCompanyResponse(filing, env, { displayTicker: tickerRecord.ticker }),
+    company: await serializeCompanyResponse(filing, env, {
+      displayTicker: tickerRecord.ticker,
+      allowHistoricalPersistence: true
+    }),
     usage
   });
 };

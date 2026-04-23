@@ -290,7 +290,7 @@ function assertUsageDelta(currentUsage, expectedUsage, label) {
 }
 
 async function checkBillingSync() {
-  const response = await fetch(`${baseURL}/v1/billing/sync`, {
+  const activeClaimResponse = await fetch(`${baseURL}/v1/billing/sync`, {
     method: "POST",
     headers: {
       "content-type": "application/json"
@@ -302,21 +302,42 @@ async function checkBillingSync() {
     })
   });
 
-  if (response.status !== 200) {
-    throw new Error(`/v1/billing/sync expected 200, received ${response.status}`);
+  if (activeClaimResponse.status !== 403) {
+    throw new Error(`/v1/billing/sync active claim expected 403, received ${activeClaimResponse.status}`);
   }
 
-  const payload = await response.json();
-  if (payload?.plan !== "pro") {
-    throw new Error("/v1/billing/sync did not return a pro entitlement");
+  const activeClaimPayload = await activeClaimResponse.json();
+  if (activeClaimPayload?.error !== "Billing verification is required") {
+    throw new Error("/v1/billing/sync active claim returned an unexpected error payload");
   }
 
-  if (typeof payload?.quotaSubject !== "string" || !payload.quotaSubject.startsWith("pro:")) {
-    throw new Error("/v1/billing/sync did not return a pro quota subject");
+  const inactiveResponse = await fetch(`${baseURL}/v1/billing/sync`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      originalTransactionId: "smoke-tx-inactive",
+      productId: "app.kabuyomi.pro.monthly",
+      active: false
+    })
+  });
+
+  if (inactiveResponse.status !== 200) {
+    throw new Error(`/v1/billing/sync inactive expected 200, received ${inactiveResponse.status}`);
   }
 
-  if (payload?.productId !== "app.kabuyomi.pro.monthly") {
-    throw new Error("/v1/billing/sync did not echo the expected product id");
+  const payload = await inactiveResponse.json();
+  if (payload?.plan !== "free") {
+    throw new Error("/v1/billing/sync inactive did not return a free entitlement");
+  }
+
+  if (typeof payload?.quotaSubject !== "string" || !payload.quotaSubject.startsWith("free:")) {
+    throw new Error("/v1/billing/sync inactive did not return a free quota subject");
+  }
+
+  if (payload?.productId !== null) {
+    throw new Error("/v1/billing/sync inactive should not echo an unverified product id");
   }
 }
 

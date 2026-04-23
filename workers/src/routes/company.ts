@@ -45,7 +45,12 @@ export const handleCompanyRoute: RouteHandler = async ({ request, url, env, conf
         identityKind: identity.identityKind,
         filingKey: filing.filingKey
       });
-      return json(await serializeCompanyResponse(filing, env, { displayTicker: tickerRecord.ticker }));
+      return json(
+        await serializeCompanyResponse(filing, env, {
+          displayTicker: tickerRecord.ticker,
+          allowHistoricalPersistence: true
+        })
+      );
     } catch (error) {
       logErrorEvent("company_load_failure", {
         ticker: ticker.trim().toUpperCase(),
@@ -101,7 +106,12 @@ export const handleCompanyRoute: RouteHandler = async ({ request, url, env, conf
         identityKind: identity.identityKind,
         filingKey: filing.filingKey
       });
-      return json(await serializeCompanyResponse(filing, env, { displayTicker: tickerRecord.ticker }));
+      return json(
+        await serializeCompanyResponse(filing, env, {
+          displayTicker: tickerRecord.ticker,
+          allowHistoricalPersistence: true
+        })
+      );
     } catch (error) {
       logErrorEvent("company_load_failure", {
         ticker: ticker.trim().toUpperCase(),

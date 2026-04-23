@@ -1,5 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
+import { EntitlementDO } from "../src/durable/entitlement";
 import worker from "../src/index";
+
+function createEntitlementState() {
+  const storage = new Map<string, unknown>();
+
+  return {
+    storage: {
+      async get<T>(key: string) {
+        return storage.get(key) as T | undefined;
+      },
+      async put(key: string, value: unknown) {
+        storage.set(key, value);
+      }
+    }
+  };
+}
 
 describe("worker routing", () => {
   const executionContext = {
@@ -7,7 +23,8 @@ describe("worker routing", () => {
     passThroughOnException: vi.fn()
   } as never;
 
-  it("syncs the StoreKit entitlement and returns the resolved plan", async () => {
+  it("does not mint pro from a client-reported billing sync claim", async () => {
+    const fetch = vi.fn();
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/v1/billing/sync", {
         method: "POST",
@@ -24,20 +41,39 @@ describe("worker routing", () => {
         },
         ENTITLEMENT: {
           getByName: vi.fn().mockReturnValue({
-            fetch: vi.fn().mockResolvedValue(
-              new Response(
-                JSON.stringify({
-                  plan: "pro",
-                  quotaSubject: "pro:abc123",
-                  productId: "app.kabuyomi.pro.monthly",
-                  syncedAt: "2026-04-20T00:00:00.000Z"
-                }),
-                {
-                  status: 200,
-                  headers: { "content-type": "application/json" }
-                }
-              )
-            )
+            fetch
+          })
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "Billing verification is required"
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("syncs inactive billing state as free without minting pro", async () => {
+    const entitlement = new EntitlementDO(createEntitlementState() as never);
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/billing/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          originalTransactionId: "tx-1",
+          productId: "app.kabuyomi.pro.monthly",
+          active: false
+        })
+      }),
+      {
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        },
+        ENTITLEMENT: {
+          getByName: vi.fn().mockReturnValue({
+            fetch: (request: Request) => entitlement.fetch(request)
           })
         }
       } as never,
@@ -45,14 +81,16 @@ describe("worker routing", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
-    await expect(response.json()).resolves.toEqual({
-      plan: "pro",
-      quotaSubject: "pro:abc123",
-      productId: "app.kabuyomi.pro.monthly",
-      syncedAt: "2026-04-20T00:00:00.000Z"
-    });
+    const payload = (await response.json()) as {
+      plan: string;
+      quotaSubject: string;
+      productId: string | null;
+      syncedAt: string;
+    };
+    expect(payload.plan).toBe("free");
+    expect(payload.productId).toBeNull();
+    expect(payload.quotaSubject).toMatch(/^free:[a-f0-9]{64}$/);
+    expect(typeof payload.syncedAt).toBe("string");
   });
 
   it("returns 415 for chat requests without a JSON content type", async () => {

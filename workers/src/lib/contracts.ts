@@ -33,7 +33,9 @@ export const BillingSyncRequestSchema = z.object({
   active: z.boolean().default(false)
 });
 
-export const EntitlementRequestSchema = BillingSyncRequestSchema;
+export const EntitlementRequestSchema = BillingSyncRequestSchema.extend({
+  serverVerified: z.boolean().default(false)
+});
 
 export const QuotaRequestSchema = z.object({
   action: z.enum([
