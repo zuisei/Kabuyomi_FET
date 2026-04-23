@@ -56,8 +56,10 @@ struct ConversationMessageRow: View {
                                     sourceChip(for: source)
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel("根拠を開く: \(displaySourceLabel(for: source))")
                             }
                         }
+                        .padding(.trailing, 20)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -330,7 +332,7 @@ struct ConversationRecoverySuggestions: View {
                         )
                     }
                 }
-                .padding(.trailing, 2)
+                .padding(.trailing, 20)
             }
         }
     }

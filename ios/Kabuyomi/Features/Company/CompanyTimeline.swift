@@ -376,7 +376,7 @@ struct ConversationContextCard: View {
                         )
                     }
                 }
-                .padding(.trailing, 2)
+                .padding(.trailing, 20)
             }
         }
     }
@@ -417,6 +417,7 @@ struct ConversationPromptChip: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("質問を入力: \(text)")
     }
 }
 
@@ -448,6 +449,7 @@ private struct ConversationMiniPromptChip: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("質問を入力: \(text)")
     }
 }
 

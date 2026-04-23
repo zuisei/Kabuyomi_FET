@@ -11,18 +11,7 @@ struct ComposerBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if !aiConsentGranted {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                    Text("初回送信時に AI 利用の同意確認が表示されます。")
-                        .lineLimit(2)
-                }
-                .font(.system(.footnote, design: .rounded, weight: .semibold))
-                .foregroundStyle(KabuyomiTheme.negative)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .kabuyomiGlass(radius: 16, tint: KabuyomiTheme.accentSoft.opacity(0.18), stroke: Color.white.opacity(0.48))
-            }
+            consentStatusLine
 
             HStack(alignment: .center, spacing: 12) {
                 TextField(
@@ -39,6 +28,8 @@ struct ComposerBar: View {
                 .frame(minHeight: 24)
                 .submitLabel(.send)
                 .onSubmit(sendAction)
+                .accessibilityLabel("質問入力")
+                .accessibilityHint(aiConsentGranted ? "入力した質問を送信できます" : "初回は同意確認後、入力内容を残します")
 
                 Button {
                     question = ""
@@ -69,6 +60,7 @@ struct ComposerBar: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(sendDisabled)
+                .accessibilityLabel("質問を送信")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -99,5 +91,19 @@ struct ComposerBar: View {
                     .stroke(sendDisabled ? Color.white.opacity(0.9) : Color.white.opacity(0.2), lineWidth: 1)
             )
             .shadow(color: sendDisabled ? Color.clear : KabuyomiTheme.accentDeep.opacity(0.24), radius: 10, x: 0, y: 6)
+    }
+
+    private var consentStatusLine: some View {
+        HStack(spacing: 8) {
+            Image(systemName: aiConsentGranted ? "checkmark.circle.fill" : "info.circle.fill")
+                .font(.system(size: 12, weight: .bold))
+
+            Text(aiConsentGranted ? "送信前に内容を確認できます。" : "初回は同意確認後、入力内容を残します。もう一度送信してください。")
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.system(.caption2, design: .rounded, weight: .semibold))
+        .foregroundStyle(aiConsentGranted ? KabuyomiTheme.inkMuted : KabuyomiTheme.accentDeep)
+        .padding(.horizontal, 4)
     }
 }

@@ -1,5 +1,54 @@
 import SwiftUI
 
+struct HistoricalBoardCopy: Equatable {
+    let eyebrow: String
+    let title: String
+    let subtitle: String
+    let note: String
+}
+
+func historicalMetricSummaryText(for series: [HistoricalMetricSeriesPayload]) -> String? {
+    guard !series.isEmpty else { return nil }
+
+    let labels = series.prefix(2).map(\.label).joined(separator: " / ")
+    if series.count > 2 {
+        return "表示指標: \(labels) ほか \(series.count - 2) 件"
+    }
+
+    return "表示指標: \(labels)"
+}
+
+func historicalBoardCopy(
+    comparisonBasis: String,
+    requestedYears: Int,
+    availablePeriodCount: Int,
+    singleSeriesLabel: String?
+) -> HistoricalBoardCopy {
+    let isQuarterly = comparisonBasis == "quarterly"
+    let basisTitle = isQuarterly ? "同四半期" : "年次"
+    let basisNote = isQuarterly ? "同四半期ベース" : "年次ベース"
+    let safeAvailableCount = max(availablePeriodCount, 0)
+    let safeRequestedYears = max(requestedYears, safeAvailableCount)
+    let isComplete = safeRequestedYears > 0 && safeAvailableCount >= safeRequestedYears
+    let subject = singleSeriesLabel.map { "\($0)の" } ?? ""
+
+    if isComplete {
+        return HistoricalBoardCopy(
+            eyebrow: "\(safeRequestedYears)年",
+            title: "\(subject)\(safeRequestedYears)年の\(basisTitle)比較",
+            subtitle: "\(basisTitle)で \(safeRequestedYears) 年分を横並び比較",
+            note: "履歴比較は\(basisNote)です。"
+        )
+    }
+
+    return HistoricalBoardCopy(
+        eyebrow: "\(safeAvailableCount)期",
+        title: "\(subject)取得済み\(safeAvailableCount)期比較",
+        subtitle: "\(basisTitle)。\(safeRequestedYears)年分のうち取得済み\(safeAvailableCount)期だけ表示",
+        note: "履歴比較は\(basisNote)です。\(safeRequestedYears)年分が揃うまでは取得済み期間だけ表示します。"
+    )
+}
+
 func summarySignalSegmentWidths(
     totalWidth: CGFloat,
     counts: [Int],
@@ -515,33 +564,65 @@ private struct InvestorHistoricalTrendBoard: View {
         return Array(Set(allPeriods)).sorted()
     }
 
-    private var subtitle: String {
-        overview.comparisonBasis == "quarterly"
-            ? "同四半期で 3 年分を横並び比較"
-            : "年次で 3 年分を横並び比較"
+    private var copy: HistoricalBoardCopy {
+        historicalBoardCopy(
+            comparisonBasis: overview.comparisonBasis,
+            requestedYears: overview.years,
+            availablePeriodCount: orderedPeriods.count,
+            singleSeriesLabel: overview.series.count == 1 ? overview.series.first?.label : nil
+        )
+    }
+
+    private var metricSummaryText: String? {
+        historicalMetricSummaryText(for: overview.series)
+    }
+
+    private var showsMetricColumn: Bool {
+        overview.series.count > 1
+    }
+
+    private var tableMinWidth: CGFloat {
+        let elementCount = orderedPeriods.count + 1 + (showsMetricColumn ? 1 : 0)
+        let spacingWidth = CGFloat(max(elementCount - 1, 0)) * 10
+        let metricWidth: CGFloat = showsMetricColumn ? 90 : 0
+        let periodWidth = CGFloat(orderedPeriods.count) * 108
+        return max(300, metricWidth + periodWidth + 68 + spacingWidth)
     }
 
     var body: some View {
         SummaryBoardCard(
-            eyebrow: "3年",
-            title: overview.comparisonBasis == "quarterly" ? "3年の同四半期比較" : "3年の年次比較",
-            subtitle: subtitle,
+            eyebrow: copy.eyebrow,
+            title: copy.title,
+            subtitle: copy.subtitle,
             systemImage: "tablecells"
         ) {
+            if let metricSummaryText {
+                Text(metricSummaryText)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+            }
+
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(spacing: 0) {
-                    InvestorHistoricalTableHeader(periods: orderedPeriods)
+                    InvestorHistoricalTableHeader(
+                        periods: orderedPeriods,
+                        showsMetricColumn: showsMetricColumn
+                    )
 
                     ForEach(Array(overview.series.enumerated()), id: \.element.id) { index, series in
                         InvestorHistoricalTableRow(
                             series: series,
                             periods: orderedPeriods,
+                            showsMetricColumn: showsMetricColumn,
                             isLast: index == overview.series.count - 1
                         )
                     }
                 }
                 .padding(14)
-                .frame(minWidth: 520, alignment: .leading)
+                .frame(minWidth: tableMinWidth, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .fill(Color.white.opacity(0.72))
@@ -552,7 +633,7 @@ private struct InvestorHistoricalTrendBoard: View {
                 )
             }
 
-            Text("履歴比較は \(overview.comparisonBasis == "quarterly" ? "同四半期ベース" : "年次ベース") です。")
+            Text(copy.note)
                 .font(.system(.caption, design: .rounded, weight: .medium))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
         }
@@ -561,11 +642,14 @@ private struct InvestorHistoricalTrendBoard: View {
 
 private struct InvestorHistoricalTableHeader: View {
     let periods: [String]
+    let showsMetricColumn: Bool
 
     var body: some View {
         HStack(spacing: 10) {
-            Text("指標")
-                .frame(width: 90, alignment: .leading)
+            if showsMetricColumn {
+                Text("指標")
+                    .frame(width: 90, alignment: .leading)
+            }
 
             ForEach(periods, id: \.self) { period in
                 Text(shortHistoricalPeriod(period))
@@ -584,6 +668,7 @@ private struct InvestorHistoricalTableHeader: View {
 private struct InvestorHistoricalTableRow: View {
     let series: HistoricalMetricSeriesPayload
     let periods: [String]
+    let showsMetricColumn: Bool
     let isLast: Bool
 
     private var pointsByPeriod: [String: HistoricalMetricPointPayload] {
@@ -609,10 +694,12 @@ private struct InvestorHistoricalTableRow: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(series.label)
-                    .font(.system(.subheadline, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                    .frame(width: 90, alignment: .leading)
+                if showsMetricColumn {
+                    Text(series.label)
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                        .frame(width: 90, alignment: .leading)
+                }
 
                 ForEach(periods, id: \.self) { period in
                     Text(periodValue(period))
@@ -1029,26 +1116,13 @@ private struct InvestorFocusBoard: View {
                 ForEach(Array(focusInsights.enumerated()), id: \.element.id) { index, insight in
                     let primarySource = primarySourceReference(sourceIds: insight.sourceIds, in: company)
 
-                    Group {
-                        if let primarySource {
-                            Button(action: { openSource(primarySource) }) {
-                                InvestorFocusInsightCard(
-                                    company: company,
-                                    index: index + 1,
-                                    insight: insight,
-                                    isInteractive: true
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            InvestorFocusInsightCard(
-                                company: company,
-                                index: index + 1,
-                                insight: insight,
-                                isInteractive: false
-                            )
-                        }
-                    }
+                    InvestorFocusInsightCard(
+                        company: company,
+                        index: index + 1,
+                        insight: insight,
+                        primarySource: primarySource,
+                        openSource: openSource
+                    )
                 }
             }
         }
@@ -1059,50 +1133,66 @@ private struct InvestorFocusInsightCard: View {
     let company: CompanyPayload
     let index: Int
     let insight: FilingInsight
-    let isInteractive: Bool
+    let primarySource: LocalMessageSourceRef?
+    let openSource: (LocalMessageSourceRef) -> Void
+
+    private var isInteractive: Bool {
+        primarySource != nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                Text("Q\(index)")
-                    .font(.system(.caption, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
-
-                Text(insight.text)
-                    .font(.system(.body, design: .rounded))
-                    .foregroundStyle(KabuyomiTheme.inkSoft)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if isInteractive {
-                    Spacer(minLength: 8)
-
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
-                        .padding(8)
-                        .background(Circle().fill(KabuyomiTheme.accentSoft.opacity(0.45)))
-                }
-            }
+            focusHeader
 
             InsightSourceChips(
                 company: company,
                 sourceIds: insight.sourceIds,
-                openSource: nil
+                openSource: openSource
             )
-
-            if isInteractive {
-                Text("タップで根拠を開く")
-                    .font(.system(.caption2, design: .rounded, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep.opacity(0.82))
-            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .kabuyomiCard(.secondary, radius: 20)
+    }
+
+    @ViewBuilder
+    private var focusHeader: some View {
+        if let primarySource {
+            Button(action: { openSource(primarySource) }) {
+                focusHeaderContent
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("論点の根拠を開く: \(insight.text)")
+        } else {
+            focusHeaderContent
+        }
+    }
+
+    private var focusHeaderContent: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("Q\(index)")
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.accentDeep)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+
+            Text(insight.text)
+                .font(.system(.body, design: .rounded))
+                .foregroundStyle(KabuyomiTheme.inkSoft)
+                .lineSpacing(4)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if isInteractive {
+                Spacer(minLength: 8)
+
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .padding(8)
+                    .background(Circle().fill(KabuyomiTheme.accentSoft.opacity(0.45)))
+            }
+        }
     }
 }
 
@@ -1204,11 +1294,12 @@ private struct InsightSourceChips: View {
                     ForEach(Array(chips.prefix(2))) { chip in
                         if let source = chip.source, let openSource {
                             Button(action: { openSource(source) }) {
-                                sourceChipLabel(chip.label)
+                                sourceChipLabel(chip.label, isInteractive: true)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("根拠を開く: \(chip.label)")
                         } else {
-                            sourceChipLabel(chip.label)
+                            sourceChipLabel(chip.label, isInteractive: false)
                         }
                     }
 
@@ -1221,12 +1312,24 @@ private struct InsightSourceChips: View {
                             .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
                     }
                 }
+                .padding(.trailing, 20)
             }
         }
     }
 
-    private func sourceChipLabel(_ label: String) -> some View {
-        Label(label, systemImage: "bookmark")
+    private func sourceChipLabel(_ label: String, isInteractive: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "bookmark")
+                .font(.system(size: 11, weight: .semibold))
+
+            Text(label)
+
+            if isInteractive {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep.opacity(0.58))
+            }
+        }
             .font(.system(.caption2, design: .rounded, weight: .semibold))
             .foregroundStyle(KabuyomiTheme.accentDeep)
             .padding(.horizontal, 10)

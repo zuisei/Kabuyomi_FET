@@ -162,6 +162,106 @@ test("fetchMetrics falls back to companyconcept only for tags missing from compa
   }
 });
 
+test("fetchMetrics falls back to companyconcept when companyfacts is temporarily unavailable", async () => {
+  const calls = [];
+  const originalFetch = global.fetch;
+
+  global.fetch = async (url) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("/companyfacts/")) {
+      return new Response("temporary", { status: 503 });
+    }
+    if (target.endsWith("/Revenues.json")) {
+      return new Response(JSON.stringify({ units: { USD: [{ val: 10, form: "10-Q" }] } }), { status: 200 });
+    }
+    if (target.endsWith("/NetIncomeLoss.json")) {
+      return new Response(JSON.stringify({ units: { USD: [{ val: 3, form: "10-Q" }] } }), { status: 200 });
+    }
+
+    throw new Error(`Unexpected fetch: ${target}`);
+  };
+
+  try {
+    const service = createSecService({
+      internalToken: "",
+      userAgent: "Kabuyomi admin@kabuyomi.app",
+      rateLimitPerSecond: 8,
+      retryCount: 0,
+      initialBackoffMs: 1,
+      requestTimeoutMs: 10
+    });
+    const payload = await service.fetchMetrics({
+      cik: "0000320193",
+      tags: ["Revenues", "NetIncomeLoss"]
+    });
+
+    assert.equal(payload.companyFacts, null);
+    assert.equal(payload.concepts.Revenues.units.USD[0].val, 10);
+    assert.equal(payload.concepts.NetIncomeLoss.units.USD[0].val, 3);
+    assert.deepEqual(calls, [
+      "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json",
+      "https://data.sec.gov/api/xbrl/companyconcept/CIK0000320193/us-gaap/Revenues.json",
+      "https://data.sec.gov/api/xbrl/companyconcept/CIK0000320193/us-gaap/NetIncomeLoss.json"
+    ]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("fetchMetrics preserves fulfilled concept fallbacks when a sibling tag fails", async () => {
+  const calls = [];
+  const originalFetch = global.fetch;
+
+  global.fetch = async (url) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("/companyfacts/")) {
+      return new Response(JSON.stringify({
+        facts: {
+          "us-gaap": {
+            Revenues: { units: { USD: [{ val: 1, form: "10-Q" }] } }
+          }
+        }
+      }), { status: 200 });
+    }
+    if (target.endsWith("/NetIncomeLoss.json")) {
+      return new Response(JSON.stringify({ units: { USD: [{ val: 2, form: "10-Q" }] } }), { status: 200 });
+    }
+    if (target.endsWith("/OperatingIncomeLoss.json")) {
+      return new Response("temporary", { status: 503 });
+    }
+
+    throw new Error(`Unexpected fetch: ${target}`);
+  };
+
+  try {
+    const service = createSecService({
+      internalToken: "",
+      userAgent: "Kabuyomi admin@kabuyomi.app",
+      rateLimitPerSecond: 8,
+      retryCount: 0,
+      initialBackoffMs: 1,
+      requestTimeoutMs: 10
+    });
+    const payload = await service.fetchMetrics({
+      cik: "0000320193",
+      tags: ["Revenues", "NetIncomeLoss", "OperatingIncomeLoss"]
+    });
+
+    assert.equal(payload.concepts.Revenues.units.USD[0].val, 1);
+    assert.equal(payload.concepts.NetIncomeLoss.units.USD[0].val, 2);
+    assert.equal(payload.concepts.OperatingIncomeLoss, null);
+    assert.deepEqual(calls, [
+      "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json",
+      "https://data.sec.gov/api/xbrl/companyconcept/CIK0000320193/us-gaap/NetIncomeLoss.json",
+      "https://data.sec.gov/api/xbrl/companyconcept/CIK0000320193/us-gaap/OperatingIncomeLoss.json"
+    ]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test("fetchSubmissions serves cached data when the upstream later fails", async () => {
   const originalFetch = global.fetch;
   const originalNow = Date.now;

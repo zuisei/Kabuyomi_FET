@@ -386,9 +386,17 @@ export async function backfillHistoricalFilings(
 
       const cursor = request.cursorByTicker?.[ticker] ?? 0;
       const batch = candidates.slice(cursor, cursor + request.maxFilingsPerTicker);
+      const batchEntries = batch.map((filingReference) => ({
+        filingReference,
+        filingKey: buildHistoryFilingKey(config.extractorVersion, filingReference)
+      }));
+      const existingIndexedByFilingKey = await loadExistingIndexedFilings(
+        batchEntries.map((entry) => entry.filingKey),
+        env
+      );
       let consumedInBatch = 0;
 
-      for (const filingReference of batch) {
+      for (const { filingReference, filingKey } of batchEntries) {
         if (remainingBudget <= 0) {
           totalCapReached = true;
           nextCursorByTicker[ticker] = cursor + consumedInBatch;
@@ -396,10 +404,7 @@ export async function backfillHistoricalFilings(
           break;
         }
 
-        const filingKey = filingReference.accessionNumber.replaceAll("-", "");
-        const existingIndexed = await env.DB.prepare("SELECT filing_key, ticker FROM filings WHERE filing_key = ? LIMIT 1")
-          .bind(`${config.extractorVersion}:${filingReference.cik}:${filingKey}`)
-          .first<{ filing_key: string; ticker: string }>();
+        const existingIndexed = existingIndexedByFilingKey.get(filingKey);
         consumedInBatch += 1;
 
         if (existingIndexed?.filing_key) {
@@ -494,6 +499,28 @@ async function normalizeIndexedFilingTicker(
     env.DB.prepare("UPDATE metric_history SET ticker = ? WHERE filing_key = ?").bind(ticker, filingKey),
     env.DB.prepare("UPDATE segment_highlights SET ticker = ? WHERE filing_key = ?").bind(ticker, filingKey)
   ]);
+}
+
+function buildHistoryFilingKey(extractorVersion: string, filingReference: FilingReference): string {
+  return `${extractorVersion}:${filingReference.cik}:${filingReference.accessionNumber.replaceAll("-", "")}`;
+}
+
+async function loadExistingIndexedFilings(
+  filingKeys: string[],
+  env: Env & { DB: D1Database }
+): Promise<Map<string, { filing_key: string; ticker: string }>> {
+  if (filingKeys.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = filingKeys.map(() => "?").join(", ");
+  const result = await env.DB.prepare(
+    `SELECT filing_key, ticker FROM filings WHERE filing_key IN (${placeholders})`
+  )
+    .bind(...filingKeys)
+    .all<{ filing_key: string; ticker: string }>();
+
+  return new Map((result.results ?? []).map((row) => [row.filing_key, row]));
 }
 
 export function buildArchiveObjectKey(filingKey: string): string {

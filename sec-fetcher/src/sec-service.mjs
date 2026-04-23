@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 
 const DEFAULT_USER_AGENT = "Kabuyomi admin@kabuyomi.app";
+const MAX_RESPONSE_CACHE_ENTRIES = 512;
 const CACHE_TTL = {
   tickerSnapshot: 24 * 60 * 60 * 1000,
   submissions: 30 * 60 * 1000,
@@ -120,31 +121,27 @@ export function createSecService(config = readConfig()) {
         return { concepts: {}, companyFacts: null };
       }
 
-      const companyFacts = await secJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${normalizedCik}.json`, {
-        cacheTtlMs: CACHE_TTL.companyFacts
-      });
+      let companyFacts = null;
+      let companyFactsError = null;
+      try {
+        companyFacts = await secJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${normalizedCik}.json`, {
+          cacheTtlMs: CACHE_TTL.companyFacts
+        });
+      } catch (error) {
+        companyFactsError = error;
+      }
+
       const { concepts: companyFactsConcepts, missingTags } = extractRequestedConceptsFromCompanyFacts(
         companyFacts,
         requestedTags
       );
-      const fallbackEntries =
-        missingTags.length > 0
-          ? await Promise.all(
-              missingTags.map(async (tag) => [
-                tag,
-                await secJson(
-                  `https://data.sec.gov/api/xbrl/companyconcept/CIK${normalizedCik}/us-gaap/${tag}.json`,
-                  {
-                    allowNotFound: true,
-                    cacheTtlMs: CACHE_TTL.concept
-                  }
-                )
-              ])
-            )
-          : [];
-      const fallbackConcepts = Object.fromEntries(fallbackEntries);
+      const fallback = await fetchConceptFallbacks(normalizedCik, missingTags, secJson);
+      if (!companyFacts && missingTags.length > 0 && fallback.fulfilledCount === 0 && fallback.failedCount > 0) {
+        throw companyFactsError ?? new Error(`SEC concept fallback failed for CIK${normalizedCik}`);
+      }
+
       const concepts = Object.fromEntries(
-        requestedTags.map((tag) => [tag, companyFactsConcepts[tag] ?? fallbackConcepts[tag] ?? null])
+        requestedTags.map((tag) => [tag, companyFactsConcepts[tag] ?? fallback.concepts[tag] ?? null])
       );
 
       return { concepts, companyFacts };
@@ -167,6 +164,41 @@ function extractRequestedConceptsFromCompanyFacts(companyFacts, tags) {
   }
 
   return { concepts, missingTags };
+}
+
+async function fetchConceptFallbacks(normalizedCik, tags, secJson) {
+  if (tags.length === 0) {
+    return { concepts: {}, fulfilledCount: 0, failedCount: 0 };
+  }
+
+  const settled = await Promise.allSettled(
+    tags.map(async (tag) => [
+      tag,
+      await secJson(
+        `https://data.sec.gov/api/xbrl/companyconcept/CIK${normalizedCik}/us-gaap/${tag}.json`,
+        {
+          allowNotFound: true,
+          cacheTtlMs: CACHE_TTL.concept
+        }
+      )
+    ])
+  );
+  const concepts = {};
+  let fulfilledCount = 0;
+  let failedCount = 0;
+
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      fulfilledCount += 1;
+      const [tag, concept] = result.value;
+      concepts[tag] = concept;
+      continue;
+    }
+
+    failedCount += 1;
+  }
+
+  return { concepts, fulfilledCount, failedCount };
 }
 
 async function expandSubmissionHistory(root, secJson) {
@@ -261,6 +293,7 @@ export async function fetchWithRetry(url, init, config, limiter) {
         signal: controller.signal
       });
       if (shouldRetryResponse(response) && attempt < config.retryCount) {
+        await discardResponseBody(response);
         await sleep(config.initialBackoffMs * (attempt + 1));
         continue;
       }
@@ -295,7 +328,7 @@ async function withCache(cache, key, ttlMs, loader) {
     try {
       const value = await loader();
       if (ttlMs > 0) {
-        cache.set(key, {
+        setCacheEntry(cache, key, {
           value,
           expiresAt: Date.now() + ttlMs
         });
@@ -305,7 +338,7 @@ async function withCache(cache, key, ttlMs, loader) {
       return value;
     } catch (error) {
       if (cached?.value !== undefined) {
-        cache.set(key, cached);
+        setCacheEntry(cache, key, cached);
         return cached.value;
       }
       cache.delete(key);
@@ -313,7 +346,7 @@ async function withCache(cache, key, ttlMs, loader) {
     }
   })();
 
-  cache.set(key, {
+  setCacheEntry(cache, key, {
     value: cached?.value,
     expiresAt: cached?.expiresAt ?? 0,
     pending
@@ -326,6 +359,38 @@ async function withCache(cache, key, ttlMs, loader) {
     if (latest?.pending === pending && latest.value === undefined) {
       cache.delete(key);
     }
+  }
+}
+
+async function discardResponseBody(response) {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Best-effort cleanup before retrying a failed SEC response.
+  }
+}
+
+function setCacheEntry(cache, key, entry) {
+  if (cache.has(key)) {
+    cache.delete(key);
+  }
+  cache.set(key, entry);
+  pruneCache(cache);
+}
+
+function pruneCache(cache) {
+  if (cache.size <= MAX_RESPONSE_CACHE_ENTRIES) {
+    return;
+  }
+
+  for (const [key, entry] of cache) {
+    if (cache.size <= MAX_RESPONSE_CACHE_ENTRIES) {
+      return;
+    }
+    if (entry?.pending) {
+      continue;
+    }
+    cache.delete(key);
   }
 }
 

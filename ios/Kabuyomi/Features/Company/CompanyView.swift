@@ -186,8 +186,11 @@ struct CompanyView: View {
 
             self.pendingConsentSubmission = nil
 
-            if appModel.aiConsentGranted {
-                submitQuestion(pendingConsentSubmission)
+            if let restoredDraft = restoreDraftAfterConsentDismissal(
+                currentDraft: question,
+                pendingSubmission: pendingConsentSubmission
+            ) {
+                question = restoredDraft
             }
         }
         .sheet(isPresented: $settingsPresented) {
@@ -253,7 +256,7 @@ struct CompanyView: View {
     }
 
     private var composerPlaceholder: String {
-        guard let company else {
+        guard company != nil else {
             if appModel.companyIsLoading {
                 return "\(currentTicker) を読み込み中..."
             }
@@ -261,12 +264,7 @@ struct CompanyView: View {
             return "\(currentTicker) を開けませんでした。左上から別の銘柄を選択してください"
         }
 
-        let suggestions = buildSuggestedQuestions(for: company)
-        if let firstSuggestion = suggestions.first {
-            return "この決算で気になる点を聞く\n例: \(firstSuggestion)"
-        }
-
-        return "この決算で気になる点を聞く\n例: 利益率は改善した？"
+        return "この決算で気になる点を聞く"
     }
 
     private var overlayBackdrop: some View {
@@ -457,6 +455,14 @@ struct CompanyView: View {
     private func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+}
+
+func restoreDraftAfterConsentDismissal(currentDraft: String, pendingSubmission: String?) -> String? {
+    guard let pendingSubmission else { return nil }
+    guard currentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+
+    let trimmedPending = pendingSubmission.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmedPending.isEmpty ? nil : trimmedPending
 }
 
 private struct SourceEvidenceSheet: View {

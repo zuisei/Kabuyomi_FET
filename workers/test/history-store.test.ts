@@ -21,7 +21,8 @@ function makeEnv() {
     DB: {
       prepare: vi.fn().mockReturnValue({
         bind: vi.fn().mockReturnValue({
-          first: vi.fn().mockResolvedValue(null)
+          first: vi.fn().mockResolvedValue(null),
+          all: vi.fn().mockResolvedValue({ results: [] })
         })
       }),
       batch: vi.fn().mockResolvedValue([])
@@ -239,23 +240,26 @@ describe("history backfill guardrails", () => {
       makeFiling("AAPL", "10-K", "0001-02", "2024-12-31")
     ]);
 
-    let lookupCount = 0;
     const env = {
       DB: {
         prepare: vi.fn((sql: string) => ({
           bind: vi.fn(() => ({
-            first: vi.fn().mockImplementation(async () => {
+            all: vi.fn().mockImplementation(async () => {
               if (!sql.includes("SELECT filing_key, ticker FROM filings")) {
-                return null;
+                return { results: [] };
               }
 
-              lookupCount += 1;
-              return lookupCount === 1
-                ? {
+              return {
+                results: [
+                  {
                     filing_key: "v1:0000000001:000101",
                     ticker: "AAPL"
                   }
-                : null;
+                ]
+              };
+            }),
+            first: vi.fn().mockImplementation(async () => {
+              return null;
             })
           }))
         })),
@@ -342,7 +346,10 @@ describe("history backfill guardrails", () => {
     } as never);
     vi.mocked(fetchSubmissions).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
     vi.mocked(listSupportedFilings).mockReturnValue([
-      makeFiling("GOOG", "10-K", "0001652044-26-000018", "2025-12-31")
+      {
+        ...makeFiling("GOOG", "10-K", "0001652044-26-000018", "2025-12-31"),
+        cik: "0001652044"
+      }
     ]);
 
     const batch = vi.fn().mockResolvedValue([]);
@@ -352,6 +359,18 @@ describe("history backfill guardrails", () => {
           bind: vi.fn((...args: unknown[]) => ({
             sql,
             args,
+            all: vi.fn().mockResolvedValue(
+              sql.includes("SELECT filing_key, ticker FROM filings")
+                ? {
+                    results: [
+                      {
+                        filing_key: "v3:0001652044:000165204426000018",
+                        ticker: "GOOGL"
+                      }
+                    ]
+                  }
+                : { results: [] }
+            ),
             first: vi.fn().mockResolvedValue(
               sql.includes("SELECT filing_key, ticker FROM filings")
                 ? {

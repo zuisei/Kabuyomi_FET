@@ -10,6 +10,25 @@ final class ConversationPromptTests: XCTestCase {
         )
     }
 
+    func testConsentDismissalRestoresPendingDraftWithoutAutoSubmit() {
+        XCTAssertEqual(
+            restoreDraftAfterConsentDismissal(
+                currentDraft: "   ",
+                pendingSubmission: " 売上高は？ "
+            ),
+            "売上高は？"
+        )
+    }
+
+    func testConsentDismissalDoesNotOverwriteNewDraft() {
+        XCTAssertNil(
+            restoreDraftAfterConsentDismissal(
+                currentDraft: "利益率は？",
+                pendingSubmission: "売上高は？"
+            )
+        )
+    }
+
     func testBuildFollowUpQuestionsFallsBackToHistoricalForPeerComparison() {
         let company = TestFixtures.companyPayload()
 
@@ -230,6 +249,41 @@ final class ConversationPromptTests: XCTestCase {
         XCTAssertEqual(widths.count, 3)
         XCTAssertGreaterThan(widths[1], 0)
         XCTAssertEqual(widths.reduce(0, +) + 12, 180, accuracy: 0.001)
+    }
+
+    func testHistoricalBoardCopyDoesNotClaimThreeYearsWhenOnlyTwoPeriodsExist() {
+        let copy = historicalBoardCopy(
+            comparisonBasis: "quarterly",
+            requestedYears: 3,
+            availablePeriodCount: 2,
+            singleSeriesLabel: "EPS（Basic）"
+        )
+
+        XCTAssertEqual(copy.eyebrow, "2期")
+        XCTAssertEqual(copy.title, "EPS（Basic）の取得済み2期比較")
+        XCTAssertEqual(copy.subtitle, "同四半期。3年分のうち取得済み2期だけ表示")
+        XCTAssertEqual(copy.note, "履歴比較は同四半期ベースです。3年分が揃うまでは取得済み期間だけ表示します。")
+    }
+
+    func testHistoricalBoardCopyKeepsThreeYearTitleWhenPeriodsAreComplete() {
+        let copy = historicalBoardCopy(
+            comparisonBasis: "annual",
+            requestedYears: 3,
+            availablePeriodCount: 3,
+            singleSeriesLabel: nil
+        )
+
+        XCTAssertEqual(copy.eyebrow, "3年")
+        XCTAssertEqual(copy.title, "3年の年次比較")
+        XCTAssertEqual(copy.subtitle, "年次で 3 年分を横並び比較")
+        XCTAssertEqual(copy.note, "履歴比較は年次ベースです。")
+    }
+
+    func testHistoricalMetricSummaryTextNamesVisibleMetricOutsideScrollableTable() {
+        let company = TestFixtures.companyPayload()
+        let summary = historicalMetricSummaryText(for: company.historicalOverview?.series ?? [])
+
+        XCTAssertEqual(summary, "表示指標: 売上高")
     }
 
     func testPrimarySourceReferenceUsesFirstMatchedSourceId() {
