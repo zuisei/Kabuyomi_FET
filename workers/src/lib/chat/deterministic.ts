@@ -197,7 +197,7 @@ export function shouldRecoverFromWeakModelSources(
 }
 
 function isLowSignalNarrativeSource(source: SourceChunkRecord): boolean {
-  return /available information|investor relations website|corporate website|securities and exchange commission|should be read in conjunction/i.test(
+  return /available information|forward-looking statements|private securities litigation reform act|investor relations website|corporate website|securities and exchange commission|should be read in conjunction/i.test(
     source.text
   );
 }
@@ -325,7 +325,7 @@ function summarizeBusinessOverview(sourceChunks: SourceChunkRecord[]): {
     {
       label: "スマートフォン・PC・サービス",
       priority: 50,
-      patterns: [/iphone/i, /ipad/i, /mac/i, /services/i]
+      patterns: [/iphone/i, /ipad/i, /\bmac\b/i]
     },
     {
       label: "製品・サービス販売",
