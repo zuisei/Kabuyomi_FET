@@ -4,6 +4,7 @@ import { buildSecFilingSource, dedupeChatSources, type ChatEvidenceSource, type 
 
 export interface DeterministicChatAnswer {
   strategy:
+    | "business_overview"
     | "margin_snapshot"
     | "revenue_breakdown"
     | "revenue_drivers"
@@ -34,6 +35,7 @@ export function buildDeterministicMetricAnswer(
   const asksRevenueDrivers =
     /(売上|増収|成長|growth|revenue)/.test(normalizedQuestion) &&
     /(支え|押し上げ|牽引|ドライバ|主因|要因|原因|理由|どの変化|何が)/.test(normalizedQuestion);
+  const asksBusinessOverview = isBusinessOverviewQuestion(normalizedQuestion);
   const asksCashGeneration =
     /(キャッシュフロー|cashflow|cash flow|現金|お金.*稼|稼げてる)/.test(normalizedQuestion) &&
     !/(還元|自社株買い|buyback|repurchase|配当|dividend|株主還元)/.test(normalizedQuestion);
@@ -55,6 +57,11 @@ export function buildDeterministicMetricAnswer(
   if (asksChangeOverview) {
     const response = buildChangeOverviewAnswer(filing, normalizedQuestion);
     return response ? { strategy: "change_overview", response } : null;
+  }
+
+  if (asksBusinessOverview) {
+    const response = buildBusinessOverviewAnswer(filing);
+    return response ? { strategy: "business_overview", response } : null;
   }
 
   if (asksRevenueBreakdown) {
@@ -234,6 +241,35 @@ function buildRevenueDriversAnswer(filing: FilingCacheRecord): ChatResponsePaylo
   };
 }
 
+function isBusinessOverviewQuestion(normalizedQuestion: string): boolean {
+  return (
+    /(なんの企業|何の企業|なんの会社|何の会社|どんな企業|どんな会社|何してる|何をしてる|何をやってる|事業内容|主な事業|事業は)/.test(
+      normalizedQuestion
+    ) || /(whatdoes.*companydo|whatcompany|whatbusiness|businessmodel)/.test(normalizedQuestion)
+  );
+}
+
+function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {
+  const overview = summarizeBusinessOverview(filing.sourceChunks);
+  if (!overview) {
+    return null;
+  }
+
+  const sources = overview.sourceIds.flatMap((sourceId) => {
+    const source = filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId);
+    return source ? [buildSecFilingSource(source)] : [];
+  });
+
+  if (sources.length === 0) {
+    return null;
+  }
+
+  return {
+    answer: `${filing.companyName}は、${overview.labels.join("、")}を主な事業にする会社です。${overview.context}`,
+    sources: dedupeChatSources(sources)
+  };
+}
+
 function buildRevenueBreakdownAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {
   const breakdown = summarizeRevenueBreakdown(filing.sourceChunks);
   if (!breakdown) {
@@ -248,6 +284,111 @@ function buildRevenueBreakdownAnswer(filing: FilingCacheRecord): ChatResponsePay
   return {
     answer: breakdown.text,
     sources: dedupeChatSources(sources)
+  };
+}
+
+function summarizeBusinessOverview(sourceChunks: SourceChunkRecord[]): {
+  labels: string[];
+  sourceIds: string[];
+  context: string;
+} | null {
+  const revenueBreakdown = summarizeRevenueBreakdown(sourceChunks);
+  if (revenueBreakdown) {
+    return {
+      labels: revenueBreakdown.labels,
+      sourceIds: revenueBreakdown.sourceIds,
+      context: "提出資料では、売上区分としてこれらの事業が確認できます。"
+    };
+  }
+
+  const businessDefinitions: Array<{ label: string; priority: number; patterns: RegExp[] }> = [
+    {
+      label: "がん領域の精密医療",
+      priority: 10,
+      patterns: [/precision oncology/i, /oncology/i]
+    },
+    {
+      label: "がん検査・診断",
+      priority: 20,
+      patterns: [/cancer[^.]{0,120}(test|screen|diagnos)/i, /tumor/i, /screening/i, /diagnostic/i]
+    },
+    {
+      label: "血液検査・分子診断",
+      priority: 30,
+      patterns: [/blood[- ]based/i, /liquid biopsy/i, /molecular diagnos/i, /genomic/i]
+    },
+    {
+      label: "製薬会社向けサービス",
+      priority: 40,
+      patterns: [/biopharmaceutical/i, /pharmaceutical/i, /clinical trial/i]
+    },
+    {
+      label: "スマートフォン・PC・サービス",
+      priority: 50,
+      patterns: [/iphone/i, /ipad/i, /mac/i, /services/i]
+    },
+    {
+      label: "クラウドサービス",
+      priority: 60,
+      patterns: [/cloud/i, /azure/i]
+    },
+    {
+      label: "広告",
+      priority: 70,
+      patterns: [/advertising/i, /\bads\b/i]
+    },
+    {
+      label: "車両販売・関連サービス",
+      priority: 80,
+      patterns: [/automotive/i, /vehicle sales/i, /deliveries and servicing of new and used vehicles/i]
+    },
+    {
+      label: "エネルギー生成・蓄電",
+      priority: 90,
+      patterns: [/energy generation and storage/i, /energy storage/i]
+    },
+    {
+      label: "決済・取引サービス",
+      priority: 100,
+      patterns: [/transaction revenue/i, /payment/i, /payments/i]
+    },
+    {
+      label: "サブスク・サービス",
+      priority: 110,
+      patterns: [/subscription and services/i, /subscription/i]
+    }
+  ];
+
+  const found = new Map<string, { label: string; priority: number; sourceId: string }>();
+  for (const chunk of sourceChunks) {
+    if (chunk.sectionType !== "md_a" || isLowSignalNarrativeSource(chunk)) {
+      continue;
+    }
+
+    for (const definition of businessDefinitions) {
+      if (!definition.patterns.some((pattern) => pattern.test(chunk.text))) {
+        continue;
+      }
+
+      if (!found.has(definition.label)) {
+        found.set(definition.label, {
+          label: definition.label,
+          priority: definition.priority,
+          sourceId: chunk.sourceId
+        });
+      }
+    }
+  }
+
+  const matches = Array.from(found.values()).sort((left, right) => left.priority - right.priority).slice(0, 4);
+  if (matches.length === 0) {
+    return null;
+  }
+
+  return {
+    labels: matches.map((match) => match.label),
+    sourceIds: Array.from(new Set(matches.map((match) => match.sourceId))),
+    context: "提出資料の本文にある事業説明から確認できます。"
   };
 }
 
@@ -468,7 +609,7 @@ function summarizeRevenueDrivers(
 
 function summarizeRevenueBreakdown(
   sourceChunks: SourceChunkRecord[]
-): { text: string; sourceIds: string[] } | null {
+): { text: string; labels: string[]; sourceIds: string[] } | null {
   type RevenueBucket = {
     label: string;
     priority: number;
@@ -580,6 +721,7 @@ function summarizeRevenueBreakdown(
 
   return {
     text: `売上の主な区分は、${headlineBuckets.map((bucket) => bucket.label).join("、")}です。`,
+    labels: headlineBuckets.map((bucket) => bucket.label),
     sourceIds
   };
 }

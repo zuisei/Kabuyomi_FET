@@ -83,6 +83,44 @@ describe("buildChatResponse", () => {
     expect(response.responsePath).toBe("deterministic");
   });
 
+  it("answers company-overview prompts with business lines instead of revenue metrics", async () => {
+    const filing = makeBusinessOverviewFiling();
+
+    const response = await buildChatResponse(
+      filing,
+      "この企業はなんの企業？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.answer).toContain("Guardant Health, Inc.は");
+    expect(response.answer).toContain("がん領域の精密医療");
+    expect(response.answer).toContain("がん検査・診断");
+    expect(response.answer).toContain("製薬会社向けサービス");
+    expect(response.answer).not.toContain("売上高は");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S2"]);
+    expect(response.responsePath).toBe("deterministic");
+  });
+
+  it("uses revenue buckets for broad what-company prompts when business buckets are available", async () => {
+    const filing = makeRevenueBreakdownFiling();
+
+    const response = await buildChatResponse(
+      filing,
+      "この企業って何の会社？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.answer).toContain("Tesla, Inc.は");
+    expect(response.answer).toContain("車両販売・関連サービス");
+    expect(response.answer).toContain("サービス・その他");
+    expect(response.answer).toContain("エネルギー生成・蓄電");
+    expect(response.answer).not.toContain("売上高は");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S2", "S4"]);
+    expect(response.responsePath).toBe("deterministic");
+  });
+
   it("falls back to cash-source business lines when the filing lacks a clean revenue table chunk", async () => {
     const filing = makeRevenueBreakdownCashFallbackFiling();
 
@@ -1223,6 +1261,59 @@ function makeRevenueBreakdownFiling() {
         startOffset: 237,
         endOffset: 302,
         sortOrder: 4
+      }
+    ]
+  } as any;
+}
+
+function makeBusinessOverviewFiling() {
+  return {
+    filingKey: "v3:0001576280:000157628026000001",
+    ticker: "GH",
+    companyName: "Guardant Health, Inc.",
+    cik: "0001576280",
+    formType: "10-K",
+    filedAt: "2026-02-20",
+    periodOfReport: "2025-12-31",
+    primaryDocumentUrl: "https://example.com/gh",
+    mdaText: "",
+    mdaTokenCount: 0,
+    extractorVersion: "v3",
+    promptVersion: "v1",
+    generatedAt: "2026-04-24T00:00:00.000Z",
+    summary: { verdict: "", highlights: [], changes: [] },
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "Revenues",
+        value: 508000000,
+        unit: "USD",
+        periodEnd: "2025-12-31",
+        comparisonValue: 476500000,
+        yoyPercent: 6.6
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7, filed 2026-02-20",
+        text: "Guardant Health is a leading precision oncology company focused on helping conquer cancer globally through proprietary blood-based tests, vast data sets and advanced analytics. The company serves patients, healthcare providers and biopharmaceutical companies through screening, recurrence monitoring and therapy selection products.",
+        startOffset: 0,
+        endOffset: 320,
+        sortOrder: 2
+      },
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (Revenues)",
+        text: "売上高: 508000000 USD / 比較値: 476500000 / YoY: 6.6%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "Revenues",
+        sortOrder: 9
       }
     ]
   } as any;
