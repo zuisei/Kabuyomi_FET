@@ -14,6 +14,11 @@ private struct PendingDrawerTickerOpen: Equatable {
     let detail: String
 }
 
+private struct CompanyStatusNotice {
+    let title: String
+    let message: String
+}
+
 struct CompanyView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.openURL) private var openURL
@@ -47,6 +52,10 @@ struct CompanyView: View {
         appModel.pendingChat(for: currentTicker)
     }
 
+    private var companyLoadState: CompanyLoadStatePayload? {
+        appModel.companyLoadState(for: currentTicker)
+    }
+
     private var savedCompanies: [WatchlistCard] {
         appModel.watchlist
     }
@@ -77,6 +86,29 @@ struct CompanyView: View {
     private var companyWebsiteURL: URL? {
         guard let rawValue = company?.companyWebsiteUrl else { return nil }
         return URL(string: rawValue)
+    }
+
+    private var companyCanChat: Bool {
+        guard let company else { return false }
+        return !company.isStaleReady
+    }
+
+    private var companyStatusNotice: CompanyStatusNotice? {
+        if company?.isStaleReady == true {
+            return CompanyStatusNotice(
+                title: "前回取得した決算を表示中",
+                message: "最新データの取得に失敗したため、保存済みの資料を表示しています。右上の再読み込みで再試行できます。"
+            )
+        }
+
+        if let companyLoadState, company != nil, companyLoadState.status == .failedRetryable {
+            return CompanyStatusNotice(
+                title: "最新データの取得に時間がかかっています",
+                message: "表示中の資料はそのまま確認できます。右上の再読み込みで最新取得を再試行できます。"
+            )
+        }
+
+        return nil
     }
 
     var body: some View {
@@ -228,6 +260,12 @@ struct CompanyView: View {
             )
 
             if let company {
+                if let companyStatusNotice {
+                    CompanyStatusNoticeBanner(notice: companyStatusNotice)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                }
+
                 ConversationTimeline(
                     company: company,
                     chatHistory: chatHistory,
@@ -239,14 +277,18 @@ struct CompanyView: View {
                     draftQuestion: $question
                 )
             } else {
-                ConversationLoadingState(ticker: currentTicker, isLoading: appModel.companyIsLoading)
+                ConversationLoadingState(
+                    ticker: currentTicker,
+                    isLoading: appModel.companyIsLoading,
+                    loadState: companyLoadState
+                )
             }
         }
         .safeAreaInset(edge: .bottom) {
             ComposerBar(
                 question: $question,
                 isSending: appModel.chatIsSending,
-                isEnabled: company != nil,
+                isEnabled: companyCanChat,
                 placeholder: composerPlaceholder,
                 aiConsentGranted: appModel.aiConsentGranted,
                 applyPrompt: { question = $0 },
@@ -262,6 +304,10 @@ struct CompanyView: View {
             }
 
             return "\(currentTicker) を開けませんでした。左上から別の銘柄を選択してください"
+        }
+
+        if company?.isStaleReady == true {
+            return "最新データ取得後に質問できます"
         }
 
         return "この決算で気になる点を聞く"
@@ -463,6 +509,33 @@ func restoreDraftAfterConsentDismissal(currentDraft: String, pendingSubmission: 
 
     let trimmedPending = pendingSubmission.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmedPending.isEmpty ? nil : trimmedPending
+}
+
+private struct CompanyStatusNoticeBanner: View {
+    let notice: CompanyStatusNotice
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.accentDeep)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(notice.title)
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+
+                Text(notice.message)
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .kabuyomiCard(.secondary, radius: 18)
+    }
 }
 
 private struct SourceEvidenceSheet: View {

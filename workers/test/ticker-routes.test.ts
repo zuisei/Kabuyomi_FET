@@ -9,6 +9,10 @@ vi.mock("../src/lib/pipeline", () => ({
   ensureLatestFiling: vi.fn()
 }));
 
+vi.mock("../src/lib/filings/cache", () => ({
+  loadCachedLatestFiling: vi.fn()
+}));
+
 vi.mock("../src/lib/quota", () => ({
   readQuotaIdentity: vi.fn(),
   consumeStockQuotaWithMutation: vi.fn(),
@@ -23,6 +27,7 @@ import { handleWatchlistAddRoute } from "../src/routes/watchlist-add";
 import { handleWatchlistRemoveRoute } from "../src/routes/watchlist-remove";
 import { listTickersByCik, lookupTicker } from "../src/clients/sec";
 import { ensureLatestFiling } from "../src/lib/pipeline";
+import { loadCachedLatestFiling } from "../src/lib/filings/cache";
 import {
   consumeStockQuotaWithMutation,
   ensureCompanyAccessAllowed,
@@ -31,10 +36,12 @@ import {
   refundStockQuota,
   removeTickerFromSavedQuota
 } from "../src/lib/quota";
+import { AppError } from "../src/lib/errors";
 
 const mockLookupTicker = vi.mocked(lookupTicker);
 const mockListTickersByCik = vi.mocked(listTickersByCik);
 const mockEnsureLatestFiling = vi.mocked(ensureLatestFiling);
+const mockLoadCachedLatestFiling = vi.mocked(loadCachedLatestFiling);
 const mockReadQuotaIdentity = vi.mocked(readQuotaIdentity);
 const mockConsumeStockQuotaWithMutation = vi.mocked(consumeStockQuotaWithMutation);
 const mockPromoteSavedTickerAlias = vi.mocked(promoteSavedTickerAlias);
@@ -89,6 +96,7 @@ beforeEach(() => {
   mockReadQuotaIdentity.mockResolvedValue(identity as never);
   mockListTickersByCik.mockResolvedValue(["GOOG", "GOOGL"] as never);
   mockPromoteSavedTickerAlias.mockResolvedValue(usage as never);
+  mockLoadCachedLatestFiling.mockResolvedValue(null);
 });
 
 describe("ticker-aware routes", () => {
@@ -235,6 +243,148 @@ describe("ticker-aware routes", () => {
         tickerRecord: expect.objectContaining({ ticker: "BRK-B" })
       })
     );
+  });
+
+  it("returns stale company data instead of surfacing retryable SEC 503s", async () => {
+    mockLookupTicker.mockResolvedValue({
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      cik: "0000320193",
+      exchange: "Nasdaq"
+    });
+    mockListTickersByCik.mockResolvedValue(["AAPL"] as never);
+    mockEnsureCompanyAccessAllowed.mockResolvedValue(undefined);
+    mockEnsureLatestFiling.mockRejectedValue(new AppError(503, "SEC data is temporarily unavailable") as never);
+    mockLoadCachedLatestFiling.mockResolvedValue(
+      makeFiling({
+        ticker: "AAPL",
+        companyName: "Apple Inc.",
+        cik: "0000320193",
+        filingKey: "v2:0000320193:000032019325000001"
+      }) as never
+    );
+
+    const response = await handleCompanyRoute({
+      request: new Request("https://kabuyomi.test/v1/company/AAPL", {
+        method: "GET",
+        headers: {
+          "x-device-key": "device-123"
+        }
+      }),
+      url: new URL("https://kabuyomi.test/v1/company/AAPL"),
+      env: {} as never,
+      config: {} as never,
+      ctx: {} as never
+    });
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({
+      status: "stale_ready",
+      ticker: "AAPL",
+      filingKey: "v2:0000320193:000032019325000001",
+      statusMessage: "SEC data is temporarily unavailable",
+      retryAfterSeconds: 60
+    });
+  });
+
+  it("returns stale company data for refresh when the remote check is temporarily unavailable", async () => {
+    mockLookupTicker.mockResolvedValue({
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      cik: "0000320193",
+      exchange: "Nasdaq"
+    });
+    mockListTickersByCik.mockResolvedValue(["AAPL"] as never);
+    mockEnsureCompanyAccessAllowed.mockResolvedValue(undefined);
+    mockEnsureLatestFiling.mockRejectedValue(new AppError(503, "SEC data is temporarily unavailable") as never);
+    mockLoadCachedLatestFiling.mockResolvedValue(
+      makeFiling({
+        ticker: "AAPL",
+        companyName: "Apple Inc.",
+        cik: "0000320193",
+        filingKey: "v2:0000320193:000032019325000001"
+      }) as never
+    );
+
+    const response = await handleCompanyRoute({
+      request: new Request("https://kabuyomi.test/v1/company/AAPL/refresh", {
+        method: "POST",
+        headers: {
+          "x-device-key": "device-123"
+        }
+      }),
+      url: new URL("https://kabuyomi.test/v1/company/AAPL/refresh"),
+      env: {} as never,
+      config: {} as never,
+      ctx: {} as never
+    });
+
+    expect(response?.status).toBe(200);
+    expect(mockEnsureLatestFiling).toHaveBeenCalledTimes(1);
+    await expect(response?.json()).resolves.toMatchObject({
+      status: "stale_ready",
+      ticker: "AAPL",
+      filingKey: "v2:0000320193:000032019325000001",
+      statusMessage: "SEC data is temporarily unavailable",
+      retryAfterSeconds: 60
+    });
+  });
+
+  it("returns a retryable company state instead of HTTP 503 when no stale filing exists", async () => {
+    mockLookupTicker.mockResolvedValue({
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      cik: "0000320193",
+      exchange: "Nasdaq"
+    });
+    mockListTickersByCik.mockResolvedValue(["AAPL"] as never);
+    mockEnsureCompanyAccessAllowed.mockResolvedValue(undefined);
+    mockEnsureLatestFiling.mockRejectedValue(new AppError(503, "SEC data is temporarily unavailable") as never);
+    mockLoadCachedLatestFiling.mockResolvedValue(null);
+
+    const response = await handleCompanyRoute({
+      request: new Request("https://kabuyomi.test/v1/company/AAPL", {
+        method: "GET",
+        headers: {
+          "x-device-key": "device-123"
+        }
+      }),
+      url: new URL("https://kabuyomi.test/v1/company/AAPL"),
+      env: {} as never,
+      config: {} as never,
+      ctx: {} as never
+    });
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual({
+      status: "failed_retryable",
+      ticker: "AAPL",
+      message: "SEC data is temporarily unavailable",
+      retryAfterSeconds: 60
+    });
+  });
+
+  it("does not use stale fallback before company access has been checked", async () => {
+    mockLookupTicker.mockRejectedValue(new AppError(503, "SEC data is temporarily unavailable") as never);
+    mockLoadCachedLatestFiling.mockResolvedValue(makeFiling({ ticker: "AAPL" }) as never);
+
+    await expect(
+      handleCompanyRoute({
+        request: new Request("https://kabuyomi.test/v1/company/AAPL", {
+          method: "GET",
+          headers: {
+            "x-device-key": "device-123"
+          }
+        }),
+        url: new URL("https://kabuyomi.test/v1/company/AAPL"),
+        env: {} as never,
+        config: {} as never,
+        ctx: {} as never
+      })
+    ).rejects.toMatchObject({ status: 503 });
+
+    expect(mockEnsureCompanyAccessAllowed).not.toHaveBeenCalled();
+    expect(mockLoadCachedLatestFiling).not.toHaveBeenCalled();
   });
 
   it("normalizes separator aliases before watchlist removal", async () => {

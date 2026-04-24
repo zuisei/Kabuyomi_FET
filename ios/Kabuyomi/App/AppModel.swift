@@ -77,6 +77,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var usage: UsagePayload?
     var usageLoadState: UsageLoadState = .idle
     var companyCache: [String: CompanyPayload] = [:]
+    var companyLoadStates: [String: CompanyLoadStatePayload] = [:]
     var chatHistoryCache: [String: [LocalChatMessage]] = [:]
     var pendingChats: [String: PendingChatState] = [:]
     var lastViewedTicker = UserDefaults.standard.string(forKey: "kabuyomi.lastViewedTicker")
@@ -425,6 +426,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         return companyCache[normalized] ?? persistence.loadCompany(ticker: normalized)?.company
     }
 
+    func companyLoadState(for ticker: String) -> CompanyLoadStatePayload? {
+        companyLoadStates[normalizedTicker(ticker)]
+    }
+
     func openConversation(for ticker: String, draftQuestion: String? = nil) {
         let normalized = normalizedTicker(ticker)
         let trimmedDraft = draftQuestion?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -553,6 +558,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             usage = nil
             usageLoadState = .loading
             companyCache = [:]
+            companyLoadStates = [:]
             chatHistoryCache = [:]
             pendingChats = [:]
             addingTickers = []
@@ -663,8 +669,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             let savedTicker = normalizedTicker(result.company.ticker)
             try persistence.saveCompany(result.company, searchItem: searchItem)
             companyCache.removeValue(forKey: normalized)
+            companyLoadStates.removeValue(forKey: normalized)
             chatHistoryCache.removeValue(forKey: normalized)
             companyCache[savedTicker] = result.company
+            companyLoadStates.removeValue(forKey: savedTicker)
             chatHistoryCache[savedTicker] = persistence.loadCompany(ticker: savedTicker)?.chatHistory ?? []
             accessRevokedTickers.remove(normalized)
             accessRevokedTickers.remove(savedTicker)
@@ -727,7 +735,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         }
 
         do {
-            let company = try await (
+            let response = try await (
                 forceRefresh
                     ? apiClient.refreshCompany(
                         ticker: ticker
@@ -738,12 +746,12 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             )
             guard stateGeneration == self.stateGeneration else { return }
             guard !isLocalAccessRevoked(for: ticker) else { return }
-            try persistence.saveCompany(company, searchItem: nil)
-            companyCache[ticker] = company
-            chatHistoryCache[ticker] = persistence.loadCompany(ticker: ticker)?.chatHistory ?? []
-            accessRevokedTickers.remove(ticker)
-            refreshedTickersThisSession.insert(ticker)
-            loadHomeFromPersistence()
+            switch response {
+            case .company(let company):
+                try handleLoadedCompany(company, requestedTicker: ticker)
+            case .retryable(let state):
+                companyLoadStates[ticker] = state
+            }
         } catch {
             guard stateGeneration == self.stateGeneration else { return }
             guard !shouldIgnore(error) else { return }
@@ -752,6 +760,39 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 presentAlert(for: error)
             }
         }
+    }
+
+    private func handleLoadedCompany(_ company: CompanyPayload, requestedTicker: String) throws {
+        let normalizedCompanyTicker = normalizedTicker(company.ticker)
+        let shouldPersist = !company.isStaleReady
+
+        if shouldPersist {
+            try persistence.saveCompany(company, searchItem: nil)
+            companyLoadStates.removeValue(forKey: requestedTicker)
+            companyLoadStates.removeValue(forKey: normalizedCompanyTicker)
+        } else {
+            companyLoadStates[requestedTicker] = CompanyLoadStatePayload(
+                status: .staleReady,
+                ticker: company.ticker,
+                companyName: company.companyName,
+                cik: company.cik,
+                message: nil,
+                statusMessage: company.statusMessage,
+                retryAfterSeconds: company.retryAfterSeconds
+            )
+        }
+
+        companyCache[requestedTicker] = company
+        companyCache[normalizedCompanyTicker] = company
+        chatHistoryCache[requestedTicker] = persistence.loadCompany(ticker: requestedTicker)?.chatHistory ?? []
+        chatHistoryCache[normalizedCompanyTicker] = persistence.loadCompany(ticker: normalizedCompanyTicker)?.chatHistory ?? []
+        accessRevokedTickers.remove(requestedTicker)
+        accessRevokedTickers.remove(normalizedCompanyTicker)
+        if shouldPersist {
+            refreshedTickersThisSession.insert(requestedTicker)
+            refreshedTickersThisSession.insert(normalizedCompanyTicker)
+        }
+        loadHomeFromPersistence()
     }
 
     private func handle(_ error: Error) {
@@ -1039,6 +1080,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         let normalized = normalizedTicker(ticker)
         accessRevokedTickers.insert(normalized)
         companyCache.removeValue(forKey: normalized)
+        companyLoadStates.removeValue(forKey: normalized)
         chatHistoryCache.removeValue(forKey: normalized)
         pendingChats.removeValue(forKey: normalized)
         addingTickers.remove(normalized)

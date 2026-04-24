@@ -539,6 +539,36 @@ struct ConversationEmptyState: View {
 struct ConversationLoadingState: View {
     let ticker: String
     let isLoading: Bool
+    let loadState: CompanyLoadStatePayload?
+
+    private var showsRetryableState: Bool {
+        guard let loadState else { return false }
+        return loadState.status == .failedRetryable || loadState.status == .preparing
+    }
+
+    private var titleText: String {
+        if isLoading {
+            return "\(ticker) の会話を準備中..."
+        }
+
+        if showsRetryableState {
+            return "\(ticker) の取得を再試行できます"
+        }
+
+        return "\(ticker) をまだ開けませんでした"
+    }
+
+    private var detailText: String {
+        if isLoading {
+            return "英語の決算を日本語で読みやすくしています。"
+        }
+
+        if showsRetryableState {
+            return "SEC データの取得が一時的に失敗しました。右上の再読み込みで、少し待ってからもう一度取得できます。"
+        }
+
+        return "左上から別の銘柄を選ぶか、右上の再読み込みでもう一度試してください。"
+    }
 
     var body: some View {
         VStack(spacing: 18) {
@@ -548,21 +578,21 @@ struct ConversationLoadingState: View {
                 ProgressView()
                     .controlSize(.large)
                     .tint(KabuyomiTheme.accentDeep)
+            } else if showsRetryableState {
+                Image(systemName: "arrow.triangle.2.circlepath.circle")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
             } else {
                 Image(systemName: "exclamationmark.circle")
                     .font(.system(size: 30, weight: .semibold))
                     .foregroundStyle(KabuyomiTheme.accentDeep)
             }
 
-            Text(isLoading ? "\(ticker) の会話を準備中..." : "\(ticker) をまだ開けませんでした")
+            Text(titleText)
                 .font(.system(.title3, design: .rounded, weight: .bold))
                 .foregroundStyle(KabuyomiTheme.ink)
 
-            Text(
-                isLoading
-                    ? "英語の決算を日本語で読みやすくしています。"
-                    : "左上から別の銘柄を選ぶか、右上の再読み込みでもう一度試してください。"
-            )
+            Text(detailText)
                 .font(.system(.footnote, design: .rounded))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
                 .multilineTextAlignment(.center)

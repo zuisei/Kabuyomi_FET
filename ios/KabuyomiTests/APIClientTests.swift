@@ -63,9 +63,67 @@ final class APIClientTests: XCTestCase {
             )
         }
 
-        let company = try await client.fetchCompany(ticker: "AAPL")
+        let response = try await client.fetchCompany(ticker: "AAPL")
 
+        guard case .company(let company) = response else {
+            XCTFail("Expected company payload")
+            return
+        }
         XCTAssertEqual(company.companyWebsiteUrl, "https://www.aapl.com")
+    }
+
+    func testFetchCompanyDecodesRetryableCompanyState() async throws {
+        let client = makeClient(context: standardContext) { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/company/AAPL")
+            XCTAssertEqual(request.httpMethod, "GET")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "status": "failed_retryable",
+                    "ticker": "AAPL",
+                    "message": "SEC data is temporarily unavailable",
+                    "retryAfterSeconds": 60
+                ])
+            )
+        }
+
+        let response = try await client.fetchCompany(ticker: "AAPL")
+
+        guard case .retryable(let state) = response else {
+            XCTFail("Expected retryable company state")
+            return
+        }
+        XCTAssertEqual(state.status, .failedRetryable)
+        XCTAssertEqual(state.ticker, "AAPL")
+        XCTAssertEqual(state.displayMessage, "SEC data is temporarily unavailable")
+        XCTAssertEqual(state.retryAfterSeconds, 60)
+    }
+
+    func testFetchCompanyDecodesStaleReadyCompanyStatus() async throws {
+        let client = makeClient(context: standardContext) { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/company/AAPL")
+            let base = try JSONSerialization.jsonObject(with: TestFixtures.companyPayloadData()) as? [String: Any]
+            var payload = try XCTUnwrap(base)
+            payload["status"] = "stale_ready"
+            payload["statusMessage"] = "SEC data is temporarily unavailable"
+            payload["retryAfterSeconds"] = 60
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData(payload)
+            )
+        }
+
+        let response = try await client.fetchCompany(ticker: "AAPL")
+
+        guard case .company(let company) = response else {
+            XCTFail("Expected stale company payload")
+            return
+        }
+        XCTAssertTrue(company.isStaleReady)
+        XCTAssertEqual(company.statusMessage, "SEC data is temporarily unavailable")
+        XCTAssertEqual(company.retryAfterSeconds, 60)
     }
 
     func testFetchUsageSendsDeviceHeader() async throws {

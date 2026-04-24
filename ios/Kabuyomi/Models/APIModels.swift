@@ -103,6 +103,91 @@ struct CompanyPayload: Codable, Hashable {
     let historicalOverview: HistoricalOverviewPayload?
     let sourceChunks: [SourceChunkPayload]
     let lastUpdatedAt: String
+    let status: CompanyLoadStatus?
+    let statusMessage: String?
+    let retryAfterSeconds: Int?
+
+    init(
+        filingKey: String,
+        ticker: String,
+        companyName: String,
+        cik: String,
+        formType: String,
+        filedAt: String,
+        periodOfReport: String,
+        primaryDocumentUrl: String,
+        companyWebsiteUrl: String?,
+        summary: SummaryPayload,
+        metrics: [MetricPayload],
+        historicalOverview: HistoricalOverviewPayload?,
+        sourceChunks: [SourceChunkPayload],
+        lastUpdatedAt: String,
+        status: CompanyLoadStatus? = nil,
+        statusMessage: String? = nil,
+        retryAfterSeconds: Int? = nil
+    ) {
+        self.filingKey = filingKey
+        self.ticker = ticker
+        self.companyName = companyName
+        self.cik = cik
+        self.formType = formType
+        self.filedAt = filedAt
+        self.periodOfReport = periodOfReport
+        self.primaryDocumentUrl = primaryDocumentUrl
+        self.companyWebsiteUrl = companyWebsiteUrl
+        self.summary = summary
+        self.metrics = metrics
+        self.historicalOverview = historicalOverview
+        self.sourceChunks = sourceChunks
+        self.lastUpdatedAt = lastUpdatedAt
+        self.status = status
+        self.statusMessage = statusMessage
+        self.retryAfterSeconds = retryAfterSeconds
+    }
+
+    var isStaleReady: Bool {
+        status == .staleReady
+    }
+}
+
+enum CompanyLoadStatus: String, Codable, Hashable {
+    case ready
+    case staleReady = "stale_ready"
+    case preparing
+    case failedRetryable = "failed_retryable"
+}
+
+struct CompanyLoadStatePayload: Codable, Hashable {
+    let status: CompanyLoadStatus
+    let ticker: String
+    let companyName: String?
+    let cik: String?
+    let message: String?
+    let statusMessage: String?
+    let retryAfterSeconds: Int?
+
+    var displayMessage: String? {
+        statusMessage ?? message
+    }
+}
+
+enum CompanyLoadResponse: Decodable {
+    case company(CompanyPayload)
+    case retryable(CompanyLoadStatePayload)
+
+    private enum CodingKeys: String, CodingKey {
+        case filingKey
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if container.contains(.filingKey) {
+            self = .company(try CompanyPayload(from: decoder))
+            return
+        }
+
+        self = .retryable(try CompanyLoadStatePayload(from: decoder))
+    }
 }
 
 struct HistoricalOverviewPayload: Codable, Hashable {
