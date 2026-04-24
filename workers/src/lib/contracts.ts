@@ -27,6 +27,18 @@ export const BackfillHistoryRequestSchema = z.object({
   cursorByTicker: z.record(z.string(), z.number().int().min(0)).optional()
 });
 
+const ExtractorVersionSchema = z.string().trim().regex(/^v\d+$/i).transform((value) => value.toLowerCase());
+
+export const CleanupFilingsRequestSchema = z.object({
+  execute: z.boolean().default(false),
+  targetVersions: z.array(ExtractorVersionSchema).min(1).max(20).optional(),
+  tickers: z.array(z.string().trim().min(1).max(16)).max(100).optional(),
+  maxFilings: z.number().int().min(1).max(100).default(50),
+  maxKvKeys: z.number().int().min(0).max(1_000).default(200),
+  includeUnshadowed: z.boolean().default(false),
+  onlyDisagreeingMetrics: z.boolean().default(false)
+});
+
 export const BillingSyncRequestSchema = z.object({
   originalTransactionId: z.string().trim().min(1),
   productId: z.string().trim().min(1).optional(),

@@ -229,6 +229,31 @@ describe("worker routing", () => {
     });
   });
 
+  it("returns 400 for invalid internal cleanup JSON instead of bubbling a 500", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/internal/cleanup/filings", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-internal-token": "secret"
+        },
+        body: "{"
+      }),
+      {
+        BACKFILL_SHARED_SECRET: "secret",
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid cleanup payload"
+    });
+  });
+
   it("returns 415 for quote translation requests without a JSON content type", async () => {
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/v1/translate-quote", {

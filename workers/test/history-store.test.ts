@@ -423,6 +423,7 @@ describe("history backfill guardrails", () => {
   });
 
   it("loads historical overview across class-share aliases via cik", async () => {
+    const env = makeHistoricalBindingsEnv();
     const overview = await loadHistoricalOverview(
       {
         filingKey: "v3:0001067983:3",
@@ -442,12 +443,13 @@ describe("history backfill guardrails", () => {
         extractorVersion: "v3",
         promptVersion: "v2"
       },
-      makeHistoricalBindingsEnv() as never
+      env as never
     );
 
     expect(overview?.comparisonBasis).toBe("annual");
     expect(overview?.series).toHaveLength(1);
     expect(overview?.series[0]?.points).toHaveLength(2);
+    expect(env.DB.prepare).toHaveBeenCalledWith(expect.stringContaining("substr(f.filing_key, 1, instr(f.filing_key, ':') - 1) = ?"));
   });
 
   it("loads historical chat evidence across class-share aliases via cik", async () => {

@@ -1,7 +1,7 @@
 import { listTickersByCik, lookupTicker } from "../clients/sec";
 import type { Env } from "../env";
 
-const MAX_TRACKED_TICKERS = 30;
+export const MAX_TRACKED_TICKERS = 30;
 const DEFAULT_BATCH_SIZE = MAX_TRACKED_TICKERS;
 const DEFAULT_CONCURRENCY = 4;
 const MAX_BATCH_SIZE = MAX_TRACKED_TICKERS;

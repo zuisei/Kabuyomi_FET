@@ -204,6 +204,7 @@ export async function maybeBuildHistoricalChatResponse(
     filing.cik,
     filing.formType,
     subtractYearsIsoDate(filing.periodOfReport, HISTORY_YEARS),
+    filing.extractorVersion,
     metricNames,
     filing.formType === "10-Q" ? 24 : 9,
     env
@@ -242,6 +243,7 @@ export async function maybeBuildHistoricalChatResponse(
       filing.cik,
       filing.formType,
       subtractYearsIsoDate(filing.periodOfReport, HISTORY_YEARS),
+      filing.extractorVersion,
       env
     );
     const segmentSummary = buildSegmentHistorySummary(segments);
@@ -286,6 +288,7 @@ export async function loadHistoricalOverview(
     filing.cik,
     filing.formType,
     subtractYearsIsoDate(filing.periodOfReport, HISTORY_YEARS),
+    filing.extractorVersion,
     logicalNames,
     filing.formType === "10-Q" ? 36 : 15,
     env
@@ -665,6 +668,7 @@ async function loadHistoricalMetricRows(
   cik: string,
   formType: FilingReference["formType"],
   sinceDate: string,
+  extractorVersion: string,
   logicalNames: MetricSnapshot["logicalName"][],
   limit: number,
   env: Env & { DB: D1Database }
@@ -686,11 +690,13 @@ async function loadHistoricalMetricRows(
       f.primary_document_url AS primaryDocumentUrl
     FROM metric_history m
     JOIN filings f ON f.filing_key = m.filing_key
-    WHERE f.cik = ? AND f.form_type = ? AND m.period_end >= ? AND m.logical_name IN (${placeholders})
+    WHERE f.cik = ? AND f.form_type = ? AND m.period_end >= ?
+      AND substr(f.filing_key, 1, instr(f.filing_key, ':') - 1) = ?
+      AND m.logical_name IN (${placeholders})
     ORDER BY m.period_end DESC, f.filed_at DESC
     LIMIT ?`
   )
-    .bind(cik, formType, sinceDate, ...logicalNames, limit)
+    .bind(cik, formType, sinceDate, extractorVersion, ...logicalNames, limit)
     .all<HistoricalMetricRow>();
 
   return result.results;
@@ -700,6 +706,7 @@ async function loadSegmentHighlights(
   cik: string,
   formType: FilingReference["formType"],
   sinceDate: string,
+  extractorVersion: string,
   env: Env & { DB: D1Database }
 ): Promise<SegmentHighlightRow[]> {
   const result = await env.DB.prepare(
@@ -717,10 +724,11 @@ async function loadSegmentHighlights(
     FROM segment_highlights s
     JOIN filings f ON f.filing_key = s.filing_key
     WHERE f.cik = ? AND f.form_type = ? AND s.period_end >= ?
+      AND substr(f.filing_key, 1, instr(f.filing_key, ':') - 1) = ?
     ORDER BY s.period_end DESC, s.label ASC
     LIMIT 12`
   )
-    .bind(cik, formType, sinceDate)
+    .bind(cik, formType, sinceDate, extractorVersion)
     .all<SegmentHighlightRow>();
 
   return result.results;

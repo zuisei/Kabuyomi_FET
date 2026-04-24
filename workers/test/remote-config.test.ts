@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_REMOTE_CONFIG, loadRemoteConfig } from "../src/lib/remote-config";
 
 describe("remote config", () => {
-  it("falls back to default tracked tickers when none are configured", async () => {
+  it("keeps the curated ticker seed but leaves scheduled refresh opt-in", async () => {
     const config = await loadRemoteConfig({
       KABUYOMI_CACHE: {
         get: async () => null
@@ -12,6 +12,7 @@ describe("remote config", () => {
     expect(config.trackedTickers).toEqual(DEFAULT_REMOTE_CONFIG.trackedTickers);
     expect(config.dailyRefreshBatchSize).toBe(DEFAULT_REMOTE_CONFIG.dailyRefreshBatchSize);
     expect(config.trackedTickers).toHaveLength(30);
+    expect(config.dailyRefreshEnabled).toBe(false);
     expect(config.webSupplementEnabled).toBe(false);
   });
 

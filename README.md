@@ -97,8 +97,8 @@ npx wrangler d1 execute kabuyomi-history --remote --file ./d1/migrations/0001_hi
 - Treat D1 as an index only; keep large filing payloads in R2.
 - Prefer small batch runs over broad backfills.
 - Default rollout is annual `10-K` first, then narrow `10-Q` top-ups for saved or explicitly requested tickers.
-- The current background history seed targets the top 30 U.S.-listed issuers by market cap, normalized at the issuer/CIK level so class-share families such as `GOOG/GOOGL` or `BRK-A/BRK-B` count as one tracked company.
-- Live annual coverage is intended to hold 3 years of `10-K` history for that top-30 tracked issuer set before any broader `10-Q` rollout.
+- The curated 30-company seed remains available for manual backfill/update, but scheduled background refresh is disabled unless ops explicitly enables it.
+- The tracked ticker list is capped at 30 issuers and normalized at the issuer/CIK level so class-share families such as `GOOG/GOOGL` or `BRK-A/BRK-B` count as one tracked company.
 - Free-tier-safe defaults currently cap one run to annual filings with `maxFilingsPerTicker=1` and `maxTotalFilings=8`.
 - User-facing history chat stays narrow on purpose: each request hydrates at most 2 prior filings and does not do broad background sweeps.
 
@@ -111,8 +111,19 @@ BACKFILL_SHARED_SECRET=replace-me \
 node ./scripts/backfill-history.mjs AAPL MSFT --years=3
 ```
 
-If no tickers are supplied, the worker uses the configured tracked tickers list.
+If no tickers are supplied, the worker uses the configured tracked tickers list, falling back to the curated 30-company seed.
 That tracked ticker list is background ops config for refresh/backfill, not the user saved ticker source of truth.
+
+Filing cleanup is dry-run by default. It targets old extractor versions only, preserves old D1 rows that do not yet have a current-version replacement, and requires `--execute` before any KV/D1/R2 deletion:
+
+```bash
+cd /Users/0xt4/t4dano/Kabuyomi/workers
+CLEANUP_URL=http://127.0.0.1:8787 \
+BACKFILL_SHARED_SECRET=replace-me \
+npm run cleanup:filings -- AAPL MSFT --only-disagreeing-metrics
+```
+
+After reviewing the returned manifest, rerun with `--execute` to delete the listed candidates.
 
 ## Ops Notes
 

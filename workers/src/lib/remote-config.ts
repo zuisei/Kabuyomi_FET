@@ -1,6 +1,7 @@
 import type { Env } from "../env";
 import {
   DEFAULT_TRACKED_TICKERS,
+  MAX_TRACKED_TICKERS,
   normalizeTrackedTickers,
   resolveDailyRefreshBatchSize,
   resolveDailyRefreshConcurrency
@@ -36,7 +37,7 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   maintenanceMode: false,
   extractorVersion: CURRENT_EXTRACTOR_VERSION,
   promptVersion: "v1",
-  dailyRefreshEnabled: true,
+  dailyRefreshEnabled: false,
   dailyRefreshBatchSize: DEFAULT_TRACKED_TICKERS.length,
   dailyRefreshConcurrency: 4,
   trackedTickers: [...DEFAULT_TRACKED_TICKERS]
@@ -60,7 +61,7 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
     extractorVersion: normalizeExtractorVersion(payload.extractorVersion),
     trackedTickers: normalizeTrackedTickers(Array.isArray(payload.trackedTickers) ? payload.trackedTickers : []).slice(
       0,
-      DEFAULT_TRACKED_TICKERS.length
+      MAX_TRACKED_TICKERS
     ),
     dailyRefreshEnabled:
       typeof payload.dailyRefreshEnabled === "boolean"
