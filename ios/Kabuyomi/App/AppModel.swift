@@ -103,6 +103,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     private var loadingTickers: Set<String> = []
     private var accessRevokedTickers: Set<String> = []
     private var refreshedTickersThisSession: Set<String> = []
+    private var companyRetryTasks: [String: Task<Void, Never>] = [:]
     private var watchlistMutationInFlight = false
     private var watchlistMutationWaiters: [CheckedContinuation<Void, Never>] = []
     private var usageMutationGeneration = 0
@@ -356,6 +357,13 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             }
         }
 
+        if !forceRefresh,
+           let state = companyLoadStates[normalized],
+           shouldRetryCompanyLoadState(state.status) {
+            scheduleCompanyLoadRetry(ticker: normalized, state: state)
+            return
+        }
+
         await fetchCompanyRemote(ticker: normalized, forceRefresh: forceRefresh)
     }
 
@@ -428,6 +436,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     func companyLoadState(for ticker: String) -> CompanyLoadStatePayload? {
         companyLoadStates[normalizedTicker(ticker)]
+    }
+
+    func isCompanyLoading(_ ticker: String) -> Bool {
+        loadingTickers.contains(normalizedTicker(ticker))
     }
 
     func openConversation(for ticker: String, draftQuestion: String? = nil) {
@@ -563,6 +575,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             pendingChats = [:]
             addingTickers = []
             loadingTickers = []
+            cancelAllCompanyLoadRetries()
             accessRevokedTickers = []
             refreshedTickersThisSession = []
             savedTickers = []
@@ -736,6 +749,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         accessRevokedTickers.remove(savedTicker)
         companyLoadStates[requestedTicker] = loadState
         companyLoadStates[savedTicker] = loadState
+        scheduleCompanyLoadRetry(ticker: savedTicker, state: loadState)
         completeInitialEntry()
         storeUsage(usage, source: .watchlistAdd)
         if usage.savedTickers == nil {
@@ -806,6 +820,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 try handleLoadedCompany(company, requestedTicker: ticker)
             case .retryable(let state):
                 companyLoadStates[ticker] = state
+                scheduleCompanyLoadRetry(ticker: ticker, state: state)
             }
         } catch {
             guard stateGeneration == self.stateGeneration else { return }
@@ -825,6 +840,8 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             try persistence.saveCompany(company, searchItem: nil)
             companyLoadStates.removeValue(forKey: requestedTicker)
             companyLoadStates.removeValue(forKey: normalizedCompanyTicker)
+            cancelCompanyLoadRetry(for: requestedTicker)
+            cancelCompanyLoadRetry(for: normalizedCompanyTicker)
         } else {
             companyLoadStates[requestedTicker] = CompanyLoadStatePayload(
                 status: .staleReady,
@@ -848,6 +865,63 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             refreshedTickersThisSession.insert(normalizedCompanyTicker)
         }
         loadHomeFromPersistence()
+    }
+
+    private func scheduleCompanyLoadRetry(ticker: String, state: CompanyLoadStatePayload) {
+        let normalized = normalizedTicker(ticker)
+        guard shouldRetryCompanyLoadState(state.status) else { return }
+        guard companyCache[normalized] == nil, !loadingTickers.contains(normalized), !isLocalAccessRevoked(for: normalized) else { return }
+
+        companyRetryTasks[normalized]?.cancel()
+        let delay = companyRetryDelay(for: state)
+        companyRetryTasks[normalized] = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            await self?.retryCompanyLoadIfStillPending(ticker: normalized)
+        }
+    }
+
+    private func retryCompanyLoadIfStillPending(ticker: String) async {
+        let normalized = normalizedTicker(ticker)
+        companyRetryTasks[normalized] = nil
+        guard companyCache[normalized] == nil else { return }
+        guard !loadingTickers.contains(normalized), !isLocalAccessRevoked(for: normalized) else { return }
+        guard let state = companyLoadStates[normalized], shouldRetryCompanyLoadState(state.status) else { return }
+
+        await fetchCompanyRemote(ticker: normalized, forceRefresh: false)
+    }
+
+    private func shouldRetryCompanyLoadState(_ status: CompanyLoadStatus) -> Bool {
+        status == .preparing || status == .failedRetryable
+    }
+
+    private func companyRetryDelay(for state: CompanyLoadStatePayload) -> Duration {
+        let seconds = state.retryAfterSeconds ?? (state.status == .preparing ? 2 : 30)
+        if seconds <= 0 {
+            return .milliseconds(50)
+        }
+
+        switch state.status {
+        case .preparing:
+            return .seconds(min(seconds, 5))
+        case .failedRetryable:
+            return .seconds(min(max(seconds, 10), 60))
+        case .ready, .staleReady:
+            return .seconds(seconds)
+        }
+    }
+
+    private func cancelCompanyLoadRetry(for ticker: String) {
+        let normalized = normalizedTicker(ticker)
+        companyRetryTasks[normalized]?.cancel()
+        companyRetryTasks.removeValue(forKey: normalized)
+    }
+
+    private func cancelAllCompanyLoadRetries() {
+        for task in companyRetryTasks.values {
+            task.cancel()
+        }
+        companyRetryTasks = [:]
     }
 
     private func handle(_ error: Error) {
@@ -1138,6 +1212,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         companyLoadStates.removeValue(forKey: normalized)
         chatHistoryCache.removeValue(forKey: normalized)
         pendingChats.removeValue(forKey: normalized)
+        cancelCompanyLoadRetry(for: normalized)
         addingTickers.remove(normalized)
         loadingTickers.remove(normalized)
         refreshedTickersThisSession.remove(normalized)

@@ -197,7 +197,7 @@ describe("ticker-aware routes", () => {
       ticker: "GOOG",
       companyName: "Alphabet Inc.",
       cik: "0001652044",
-      retryAfterSeconds: 5,
+      retryAfterSeconds: 2,
       usage
     });
     expect(ctx.waitUntil).toHaveBeenCalledTimes(1);

@@ -243,7 +243,8 @@ enum TestFixtures {
     static func watchlistPreparingResponseData(
         ticker: String = "AAPL",
         companyName: String = "Apple Inc.",
-        cik: String = "0000320193"
+        cik: String = "0000320193",
+        retryAfterSeconds: Int = 2
     ) throws -> Data {
         try jsonData([
             "status": "preparing",
@@ -251,7 +252,7 @@ enum TestFixtures {
             "companyName": companyName,
             "cik": cik,
             "message": "SEC filing is being prepared",
-            "retryAfterSeconds": 5,
+            "retryAfterSeconds": retryAfterSeconds,
             "usage": [
                 "plan": "free",
                 "chatsUsed": 0,
