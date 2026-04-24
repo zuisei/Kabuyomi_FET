@@ -7,6 +7,23 @@ export const DEFAULT_GEMINI_MODEL = "gemma-4-31b-it";
 export const DEFAULT_GEMINI_TRANSLATION_MODEL = "gemma-4-26b-a4b-it";
 const DEFAULT_GEMINI_TIMEOUT_MS = 12_000;
 const RETRYABLE_GEMINI_STATUS_CODES = new Set([429, 500, 503, 504]);
+const SUMMARY_GENERATION_CONFIG = {
+  temperature: 0.2,
+  candidateCount: 1,
+  responseMimeType: "application/json"
+};
+const QUOTE_TRANSLATION_GENERATION_CONFIG = {
+  temperature: 0.1,
+  candidateCount: 1,
+  responseMimeType: "application/json"
+};
+const CHAT_GENERATION_CONFIG = {
+  temperature: 0,
+  topP: 0.1,
+  topK: 1,
+  candidateCount: 1,
+  responseMimeType: "application/json"
+};
 
 export async function invokeGemini(
   env: Env,
@@ -27,7 +44,7 @@ export async function invokeGemini(
         {
           model,
           includeSchema: true,
-          generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseJsonSchema }
+          generationConfig: { ...SUMMARY_GENERATION_CONFIG, responseJsonSchema }
         }
       ]
     : kind === "quote_translation"
@@ -35,15 +52,15 @@ export async function invokeGemini(
           {
             model,
             includeSchema: true,
-            generationConfig: { temperature: 0.1, responseMimeType: "application/json", responseJsonSchema }
+            generationConfig: { ...QUOTE_TRANSLATION_GENERATION_CONFIG, responseJsonSchema }
           },
-          { model, includeSchema: false, generationConfig: { temperature: 0.1, responseMimeType: "application/json" } },
+          { model, includeSchema: false, generationConfig: QUOTE_TRANSLATION_GENERATION_CONFIG },
           ...(translationFallbackModel
             ? [
                 {
                   model: translationFallbackModel,
                   includeSchema: false,
-                  generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
+                  generationConfig: QUOTE_TRANSLATION_GENERATION_CONFIG
                 }
               ]
             : [])
@@ -52,9 +69,9 @@ export async function invokeGemini(
         {
           model,
           includeSchema: true,
-          generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseJsonSchema }
+          generationConfig: { ...CHAT_GENERATION_CONFIG, responseJsonSchema }
         },
-        { model, includeSchema: false, generationConfig: { temperature: 0.2, responseMimeType: "application/json" } }
+        { model, includeSchema: false, generationConfig: CHAT_GENERATION_CONFIG }
       ];
 
   for (const [index, attempt] of attempts.entries()) {

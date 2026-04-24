@@ -28,6 +28,17 @@ export async function maybeAppendWebSupplement(
     return response;
   }
 
+  if (!shouldAttachWebSupplement(supplement, question)) {
+    logEvent("chat_web_supplement_skipped", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      publisher: supplement.publisher || "unknown",
+      sourceStrength: supplement.evidenceStrength,
+      reason: "weak_snippet_without_stock_reaction"
+    });
+    return response;
+  }
+
   const webSentence = buildWebSupplementSentence(supplement, question);
   if (!webSentence) {
     return response;
@@ -96,6 +107,14 @@ function shouldUseWebSupplement(question: string, answer: string): boolean {
     (asksGrowthDrivers && hasFilingLimitSignal) ||
     (asksBroaderFilingAdjacentContext && hasFilingLimitSignal)
   );
+}
+
+function shouldAttachWebSupplement(supplement: WebSupplementRecord, question: string): boolean {
+  if (supplement.evidenceStrength === "supplement_article") {
+    return true;
+  }
+
+  return isStockReactionQuestion(question) && extractStockReaction(supplement) !== null;
 }
 
 function buildStockReactionMergedAnswer(
@@ -348,6 +367,8 @@ function trimStockContextLimitation(answer: string): string {
   return answer
     .replace(/株の強弱をみるには、実際の株価推移や決算後ニュースも併せて確認する必要があります。?/g, "")
     .replace(/まず決算で確認できる数字を押さえ、そのうえで株価推移や決算後ニュースを別で見るのが安全です。?/g, "")
+    .replace(/このあと見るなら、実際の株価推移や決算後ニュースをこの決算の数字と並べると強弱を掴みやすいです。?/g, "")
+    .replace(/次に見るなら、株価推移や決算後ニュースをこの数字と並べると強弱を掴みやすいです。?/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }

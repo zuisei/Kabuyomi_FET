@@ -241,6 +241,81 @@ describe("Gemini local chat fallback", () => {
     expect(response.sourceIds).toEqual(["S2", "S4"]);
   });
 
+  it("uses deterministic generation settings for remote chat requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer: "売上高は 1,000ドル です。",
+                      sourceIds: ["S1"]
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await generateChatAnswer(
+      {
+        GEMINI_API_KEY: "test-key"
+      } as never,
+      {
+        question: "売上高は？",
+        filing: {
+          filingKey: "v1:0000000000:000000000000001000",
+          ticker: "TEST",
+          companyName: "Test Corp",
+          cik: "0000000000",
+          formType: "10-Q",
+          filedAt: "2026-04-14",
+          periodOfReport: "2026-03-31",
+          primaryDocumentUrl: "https://example.com",
+          mdaText: "",
+          mdaTokenCount: 0,
+          metrics: [],
+          generatedAt: "2026-04-14T00:00:00.000Z",
+          extractorVersion: "v1",
+          promptVersion: "v1",
+          summary: { verdict: "", highlights: [], changes: [] },
+          sourceChunks: [
+            {
+              sourceId: "S1",
+              sectionType: "xbrl_metric",
+              sectionTitle: "売上高",
+              sourceLabel: "XBRL 売上高 (Revenue)",
+              text: "売上高: 1000 USD",
+              startOffset: 0,
+              endOffset: 0,
+              tagName: "Revenue",
+              sortOrder: 1
+            }
+          ]
+        }
+      }
+    );
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const body = JSON.parse(String(init?.body));
+    expect(body.generationConfig).toMatchObject({
+      temperature: 0,
+      topP: 0.1,
+      topK: 1,
+      candidateCount: 1,
+      responseMimeType: "application/json"
+    });
+    expect(body.generationConfig.responseJsonSchema).toBeTruthy();
+  });
+
   it("matches Japanese questions against source text without whitespace tokenization", async () => {
     const response = await generateChatAnswer({} as never, {
       question: "利益率悪化の主因は？",

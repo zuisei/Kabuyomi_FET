@@ -403,9 +403,16 @@ describe("buildChatResponse", () => {
 
       if (url === "https://www.reuters.com/business/apple-earnings") {
         return {
-          ok: false,
-          status: 401,
-          text: async () => ""
+          ok: true,
+          status: 200,
+          text: async () => `
+            <html>
+              <head>
+                <meta name="description" content="Apple forecast higher-than-expected revenue growth, powered by strong demand for its iPhones and services growth as China rebounds.">
+                <title>Apple forecasts strong sales growth as iPhone demand rebounds</title>
+              </head>
+            </html>
+          `
         } as Response;
       }
 
@@ -422,7 +429,7 @@ describe("buildChatResponse", () => {
     );
 
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
-    expect(response.answer).toContain("検索 snippet の弱い外部補足では Reuters が");
+    expect(response.answer).toContain("外部補足では Reuters が");
     expect(response.answer).toContain("iPhone需要");
     expect(response.answer).toContain("サービス事業の伸び");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7", "W1"]);
@@ -432,9 +439,9 @@ describe("buildChatResponse", () => {
     expect(response.sources[0]?.sourceUrl).toBe(filing.primaryDocumentUrl);
     expect(response.sources[1]?.sourceUrl).toBe(filing.primaryDocumentUrl);
     expect(response.sources[2]?.sourceUrl).toBe("https://www.reuters.com/business/apple-earnings");
-    expect(response.sources[2]?.sourceStrength).toBe("supplement_snippet");
-    expect(response.sources[2]?.sourceLabel).toContain("Weak external supplement");
-    expect(response.sources[2]?.excerpt).toContain("Search snippet:");
+    expect(response.sources[2]?.sourceStrength).toBe("supplement_article");
+    expect(response.sources[2]?.sourceLabel).toContain("External supplement");
+    expect(response.sources[2]?.excerpt).not.toContain("Search snippet:");
   });
 
   it("still appends a web supplement when Gemini returns a terse filing-only answer", async () => {
@@ -477,9 +484,16 @@ describe("buildChatResponse", () => {
 
       if (url === "https://www.reuters.com/business/apple-earnings") {
         return {
-          ok: false,
-          status: 401,
-          text: async () => ""
+          ok: true,
+          status: 200,
+          text: async () => `
+            <html>
+              <head>
+                <meta property="og:description" content="Apple forecast higher-than-expected revenue growth, powered by strong demand for its iPhones and services growth as China rebounds.">
+                <title>Apple forecasts strong sales growth as iPhone demand rebounds</title>
+              </head>
+            </html>
+          `
         } as Response;
       }
 
@@ -496,7 +510,7 @@ describe("buildChatResponse", () => {
     );
 
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7", "W1"]);
-    expect(response.answer).toContain("検索 snippet の弱い外部補足では Reuters が");
+    expect(response.answer).toContain("外部補足では Reuters が");
   });
 
   it("replaces weak model citations with a stronger filing-backed local fallback", async () => {
@@ -651,9 +665,16 @@ describe("buildChatResponse", () => {
 
       if (url === "https://www.reuters.com/business/apple-guidance") {
         return {
-          ok: false,
-          status: 401,
-          text: async () => ""
+          ok: true,
+          status: 200,
+          text: async () => `
+            <html>
+              <head>
+                <meta name="description" content="Apple forecast higher-than-expected revenue growth for the March quarter, powered by strong demand for its iPhones and a rebound in China.">
+                <title>Apple forecasts strong sales growth as iPhone demand rebounds</title>
+              </head>
+            </html>
+          `
         } as Response;
       }
 
@@ -670,13 +691,13 @@ describe("buildChatResponse", () => {
     );
 
     expect(response.answer).toContain("見通しは、会社が出している需要・リスクの言い方");
-    expect(response.answer).toContain("検索 snippet の弱い外部補足では Reuters が");
+    expect(response.answer).toContain("外部補足では Reuters が");
     expect(response.answer).toContain("会社見通し");
     expect(response.sources.map((source) => source.sourceKind)).toEqual(["sec_filing", "sec_filing", "web_supplement"]);
-    expect(response.sources.at(-1)?.sourceStrength).toBe("supplement_snippet");
+    expect(response.sources.at(-1)?.sourceStrength).toBe("supplement_article");
   });
 
-  it("adds a contrastive market explanation from web supplements for despite-style stock questions", async () => {
+  it("keeps despite-style stock questions filing-grounded when only weak snippets are available", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 
@@ -711,10 +732,14 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: true }
     );
 
-    expect(response.answer).toContain("検索 snippet の弱い外部補足では Reuters が");
-    expect(response.answer).toContain("会社見通し");
-    expect(response.sources.at(-1)?.sourceKind).toBe("web_supplement");
-    expect(response.sources.at(-1)?.sourceStrength).toBe("supplement_snippet");
+    expect(response.answer).toContain("たしかに、提出資料では");
+    expect(response.answer).not.toContain("検索 snippet の弱い外部補足では Reuters が");
+    expect(response.sources.map((source) => source.sourceKind)).toEqual([
+      "sec_filing",
+      "sec_filing",
+      "sec_filing",
+      "sec_filing"
+    ]);
   });
 
   it("uses Reuters-style stock reaction context for broad recent stock questions", async () => {
@@ -756,6 +781,7 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("反応チャート:");
     expect(response.answer).toContain("↗ 3.2%");
     expect(response.answer).toContain("今回の決算から見ると、足元はやや強めです");
+    expect(response.answer).not.toContain("実際の株価推移や決算後ニュースをこの決算の数字と並べる");
     expect(response.answer).toContain("値動き自体は検索 snippet ベースの弱い外部補足で、なぜそう見られたかの整理は今回の決算資料に基づいています");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S12", "W1"]);
     expect(response.sources.at(-1)?.sourceKind).toBe("web_supplement");
@@ -854,9 +880,16 @@ describe("buildChatResponse", () => {
 
       if (url === "https://www.reuters.com/business/apple-earnings") {
         return {
-          ok: false,
-          status: 401,
-          text: async () => ""
+          ok: true,
+          status: 200,
+          text: async () => `
+            <html>
+              <head>
+                <meta name="description" content="Apple forecast higher-than-expected revenue growth, powered by strong demand for its iPhones and services growth as China rebounds.">
+                <title>Apple forecasts strong sales growth as iPhone demand rebounds</title>
+              </head>
+            </html>
+          `
         } as Response;
       }
 
