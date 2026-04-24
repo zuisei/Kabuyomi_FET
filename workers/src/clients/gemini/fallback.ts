@@ -10,6 +10,7 @@ type QuestionProfile = {
   asksMarketReaction: boolean;
   asksStockContext: boolean;
   asksCapitalAllocation: boolean;
+  asksBusinessOverview: boolean;
   asksRevenue: boolean;
   asksProfitability: boolean;
   asksProfit: boolean;
@@ -66,6 +67,17 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
   const metric = selectRelevantMetric(input.filing, profile);
   const metricSourceId = metric ? findMetricSourceId(input.filing, metric) : undefined;
   const narrative = selectRelevantNarrative(input.filing, profile, metricSourceId);
+
+  if (profile.asksBusinessOverview) {
+    if (narrative) {
+      return buildNarrativeFallbackAnswer(narrative, profile);
+    }
+
+    return {
+      answer: "この決算資料の範囲では確認できません。",
+      sourceIds: []
+    };
+  }
 
   if (profile.asksStockPrice || profile.asksRecommendation || profile.asksMarketReaction || profile.asksStockContext) {
     const closest = buildClosestContextFallbackAnswer(metric, metricSourceId, narrative, profile);
@@ -134,6 +146,10 @@ function analyzeQuestion(question: string): QuestionProfile {
     asksCapitalAllocation: /(還元|自社株買い|buyback|repurchase|配当|dividend|capitalallocation|株主還元)/.test(
       normalized
     ),
+    asksBusinessOverview:
+      /(なんの企業|何の企業|なんの会社|何の会社|どんな企業|どんな会社|何してる|何をしてる|何をやってる|事業内容|主な事業|事業は)/.test(
+        normalized
+      ) || /(whatdoes.*companydo|whatcompany|whatbusiness|businessmodel)/.test(normalized),
     asksRevenue: /(売上|revenue|sales|growth|増収)/.test(normalized),
     asksProfitability: /(利益率|マージン|粗利|採算|margin|profitability)/.test(normalized),
     asksProfit: /(赤字|黒字|損失|欠損|純利益|利益|netincome|netloss|netincome\(loss\)|net loss|profit|income|earnings|eps|loss)/.test(
@@ -164,6 +180,10 @@ function wantsNarrativeDepth(profile: QuestionProfile): boolean {
 }
 
 function selectRelevantMetric(filing: FilingCacheRecord, profile: QuestionProfile): MetricSnapshot | undefined {
+  if (profile.asksBusinessOverview) {
+    return undefined;
+  }
+
   if (profile.asksCashFlow || profile.asksCapitalAllocation) {
     return filing.metrics.find((metric) => metric.logicalName === "operatingCashFlow");
   }
@@ -230,6 +250,12 @@ function selectRelevantNarrative(
 
   if (profile.asksCashFlow) {
     return cashFlowNarrative ?? capitalNarrative ?? driverNarrative;
+  }
+
+  if (profile.asksBusinessOverview) {
+    return findNarrative(
+      /precision oncology|oncology|cancer|tumor|screening|diagnostic|blood[- ]based|liquid biopsy|molecular|biopharmaceutical|revenue by|disaggregation of revenue|vehicle sales|automotive|energy generation and storage|subscription and services|transaction revenue|cloud|advertising/
+    ) ?? driverNarrative;
   }
 
   if (profile.asksGuidance || profile.asksForecast) {
@@ -323,11 +349,44 @@ function buildClosestContextFallbackAnswer(
 }
 
 function buildNarrativeFallbackAnswer(narrative: SourceChunkRecord, profile: QuestionProfile): GeminiChatAnswer {
+  if (profile.asksBusinessOverview) {
+    return {
+      answer: summarizeBusinessNarrativeEvidence(narrative),
+      sourceIds: [narrative.sourceId]
+    };
+  }
+
   const limitation = buildNarrativeFallbackLimitation(profile);
   return {
     answer: limitation ? `${summarizeNarrativeEvidence(narrative, profile)} ${limitation}` : summarizeNarrativeEvidence(narrative, profile),
     sourceIds: [narrative.sourceId]
   };
+}
+
+function summarizeBusinessNarrativeEvidence(narrative: SourceChunkRecord): string {
+  const labels: string[] = [];
+  const text = narrative.text;
+  const add = (label: string, pattern: RegExp) => {
+    if (pattern.test(text) && !labels.includes(label)) {
+      labels.push(label);
+    }
+  };
+
+  add("がん領域の精密医療", /precision oncology|oncology/i);
+  add("がん検査・診断", /cancer|tumor|screening|diagnostic/i);
+  add("血液検査・分子診断", /blood[- ]based|liquid biopsy|molecular|genomic/i);
+  add("製薬会社向けサービス", /biopharmaceutical|pharmaceutical|clinical trial/i);
+  add("車両販売・関連サービス", /automotive|vehicle sales|deliveries and servicing/i);
+  add("エネルギー生成・蓄電", /energy generation and storage|energy storage/i);
+  add("クラウドサービス", /cloud|azure/i);
+  add("広告", /advertising|\bads\b/i);
+  add("サブスク・サービス", /subscription and services|subscription/i);
+
+  if (labels.length > 0) {
+    return `この会社は、提出資料から見ると、${labels.slice(0, 4).join("、")}を主な事業にする会社です。`;
+  }
+
+  return `この会社は、提出資料の本文では「${truncateExcerpt(narrative.text, 120)}」という文脈で説明されています。`;
 }
 
 function buildMetricObservation(metric: MetricSnapshot): string {
