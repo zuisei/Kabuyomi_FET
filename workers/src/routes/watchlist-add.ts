@@ -11,7 +11,7 @@ import type { RouteHandler } from "./types";
 const WATCHLIST_PAYLOAD_MAX_BYTES = 1_024;
 const WATCHLIST_ASYNC_MODE_HEADER = "x-kabuyomi-watchlist-mode";
 const WATCHLIST_PREPARING_MESSAGE = "SEC filing is being prepared";
-const WATCHLIST_PREPARING_RETRY_AFTER_SECONDS = 5;
+const WATCHLIST_PREPARING_RETRY_AFTER_SECONDS = 2;
 
 export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env, config, ctx }) => {
   if (!(request.method === "POST" && url.pathname === "/v1/watchlist/add")) {

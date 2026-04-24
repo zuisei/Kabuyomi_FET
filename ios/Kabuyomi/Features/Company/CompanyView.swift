@@ -56,6 +56,10 @@ struct CompanyView: View {
         appModel.companyLoadState(for: currentTicker)
     }
 
+    private var isCurrentCompanyLoading: Bool {
+        appModel.isCompanyLoading(currentTicker)
+    }
+
     private var savedCompanies: [WatchlistCard] {
         appModel.watchlist
     }
@@ -246,7 +250,7 @@ struct CompanyView: View {
                 formType: company?.formType,
                 companyWebsiteURL: companyWebsiteURL,
                 isSaved: isCurrentTickerSaved,
-                isLoading: appModel.companyIsLoading,
+                isLoading: isCurrentCompanyLoading,
                 canOpenSummary: company != nil,
                 openLibrary: { openPanel(.library) },
                 openCompanyWebsite: openCompanyWebsite,
@@ -279,7 +283,7 @@ struct CompanyView: View {
             } else {
                 ConversationLoadingState(
                     ticker: currentTicker,
-                    isLoading: appModel.companyIsLoading,
+                    isLoading: isCurrentCompanyLoading,
                     loadState: companyLoadState
                 )
             }
@@ -299,7 +303,7 @@ struct CompanyView: View {
 
     private var composerPlaceholder: String {
         guard company != nil else {
-            if appModel.companyIsLoading {
+            if isCurrentCompanyLoading {
                 return "\(currentTicker) を読み込み中..."
             }
 

@@ -550,7 +550,11 @@ struct ConversationLoadingState: View {
     }
 
     private var titleText: String {
-        if isLoading || isPreparingState {
+        if isPreparingState {
+            return "決算資料を準備中..."
+        }
+
+        if isLoading {
             return "\(ticker) の会話を準備中..."
         }
 
@@ -567,7 +571,7 @@ struct ConversationLoadingState: View {
         }
 
         if isPreparingState {
-            return "保存は完了しました。決算資料の準備ができたら質問できます。"
+            return "保存は完了しました。準備でき次第、自動で表示します。"
         }
 
         if showsRetryableState {

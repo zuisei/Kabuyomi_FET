@@ -787,6 +787,126 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.watchlist.map(\.isPlaceholder), [true])
     }
 
+    func testPreparingCompanyLoadDoesNotWaitForRemoteFetchImmediately() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let model = makeAppModel(persistence: persistence)
+        let companyRequestCounter = ThreadSafeCounter()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            switch request.url?.path {
+            case "/v1/watchlist/add":
+                return (
+                    response,
+                    try TestFixtures.watchlistPreparingResponseData(retryAfterSeconds: 30)
+                )
+            case "/v1/company/AAPL":
+                _ = companyRequestCounter.incrementAndGet()
+                return (
+                    response,
+                    try TestFixtures.companyPayloadData(ticker: "AAPL", cik: "0000320193")
+                )
+            default:
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "free",
+                        "chatsUsed": 0,
+                        "chatLimit": 10,
+                        "stocksUsed": 0,
+                        "stockLimit": 3,
+                        "dateJST": "2026-04-18",
+                        "savedTickers": []
+                    ])
+                )
+            }
+        }
+
+        await model.addToWatchlist(
+            SearchItem(
+                ticker: "AAPL",
+                companyName: "Apple Inc.",
+                cik: "0000320193",
+                exchange: "NASDAQ",
+                latestFormType: "10-Q"
+            )
+        )
+
+        await model.loadCompany(ticker: "AAPL")
+
+        XCTAssertEqual(companyRequestCounter.count, 0)
+        XCTAssertFalse(model.isCompanyLoading("AAPL"))
+        XCTAssertEqual(model.companyLoadState(for: "AAPL")?.status, .preparing)
+    }
+
+    func testPreparingCompanyAutomaticallyRetriesUntilReady() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let model = makeAppModel(persistence: persistence)
+        let companyRequestCounter = ThreadSafeCounter()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            switch request.url?.path {
+            case "/v1/watchlist/add":
+                return (
+                    response,
+                    try TestFixtures.watchlistPreparingResponseData(retryAfterSeconds: 0)
+                )
+            case "/v1/company/AAPL":
+                let requestCount = companyRequestCounter.incrementAndGet()
+                if requestCount == 1 {
+                    return (
+                        response,
+                        try TestFixtures.jsonData([
+                            "status": "preparing",
+                            "ticker": "AAPL",
+                            "companyName": "Apple Inc.",
+                            "cik": "0000320193",
+                            "message": "SEC filing is being prepared",
+                            "retryAfterSeconds": 0
+                        ])
+                    )
+                }
+
+                return (
+                    response,
+                    try TestFixtures.companyPayloadData(ticker: "AAPL", cik: "0000320193")
+                )
+            default:
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "free",
+                        "chatsUsed": 0,
+                        "chatLimit": 10,
+                        "stocksUsed": 0,
+                        "stockLimit": 3,
+                        "dateJST": "2026-04-18",
+                        "savedTickers": []
+                    ])
+                )
+            }
+        }
+
+        await model.addToWatchlist(
+            SearchItem(
+                ticker: "AAPL",
+                companyName: "Apple Inc.",
+                cik: "0000320193",
+                exchange: "NASDAQ",
+                latestFormType: "10-Q"
+            )
+        )
+        try? await Task.sleep(nanoseconds: 250_000_000)
+
+        XCTAssertGreaterThanOrEqual(companyRequestCounter.count, 2)
+        XCTAssertNotNil(model.companyPayload(for: "AAPL"))
+        XCTAssertNil(model.companyLoadState(for: "AAPL"))
+        XCTAssertEqual(model.watchlist.map(\.isPlaceholder), [false])
+    }
+
     func testBootstrapKeepsIssuerAliasLocallyAccessibleWhenCanonicalTickerChanges() async throws {
         let cik = "0001067983"
         UserDefaults.standard.set(["BRK-A"], forKey: AppModel.savedTickersKey)
@@ -1414,6 +1534,24 @@ final class AppModelTests: XCTestCase {
         }
 
         return data.isEmpty ? nil : data
+    }
+}
+
+private final class ThreadSafeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    func incrementAndGet() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        value += 1
+        return value
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
     }
 }
 
