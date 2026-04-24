@@ -111,7 +111,7 @@ struct APIClient {
 
     func fetchCompany(
         ticker: String
-    ) async throws -> CompanyPayload {
+    ) async throws -> CompanyLoadResponse {
         try await sendRequest(
             path: "/v1/company/\(ticker)",
             headers: requestHeaders()
@@ -120,7 +120,7 @@ struct APIClient {
 
     func refreshCompany(
         ticker: String
-    ) async throws -> CompanyPayload {
+    ) async throws -> CompanyLoadResponse {
         try await sendRequest(
             path: "/v1/company/\(ticker)/refresh",
             method: "POST",

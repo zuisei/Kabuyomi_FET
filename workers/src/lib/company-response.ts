@@ -4,13 +4,19 @@ import { loadHistoricalOverview } from "./history-store";
 export async function serializeCompanyResponse(
   filing: FilingCacheRecord,
   env: Partial<Env> = {},
-  options: { displayTicker?: string; allowHistoricalPersistence?: boolean } = {}
+  options: {
+    displayTicker?: string;
+    allowHistoricalPersistence?: boolean;
+    status?: "ready" | "stale_ready";
+    statusMessage?: string;
+    retryAfterSeconds?: number;
+  } = {}
 ) {
   const historicalOverview = await loadHistoricalOverview(filing, env, {
     allowPersistence: options.allowHistoricalPersistence ?? false
   });
 
-  return {
+  const payload = {
     filingKey: filing.filingKey,
     ticker: options.displayTicker ?? filing.ticker,
     companyName: filing.companyName,
@@ -25,5 +31,16 @@ export async function serializeCompanyResponse(
     historicalOverview,
     sourceChunks: filing.sourceChunks,
     lastUpdatedAt: filing.generatedAt
+  };
+
+  if (!options.status) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    status: options.status,
+    statusMessage: options.statusMessage,
+    retryAfterSeconds: options.retryAfterSeconds
   };
 }

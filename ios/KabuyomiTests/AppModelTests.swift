@@ -158,6 +158,34 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.activeAlert)
     }
 
+    func testLoadCompanyRetryableStateDoesNotPresentAlert() async {
+        UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
+        let model = makeAppModel()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            switch request.url?.path {
+            case "/v1/company/AAPL":
+                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                let data = try TestFixtures.jsonData([
+                    "status": "failed_retryable",
+                    "ticker": "AAPL",
+                    "message": "SEC data is temporarily unavailable",
+                    "retryAfterSeconds": 60
+                ])
+                return (response, data)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        await model.loadCompany(ticker: "AAPL")
+
+        XCTAssertNil(model.activeAlert)
+        XCTAssertNil(model.companyPayload(for: "AAPL"))
+        XCTAssertEqual(model.companyLoadState(for: "AAPL")?.status, .failedRetryable)
+        XCTAssertEqual(model.companyLoadState(for: "AAPL")?.retryAfterSeconds, 60)
+    }
+
     func testBootstrapDoesNotBlockOnUsageRefresh() async {
         MockAppModelURLProtocol.requestHandler = { request in
             Thread.sleep(forTimeInterval: 1.0)
