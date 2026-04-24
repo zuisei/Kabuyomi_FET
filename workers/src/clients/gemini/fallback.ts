@@ -70,7 +70,10 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
 
   if (profile.asksBusinessOverview) {
     if (narrative) {
-      return buildNarrativeFallbackAnswer(narrative, profile);
+      return {
+        answer: summarizeBusinessNarrativeEvidence(narrative, input.filing.companyName),
+        sourceIds: [narrative.sourceId]
+      };
     }
 
     return {
@@ -175,6 +178,7 @@ function wantsNarrativeDepth(profile: QuestionProfile): boolean {
     profile.asksGuidance ||
     profile.asksForecast ||
     profile.asksRevenue ||
+    profile.asksBusinessOverview ||
     profile.asksStockContext
   );
 }
@@ -363,7 +367,7 @@ function buildNarrativeFallbackAnswer(narrative: SourceChunkRecord, profile: Que
   };
 }
 
-function summarizeBusinessNarrativeEvidence(narrative: SourceChunkRecord): string {
+function summarizeBusinessNarrativeEvidence(narrative: SourceChunkRecord, companyName?: string): string {
   const labels: string[] = [];
   const text = narrative.text;
   const add = (label: string, pattern: RegExp) => {
@@ -383,7 +387,8 @@ function summarizeBusinessNarrativeEvidence(narrative: SourceChunkRecord): strin
   add("サブスク・サービス", /subscription and services|subscription/i);
 
   if (labels.length > 0) {
-    return `この会社は、提出資料から見ると、${labels.slice(0, 4).join("、")}を主な事業にする会社です。`;
+    const subject = companyName ? `${companyName}は` : "この会社は";
+    return `${subject}、提出資料から見ると、${labels.slice(0, 4).join("、")}を主な事業にする会社です。`;
   }
 
   return `この会社は、提出資料の本文では「${truncateExcerpt(narrative.text, 120)}」という文脈で説明されています。`;

@@ -90,7 +90,7 @@ export async function generateChatAnswer(env: Env, input: ChatPromptInput): Prom
     usedRemoteModel: normalized.usedRemoteModel
   });
 
-  if (shouldRecoverLowQualityChatAnswer(input, recovered.answer)) {
+  if (shouldRecoverLowQualityChatAnswer(input, recovered.answer, recovered.sourceIds)) {
     logEvent("gemini_fallback_used", { kind: "chat", reason: "low_quality_answer" });
     return localChatFallback(input);
   }
@@ -128,9 +128,13 @@ function logSchemaMismatch(kind: "summary" | "chat" | "quote_translation", paylo
   });
 }
 
-function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: string): boolean {
-  const normalizedQuestion = input.question.toLowerCase();
+function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: string, sourceIds: string[]): boolean {
+  const normalizedQuestion = input.question.replace(/\s+/g, "").toLowerCase();
   const normalizedAnswer = answer.toLowerCase();
+  const asksBusinessOverview =
+    /(なんの企業|何の企業|なんの会社|何の会社|どんな企業|どんな会社|何してる|何をしてる|何をやってる|事業内容|主な事業|事業は)/.test(
+      normalizedQuestion
+    ) || /(whatdoes.*companydo|whatcompany|whatbusiness|businessmodel)/.test(normalizedQuestion);
   const asksProfitCause =
     /(赤字|黒字|損失|欠損|純利益|利益|net income|net loss|profit|income|earnings|loss)/.test(normalizedQuestion) &&
     /(主因|要因|原因|理由|なぜ|背景|何が|driver|cause|why)/.test(normalizedQuestion);
@@ -166,6 +170,37 @@ function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: strin
       /(売上高|営業利益|純利益|前年比|前年同期比|revenue|operating income|net income)/.test(normalizedAnswer);
 
     if (leansOnMetricsOnly && !mentionsStockContext) {
+      return true;
+    }
+  }
+
+  if (asksBusinessOverview) {
+    const citedChunks = sourceIds
+      .map((sourceId) => input.filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId))
+      .filter((chunk): chunk is NonNullable<typeof chunk> => chunk !== undefined);
+    const citesOnlyMetrics = citedChunks.length > 0 && citedChunks.every((chunk) => chunk.sectionType === "xbrl_metric");
+    const metricIndex = firstPatternIndex(
+      normalizedAnswer,
+      /売上高|営業利益|純利益|営業cf|eps|前年比|前年同期比|revenue|operating income|net income|cash flow|growth|margin/
+    );
+    const businessIndex = firstPatternIndex(
+      normalizedAnswer,
+      /事業|主な|手がけ|提供|販売|製造|開発|運営|サービス|製品|プラットフォーム|顧客|患者|医療|検査|診断|がん|癌|腫瘍|精密医療|血液|分子|製薬|臨床研究|創薬|自動車|車両|エネルギー|蓄電|クラウド|広告|決済|サブスク|oncology|cancer|diagnostic|blood|biopharmaceutical|automotive|vehicle|energy|cloud|advertising|payment|subscription/
+    );
+    const boilerplateIndex = firstPatternIndex(
+      normalizedAnswer,
+      /一般的な注意書き|案内文|材料としては弱め|深掘りには向きません|forward-looking statements|available information|investor relations website|corporate website/
+    );
+
+    if (citesOnlyMetrics || boilerplateIndex >= 0) {
+      return true;
+    }
+
+    if (metricIndex >= 0 && (businessIndex === -1 || metricIndex < businessIndex)) {
+      return true;
+    }
+
+    if (/確認できません|分かりません|わかりません|not enough context|cannot confirm/.test(normalizedAnswer) && businessIndex === -1) {
       return true;
     }
   }
@@ -210,4 +245,9 @@ function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: strin
   const latinCount = (answer.match(/[A-Za-z]/g) ?? []).length;
   const japaneseCount = (answer.match(/[ぁ-んァ-ヶ一-龠]/g) ?? []).length;
   return !asksAboutFilingStructure && latinCount >= 40 && japaneseCount <= 12;
+}
+
+function firstPatternIndex(value: string, pattern: RegExp): number {
+  const match = pattern.exec(value);
+  return match?.index ?? -1;
 }

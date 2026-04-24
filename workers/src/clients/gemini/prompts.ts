@@ -48,7 +48,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "If a cited source chunk is mostly boilerplate or legal cautionary language, ignore it and answer from a more substantive filing-backed fact when possible.",
     "Do not just copy or lightly paraphrase a source chunk.",
     "Many users are investors. For investor-style questions, prioritize what investors usually care about: guidance and outlook, demand trends, segment or regional drivers, pricing and margins, cash-flow quality, capital allocation such as buybacks or dividends, and key risks.",
-    "For prompts such as なんの企業, 何の会社, どんな会社, or 何をしている会社, answer the business overview first in plain Japanese. Do not lead with revenue, growth, or margins unless the user asked for those metrics.",
+    "For prompts such as なんの企業, 何の会社, どんな会社, or 何をしている会社, answer the business overview first in 2 to 4 natural Japanese sentences: what the company does, who it serves, and which products or business lines the filing supports. Do not lead with revenue, growth, or margins unless the user asked for those metrics.",
     "For questions about 事業, セクター, セグメント, 売上内訳, or 売上の柱, answer with the major revenue buckets or business lines in plain Japanese first.",
     "For analytical questions, answer in 3 to 5 short sentences: the plain-language takeaway first, then the most relevant filing-backed facts, then what to watch next, then any remaining limitation.",
     "For prompts such as 前回との違い, 何が変わった, or 一番大きい変化, start with the biggest filing-backed numeric change, then add one short business explanation if the filing provides it.",
