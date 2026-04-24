@@ -154,6 +154,69 @@ describe("ticker-aware routes", () => {
     expect(mockPromoteSavedTickerAlias).not.toHaveBeenCalled();
   });
 
+  it("returns a preparing state for async watchlist add and schedules filing ingestion", async () => {
+    mockLookupTicker.mockResolvedValue({
+      ticker: "GOOG",
+      companyName: "Alphabet Inc.",
+      cik: "0001652044",
+      exchange: "Nasdaq"
+    });
+    mockConsumeStockQuotaWithMutation.mockResolvedValue({ usage, didMutate: true } as never);
+
+    let resolveFiling: (filing: unknown) => void = () => {};
+    const pendingFiling = new Promise((resolve) => {
+      resolveFiling = resolve;
+    });
+    mockEnsureLatestFiling.mockReturnValue(pendingFiling as never);
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const ctx = {
+      waitUntil: vi.fn((promise: Promise<unknown>) => {
+        waitUntilPromises.push(promise);
+      })
+    };
+
+    const response = await handleWatchlistAddRoute({
+      request: new Request("https://kabuyomi.test/v1/watchlist/add", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123",
+          "x-kabuyomi-watchlist-mode": "async"
+        },
+        body: JSON.stringify({ ticker: "GOOG" })
+      }),
+      url: new URL("https://kabuyomi.test/v1/watchlist/add"),
+      env: {} as never,
+      config: {} as never,
+      ctx: ctx as never
+    });
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({
+      status: "preparing",
+      ticker: "GOOG",
+      companyName: "Alphabet Inc.",
+      cik: "0001652044",
+      retryAfterSeconds: 5,
+      usage
+    });
+    expect(ctx.waitUntil).toHaveBeenCalledTimes(1);
+    expect(mockEnsureLatestFiling).toHaveBeenCalledWith(
+      "GOOG",
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        executionContext: ctx,
+        tickerRecord: expect.objectContaining({ ticker: "GOOG" })
+      })
+    );
+    expect(mockRefundStockQuota).not.toHaveBeenCalled();
+    expect(mockPromoteSavedTickerAlias).not.toHaveBeenCalled();
+
+    resolveFiling(makeFiling({ ticker: "GOOG" }));
+    await Promise.all(waitUntilPromises);
+  });
+
   it("promotes the requested ticker label when the issuer group was already saved", async () => {
     mockLookupTicker.mockResolvedValue({
       ticker: "BRK-B",

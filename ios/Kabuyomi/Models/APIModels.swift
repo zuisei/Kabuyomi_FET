@@ -258,8 +258,21 @@ struct SourceChunkPayload: Codable, Identifiable, Hashable {
 }
 
 struct WatchlistAddResponse: Decodable {
-    let company: CompanyPayload
+    let company: CompanyPayload?
+    let loadState: CompanyLoadStatePayload?
     let usage: UsagePayload
+
+    private enum CodingKeys: String, CodingKey {
+        case company
+        case usage
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        company = try container.decodeIfPresent(CompanyPayload.self, forKey: .company)
+        usage = try container.decode(UsagePayload.self, forKey: .usage)
+        loadState = company == nil ? try CompanyLoadStatePayload(from: decoder) : nil
+    }
 }
 
 struct WatchlistRemoveResponse: Decodable {

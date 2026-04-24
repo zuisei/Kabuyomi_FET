@@ -666,32 +666,87 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 ticker: normalized
             )
             guard stateGeneration == self.stateGeneration else { return }
-            let savedTicker = normalizedTicker(result.company.ticker)
-            try persistence.saveCompany(result.company, searchItem: searchItem)
-            companyCache.removeValue(forKey: normalized)
-            companyLoadStates.removeValue(forKey: normalized)
-            chatHistoryCache.removeValue(forKey: normalized)
-            companyCache[savedTicker] = result.company
-            companyLoadStates.removeValue(forKey: savedTicker)
-            chatHistoryCache[savedTicker] = persistence.loadCompany(ticker: savedTicker)?.chatHistory ?? []
-            accessRevokedTickers.remove(normalized)
-            accessRevokedTickers.remove(savedTicker)
-            completeInitialEntry()
-            storeUsage(result.usage, source: .watchlistAdd)
-            if result.usage.savedTickers == nil {
-                applyLocalWatchlistAddFallback(savedTicker: savedTicker, cik: result.company.cik)
-            }
-            setLastSeenFilingKey(result.company.filingKey, for: savedTicker)
-            activeConversationTicker = savedTicker
-            UserDefaults.standard.set(savedTicker, forKey: Self.activeConversationTickerKey)
-            loadHomeFromPersistence()
 
-            if redirectToConversation {
-                openConversation(for: savedTicker)
+            if let company = result.company {
+                try handleReadyWatchlistAdd(
+                    company: company,
+                    requestedTicker: normalized,
+                    searchItem: searchItem,
+                    usage: result.usage,
+                    redirectToConversation: redirectToConversation
+                )
+            } else if let loadState = result.loadState {
+                handlePendingWatchlistAdd(
+                    loadState: loadState,
+                    requestedTicker: normalized,
+                    searchItem: searchItem,
+                    usage: result.usage,
+                    redirectToConversation: redirectToConversation
+                )
+            } else {
+                throw APIError.invalidResponse
             }
         } catch {
             guard stateGeneration == self.stateGeneration else { return }
             handle(error)
+        }
+    }
+
+    private func handleReadyWatchlistAdd(
+        company: CompanyPayload,
+        requestedTicker: String,
+        searchItem: SearchItem?,
+        usage: UsagePayload,
+        redirectToConversation: Bool
+    ) throws {
+        let savedTicker = normalizedTicker(company.ticker)
+        try persistence.saveCompany(company, searchItem: searchItem)
+        companyCache.removeValue(forKey: requestedTicker)
+        companyLoadStates.removeValue(forKey: requestedTicker)
+        chatHistoryCache.removeValue(forKey: requestedTicker)
+        companyCache[savedTicker] = company
+        companyLoadStates.removeValue(forKey: savedTicker)
+        chatHistoryCache[savedTicker] = persistence.loadCompany(ticker: savedTicker)?.chatHistory ?? []
+        accessRevokedTickers.remove(requestedTicker)
+        accessRevokedTickers.remove(savedTicker)
+        completeInitialEntry()
+        storeUsage(usage, source: .watchlistAdd)
+        if usage.savedTickers == nil {
+            applyLocalWatchlistAddFallback(savedTicker: savedTicker, cik: company.cik)
+        }
+        setLastSeenFilingKey(company.filingKey, for: savedTicker)
+        activeConversationTicker = savedTicker
+        UserDefaults.standard.set(savedTicker, forKey: Self.activeConversationTickerKey)
+        loadHomeFromPersistence()
+
+        if redirectToConversation {
+            openConversation(for: savedTicker)
+        }
+    }
+
+    private func handlePendingWatchlistAdd(
+        loadState: CompanyLoadStatePayload,
+        requestedTicker: String,
+        searchItem: SearchItem?,
+        usage: UsagePayload,
+        redirectToConversation: Bool
+    ) {
+        let savedTicker = normalizedTicker(loadState.ticker)
+        accessRevokedTickers.remove(requestedTicker)
+        accessRevokedTickers.remove(savedTicker)
+        companyLoadStates[requestedTicker] = loadState
+        companyLoadStates[savedTicker] = loadState
+        completeInitialEntry()
+        storeUsage(usage, source: .watchlistAdd)
+        if usage.savedTickers == nil {
+            applyLocalWatchlistAddFallback(savedTicker: savedTicker, cik: loadState.cik ?? searchItem?.cik)
+        }
+        activeConversationTicker = savedTicker
+        UserDefaults.standard.set(savedTicker, forKey: Self.activeConversationTickerKey)
+        loadHomeFromPersistence()
+
+        if redirectToConversation {
+            openConversation(for: savedTicker)
         }
     }
 
@@ -1351,6 +1406,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         for company in companyCache.values {
             guard let cik = normalizedCIK(company.cik) else { continue }
             result[normalizedTicker(company.ticker)] = cik
+        }
+
+        for state in companyLoadStates.values {
+            guard let cik = normalizedCIK(state.cik) else { continue }
+            result[normalizedTicker(state.ticker)] = cik
         }
 
         for item in searchResults {

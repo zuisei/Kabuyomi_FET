@@ -90,10 +90,13 @@ struct APIClient {
     func addToWatchlist(
         ticker: String
     ) async throws -> WatchlistAddResponse {
-        try await sendRequest(
+        var headers = requestHeaders()
+        headers["x-kabuyomi-watchlist-mode"] = "async"
+
+        return try await sendRequest(
             path: "/v1/watchlist/add",
             method: "POST",
-            headers: requestHeaders(),
+            headers: headers,
             body: ["ticker": ticker]
         )
     }
