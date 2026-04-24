@@ -541,13 +541,16 @@ struct ConversationLoadingState: View {
     let isLoading: Bool
     let loadState: CompanyLoadStatePayload?
 
+    private var isPreparingState: Bool {
+        loadState?.status == .preparing
+    }
+
     private var showsRetryableState: Bool {
-        guard let loadState else { return false }
-        return loadState.status == .failedRetryable || loadState.status == .preparing
+        loadState?.status == .failedRetryable
     }
 
     private var titleText: String {
-        if isLoading {
+        if isLoading || isPreparingState {
             return "\(ticker) の会話を準備中..."
         }
 
@@ -563,6 +566,10 @@ struct ConversationLoadingState: View {
             return "英語の決算を日本語で読みやすくしています。"
         }
 
+        if isPreparingState {
+            return "保存は完了しました。決算資料の準備ができたら質問できます。"
+        }
+
         if showsRetryableState {
             return "SEC データの取得が一時的に失敗しました。右上の再読み込みで、少し待ってからもう一度取得できます。"
         }
@@ -574,7 +581,7 @@ struct ConversationLoadingState: View {
         VStack(spacing: 18) {
             Spacer(minLength: 48)
 
-            if isLoading {
+            if isLoading || isPreparingState {
                 ProgressView()
                     .controlSize(.large)
                     .tint(KabuyomiTheme.accentDeep)

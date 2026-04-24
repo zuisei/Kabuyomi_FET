@@ -1,6 +1,6 @@
 import { listTickersByCik, lookupTicker } from "../clients/sec";
 import { WatchlistAddRequestSchema } from "../lib/contracts";
-import { logErrorEvent } from "../lib/logging";
+import { logErrorEvent, logEvent } from "../lib/logging";
 import { ensureLatestFiling } from "../lib/pipeline";
 import { consumeStockQuotaWithMutation, promoteSavedTickerAlias, readQuotaIdentity, refundStockQuota } from "../lib/quota";
 import { json, notFound } from "../lib/response";
@@ -9,6 +9,9 @@ import { serializeCompanyResponse } from "../lib/company-response";
 import type { RouteHandler } from "./types";
 
 const WATCHLIST_PAYLOAD_MAX_BYTES = 1_024;
+const WATCHLIST_ASYNC_MODE_HEADER = "x-kabuyomi-watchlist-mode";
+const WATCHLIST_PREPARING_MESSAGE = "SEC filing is being prepared";
+const WATCHLIST_PREPARING_RETRY_AFTER_SECONDS = 5;
 
 export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env, config, ctx }) => {
   if (!(request.method === "POST" && url.pathname === "/v1/watchlist/add")) {
@@ -29,6 +32,42 @@ export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env,
   const relatedTickers = await listTickersByCik(tickerRecord.cik, env);
 
   const stockQuota = await consumeStockQuotaWithMutation(identity, tickerRecord.ticker, env, config, { relatedTickers });
+  const asyncMode = request.headers.get(WATCHLIST_ASYNC_MODE_HEADER)?.toLowerCase() === "async";
+  if (asyncMode) {
+    const usage = stockQuota.didMutate
+      ? stockQuota.usage
+      : await promoteSavedTickerAlias(identity, tickerRecord.ticker, env, config, { relatedTickers });
+
+    ctx.waitUntil(
+      ensureLatestFiling(tickerRecord.ticker, env, config, {
+        executionContext: ctx,
+        tickerRecord
+      })
+        .then((filing) => {
+          logEvent("watchlist_add_async_filing_ready", {
+            ticker: tickerRecord.ticker,
+            filingKey: filing.filingKey
+          });
+        })
+        .catch((error) => {
+          logErrorEvent("watchlist_add_async_filing_failed", {
+            ticker: tickerRecord.ticker,
+            reason: error instanceof Error ? error.message : String(error)
+          });
+        })
+    );
+
+    return json({
+      status: "preparing",
+      ticker: tickerRecord.ticker,
+      companyName: tickerRecord.companyName,
+      cik: tickerRecord.cik,
+      message: WATCHLIST_PREPARING_MESSAGE,
+      retryAfterSeconds: WATCHLIST_PREPARING_RETRY_AFTER_SECONDS,
+      usage
+    });
+  }
+
   const filing = await (async () => {
     try {
       return await ensureLatestFiling(tickerRecord.ticker, env, config, {

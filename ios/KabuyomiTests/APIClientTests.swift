@@ -33,6 +33,7 @@ final class APIClientTests: XCTestCase {
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/watchlist/add")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-watchlist-mode"), "async")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
 
             let body = try XCTUnwrap(Self.requestBodyData(from: request))
@@ -47,8 +48,30 @@ final class APIClientTests: XCTestCase {
 
         let response = try await client.addToWatchlist(ticker: "AAPL")
 
-        XCTAssertEqual(response.company.ticker, "AAPL")
+        let company = try XCTUnwrap(response.company)
+        XCTAssertEqual(company.ticker, "AAPL")
+        XCTAssertNil(response.loadState)
         XCTAssertEqual(response.usage.stocksUsed, 1)
+    }
+
+    func testAddToWatchlistDecodesPreparingState() async throws {
+        let client = makeClient(context: standardContext) { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/watchlist/add")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-watchlist-mode"), "async")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.watchlistPreparingResponseData()
+            )
+        }
+
+        let response = try await client.addToWatchlist(ticker: "AAPL")
+
+        XCTAssertNil(response.company)
+        XCTAssertEqual(response.loadState?.status, .preparing)
+        XCTAssertEqual(response.loadState?.ticker, "AAPL")
+        XCTAssertEqual(response.usage.savedTickers, ["AAPL"])
     }
 
     func testFetchCompanyDecodesCompanyWebsiteURLWhenPresent() async throws {

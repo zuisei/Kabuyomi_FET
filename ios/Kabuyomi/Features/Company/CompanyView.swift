@@ -137,7 +137,7 @@ struct CompanyView: View {
                             pendingTicker: pendingLibraryOpenItem?.ticker ?? pendingDrawerTickerOpen?.ticker,
                             pendingCompanyName: pendingLibraryOpenItem?.companyName ?? pendingDrawerTickerOpen?.companyName,
                             pendingDetail: pendingLibraryOpenItem != nil
-                                ? "追加が終わり次第、そのまま会話へ移ります。"
+                                ? "保存後に会話へ移動します。"
                                 : pendingDrawerTickerOpen?.detail,
                             selectTicker: openDrawerTicker,
                             openSearchResult: openSearchResult,
@@ -303,6 +303,10 @@ struct CompanyView: View {
                 return "\(currentTicker) を読み込み中..."
             }
 
+            if companyLoadState?.status == .preparing {
+                return "決算資料を準備中..."
+            }
+
             return "\(currentTicker) を開けませんでした。左上から別の銘柄を選択してください"
         }
 
@@ -440,7 +444,7 @@ struct CompanyView: View {
         pendingDrawerTickerOpen = PendingDrawerTickerOpen(
             ticker: normalized,
             companyName: companyName,
-            detail: "決算資料を開けたら、そのまま会話へ移ります。"
+            detail: "読み込み後に移動します。"
         )
 
         Task {

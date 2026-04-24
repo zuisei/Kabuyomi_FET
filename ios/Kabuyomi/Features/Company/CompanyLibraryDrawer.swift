@@ -489,7 +489,7 @@ private struct DrawerSearchRow: View {
 
     private var actionTitle: String {
         if isAdding {
-            return "開いています"
+            return "準備中"
         }
 
         if isSaved {

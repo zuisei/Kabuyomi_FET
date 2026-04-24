@@ -727,6 +727,66 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.isTickerInWatchlist("BRK.A", cik: cik))
     }
 
+    func testAddToWatchlistOpensConversationWhileCompanyIsPreparing() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let model = makeAppModel(persistence: persistence)
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            switch request.url?.path {
+            case "/v1/watchlist/add":
+                XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-watchlist-mode"), "async")
+                return (
+                    response,
+                    try TestFixtures.watchlistPreparingResponseData()
+                )
+            case "/v1/company/AAPL":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "status": "preparing",
+                        "ticker": "AAPL",
+                        "companyName": "Apple Inc.",
+                        "cik": "0000320193",
+                        "message": "SEC filing is being prepared",
+                        "retryAfterSeconds": 5
+                    ])
+                )
+            default:
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "free",
+                        "chatsUsed": 0,
+                        "chatLimit": 10,
+                        "stocksUsed": 0,
+                        "stockLimit": 3,
+                        "dateJST": "2026-04-18",
+                        "savedTickers": []
+                    ])
+                )
+            }
+        }
+
+        await model.addToWatchlist(
+            SearchItem(
+                ticker: "AAPL",
+                companyName: "Apple Inc.",
+                cik: "0000320193",
+                exchange: "NASDAQ",
+                latestFormType: "10-Q"
+            )
+        )
+
+        XCTAssertTrue(model.isTickerInWatchlist("AAPL", cik: "0000320193"))
+        XCTAssertEqual(model.activeConversationTicker, "AAPL")
+        XCTAssertNil(model.companyPayload(for: "AAPL"))
+        XCTAssertEqual(model.companyLoadState(for: "AAPL")?.status, .preparing)
+        XCTAssertEqual(model.watchlist.map(\.ticker), ["AAPL"])
+        XCTAssertEqual(model.watchlist.map(\.isPlaceholder), [true])
+    }
+
     func testBootstrapKeepsIssuerAliasLocallyAccessibleWhenCanonicalTickerChanges() async throws {
         let cik = "0001067983"
         UserDefaults.standard.set(["BRK-A"], forKey: AppModel.savedTickersKey)

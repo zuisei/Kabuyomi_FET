@@ -25,7 +25,7 @@ struct SearchView: View {
                         TickerOpenTransitionOverlay(
                             ticker: pendingOpenItem.ticker,
                             companyName: pendingOpenItem.companyName,
-                            detail: "初回は決算資料の取得があるため、数秒かかることがあります。"
+                            detail: "初回だけ数秒かかります。"
                         )
                     }
 
@@ -239,7 +239,7 @@ private struct SearchResultCard: View {
 
     private var buttonTitle: String {
         if isAdding {
-            return "開いています"
+            return "準備中"
         }
 
         if isAdded {
@@ -274,13 +274,14 @@ struct TickerOpenTransitionOverlay: View {
                 .tint(KabuyomiTheme.accentDeep)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(ticker) を開いています...")
+                Text("会話を準備中")
                     .font(.system(.subheadline, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.ink)
 
                 Text(companyName)
                     .font(.system(.caption, design: .rounded, weight: .semibold))
                     .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .lineLimit(1)
 
                 Text(detail)
                     .font(.system(.caption2, design: .rounded))
