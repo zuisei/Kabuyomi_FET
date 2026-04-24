@@ -22,6 +22,7 @@ type QuestionProfile = {
   asksStockPrice: boolean;
   asksRecommendation: boolean;
   asksForecast: boolean;
+  asksDurability: boolean;
 };
 
 export function localSummaryFallback(input: SummaryPromptInput): SummaryRecord {
@@ -86,6 +87,13 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
     const closest = buildClosestContextFallbackAnswer(metric, metricSourceId, narrative, profile);
     if (closest) {
       return closest;
+    }
+  }
+
+  if (profile.asksDurability) {
+    const durability = buildDurabilityFallbackAnswer(input.filing, profile);
+    if (durability) {
+      return durability;
     }
   }
 
@@ -165,7 +173,11 @@ function analyzeQuestion(question: string): QuestionProfile {
     asksProductMix: /(iphone|services|cloud|広告|ads|product mix|サービス|クラウド)/.test(normalized),
     asksStockPrice: /(株価|shareprice|stockprice)/.test(normalized),
     asksRecommendation: /(買いか|売りか|おすすめ|投資判断|recommend)/.test(normalized),
-    asksForecast: /(今後|この先|予想|forecast)/.test(normalized)
+    asksForecast: /(今後|この先|予想|forecast)/.test(normalized),
+    asksDurability:
+      /(一時的|一過性|一時要因|一回限り|単発|継続|持続|続く|続きそう|構造的|恒常|今後も|来期も|短期|長期|temporary|transitory|one[- ]?time|one[- ]?off|recurring|sustain|continue|ongoing)/.test(
+        normalized
+      ) && /(要因|原因|理由|影響|それ|その|この|driver|cause|factor)/.test(normalized)
   };
 }
 
@@ -177,6 +189,7 @@ function wantsNarrativeDepth(profile: QuestionProfile): boolean {
     profile.asksTariff ||
     profile.asksGuidance ||
     profile.asksForecast ||
+    profile.asksDurability ||
     profile.asksRevenue ||
     profile.asksBusinessOverview ||
     profile.asksStockContext
@@ -268,6 +281,10 @@ function selectRelevantNarrative(
 
   if (profile.asksRisk) {
     return riskNarrative ?? driverNarrative;
+  }
+
+  if (profile.asksDurability) {
+    return guidanceNarrative ?? riskNarrative ?? driverNarrative;
   }
 
   if (profile.asksProfit && profile.asksCause) {
@@ -365,6 +382,108 @@ function buildNarrativeFallbackAnswer(narrative: SourceChunkRecord, profile: Que
     answer: limitation ? `${summarizeNarrativeEvidence(narrative, profile)} ${limitation}` : summarizeNarrativeEvidence(narrative, profile),
     sourceIds: [narrative.sourceId]
   };
+}
+
+function buildDurabilityFallbackAnswer(filing: FilingCacheRecord, profile: QuestionProfile): GeminiChatAnswer | null {
+  const narrative = selectDurabilityNarrative(filing.sourceChunks);
+  const metric = selectRelevantMetric(filing, {
+    ...profile,
+    asksRevenue: profile.asksRevenue || (!profile.asksProfit && !profile.asksProfitability && !profile.asksCashFlow)
+  });
+  const metricSourceId = metric ? findMetricSourceId(filing, metric) : undefined;
+  const sourceIds: string[] = [];
+  const parts: string[] = [];
+
+  if (narrative) {
+    sourceIds.push(narrative.sourceId);
+    parts.push(buildDurabilityLead(narrative));
+    parts.push(summarizeDurabilityEvidence(narrative));
+  } else {
+    parts.push("この決算資料だけでは、その要因が一時的か継続的かは断定できません。");
+  }
+
+  if (metric && metricSourceId) {
+    sourceIds.push(metricSourceId);
+    parts.push(`${buildMetricObservation(metric)} ただし、この数字だけでは要因の継続性までは分かりません。`);
+  }
+
+  parts.push("次に見るなら、会社が一回限りの要因として明示しているか、次の期も同じ需要・コスト・リスクが続くと言っているかを確認するのが近いです。");
+
+  return sourceIds.length > 0
+    ? {
+        answer: parts.join(" "),
+        sourceIds: Array.from(new Set(sourceIds))
+      }
+    : null;
+}
+
+function selectDurabilityNarrative(sourceChunks: SourceChunkRecord[]): SourceChunkRecord | undefined {
+  const narratives = sourceChunks.filter(
+    (chunk) => chunk.sectionType === "md_a" && chunk.text.trim() && !isLowSignalNarrative(chunk)
+  );
+
+  return (
+    narratives.find((chunk) =>
+      /(one[- ]?time|one[- ]?off|non[- ]recurring|temporary|transitory|continue|continued|ongoing|remain|long[- ]term|sustain|recurring|expect|outlook|forecast|guidance)/i.test(
+        chunk.text
+      )
+    ) ??
+    narratives.find((chunk) =>
+      /(primarily due to|driven by|helped by|higher net sales|demand|fuel|labor|pricing|cost|margin|capacity|traffic|volume|yield|risk|uncertain|uncertainty|volatility|adverse impact)/i.test(
+        chunk.text
+      )
+    ) ??
+    narratives[0]
+  );
+}
+
+function buildDurabilityLead(narrative: SourceChunkRecord): string {
+  const lowered = narrative.text.toLowerCase();
+
+  if (/(one[- ]?time|one[- ]?off|non[- ]recurring|temporary|transitory)/i.test(lowered)) {
+    return "一時的な要因として読む材料があります。";
+  }
+
+  if (
+    /(continue|continued|ongoing|remain|long[- ]term|sustain|recurring|expect|outlook|forecast|guidance|risk|uncertain|uncertainty|volatility|fuel|labor|demand|pricing|cost)/i.test(
+      lowered
+    )
+  ) {
+    return "一時的とは断定しにくいです。";
+  }
+
+  return "この資料だけでは、一時的か継続的かは断定できません。";
+}
+
+function summarizeDurabilityEvidence(source: SourceChunkRecord): string {
+  const text = source.text.trim();
+  const lowered = text.toLowerCase();
+
+  if (/fuel/.test(lowered) && /(price|cost|availability|supply|volatility)/.test(lowered)) {
+    return "提出資料では、燃料価格や供給量の変動が業績に大きく影響しうる論点として出ています。";
+  }
+
+  const regionalDriver = text.match(/([A-Za-z ]+?)\s+net sales increased[\s\S]*?primarily due to higher net sales of ([^.]+)\./i);
+  if (regionalDriver?.[1] && regionalDriver[2]) {
+    return `提出資料では、${regionalDriver[1].trim()}の売上増は ${translateDriverList(
+      regionalDriver[2]
+    )} が主因と説明されています。`;
+  }
+
+  const generalDriver = text.match(/(?:primarily due to|driven by|helped by|powered by)\s+([^.]+)\./i);
+  if (generalDriver?.[1]) {
+    return `提出資料では、${translateDriverList(generalDriver[1])} が要因として説明されています。`;
+  }
+
+  if (/demand/.test(lowered) && /(strong|resilient|healthy|rebound|higher)/.test(lowered)) {
+    return "提出資料では、需要の強さや回復が要因として示されています。";
+  }
+
+  if (/(risk|uncertain|uncertainty|volatility|adverse impact)/.test(lowered)) {
+    return "提出資料では、この論点は業績に影響しうるリスクとして扱われています。";
+  }
+
+  return "提出資料の本文に、この要因に近い説明があります。";
 }
 
 function summarizeBusinessNarrativeEvidence(narrative: SourceChunkRecord, companyName?: string): string {
@@ -470,34 +589,34 @@ function buildNarrativeContext(narrative: SourceChunkRecord, profile: QuestionPr
 function buildMetricNextStep(profile: QuestionProfile, hasNarrative: boolean): string | null {
   if (profile.asksRevenue && (profile.asksCause || profile.asksDetail)) {
     return hasNarrative
-      ? "一番効いた順番までは置かず、まずこの本文説明と売上の伸びをセットで見るのが近いです。"
-      : "数字だけで見ると売上は伸びています。事業別・地域別の押し上げ役は、本文の追加説明があるともう一段絞れます。";
+      ? "この数字だけを見るより、本文で名前が出ている事業や地域とセットで見る方が自然です。"
+      : "数字では売上は伸びていますが、どの事業が押したかまではこの材料だけだと切れません。";
   }
 
   if (profile.asksProfit && profile.asksCause) {
     return hasNarrative
-      ? "主因はこの本文説明を軸に、費用・評価損益・税金の数字と合わせると見えやすいです。"
-      : "数字だけなら、利益の悪化幅を先に押さえてから費用や評価損益の本文を探す流れになります。";
+      ? "利益の動きは、この説明と費用・評価損益・税金の数字を並べると見えてきます。"
+      : "利益の悪化幅は見えますが、原因の切り分けには費用や評価損益の説明がもう少し必要です。";
   }
 
   if (profile.asksRisk || profile.asksTariff) {
-    return "業績への効き方は、ここではリスクとして置かれている段階です。数字とあわせて次の決算で実際の影響を見るのがよさそうです。";
+    return "ここではまだリスクとしての記載なので、実際に数字へ出たかは次の決算で追う必要があります。";
   }
 
   if (profile.asksCashFlow && profile.asksCapitalAllocation) {
-    return "還元の十分性は、営業キャッシュフロー、手元資金、配当・自社株買いの実行額を並べると判断しやすいです。";
+    return "還元余力を見るなら、営業キャッシュフロー、手元資金、配当・自社株買いの実行額を並べたいところです。";
   }
 
   if (profile.asksCapitalAllocation) {
-    return "方針の強弱は、今回の実行額と会社コメントを並べて見るのが近いです。";
+    return "方針の強さは、今回の実行額と会社コメントをあわせると見えやすくなります。";
   }
 
   if (profile.asksCashFlow) {
-    return "持続性は、次の期も営業キャッシュフローが同じ方向で出るかを見ると判断しやすいです。";
+    return "持続性は、次の期も営業キャッシュフローが同じ方向で出るか次第です。";
   }
 
   if (profile.asksGuidance || profile.asksForecast) {
-    return "見通しは、会社が出している需要・リスクの言い方と次期の数字をセットで見るのが近いです。";
+    return "見通しの強さは、会社の需要コメントやリスクの言い方がどれだけ前向きかで見たいところです。";
   }
 
   if (profile.asksProfitability && profile.asksCause) {
@@ -509,30 +628,30 @@ function buildMetricNextStep(profile: QuestionProfile, hasNarrative: boolean): s
 
 function buildClosestContextLead(profile: QuestionProfile): string {
   if (profile.asksStockPrice || profile.asksRecommendation) {
-    return "買いかどうかの判断そのものは出さず、まず決算から読める強弱を整理します。";
+    return "買いかどうかはここでは決めず、決算から見える強弱だけ拾います。";
   }
 
   if (profile.asksMarketReaction) {
-    return "株価反応そのものは外部要因も混ざるので、まず決算側で好感・警戒されやすい材料を分けます。";
+    return "株価反応は外部要因も混ざるので、決算側で好感・警戒されそうな材料に絞ります。";
   }
 
-  return "この決算資料から確認できる範囲で、近い事実を整理します。";
+  return "近い材料から見ると、こうです。";
 }
 
 function buildClosestContextLimitation(profile: QuestionProfile): string {
   if (profile.asksStockPrice || profile.asksRecommendation) {
-    return "次に見るなら、同じ期間の株価推移、決算後ニュース、会社見通しを合わせると判断しやすいです。";
+    return "実際の判断には、同じ期間の株価推移、決算後ニュース、会社見通しも必要です。";
   }
 
   if (profile.asksStockContext) {
-    return "次に見るなら、株価推移や決算後ニュースをこの数字と並べると強弱を掴みやすいです。";
+    return "実際の株価推移や決算後ニュースまで並べると、強弱はもっとはっきりします。";
   }
 
   if (profile.asksGuidance || profile.asksForecast) {
     return "具体的な見通しや外部予想との比較は、会社コメントや市場予想を追加すると精度が上がります。";
   }
 
-  return "ここから先は、同じ論点の本文や外部データがあるともう一段絞れます。";
+  return "同じ論点の本文や外部データがあると、もう少し絞れます。";
 }
 
 function buildNarrativeFallbackLimitation(profile: QuestionProfile): string | null {
@@ -558,11 +677,11 @@ function buildNarrativeFallbackLimitation(profile: QuestionProfile): string | nu
   }
 
   if (profile.asksRevenue && (profile.asksCause || profile.asksDetail)) {
-    return "一番効いた順番までは置かず、まず本文で名前が出ている要因を伸びの候補として見ます。";
+    return "寄与度の順位までは置かず、本文で名前が出ている要因を伸びの候補として見ます。";
   }
 
   if (profile.asksProfit && profile.asksCause) {
-    return "主因はこの本文説明を軸に、費用・評価損益・税金の数字と合わせると見えやすいです。";
+    return "原因はこの本文説明を軸に、費用・評価損益・税金の数字も合わせて見たいところです。";
   }
 
   if (profile.asksProfitability && profile.asksCause) {
@@ -733,7 +852,7 @@ function findMetricSourceId(filing: FilingCacheRecord, metric: MetricSnapshot): 
 }
 
 function isLowSignalNarrative(chunk: SourceChunkRecord): boolean {
-  return /available information|investor relations website|corporate website|securities and exchange commission/i.test(
+  return /available information|forward-looking statements|private securities litigation reform act|investor relations website|corporate website|securities and exchange commission|should be read in conjunction/i.test(
     chunk.text
   );
 }

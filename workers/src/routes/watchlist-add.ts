@@ -40,6 +40,7 @@ export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env,
 
     ctx.waitUntil(
       ensureLatestFiling(tickerRecord.ticker, env, config, {
+        deferFullContent: true,
         executionContext: ctx,
         tickerRecord
       })
@@ -71,6 +72,7 @@ export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env,
   const filing = await (async () => {
     try {
       return await ensureLatestFiling(tickerRecord.ticker, env, config, {
+        deferFullContent: true,
         executionContext: ctx,
         tickerRecord
       });

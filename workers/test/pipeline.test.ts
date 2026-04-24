@@ -56,7 +56,7 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
     expect(response.answer).toContain("15.7%増");
     expect(response.answer).toContain("iPhone");
-    expect(response.answer).toContain("まず本文で名前が出ている地域・製品を伸びの候補として見る");
+    expect(response.answer).toContain("本文で名前が出ている地域・製品は伸びの候補");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
     expect(response.sources.every((source) => source.sourceUrl === filing.primaryDocumentUrl)).toBe(true);
@@ -140,6 +140,44 @@ describe("buildChatResponse", () => {
     expect(response.answer).not.toContain("売上高は");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S2"]);
     expect(response.responsePath).toBe("gemini");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers business-overview prompts when remote output starts without a subject", async () => {
+    const filing = makeBusinessOverviewFiling();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer: "は、がんの血液検査と精密医療を手がける会社です。患者や医療機関向けの検査も提供しています。",
+                      sourceIds: ["S2"]
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await buildChatResponse(
+      filing,
+      "この企業はなんの企業？",
+      { GEMINI_API_KEY: "test-key" } as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.answer).toContain("Guardant Health, Inc.は");
+    expect(response.answer).not.toMatch(/^は、/);
+    expect(response.responsePath).toBe("deterministic");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -678,6 +716,55 @@ describe("buildChatResponse", () => {
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
   });
 
+  it("recovers durability follow-ups when Gemini answers with metrics and boilerplate", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.startsWith("https://generativelanguage.googleapis.com/")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        answer:
+                          "売上高は 1,437.6億ドルで、前年同期比 15.7%増です。提出資料の一般的な注意書きや案内文が中心で、材料としては弱めです。",
+                        sourceIds: ["S9", "S3"]
+                      })
+                    }
+                  ]
+                }
+              }
+            ]
+          })
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filing = makeDriverRichFiling();
+    const response = await buildChatResponse(
+      filing,
+      "その要因は一時的？",
+      { GEMINI_API_KEY: "test-key" } as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.answer).toContain("一時的");
+    expect(response.answer).toContain("断定");
+    expect(response.answer).toContain("iPhone");
+    expect(response.answer).not.toContain("一般的な注意書き");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S7", "S9"]);
+    expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+  });
+
   it("recovers to filing-first fallback when Gemini returns only invalid sourceIds", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -719,7 +806,7 @@ describe("buildChatResponse", () => {
 
     expect(response.responsePath).toBe("fallback");
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
-    expect(response.answer).toContain("見通しは、会社が出している需要・リスクの言い方");
+    expect(response.answer).toContain("見通しの強さは、会社の需要コメントやリスクの言い方");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
   });
@@ -810,7 +897,7 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: true }
     );
 
-    expect(response.answer).toContain("見通しは、会社が出している需要・リスクの言い方");
+    expect(response.answer).toContain("見通しの強さは、会社の需要コメントやリスクの言い方");
     expect(response.answer).toContain("外部補足では Reuters が");
     expect(response.answer).toContain("会社見通し");
     expect(response.sources.map((source) => source.sourceKind)).toEqual(["sec_filing", "sec_filing", "web_supplement"]);

@@ -85,12 +85,12 @@ export function createSecService(config = readConfig()) {
       });
     },
 
-    async fetchSubmissions(cik) {
+    async fetchSubmissions(cik, options = {}) {
       const root = await secJson(`https://data.sec.gov/submissions/CIK${String(cik).padStart(10, "0")}.json`, {
         cacheTtlMs: CACHE_TTL.submissions
       });
 
-      return expandSubmissionHistory(root, secJson);
+      return options.includeHistory === true ? expandSubmissionHistory(root, secJson) : root;
     },
 
     async fetchFiling({ cik, accessionNumber, primaryDocument }) {

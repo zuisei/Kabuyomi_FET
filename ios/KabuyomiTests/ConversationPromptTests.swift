@@ -10,7 +10,7 @@ final class ConversationPromptTests: XCTestCase {
         )
     }
 
-    func testConsentDismissalRestoresPendingDraftWithoutAutoSubmit() {
+    func testConsentDismissalRestoresPendingDraftWhenConsentIsNotGranted() {
         XCTAssertEqual(
             restoreDraftAfterConsentDismissal(
                 currentDraft: "   ",
@@ -61,6 +61,17 @@ final class ConversationPromptTests: XCTestCase {
         )
 
         XCTAssertEqual(text, "売上高は 451.8億ドル で、前年同期比 15.9%増 です。")
+    }
+
+    func testLocalizedAssistantDisplayTextKeepsEnglishCompanyNameBeforeJapanesePredicate() {
+        let text = localizedAssistantDisplayText(
+            "American Airlines Group Inc. は、航空輸送業を営む企業です。旅客や貨物の輸送サービスを提供しています。"
+        )
+
+        XCTAssertEqual(
+            text,
+            "American Airlines Group Inc. は、航空輸送業を営む企業です。旅客や貨物の輸送サービスを提供しています。"
+        )
     }
 
     func testStructureAssistantMessageKeepsEnumeratedReasonsInConclusion() {
@@ -285,7 +296,7 @@ final class ConversationPromptTests: XCTestCase {
 
         XCTAssertEqual(copy.eyebrow, "2期")
         XCTAssertEqual(copy.title, "EPS（Basic）の取得済み2期比較")
-        XCTAssertEqual(copy.subtitle, "同四半期。3年分のうち取得済み2期だけ表示")
+        XCTAssertEqual(copy.subtitle, "同四半期。3年分のうち取得済み2期の推移を表示")
         XCTAssertEqual(copy.note, "履歴比較は同四半期ベースです。3年分が揃うまでは取得済み期間だけ表示します。")
     }
 
@@ -299,8 +310,16 @@ final class ConversationPromptTests: XCTestCase {
 
         XCTAssertEqual(copy.eyebrow, "3年")
         XCTAssertEqual(copy.title, "3年の年次比較")
-        XCTAssertEqual(copy.subtitle, "年次で 3 年分を横並び比較")
+        XCTAssertEqual(copy.subtitle, "年次で 3 年分の推移を比較")
         XCTAssertEqual(copy.note, "履歴比較は年次ベースです。")
+    }
+
+    func testHistoricalChartScaleIncludesZeroForPositiveAndNegativeValues() {
+        let scale = historicalChartScale(values: [-3, 7])
+
+        XCTAssertEqual(scale.minValue, -3)
+        XCTAssertEqual(scale.maxValue, 7)
+        XCTAssertEqual(historicalChartY(value: 0, scale: scale, height: 100), 70, accuracy: 0.001)
     }
 
     func testHistoricalMetricSummaryTextNamesVisibleMetricOutsideScrollableTable() {
@@ -335,6 +354,56 @@ final class ConversationPromptTests: XCTestCase {
         )
     }
 
+    func testMetricYoYDisplayUsesLossLanguageWhenOperatingLossShrinks() {
+        let metric = MetricPayload(
+            logicalName: "operatingIncome",
+            tagUsed: "us-gaap:OperatingIncomeLoss",
+            value: -41_000_000,
+            unit: "USD",
+            periodEnd: "2026-03-31",
+            comparisonValue: -270_000_000,
+            yoyPercent: 84.8
+        )
+
+        let display = metricYoYDisplay(for: metric)
+
+        XCTAssertEqual(display?.text, "赤字縮小 84.8%")
+        XCTAssertEqual(display?.tone, .positive)
+        XCTAssertEqual(display?.direction, .positive)
+    }
+
+    func testMetricYoYDisplayUsesLossLanguageWhenOperatingLossWidens() {
+        let metric = MetricPayload(
+            logicalName: "operatingIncome",
+            tagUsed: "us-gaap:OperatingIncomeLoss",
+            value: -270_000_000,
+            unit: "USD",
+            periodEnd: "2026-03-31",
+            comparisonValue: -41_000_000,
+            yoyPercent: -558.5
+        )
+
+        let display = metricYoYDisplay(for: metric)
+
+        XCTAssertEqual(display?.text, "赤字拡大 558.5%")
+        XCTAssertEqual(display?.tone, .negative)
+        XCTAssertEqual(display?.direction, .negative)
+    }
+
+    func testMetricYoYDisplayKeepsSignedGrowthForRevenue() {
+        let metric = MetricPayload(
+            logicalName: "revenue",
+            tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+            value: 143_756_000_000,
+            unit: "USD",
+            periodEnd: "2026-03-28",
+            comparisonValue: 124_300_000_000,
+            yoyPercent: 15.7
+        )
+
+        XCTAssertEqual(metricYoYDisplay(for: metric)?.text, "+15.7%")
+    }
+
     func testPrimarySourceReferenceUsesFirstMatchedSourceId() {
         let company = TestFixtures.companyPayload()
 
@@ -367,5 +436,80 @@ final class ConversationPromptTests: XCTestCase {
 
         XCTAssertEqual(chips.count, 1)
         XCTAssertEqual(chips.first?.source?.sourceIdSnapshot, "metric-op")
+    }
+
+    func testDisplayableMessageSourcesDeduplicateRepeatedInvestorLabels() {
+        let company = TestFixtures.companyPayload()
+        let first = LocalMessageSourceRef(
+            id: UUID(),
+            sourceIdSnapshot: nil,
+            sourceKind: .secFiling,
+            sourceLabelSnapshot: "Part I, Item 2",
+            excerpt: "Fuel prices affect operations.",
+            sourceUrl: company.primaryDocumentUrl
+        )
+        let second = LocalMessageSourceRef(
+            id: UUID(),
+            sourceIdSnapshot: nil,
+            sourceKind: .secFiling,
+            sourceLabelSnapshot: "Item 2",
+            excerpt: "Operating results depend on fuel prices.",
+            sourceUrl: company.primaryDocumentUrl
+        )
+
+        let sources = displayableMessageSources([first, second], in: company)
+
+        XCTAssertEqual(sources.count, 1)
+        XCTAssertEqual(sources.first?.sourceLabelSnapshot, "Part I, Item 2")
+    }
+
+    func testResolvedExternalHTTPURLRejectsBareHtmlFilingNames() {
+        XCTAssertNil(resolvedExternalHTTPURL(from: "entalagreementn.htm"))
+        XCTAssertNil(resolvedExternalHTTPURL(from: "https://entalagreementn.htm"))
+    }
+
+    func testResolvedExternalHTTPURLAddsSchemeForBareCompanyDomain() {
+        XCTAssertEqual(
+            resolvedExternalHTTPURL(from: "www.alcoa.com/investors")?.absoluteString,
+            "https://www.alcoa.com/investors"
+        )
+    }
+
+    func testResolvedExternalHTTPURLAllowsHTMLPathOnRealDomain() {
+        XCTAssertEqual(
+            resolvedExternalHTTPURL(from: "www.alcoa.com/investors.html")?.absoluteString,
+            "https://www.alcoa.com/investors.html"
+        )
+    }
+
+    func testResolvedSourceURLResolvesSecRelativeFilingPathAgainstPrimaryDocument() {
+        let company = TestFixtures.companyPayload()
+        let source = LocalMessageSourceRef(
+            id: UUID(),
+            sourceIdSnapshot: nil,
+            sourceKind: .secFiling,
+            sourceLabelSnapshot: "Part I, Item 2",
+            excerpt: "Fuel prices affect operations.",
+            sourceUrl: "riskfactor.htm"
+        )
+
+        XCTAssertEqual(
+            resolvedSourceURL(for: source, in: company)?.absoluteString,
+            "https://www.sec.gov/Archives/riskfactor.htm"
+        )
+    }
+
+    func testResolvedSourceURLRejectsRelativeWebSupplementPath() {
+        let company = TestFixtures.companyPayload()
+        let source = LocalMessageSourceRef(
+            id: UUID(),
+            sourceIdSnapshot: nil,
+            sourceKind: .webSupplement,
+            sourceLabelSnapshot: "Web",
+            excerpt: "External context.",
+            sourceUrl: "article.htm"
+        )
+
+        XCTAssertNil(resolvedSourceURL(for: source, in: company))
     }
 }

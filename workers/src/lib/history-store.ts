@@ -1,5 +1,5 @@
 import type { Env, FilingCacheRecord, FilingReference, MetricSnapshot, SourceChunkRecord, TickerRecord } from "../env";
-import { fetchSubmissions, listSupportedFilings, lookupTicker, pickComparisonFiling } from "../clients/sec";
+import { fetchSubmissionsWithHistory, listSupportedFilings, lookupTicker, pickComparisonFiling } from "../clients/sec";
 import { logEvent } from "./logging";
 import type { RemoteConfig } from "./remote-config";
 
@@ -381,7 +381,7 @@ export async function backfillHistoricalFilings(
         continue;
       }
 
-      const submissions = await fetchSubmissions(tickerRecord.cik, env as Env);
+      const submissions = await fetchSubmissionsWithHistory(tickerRecord.cik, env as Env);
       const candidates = listSupportedFilings(tickerRecord, submissions)
         .filter((filingReference) => requestedForms.includes(filingReference.formType))
         .filter((filingReference) => filingReference.periodOfReport >= subtractYearsIsoDate(new Date().toISOString(), request.years))

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/clients/sec", () => ({
   fetchSubmissions: vi.fn(),
+  fetchSubmissionsWithHistory: vi.fn(),
   listTickersByCik: vi.fn(),
   listSupportedFilings: vi.fn(),
   lookupTicker: vi.fn(),
@@ -10,7 +11,7 @@ vi.mock("../src/clients/sec", () => ({
 
 import { backfillHistoricalFilings, loadHistoricalOverview, maybeBuildHistoricalChatResponse } from "../src/lib/history-store";
 import type { FilingReference } from "../src/env";
-import { fetchSubmissions, listSupportedFilings, lookupTicker } from "../src/clients/sec";
+import { fetchSubmissionsWithHistory, listSupportedFilings, lookupTicker } from "../src/clients/sec";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -151,7 +152,7 @@ describe("history backfill guardrails", () => {
       cik: "0000320193",
       exchange: "Nasdaq"
     });
-    vi.mocked(fetchSubmissions).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
+    vi.mocked(fetchSubmissionsWithHistory).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
     vi.mocked(listSupportedFilings).mockReturnValue([
       makeFiling("AAPL", "10-Q", "0001-01", "2026-03-31"),
       makeFiling("AAPL", "10-K", "0001-02", "2025-12-31"),
@@ -190,7 +191,7 @@ describe("history backfill guardrails", () => {
         cik: "0000789019",
         exchange: "Nasdaq"
       } as never);
-    vi.mocked(fetchSubmissions).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
+    vi.mocked(fetchSubmissionsWithHistory).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
     vi.mocked(listSupportedFilings)
       .mockReturnValueOnce([
         makeFiling("AAPL", "10-K", "0001-01", "2025-12-31"),
@@ -226,7 +227,7 @@ describe("history backfill guardrails", () => {
 
   it("does not spend total-cap budget on already indexed filings", async () => {
     vi.mocked(lookupTicker).mockReset();
-    vi.mocked(fetchSubmissions).mockReset();
+    vi.mocked(fetchSubmissionsWithHistory).mockReset();
     vi.mocked(listSupportedFilings).mockReset();
     vi.mocked(lookupTicker).mockResolvedValue({
       ticker: "AAPL",
@@ -234,7 +235,7 @@ describe("history backfill guardrails", () => {
       cik: "0000320193",
       exchange: "Nasdaq"
     } as never);
-    vi.mocked(fetchSubmissions).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
+    vi.mocked(fetchSubmissionsWithHistory).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
     vi.mocked(listSupportedFilings).mockReturnValue([
       makeFiling("AAPL", "10-K", "0001-01", "2025-12-31"),
       makeFiling("AAPL", "10-K", "0001-02", "2024-12-31")
@@ -312,7 +313,7 @@ describe("history backfill guardrails", () => {
       cik: `0000${ticker}`,
       exchange: "Nasdaq"
     }) as never);
-    vi.mocked(fetchSubmissions).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
+    vi.mocked(fetchSubmissionsWithHistory).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
     vi.mocked(listSupportedFilings).mockImplementation((tickerRecord: { ticker: string }) => [
       makeFiling(tickerRecord.ticker, "10-K", `${tickerRecord.ticker}-01`, "2025-12-31")
     ]);
@@ -344,7 +345,7 @@ describe("history backfill guardrails", () => {
       cik: "0001652044",
       exchange: "Nasdaq"
     } as never);
-    vi.mocked(fetchSubmissions).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
+    vi.mocked(fetchSubmissionsWithHistory).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
     vi.mocked(listSupportedFilings).mockReturnValue([
       {
         ...makeFiling("GOOG", "10-K", "0001652044-26-000018", "2025-12-31"),

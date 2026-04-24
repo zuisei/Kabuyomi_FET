@@ -1,6 +1,7 @@
 import { listTickersByCik } from "../clients/sec";
 import { resolveGeminiModel } from "../clients/gemini/request";
 import { ChatRequestSchema } from "../lib/contracts";
+import { enqueueContentUpgrade, isMetricsOnlyRecord, upgradeMetricsOnlyRecord } from "../lib/filings/content-upgrade";
 import { isCurrentCacheRecord, loadFilingByKey } from "../lib/filings/cache";
 import { buildChatResponse } from "../lib/pipeline";
 import { consumeChatQuota, ensureCompanyAccessAllowed, readQuotaIdentity, refundChatQuota } from "../lib/quota";
@@ -28,14 +29,15 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
   });
 
   try {
-    const requestedFiling = await loadFilingByKey(payload.filingKey, env);
+    let requestedFiling = await loadFilingByKey(payload.filingKey, env);
     if (!requestedFiling || !isCurrentCacheRecord(requestedFiling, config)) {
       return notFound("Filing cache not found");
     }
 
-  const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
+    const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
     const relatedTickers = await listTickersByCik(requestedFiling.cik, env);
     await ensureCompanyAccessAllowed(identity, requestedFiling.ticker, STARTER_TICKERS, env, config, { relatedTickers });
+    requestedFiling = await prepareFilingForChat(requestedFiling, env, ctx);
     const usage = await consumeChatQuota(identity, env, config);
     const startedAt = Date.now();
     const answer = await (async () => {
@@ -80,3 +82,29 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
     throw error;
   }
 };
+
+async function prepareFilingForChat(
+  filing: NonNullable<Awaited<ReturnType<typeof loadFilingByKey>>>,
+  env: Parameters<typeof upgradeMetricsOnlyRecord>[1],
+  ctx: Pick<ExecutionContext, "waitUntil">
+): Promise<NonNullable<Awaited<ReturnType<typeof loadFilingByKey>>>> {
+  if (!isMetricsOnlyRecord(filing)) {
+    return filing;
+  }
+
+  try {
+    const upgraded = await upgradeMetricsOnlyRecord(filing, env);
+    if (upgraded) {
+      return upgraded;
+    }
+  } catch (error) {
+    logErrorEvent("chat_metrics_only_upgrade_failed", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+  }
+
+  enqueueContentUpgrade(filing, env, ctx);
+  return filing;
+}

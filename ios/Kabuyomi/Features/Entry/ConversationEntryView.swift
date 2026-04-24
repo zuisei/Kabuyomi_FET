@@ -4,6 +4,7 @@ struct ConversationEntryView: View {
     @Environment(AppModel.self) private var appModel
     @State private var selectedTicker = StarterCompany.defaults.first?.ticker ?? "AAPL"
     @State private var searchPresented = false
+    private let tickerColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
 
     private var starterCompanies: [StarterCompany] {
         Array(appModel.starterCompanies.prefix(5))
@@ -15,7 +16,7 @@ struct ConversationEntryView: View {
 
     private var openingQuestions: [String] {
         [
-            "今回の一番大きい変化は？",
+            "今回の最大変化は？",
             "前回決算との違いは？",
             "利益率の推移は？"
         ]
@@ -26,13 +27,14 @@ struct ConversationEntryView: View {
             KabuyomiTheme.background.ignoresSafeArea()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    tickerCard
+                VStack(alignment: .leading, spacing: 14) {
+                    entryHeader
+                    tickerSelector
                     actionCard
                     searchButton
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 12)
+                .padding(.top, 18)
                 .padding(.bottom, 24)
             }
             .scrollBounceBehavior(.basedOnSize)
@@ -52,54 +54,50 @@ struct ConversationEntryView: View {
         }
     }
 
-    private var tickerCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("まず 1 社を選ぶ")
-                .font(.system(.title3, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.heroText)
+    private var entryHeader: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("銘柄を選ぶ")
+                .font(.system(.title2, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.ink)
 
-            Text("Kabuyomi は会話から入り、今回の変化だけでなく前回比や推移もそのまま聞けます。")
+            Text("まずはサンプル銘柄から。開いたあと、そのまま会話で深掘りできます。")
                 .font(.system(.footnote, design: .rounded, weight: .medium))
-                .foregroundStyle(KabuyomiTheme.heroSubtext)
-                .lineSpacing(2)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 2)
+    }
 
-            HStack(spacing: 8) {
-                heroFeaturePill(title: "会話", systemImage: "bubble.left.and.bubble.right.fill")
-                heroFeaturePill(title: "前回比", systemImage: "arrow.left.arrow.right")
-                heroFeaturePill(title: "推移", systemImage: "chart.line.uptrend.xyaxis")
+    private var tickerSelector: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 9) {
+                Image(systemName: "building.2.crop.circle")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("サンプルから始める")
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Text("あとから自分の銘柄も追加できます")
+                        .font(.system(.caption2, design: .rounded, weight: .medium))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                }
+
+                Spacer(minLength: 0)
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(starterCompanies) { company in
-                        tickerPill(for: company)
-                    }
+            LazyVGrid(columns: tickerColumns, spacing: 8) {
+                ForEach(starterCompanies) { company in
+                    tickerPill(for: company)
                 }
             }
         }
-        .padding(18)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .kabuyomiCard(.hero, radius: 26)
-    }
-
-    private func heroFeaturePill(title: String, systemImage: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: systemImage)
-                .font(.system(size: 11, weight: .bold))
-            Text(title)
-                .font(.system(.caption, design: .rounded, weight: .bold))
-        }
-        .foregroundStyle(KabuyomiTheme.heroText)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(
-            Capsule()
-                .fill(Color.white.opacity(0.10))
-                .overlay(
-                    Capsule()
-                        .stroke(Color.white.opacity(0.16), lineWidth: 1)
-                )
-        )
+        .kabuyomiGlass(radius: 24, tint: Color.white.opacity(0.24), stroke: Color.white.opacity(0.62))
     }
 
     private func tickerPill(for company: StarterCompany) -> some View {
@@ -107,59 +105,90 @@ struct ConversationEntryView: View {
         return Button {
             selectedTicker = company.ticker
         } label: {
-            Text(company.ticker)
-                .font(.system(.callout, design: .rounded, weight: .bold))
-                .foregroundStyle(isSelected ? KabuyomiTheme.accentDeep : KabuyomiTheme.heroText)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    Capsule()
-                        .fill(isSelected ? KabuyomiTheme.accentSoft : Color.white.opacity(0.08))
-                        .overlay(
-                            Capsule()
-                                .stroke(
-                                    isSelected ? Color.white.opacity(0.35) : Color.white.opacity(0.14),
-                                    lineWidth: isSelected ? 1.5 : 1
-                                )
-                        )
-                        .shadow(
-                            color: isSelected ? Color.black.opacity(0.18) : .clear,
-                            radius: 6,
-                            x: 0,
-                            y: 2
-                        )
-                )
+            HStack(spacing: 6) {
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .black))
+                }
+
+                Text(company.ticker)
+                    .font(.system(.callout, design: .rounded, weight: .bold))
+            }
+            .foregroundStyle(isSelected ? Color.white : KabuyomiTheme.inkSoft)
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .background(
+                Capsule()
+                    .fill(isSelected ? KabuyomiTheme.accentDeep : Color.white.opacity(0.48))
+                    .overlay(
+                        Capsule()
+                            .stroke(
+                                isSelected ? Color.white.opacity(0.26) : Color.white.opacity(0.72),
+                                lineWidth: 1
+                            )
+                    )
+                    .shadow(
+                        color: isSelected ? KabuyomiTheme.accentDeep.opacity(0.22) : Color.clear,
+                        radius: 8,
+                        x: 0,
+                        y: 4
+                    )
+            )
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .animation(.easeOut(duration: 0.12), value: isSelected)
     }
 
     private var actionCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(selectedCompany.ticker)
-                    .font(.system(.title3, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                Text(selectedCompany.companyName)
-                    .font(.system(.subheadline, design: .rounded, weight: .medium))
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(selectedCompany.ticker)
+                        .font(.system(.title3, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Text(selectedCompany.companyName)
+                        .font(.system(.subheadline, design: .rounded, weight: .medium))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.86)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .frame(width: 38, height: 38)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(KabuyomiTheme.accentSoft.opacity(0.64))
+                    )
             }
 
             Button {
                 appModel.openConversation(for: selectedCompany.ticker)
             } label: {
-                HStack {
-                    Text("\(selectedCompany.ticker) を開く")
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("決算を開く")
+                            .font(.system(.body, design: .rounded, weight: .bold))
+                        Text(selectedCompany.ticker)
+                            .font(.system(.caption, design: .rounded, weight: .bold))
+                            .opacity(0.72)
+                    }
+
                     Spacer()
+
                     Image(systemName: "arrow.right")
+                        .font(.system(size: 18, weight: .bold))
                 }
-                .font(.system(.body, design: .rounded, weight: .bold))
                 .foregroundStyle(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 13)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
                 .frame(maxWidth: .infinity)
                 .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: 19, style: .continuous)
                         .fill(
                             LinearGradient(
                                 colors: [KabuyomiTheme.accentDeep, KabuyomiTheme.accent],
@@ -168,7 +197,7 @@ struct ConversationEntryView: View {
                             )
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            RoundedRectangle(cornerRadius: 19, style: .continuous)
                                 .stroke(Color.white.opacity(0.18), lineWidth: 1)
                         )
                 )
@@ -176,40 +205,68 @@ struct ConversationEntryView: View {
             }
             .buttonStyle(.plain)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("そのまま聞く")
-                    .font(.system(.footnote, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 7) {
+                    Image(systemName: "bubble.left.and.text.bubble.right")
+                        .font(.system(size: 12, weight: .bold))
+                    Text("すぐ聞ける質問")
+                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                }
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+                .padding(.bottom, 8)
 
-                VStack(spacing: 6) {
-                    ForEach(openingQuestions, id: \.self) { question in
-                        Button {
-                            appModel.openConversation(for: selectedCompany.ticker, draftQuestion: question)
-                        } label: {
-                            HStack(spacing: 10) {
-                                Text(question)
-                                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                                    .foregroundStyle(KabuyomiTheme.ink)
-                                    .multilineTextAlignment(.leading)
-
-                                Spacer()
-
-                                Image(systemName: "arrow.right")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                            }
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 11)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .kabuyomiCard(.secondary, radius: 16)
+                VStack(spacing: 0) {
+                    ForEach(Array(openingQuestions.enumerated()), id: \.element) { index, question in
+                        openingQuestionRow(question)
+                        if index < openingQuestions.count - 1 {
+                            Divider()
+                                .overlay(KabuyomiTheme.accentSoft.opacity(0.42))
+                                .padding(.leading, 34)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(KabuyomiTheme.accentMist.opacity(0.32))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(KabuyomiTheme.accentSoft.opacity(0.24), lineWidth: 1)
+                        )
+                )
             }
         }
         .padding(16)
         .kabuyomiCard(.primary, radius: 24)
+    }
+
+    private func openingQuestionRow(_ question: String) -> some View {
+        Button {
+            appModel.openConversation(for: selectedCompany.ticker, draftQuestion: question)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.turn.down.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .frame(width: 24, height: 24)
+
+                Text(question)
+                    .font(.system(.footnote, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+
+                Spacer(minLength: 6)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.72))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
     }
 
     private var searchButton: some View {
@@ -218,8 +275,10 @@ struct ConversationEntryView: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("自分の銘柄で始める")
@@ -231,15 +290,18 @@ struct ConversationEntryView: View {
 
                 Spacer()
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                Text("検索")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(Color.white.opacity(0.48)))
             }
             .foregroundStyle(KabuyomiTheme.ink)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
             .frame(maxWidth: .infinity)
-            .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.22), stroke: Color.white.opacity(0.56))
+            .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.22), stroke: Color.white.opacity(0.58))
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())

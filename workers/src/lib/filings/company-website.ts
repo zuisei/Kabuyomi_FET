@@ -186,7 +186,7 @@ function normalizeCandidateUrl(rawValue: string | null | undefined, primaryDocum
   try {
     if (/^https?:\/\//i.test(trimmed)) {
       parsed = new URL(trimmed);
-    } else if (/^www\./i.test(trimmed) || /^[a-z0-9-]+(?:\.[a-z0-9-]+)+/i.test(trimmed)) {
+    } else if (looksLikeBareCompanyDomain(trimmed)) {
       parsed = new URL(`https://${trimmed}`);
     } else if (primaryDocumentUrl) {
       parsed = new URL(trimmed, primaryDocumentUrl);
@@ -198,7 +198,7 @@ function normalizeCandidateUrl(rawValue: string | null | undefined, primaryDocum
   }
 
   const host = parsed.hostname.toLowerCase();
-  if (!host || isBlockedHost(host)) {
+  if (!host || isBlockedHost(host) || host.endsWith(".htm") || host.endsWith(".html")) {
     return undefined;
   }
 
@@ -208,6 +208,18 @@ function normalizeCandidateUrl(rawValue: string | null | undefined, primaryDocum
 
   parsed.hash = "";
   return parsed.toString();
+}
+
+function looksLikeBareCompanyDomain(value: string): boolean {
+  const normalized = value.toLowerCase();
+  if (/^[a-z0-9_-]+\.html?(?:[?#].*)?$/i.test(normalized)) {
+    return false;
+  }
+
+  return (
+    /^www\.[a-z0-9.-]+\.[a-z]{2,}(?:[/:?#].*)?$/i.test(value) ||
+    /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:[/:?#].*)?$/i.test(value)
+  );
 }
 
 function isBlockedHost(host: string): boolean {

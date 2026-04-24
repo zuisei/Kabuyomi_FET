@@ -36,10 +36,11 @@ const server = http.createServer(async (request, response) => {
 
     if (request.url === "/internal/sec/submissions") {
       const cik = String(body?.cik ?? "").trim();
+      const includeHistory = body?.includeHistory === true;
       if (!cik) {
         return respondJson(response, 400, { error: "cik is required" });
       }
-      const payload = await service.fetchSubmissions(cik);
+      const payload = await service.fetchSubmissions(cik, { includeHistory });
       return respondJson(response, 200, payload);
     }
 

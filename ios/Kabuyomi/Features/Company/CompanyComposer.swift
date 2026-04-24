@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct ComposerBar: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     @Binding var question: String
     let isSending: Bool
     let isEnabled: Bool
@@ -10,69 +12,98 @@ struct ComposerBar: View {
     let sendAction: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            consentStatusLine
-
-            HStack(alignment: .center, spacing: 12) {
-                TextField(
-                    "",
-                    text: $question,
-                    prompt: Text(placeholder)
-                        .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.82)),
-                    axis: .vertical
-                )
-                .lineLimit(1...6)
-                .disabled(!isEnabled)
-                .font(.system(.body, design: .rounded))
-                .foregroundStyle(KabuyomiTheme.ink)
-                .frame(minHeight: 24)
-                .submitLabel(.send)
-                .onSubmit(sendAction)
-                .accessibilityLabel("質問入力")
-                .accessibilityHint(aiConsentGranted ? "入力した質問を送信できます" : "初回は同意確認後、入力内容を残します")
-
-                Button {
-                    question = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.9))
-                        .frame(width: 32, height: 32)
-                        .background(
-                            Circle()
-                                .fill(Color.white.opacity(0.72))
-                        )
-                }
-                .buttonStyle(.plain)
-                .contentShape(Circle())
-                .accessibilityLabel("入力内容を消去")
-                .accessibilityHidden(trimmedQuestion.isEmpty)
-                .opacity(trimmedQuestion.isEmpty ? 0 : 1)
-                .allowsHitTesting(!trimmedQuestion.isEmpty)
-                .animation(.easeInOut(duration: 0.15), value: trimmedQuestion.isEmpty)
-
-                Button(action: sendAction) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 18, weight: .bold))
-                        .frame(width: 44, height: 44)
-                        .foregroundStyle(sendDisabled ? KabuyomiTheme.inkMuted : .white)
-                        .background(sendButtonBackground)
-                }
-                .buttonStyle(.plain)
-                .disabled(sendDisabled)
-                .accessibilityLabel("質問を送信")
+        VStack(alignment: .leading, spacing: 8) {
+            if !aiConsentGranted {
+                consentStatusLine
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .kabuyomiGlass(
-                radius: 28,
-                tint: Color.white.opacity(0.24),
-                stroke: Color.white.opacity(0.62)
-            )
+
+            inputControls
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .kabuyomiGlass(
+            radius: 28,
+            tint: Color.white.opacity(0.28),
+            stroke: Color.white.opacity(0.66)
+        )
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 12)
+    }
+
+    @ViewBuilder
+    private var inputControls: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 10) {
+                questionField
+
+                HStack(spacing: 10) {
+                    Spacer(minLength: 0)
+                    clearButton
+                    sendButton
+                }
+            }
+        } else {
+            HStack(alignment: .center, spacing: 12) {
+                questionField
+                clearButton
+                sendButton
+            }
+        }
+    }
+
+    private var questionField: some View {
+        TextField(
+            "",
+            text: $question,
+            prompt: Text(placeholder)
+                .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.82)),
+            axis: .vertical
+        )
+        .lineLimit(1...6)
+        .disabled(!isEnabled)
+        .font(.system(.body, design: .rounded))
+        .foregroundStyle(KabuyomiTheme.ink)
+        .frame(minHeight: 24)
+        .submitLabel(.send)
+        .onSubmit(sendAction)
+        .accessibilityLabel("質問入力")
+        .accessibilityHint(aiConsentGranted ? "入力した質問を送信できます" : "初回は同意後にこの質問を送信します")
+    }
+
+    private var clearButton: some View {
+        Button {
+            question = ""
+        } label: {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.9))
+                .frame(width: 32, height: 32)
+                .background(
+                    Circle()
+                        .fill(Color.white.opacity(0.72))
+                )
+        }
+        .buttonStyle(.plain)
+        .contentShape(Circle())
+        .accessibilityLabel("入力内容を消去")
+        .accessibilityHidden(trimmedQuestion.isEmpty)
+        .opacity(trimmedQuestion.isEmpty ? 0 : 1)
+        .allowsHitTesting(!trimmedQuestion.isEmpty)
+        .animation(.easeInOut(duration: 0.15), value: trimmedQuestion.isEmpty)
+    }
+
+    private var sendButton: some View {
+        Button(action: sendAction) {
+            Image(systemName: "arrow.up")
+                .font(.system(size: 18, weight: .bold))
+                .frame(width: 44, height: 44)
+                .foregroundStyle(sendDisabled ? KabuyomiTheme.inkMuted : .white)
+                .background(sendButtonBackground)
+        }
+        .buttonStyle(.plain)
+        .disabled(sendDisabled)
+        .accessibilityLabel("質問を送信")
     }
 
     private var trimmedQuestion: String {
@@ -95,15 +126,15 @@ struct ComposerBar: View {
 
     private var consentStatusLine: some View {
         HStack(spacing: 8) {
-            Image(systemName: aiConsentGranted ? "checkmark.circle.fill" : "info.circle.fill")
+            Image(systemName: "info.circle.fill")
                 .font(.system(size: 12, weight: .bold))
 
-            Text(aiConsentGranted ? "送信前に内容を確認できます。" : "初回は同意確認後、入力内容を残します。もう一度送信してください。")
-                .lineLimit(2)
+            Text("初回は同意後にこの質問を送信します。")
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .font(.system(.caption2, design: .rounded, weight: .semibold))
-        .foregroundStyle(aiConsentGranted ? KabuyomiTheme.inkMuted : KabuyomiTheme.accentDeep)
+        .foregroundStyle(KabuyomiTheme.accentDeep)
         .padding(.horizontal, 4)
     }
 }

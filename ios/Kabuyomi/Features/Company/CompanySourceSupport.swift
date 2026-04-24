@@ -132,19 +132,93 @@ func investorFacingSourceLabel(for source: LocalMessageSourceRef, in company: Co
 
 func resolvedSourceURL(for source: LocalMessageSourceRef, in company: CompanyPayload) -> URL? {
     let fallbackURL: String?
+    let relativeBaseURL: String?
+    let allowsBareDomain: Bool
     switch source.sourceKind {
     case .secFiling:
         fallbackURL = company.primaryDocumentUrl
+        relativeBaseURL = company.primaryDocumentUrl
+        allowsBareDomain = false
     case .historicalFiling, .webSupplement:
         fallbackURL = nil
+        relativeBaseURL = nil
+        allowsBareDomain = source.sourceKind == .webSupplement
     }
 
-    guard let candidate = source.sourceUrl ?? fallbackURL,
-          let url = URL(string: candidate) else {
+    return resolvedExternalHTTPURL(
+        from: source.sourceUrl ?? fallbackURL,
+        relativeTo: relativeBaseURL,
+        allowBareDomain: allowsBareDomain
+    )
+}
+
+func resolvedExternalHTTPURL(
+    from rawValue: String?,
+    relativeTo baseValue: String? = nil,
+    allowBareDomain: Bool = true
+) -> URL? {
+    guard let trimmed = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !trimmed.isEmpty else {
         return nil
     }
 
-    return url
+    if let url = URL(string: trimmed),
+       isOpenableHTTPURL(url) {
+        return url
+    }
+
+    if allowBareDomain,
+       looksLikeBareDomain(trimmed),
+       let url = URL(string: "https://\(trimmed)"),
+       isOpenableHTTPURL(url) {
+        return url
+    }
+
+    if let baseValue,
+       let baseURL = URL(string: baseValue),
+       isOpenableHTTPURL(baseURL),
+       let url = URL(string: trimmed, relativeTo: baseURL)?.absoluteURL,
+       isOpenableHTTPURL(url) {
+        return url
+    }
+
+    return nil
+}
+
+private func isOpenableHTTPURL(_ url: URL) -> Bool {
+    guard let scheme = url.scheme?.lowercased(),
+          scheme == "http" || scheme == "https",
+          let host = url.host?.lowercased(),
+          host.contains("."),
+          !host.hasSuffix(".htm"),
+          !host.hasSuffix(".html") else {
+        return false
+    }
+
+    return true
+}
+
+private func looksLikeBareDomain(_ value: String) -> Bool {
+    let lowered = value.lowercased()
+    guard !lowered.contains("://"),
+          !lowered.hasPrefix("/"),
+          !lowered.hasPrefix("."),
+          !lowered.contains(" "),
+          !looksLikeBareHTMLFilename(lowered) else {
+        return false
+    }
+
+    return lowered.range(
+        of: #"^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:[/:?#].*)?$"#,
+        options: .regularExpression
+    ) != nil
+}
+
+private func looksLikeBareHTMLFilename(_ value: String) -> Bool {
+    value.range(
+        of: #"^[a-z0-9_-]+\.html?(?:[?#].*)?$"#,
+        options: .regularExpression
+    ) != nil
 }
 
 func sourceDocumentSearchMode(for source: LocalMessageSourceRef, in company: CompanyPayload) -> SourceDocumentSearchMode {

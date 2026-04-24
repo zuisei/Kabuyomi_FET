@@ -27,6 +27,34 @@ describe("sec fetcher client", () => {
         headers: expect.any(Headers)
       })
     );
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      cik: "0000320193",
+      includeHistory: false
+    });
+  });
+
+  it("can request expanded submission history only for history-aware paths", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchSubmissionsFromFetcher(
+      "0000320193",
+      {
+        SEC_FETCHER_BASE_URL: "http://127.0.0.1:8789",
+        SEC_FETCHER_SHARED_SECRET: "secret"
+      } as never,
+      { includeHistory: true }
+    );
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      cik: "0000320193",
+      includeHistory: true
+    });
   });
 
   it("throws a clear error when the fetcher is not configured", async () => {

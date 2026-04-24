@@ -493,7 +493,7 @@ describe("Gemini local chat fallback", () => {
     expect(response.sourceIds).toEqual(["S9"]);
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
     expect(response.answer).toContain("15.7%増");
-    expect(response.answer).toContain("事業別・地域別の押し上げ役は");
+    expect(response.answer).toContain("どの事業が押したかまでは");
     expect(response.answer).not.toContain("分かりません");
   });
 
@@ -642,7 +642,7 @@ describe("Gemini local chat fallback", () => {
     });
 
     expect(response.sourceIds).toEqual(["S9", "S1"]);
-    expect(response.answer).toContain("買いかどうかの判断そのものは出さず");
+    expect(response.answer).toContain("買いかどうかはここでは決めず");
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
     expect(response.answer).toContain("株価推移、決算後ニュース、会社見通し");
   });
@@ -709,7 +709,7 @@ describe("Gemini local chat fallback", () => {
     expect(response.sourceIds).toEqual(["S9", "S1"]);
     expect(response.answer).toContain("今回の決算から見ると、足元はやや強めです");
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
-    expect(response.answer).toContain("株価推移や決算後ニュースをこの数字と並べる");
+    expect(response.answer).toContain("実際の株価推移や決算後ニュース");
   });
 
   it("uses cash flow as the anchor for capital-allocation style questions", async () => {
@@ -1024,7 +1024,7 @@ describe("Gemini local chat fallback", () => {
     });
 
     expect(response.sourceIds).toEqual(["S9", "S1"]);
-    expect(response.answer).toContain("買いかどうかの判断そのものは出さず");
+    expect(response.answer).toContain("買いかどうかはここでは決めず");
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
   });
 
@@ -1201,7 +1201,7 @@ describe("Gemini local chat fallback", () => {
 
     expect(response.sourceIds).toEqual(["S9", "S7"]);
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
-    expect(response.answer).toContain("見通しは、会社が出している需要・リスクの言い方");
+    expect(response.answer).toContain("見通しの強さは、会社の需要コメントやリスクの言い方");
   });
 
   it("recovers revenue-only remote answers when the user asked about red-ink causes", async () => {

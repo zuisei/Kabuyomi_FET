@@ -231,7 +231,7 @@ function buildRevenueDriversAnswer(filing: FilingCacheRecord): ChatResponsePaylo
   }
   answerParts.push(
     narrative
-      ? "一番効いた順番までは置かず、まず本文で名前が出ている地域・製品を伸びの候補として見るのが自然です。"
+      ? "寄与度の順位までは切れませんが、本文で名前が出ている地域・製品は伸びの候補として見てよさそうです。"
       : "事業別・地域別の押し上げ役は、本文の追加説明があるともう一段絞れます。"
   );
 

@@ -595,6 +595,61 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.searchResults.map(\.ticker), ["BRK-B", "BRK-A"])
     }
 
+    func testSearchFailureClearsStaleResultsAndStoresInlineError() async throws {
+        let model = makeAppModel()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            guard request.url?.path == "/v1/search" else {
+                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                let data = try TestFixtures.jsonData([
+                    "plan": "free",
+                    "chatsUsed": 0,
+                    "chatLimit": 10,
+                    "stocksUsed": 0,
+                    "stockLimit": 3,
+                    "dateJST": "2026-04-18"
+                ])
+                return (response, data)
+            }
+
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "q" })?
+                .value
+
+            if query == "AAPL" {
+                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "items": [
+                            [
+                                "ticker": "AAPL",
+                                "companyName": "Apple Inc.",
+                                "cik": "0000320193",
+                                "exchange": "Nasdaq",
+                                "latestFormType": "10-K"
+                            ]
+                        ],
+                        "snapshotUpdatedAt": NSNull()
+                    ])
+                )
+            }
+
+            let response = HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!
+            let data = try TestFixtures.jsonData(["error": "SEC data is temporarily unavailable"])
+            return (response, data)
+        }
+
+        await model.search(query: "AAPL")
+        XCTAssertEqual(model.searchResults.map(\.ticker), ["AAPL"])
+        XCTAssertNil(model.searchErrorMessage)
+
+        await model.search(query: "MSFT")
+        XCTAssertTrue(model.searchResults.isEmpty)
+        XCTAssertEqual(model.searchErrorMessage, "SEC データを現在取得できません。しばらくしてから再度お試しください。")
+    }
+
     func testSendChatPresentsLocalizedTemporaryBackendFailure() async throws {
         let persistence = PersistenceController(inMemory: true)
         let company = TestFixtures.companyPayload()
@@ -785,6 +840,49 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.companyLoadState(for: "AAPL")?.status, .preparing)
         XCTAssertEqual(model.watchlist.map(\.ticker), ["AAPL"])
         XCTAssertEqual(model.watchlist.map(\.isPlaceholder), [true])
+    }
+
+    func testSaveSearchResultAddsWatchlistWithoutOpeningConversation() async throws {
+        let model = makeAppModel()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            if request.url?.path == "/v1/watchlist/add" {
+                return (
+                    response,
+                    try TestFixtures.watchlistAddResponseData(ticker: "AA", cik: "0000004281")
+                )
+            }
+
+            return (
+                response,
+                try TestFixtures.jsonData([
+                    "plan": "free",
+                    "chatsUsed": 0,
+                    "chatLimit": 10,
+                    "stocksUsed": 0,
+                    "stockLimit": 3,
+                    "dateJST": "2026-04-18",
+                    "savedTickers": []
+                ])
+            )
+        }
+
+        await model.saveSearchResult(
+            SearchItem(
+                ticker: "AA",
+                companyName: "Alcoa Corp",
+                cik: "0000004281",
+                exchange: "NYSE",
+                latestFormType: "10-K"
+            )
+        )
+
+        XCTAssertTrue(model.isTickerInWatchlist("AA", cik: "0000004281"))
+        XCTAssertEqual(model.watchlist.map(\.ticker), ["AA"])
+        XCTAssertEqual(model.companyPayload(for: "AA")?.ticker, "AA")
+        XCTAssertNil(model.activeConversationTicker)
     }
 
     func testPreparingCompanyLoadDoesNotWaitForRemoteFetchImmediately() async throws {

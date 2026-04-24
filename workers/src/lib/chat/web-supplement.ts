@@ -100,7 +100,10 @@ function shouldUseWebSupplement(question: string, answer: string): boolean {
     answer.includes("もう一段絞れます") ||
     answer.includes("伸びの候補") ||
     answer.includes("次に見るなら") ||
-    answer.includes("判断しやすい");
+    answer.includes("判断しやすい") ||
+    answer.includes("見たいところ") ||
+    answer.includes("もっとはっきりします") ||
+    answer.includes("必要です");
 
   return (
     asksCurrentOrMarketContext ||
@@ -369,6 +372,8 @@ function trimStockContextLimitation(answer: string): string {
     .replace(/まず決算で確認できる数字を押さえ、そのうえで株価推移や決算後ニュースを別で見るのが安全です。?/g, "")
     .replace(/このあと見るなら、実際の株価推移や決算後ニュースをこの決算の数字と並べると強弱を掴みやすいです。?/g, "")
     .replace(/次に見るなら、株価推移や決算後ニュースをこの数字と並べると強弱を掴みやすいです。?/g, "")
+    .replace(/実際の判断には、同じ期間の株価推移、決算後ニュース、会社見通しも必要です。?/g, "")
+    .replace(/実際の株価推移や決算後ニュースまで並べると、強弱はもっとはっきりします。?/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }

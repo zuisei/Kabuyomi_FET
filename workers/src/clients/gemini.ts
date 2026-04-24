@@ -144,6 +144,10 @@ function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: strin
     ) ||
     (/(最近|直近|足元|いま|今は|今の|このところ|ここのところ)/.test(normalizedQuestion) &&
       /(株|株価|市場|stock|share)/.test(normalizedQuestion));
+  const asksDurabilityOfCause =
+    /(一時的|一過性|一時要因|一回限り|単発|継続|持続|続く|続きそう|構造的|恒常|今後も|来期も|短期|長期|temporary|transitory|one[- ]?time|one[- ]?off|recurring|sustain|continue|ongoing)/.test(
+      normalizedQuestion
+    ) && /(要因|原因|理由|影響|それ|その|この|driver|cause|factor)/.test(normalizedQuestion);
 
   const asksAboutFilingStructure =
     /(item|md&a|risk factors|form 10-q|form 10-k|項目|どこ|どの欄|section|パート)/.test(normalizedQuestion);
@@ -175,6 +179,10 @@ function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: strin
   }
 
   if (asksBusinessOverview) {
+    if (/^[\s、。,]*(?:は|が|を|に|で)(?:[、。,\s]|$)/.test(answer)) {
+      return true;
+    }
+
     const citedChunks = sourceIds
       .map((sourceId) => input.filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId))
       .filter((chunk): chunk is NonNullable<typeof chunk> => chunk !== undefined);
@@ -201,6 +209,20 @@ function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: strin
     }
 
     if (/確認できません|分かりません|わかりません|not enough context|cannot confirm/.test(normalizedAnswer) && businessIndex === -1) {
+      return true;
+    }
+  }
+
+  if (asksDurabilityOfCause) {
+    const mentionsDurability =
+      /(一時|一過性|一回限り|単発|継続|持続|続|構造|恒常|今後|来期|断定|確認できません|見通し|リスク|次の期|次四半期|temporary|transitory|one[- ]?time|one[- ]?off|recurring|ongoing|continue|sustain)/.test(
+        normalizedAnswer
+      );
+    const leansOnBoilerplate = /(一般的な注意書き|案内文|材料としては弱め|forward-looking statements|available information|investor relations website|corporate website)/.test(
+      normalizedAnswer
+    );
+
+    if (!mentionsDurability || leansOnBoilerplate) {
       return true;
     }
   }

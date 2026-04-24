@@ -19,9 +19,15 @@ private struct CompanyStatusNotice {
     let message: String
 }
 
+private struct OptimisticSavedState: Equatable {
+    let ticker: String
+    let isSaved: Bool
+}
+
 struct CompanyView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var currentTicker: String
     @State private var question = ""
@@ -32,9 +38,10 @@ struct CompanyView: View {
     @State private var selectedSource: LocalMessageSourceRef?
     @State private var libraryPanelID = UUID()
     @State private var summaryPanelID = UUID()
-    @State private var pendingLibraryOpenItem: SearchItem?
     @State private var pendingDrawerTickerOpen: PendingDrawerTickerOpen?
+    @State private var pendingDrawerOpenTask: Task<Void, Never>?
     @State private var pendingConsentSubmission: String?
+    @State private var optimisticSavedState: OptimisticSavedState?
 
     init(ticker: String) {
         _currentTicker = State(initialValue: ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
@@ -84,12 +91,19 @@ struct CompanyView: View {
     }
 
     private var isCurrentTickerSaved: Bool {
-        appModel.isTickerInWatchlist(currentTicker, cik: company?.cik)
+        if optimisticSavedState?.ticker == normalizedCurrentTicker {
+            return optimisticSavedState?.isSaved == true
+        }
+
+        return appModel.isTickerInWatchlist(currentTicker, cik: company?.cik)
+    }
+
+    private var normalizedCurrentTicker: String {
+        currentTicker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
     }
 
     private var companyWebsiteURL: URL? {
-        guard let rawValue = company?.companyWebsiteUrl else { return nil }
-        return URL(string: rawValue)
+        resolvedExternalHTTPURL(from: company?.companyWebsiteUrl)
     }
 
     private var companyCanChat: Bool {
@@ -115,20 +129,33 @@ struct CompanyView: View {
         return nil
     }
 
+    private var isAccessibilityLayout: Bool {
+        dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var libraryDrawerMaxWidth: CGFloat {
+        isAccessibilityLayout ? .infinity : 356
+    }
+
+    private var summaryDrawerMaxWidth: CGFloat {
+        isAccessibilityLayout ? .infinity : 372
+    }
+
     var body: some View {
-        ZStack {
-            KabuyomiTheme.background.ignoresSafeArea()
+        GeometryReader { proxy in
+            ZStack {
+                KabuyomiTheme.background.ignoresSafeArea()
 
-            mainContent
-                .blur(radius: activePanel == nil ? 0 : 10)
-                .disabled(activePanel != nil)
+                mainContent
+                    .blur(radius: activePanel == nil ? 0 : 10)
+                    .disabled(activePanel != nil)
+                    .accessibilityHidden(activePanel != nil)
 
-            if activePanel != nil {
-                overlayBackdrop
-            }
+                if activePanel != nil {
+                    overlayBackdrop
+                }
 
-            if activePanel == .library {
-                HStack(spacing: 0) {
+                if activePanel == .library {
                     ZStack(alignment: .leading) {
                         ConversationLibraryDrawer(
                             query: $libraryQuery,
@@ -138,31 +165,29 @@ struct CompanyView: View {
                             starterCompanies: filteredStarterCompanies,
                             searchResults: appModel.searchResults,
                             isSearchLoading: appModel.searchIsLoading,
-                            pendingTicker: pendingLibraryOpenItem?.ticker ?? pendingDrawerTickerOpen?.ticker,
-                            pendingCompanyName: pendingLibraryOpenItem?.companyName ?? pendingDrawerTickerOpen?.companyName,
-                            pendingDetail: pendingLibraryOpenItem != nil
-                                ? "保存後に会話へ移動します。"
-                                : pendingDrawerTickerOpen?.detail,
+                            searchErrorMessage: appModel.searchErrorMessage,
+                            pendingTicker: pendingDrawerTickerOpen?.ticker,
+                            pendingCompanyName: pendingDrawerTickerOpen?.companyName,
+                            pendingDetail: pendingDrawerTickerOpen?.detail,
                             selectTicker: openDrawerTicker,
+                            saveSearchResult: saveSearchResult,
                             openSearchResult: openSearchResult,
                             openSettings: openSettingsScreen,
-                            close: closePanels
+                            close: closePanels,
+                            cancelPendingOpen: cancelPendingDrawerOpen
                         )
                         .id(libraryPanelID)
-                        .frame(maxWidth: 356)
-                        .disabled(pendingLibraryOpenItem != nil || pendingDrawerTickerOpen != nil)
+                        .frame(maxWidth: libraryDrawerMaxWidth, maxHeight: .infinity)
+                        .accessibilityElement(children: .contain)
+                        .accessibilitySortPriority(2)
 
                         CompanyDrawerEdgeBlendLayer(style: .library)
                     }
-                    .frame(maxWidth: 356, maxHeight: .infinity)
-                    Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
                 }
-                .transition(.move(edge: .leading).combined(with: .opacity))
-            }
 
-            if activePanel == .summary, let company {
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
+                if activePanel == .summary, let company {
                     ZStack(alignment: .trailing) {
                         SummaryDrawer(
                             company: company,
@@ -174,18 +199,17 @@ struct CompanyView: View {
                             close: closePanels
                         )
                         .id(summaryPanelID)
-                        .frame(maxWidth: 372)
+                        .frame(maxWidth: summaryDrawerMaxWidth, maxHeight: .infinity)
+                        .accessibilityElement(children: .contain)
+                        .accessibilitySortPriority(2)
 
                         CompanyDrawerEdgeBlendLayer(style: .summary)
                     }
-                    .frame(maxWidth: 372, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
-                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
-
-            if activePanel == nil {
-                edgeSwipeHotspots
-            }
+            .simultaneousGesture(panelSwipeGesture(screenWidth: proxy.size.width))
         }
         .toolbar(.hidden, for: .navigationBar)
         .task(id: currentTicker) {
@@ -199,6 +223,7 @@ struct CompanyView: View {
         .onChange(of: currentTicker) { _, newValue in
             question = ""
             pendingConsentSubmission = nil
+            cancelPendingDrawerOpen()
             libraryQuery = ""
             librarySearchTask?.cancel()
             Task { await appModel.search(query: "") }
@@ -215,6 +240,7 @@ struct CompanyView: View {
         }
         .onDisappear {
             librarySearchTask?.cancel()
+            pendingDrawerOpenTask?.cancel()
             pendingConsentSubmission = nil
         }
         .onChange(of: appModel.activeAlert?.id) { _, newValue in
@@ -222,7 +248,9 @@ struct CompanyView: View {
 
             self.pendingConsentSubmission = nil
 
-            if let restoredDraft = restoreDraftAfterConsentDismissal(
+            if appModel.aiConsentGranted {
+                submitQuestion(pendingConsentSubmission)
+            } else if let restoredDraft = restoreDraftAfterConsentDismissal(
                 currentDraft: question,
                 pendingSubmission: pendingConsentSubmission
             ) {
@@ -284,7 +312,9 @@ struct CompanyView: View {
                 ConversationLoadingState(
                     ticker: currentTicker,
                     isLoading: isCurrentCompanyLoading,
-                    loadState: companyLoadState
+                    loadState: companyLoadState,
+                    openLibrary: { openPanel(.library) },
+                    retry: refreshCurrentCompany
                 )
             }
         }
@@ -330,23 +360,6 @@ struct CompanyView: View {
             }
     }
 
-    private var edgeSwipeHotspots: some View {
-        HStack(spacing: 0) {
-            EdgePullZone(edge: .leading) {
-                openPanel(.library)
-            }
-
-            Spacer(minLength: 0)
-
-            EdgePullZone(edge: .trailing) {
-                if company != nil {
-                    openPanel(.summary)
-                }
-            }
-        }
-        .ignoresSafeArea()
-    }
-
     private func openPanel(_ panel: CompanySidePanel) {
         dismissKeyboard()
 
@@ -362,7 +375,54 @@ struct CompanyView: View {
         }
     }
 
+    private func panelSwipeGesture(screenWidth: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 14, coordinateSpace: .global)
+            .onEnded { value in
+                handlePanelSwipe(value, screenWidth: screenWidth)
+            }
+    }
+
+    private func handlePanelSwipe(_ value: DragGesture.Value, screenWidth: CGFloat) {
+        let translation = value.translation
+        let predicted = value.predictedEndTranslation
+        guard isHorizontalPanelSwipe(translation: translation, predicted: predicted) else { return }
+
+        if let activePanel {
+            switch activePanel {
+            case .library where translation.width < -38 || predicted.width < -72:
+                closePanels()
+            case .summary where translation.width > 38 || predicted.width > 72:
+                closePanels()
+            default:
+                break
+            }
+            return
+        }
+
+        let startX = value.startLocation.x
+        let edgeWidth = min(max(screenWidth * 0.18, 64), 84)
+
+        if startX <= edgeWidth,
+           translation.width > 34 || predicted.width > 74 {
+            openPanel(.library)
+            return
+        }
+
+        if startX >= screenWidth - edgeWidth,
+           company != nil,
+           translation.width < -34 || predicted.width < -74 {
+            openPanel(.summary)
+        }
+    }
+
+    private func isHorizontalPanelSwipe(translation: CGSize, predicted: CGSize) -> Bool {
+        let horizontal = max(abs(translation.width), abs(predicted.width) * 0.55)
+        let vertical = max(abs(translation.height), abs(predicted.height) * 0.45)
+        return horizontal >= 34 && horizontal > vertical * 1.25
+    }
+
     private func closePanels() {
+        cancelPendingDrawerOpen()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
             activePanel = nil
         }
@@ -378,11 +438,21 @@ struct CompanyView: View {
     }
 
     private func toggleSavedState() {
-        Task {
-            if isCurrentTickerSaved {
-                await appModel.removeFromWatchlist(currentTicker)
+        let normalized = normalizedCurrentTicker
+        guard optimisticSavedState?.ticker != normalized else { return }
+
+        let nextSavedState = !isCurrentTickerSaved
+        optimisticSavedState = OptimisticSavedState(ticker: normalized, isSaved: nextSavedState)
+
+        Task { @MainActor in
+            if nextSavedState {
+                await appModel.saveTicker(normalized)
             } else {
-                await appModel.saveTicker(currentTicker)
+                await appModel.removeFromWatchlist(normalized)
+            }
+
+            if optimisticSavedState == OptimisticSavedState(ticker: normalized, isSaved: nextSavedState) {
+                optimisticSavedState = nil
             }
         }
     }
@@ -420,7 +490,6 @@ struct CompanyView: View {
 
     private func selectTicker(_ ticker: String) {
         let normalized = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        pendingLibraryOpenItem = nil
         pendingDrawerTickerOpen = nil
         guard normalized != currentTicker else {
             closePanels()
@@ -433,7 +502,7 @@ struct CompanyView: View {
 
     private func openDrawerTicker(_ ticker: String, _ companyName: String) {
         let normalized = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard pendingLibraryOpenItem == nil, pendingDrawerTickerOpen == nil else { return }
+        guard pendingDrawerTickerOpen == nil else { return }
 
         if normalized == currentTicker, appModel.companyPayload(for: normalized) != nil {
             closePanels()
@@ -451,13 +520,16 @@ struct CompanyView: View {
             detail: "読み込み後に移動します。"
         )
 
-        Task {
+        pendingDrawerOpenTask?.cancel()
+        pendingDrawerOpenTask = Task {
             await appModel.loadCompany(ticker: normalized)
+            guard !Task.isCancelled else { return }
             if appModel.companyPayload(for: normalized) != nil {
                 selectTicker(normalized)
             } else if pendingDrawerTickerOpen?.ticker == normalized {
                 pendingDrawerTickerOpen = nil
             }
+            pendingDrawerOpenTask = nil
         }
     }
 
@@ -470,28 +542,48 @@ struct CompanyView: View {
             return
         }
 
-        guard pendingLibraryOpenItem == nil else { return }
+        guard appModel.isTickerInWatchlist(item.ticker, cik: item.cik) else {
+            appModel.activeAlert = AppAlertState(
+                message: "この銘柄は先に保存してから開いてください。",
+                kind: .dismissOnly
+            )
+            return
+        }
+
+        guard pendingDrawerTickerOpen == nil else { return }
 
         let normalized = item.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if appModel.isTickerInWatchlist(normalized, cik: item.cik) {
+
+        if appModel.companyPayload(for: normalized) != nil {
             selectTicker(normalized)
             return
         }
 
-        pendingLibraryOpenItem = item
+        appModel.activeAlert = AppAlertState(
+            message: "この銘柄はまだ準備中です。保存済みなので、準備が終わると開けます。",
+            kind: .dismissOnly
+        )
         Task {
-            await appModel.addToWatchlist(item)
-            if appModel.isTickerInWatchlist(normalized, cik: item.cik) {
-                selectTicker(normalized)
-            } else if pendingLibraryOpenItem?.id == item.id {
-                pendingLibraryOpenItem = nil
-            }
+            await appModel.loadCompany(ticker: normalized)
         }
+    }
+
+    private func saveSearchResult(_ item: SearchItem) {
+        guard pendingDrawerTickerOpen == nil else { return }
+        Task {
+            await appModel.saveSearchResult(item)
+        }
+    }
+
+    private func cancelPendingDrawerOpen() {
+        pendingDrawerOpenTask?.cancel()
+        pendingDrawerOpenTask = nil
+        pendingDrawerTickerOpen = nil
     }
 
     private func openPrimaryDocument(urlString: String) {
         dismissKeyboard()
-        guard let url = URL(string: urlString) else { return }
+        guard let url = resolvedExternalHTTPURL(from: urlString, allowBareDomain: false) else { return }
         openURL(url)
     }
 
@@ -562,8 +654,7 @@ private struct SourceEvidenceSheet: View {
         self.company = company
         self.source = source
 
-        let preview = Self.resolvedPreviewText(for: source, in: company)
-        _previewMode = State(initialValue: shouldOfferPreviewTranslation(for: preview) ? .translated : .original)
+        _previewMode = State(initialValue: .original)
         _previewTranslationState = State(initialValue: .idle)
     }
 
@@ -657,6 +748,10 @@ private struct SourceEvidenceSheet: View {
         }
     }
 
+    private var previewModeLabel: String {
+        previewMode == .translated ? "プレビュー翻訳" : "SEC原文"
+    }
+
     var body: some View {
         navigationContent
             .task(id: previewTranslationTaskID) {
@@ -668,68 +763,9 @@ private struct SourceEvidenceSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("この回答はこの根拠を見ています")
-                            .font(.system(.caption, design: .rounded, weight: .bold))
-                            .foregroundStyle(KabuyomiTheme.accentDeep)
+                    sourceSummaryCard
 
-                        Text(title)
-                            .font(.system(.title3, design: .rounded, weight: .bold))
-                            .foregroundStyle(KabuyomiTheme.ink)
-
-                        Label(source.sourceKind.groundingCaption, systemImage: source.sourceKind.systemImage)
-                            .font(.system(.footnote, design: .rounded, weight: .semibold))
-                            .foregroundStyle(KabuyomiTheme.inkMuted)
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("出典ラベル")
-                            .font(.system(.caption, design: .rounded, weight: .bold))
-                            .foregroundStyle(KabuyomiTheme.accentDeep)
-
-                        Text(detailLabel)
-                            .font(.system(.footnote, design: .rounded, weight: .medium))
-                            .foregroundStyle(KabuyomiTheme.inkSoft)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("引用プレビュー")
-                            .font(.system(.caption, design: .rounded, weight: .bold))
-                            .foregroundStyle(KabuyomiTheme.accentDeep)
-
-                        if offersPreviewTranslation {
-                            previewModeToggle
-
-                            Text("翻訳はこのプレビューだけの別処理です。下のボタンでは原文を開きます。")
-                                .font(.system(.caption2, design: .rounded, weight: .semibold))
-                                .foregroundStyle(KabuyomiTheme.inkMuted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        VStack(alignment: .leading, spacing: 10) {
-                            if isPreviewTranslationPending {
-                                previewTranslationLoadingBanner
-                            }
-
-                            if let status = previewTranslationStatusText {
-                                Text(status)
-                                    .font(.system(.caption2, design: .rounded, weight: .semibold))
-                                    .foregroundStyle(KabuyomiTheme.inkMuted)
-                            }
-
-                            Text(displayedPreviewText)
-                                .font(.system(.body, design: .rounded, weight: .medium))
-                                .foregroundStyle(isPreviewTranslationPending ? KabuyomiTheme.inkSoft : KabuyomiTheme.ink)
-                                .lineSpacing(4)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .opacity(isPreviewTranslationPending ? 0.82 : 1)
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.22), stroke: Color.white.opacity(0.55))
-                        .animation(.easeInOut(duration: 0.2), value: isPreviewTranslationPending)
-                    }
+                    quotePreviewSection
 
                     if let sourceURL {
                         if source.sourceKind == .webSupplement {
@@ -794,34 +830,145 @@ private struct SourceEvidenceSheet: View {
         }
     }
 
-    private var previewModeToggle: some View {
-        HStack(spacing: 12) {
-            Text("原文")
-                .font(.system(.caption, design: .rounded, weight: previewMode == .original ? .bold : .semibold))
-                .foregroundStyle(previewMode == .original ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
+    private var sourceSummaryCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: source.sourceKind.systemImage)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(KabuyomiTheme.accentSoft.opacity(0.58))
+                    )
 
-            Toggle(
-                "",
-                isOn: Binding(
-                    get: { previewMode == .translated },
-                    set: {
-                        if $0, case .failed = previewTranslationState {
-                            previewTranslationState = .idle
-                        }
-                        previewMode = $0 ? .translated : .original
-                    }
-                )
-            )
-            .labelsHidden()
-            .toggleStyle(.switch)
-            .tint(KabuyomiTheme.accentDeep)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(source.sourceKind.groundingCaption)
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
 
-            Text("翻訳")
-                .font(.system(.caption, design: .rounded, weight: previewMode == .translated ? .bold : .semibold))
-                .foregroundStyle(previewMode == .translated ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
+                    Text(title)
+                        .font(.system(.title3, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
+            }
+
+            Text(detailLabel)
+                .font(.system(.footnote, design: .rounded, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.22), stroke: Color.white.opacity(0.55))
+    }
+
+    private var quotePreviewSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
+                Label("引用", systemImage: "quote.opening")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+
+                Text(previewModeLabel)
+                    .font(.system(.caption2, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.white.opacity(0.58))
+                    )
+
+                Spacer(minLength: 0)
+
+                if offersPreviewTranslation {
+                    previewModeControl
+                }
+            }
+
+            quotePreviewCard
+        }
+    }
+
+    private var previewModeControl: some View {
+        HStack(spacing: 2) {
+            previewModeButton("原文", mode: .original)
+            previewModeButton("訳", mode: .translated)
+        }
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.62))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.66), lineWidth: 1)
+        )
+    }
+
+    private func previewModeButton(_ title: String, mode: SourcePreviewMode) -> some View {
+        Button {
+            if mode == .translated, case .failed = previewTranslationState {
+                previewTranslationState = .idle
+            }
+            previewMode = mode
+        } label: {
+            Text(title)
+                .font(.system(.caption2, design: .rounded, weight: .bold))
+                .foregroundStyle(previewMode == mode ? Color.white : KabuyomiTheme.inkMuted)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(previewMode == mode ? KabuyomiTheme.accentDeep : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var quotePreviewCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if isPreviewTranslationPending {
+                previewTranslationLoadingBanner
+            }
+
+            if let status = previewTranslationStatusText {
+                Text(status)
+                    .font(.system(.caption2, design: .rounded, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+            }
+
+            Text(displayedPreviewText)
+                .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                .foregroundStyle(isPreviewTranslationPending ? KabuyomiTheme.inkSoft : KabuyomiTheme.ink)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .opacity(isPreviewTranslationPending ? 0.82 : 1)
+        }
+        .padding(14)
+        .padding(.leading, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.white.opacity(0.72))
+        )
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(KabuyomiTheme.accentDeep.opacity(0.64))
+                .frame(width: 3)
+                .padding(.leading, 14)
+                .padding(.vertical, 14)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.82), lineWidth: 1)
+        )
+        .animation(.easeInOut(duration: 0.2), value: isPreviewTranslationPending)
     }
 
     private var previewTranslationLoadingBanner: some View {
@@ -1503,18 +1650,18 @@ private struct SourceDocumentWebView: UIViewRepresentable {
 func buildSuggestedQuestions(for company: CompanyPayload) -> [String] {
     var suggestions: [String] = []
 
-    suggestions.append("今回の一番大きい変化は？")
+    suggestions.append("今回の最大変化は？")
 
     if let revenue = company.metrics.first(where: { $0.logicalName == "revenue" }),
        let yoy = revenue.yoyPercent {
-        suggestions.append(yoy >= 0 ? "売上成長を支えた要因は？" : "売上が弱かった要因は？")
+        suggestions.append(yoy >= 0 ? "売上を伸ばした要因は？" : "売上が弱かった要因は？")
     } else if let featuredMetricQuestion = buildFeaturedMetricQuestion(for: company) {
         suggestions.append(featuredMetricQuestion)
     }
 
     if let operatingIncome = company.metrics.first(where: { $0.logicalName == "operatingIncome" }),
        let yoy = operatingIncome.yoyPercent {
-        suggestions.append(yoy >= 0 ? "利益率は改善した？" : "利益率が悪化した理由は？")
+        suggestions.append(yoy >= 0 ? "利益率は改善？" : "利益率が悪化した理由は？")
     }
 
     if let managementQuestion = buildManagementQuestion(for: company) {
@@ -1534,16 +1681,28 @@ func buildSuggestedQuestions(for company: CompanyPayload) -> [String] {
 
 func buildHistoricalQuestions(for company: CompanyPayload) -> [String] {
     let isQuarterly = company.formType == "10-Q"
+    let hasOperatingIncome = company.metrics.contains { $0.logicalName == "operatingIncome" && $0.yoyPercent != nil }
+
+    if isQuarterly {
+        let marginQuestion = hasOperatingIncome ? "営業利益率の3年推移は？" : "利益率の3年推移は？"
+        return deduplicated([
+            "前回四半期との差は？",
+            marginQuestion,
+            "売上要因の3年変化は？",
+            "同四半期で見ると？"
+        ]).prefix(4).map(\.self)
+    }
+
     var suggestions = [
-        isQuarterly ? "前回四半期との違いは？" : "前回決算との違いは？",
-        isQuarterly ? "この3年の同四半期で利益率は改善した？" : "この3年の利益率推移は？",
-        isQuarterly ? "この3年の同四半期で売上ドライバーはどう変わった？" : "この3年で売上ドライバーはどう変わった？",
-        isQuarterly ? "この3年の同四半期で見ると？" : "この3年の年次比較で見ると？"
+        "前回決算との違いは？",
+        "この3年の利益率推移は？",
+        "この3年で売上ドライバーはどう変わった？",
+        "この3年の年次比較で見ると？"
     ]
 
-    if company.metrics.contains(where: { $0.logicalName == "operatingIncome" && $0.yoyPercent != nil }) {
+    if hasOperatingIncome {
         suggestions.insert(
-            isQuarterly ? "この3年の同四半期で営業利益率はどう動いた？" : "この3年の営業利益率推移は？",
+            "この3年の営業利益率推移は？",
             at: 2
         )
     }
@@ -1565,7 +1724,7 @@ func buildRecoveryQuestions(for company: CompanyPayload, precedingUserPrompt: St
 
     if let operatingIncome = company.metrics.first(where: { $0.logicalName == "operatingIncome" }),
        let yoy = operatingIncome.yoyPercent {
-        suggestions.append(yoy >= 0 ? "利益率は改善した？" : "利益率が悪化した理由は？")
+        suggestions.append(yoy >= 0 ? "利益率は改善？" : "利益率が悪化した理由は？")
     }
 
     if let managementQuestion = buildManagementQuestion(for: company) {
@@ -1604,7 +1763,7 @@ func buildFollowUpQuestions(for company: CompanyPayload, precedingUserPrompt: St
 
     if containsAny(normalized, patterns: ["利益率", "margin", "profit", "採算", "営業利益"]) {
         suggestions.append("どの費用項目が効いた？")
-        suggestions.append(isQuarterly ? "この3年の同四半期でも改善している？" : "この3年でも改善している？")
+        suggestions.append(isQuarterly ? "3年でも改善傾向？" : "この3年でも改善している？")
     }
 
     if containsAny(normalized, patterns: ["見通し", "guidance", "慎重", "risk", "リスク", "需要", "demand"]) {
@@ -1715,31 +1874,6 @@ func isHistoricalQuestionText(_ text: String) -> Bool {
 private func containsAny(_ text: String, patterns: [String]) -> Bool {
     patterns.contains { pattern in
         text.contains(pattern.lowercased())
-    }
-}
-
-private struct EdgePullZone: View {
-    let edge: HorizontalEdge
-    let action: () -> Void
-
-    var body: some View {
-        Rectangle()
-            .fill(Color.clear)
-            .frame(width: 18)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 22)
-                    .onEnded { value in
-                        switch edge {
-                        case .leading where value.translation.width > 60:
-                            action()
-                        case .trailing where value.translation.width < -60:
-                            action()
-                        default:
-                            break
-                        }
-                    }
-            )
     }
 }
 

@@ -36,7 +36,7 @@ func historicalBoardCopy(
         return HistoricalBoardCopy(
             eyebrow: "\(safeRequestedYears)年",
             title: "\(subject)\(safeRequestedYears)年の\(basisTitle)比較",
-            subtitle: "\(basisTitle)で \(safeRequestedYears) 年分を横並び比較",
+            subtitle: "\(basisTitle)で \(safeRequestedYears) 年分の推移を比較",
             note: "履歴比較は\(basisNote)です。"
         )
     }
@@ -44,9 +44,37 @@ func historicalBoardCopy(
     return HistoricalBoardCopy(
         eyebrow: "\(safeAvailableCount)期",
         title: "\(subject)取得済み\(safeAvailableCount)期比較",
-        subtitle: "\(basisTitle)。\(safeRequestedYears)年分のうち取得済み\(safeAvailableCount)期だけ表示",
+        subtitle: "\(basisTitle)。\(safeRequestedYears)年分のうち取得済み\(safeAvailableCount)期の推移を表示",
         note: "履歴比較は\(basisNote)です。\(safeRequestedYears)年分が揃うまでは取得済み期間だけ表示します。"
     )
+}
+
+struct HistoricalChartScale: Equatable {
+    let minValue: Double
+    let maxValue: Double
+
+    var range: Double {
+        max(maxValue - minValue, 1)
+    }
+}
+
+func historicalChartScale(values: [Double]) -> HistoricalChartScale {
+    let observedMin = values.min() ?? 0
+    let observedMax = values.max() ?? 0
+    let minValue = min(observedMin, 0)
+    let maxValue = max(observedMax, 0)
+
+    if minValue == maxValue {
+        return HistoricalChartScale(minValue: minValue - 1, maxValue: maxValue + 1)
+    }
+
+    return HistoricalChartScale(minValue: minValue, maxValue: maxValue)
+}
+
+func historicalChartY(value: Double, scale: HistoricalChartScale, height: CGFloat) -> CGFloat {
+    let clampedValue = min(max(value, scale.minValue), scale.maxValue)
+    let normalized = (scale.maxValue - clampedValue) / scale.range
+    return min(max(CGFloat(normalized) * height, 0), height)
 }
 
 func summarySignalSegmentWidths(
@@ -221,6 +249,8 @@ private struct SummaryDrawerHeader: View {
 }
 
 private struct SummaryLeadCard: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let company: CompanyPayload
     let tone: InvestorOverviewTone
     let positiveCount: Int
@@ -229,24 +259,7 @@ private struct SummaryLeadCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("まずここ")
-                        .font(.system(.caption, design: .rounded, weight: .heavy))
-                        .kerning(1.1)
-                        .foregroundStyle(tone.tint.opacity(0.92))
-                    Text(company.companyName)
-                        .font(.system(.title2, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                    Text("\(company.ticker) ・ \(company.formType)")
-                        .font(.system(.footnote, design: .rounded, weight: .semibold))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
-
-                Spacer()
-
-                InvestorToneBadge(tone: tone)
-            }
+            header
 
             VStack(alignment: .leading, spacing: 10) {
                 Text(summarySentence ?? "この決算資料の要点を短く押さえ、そのまま会話で深掘りできます。")
@@ -276,6 +289,36 @@ private struct SummaryLeadCard: View {
         }
         .padding(18)
         .background(background)
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        let titleBlock = VStack(alignment: .leading, spacing: 7) {
+            Text("まずここ")
+                .font(.system(.caption, design: .rounded, weight: .heavy))
+                .kerning(1.1)
+                .foregroundStyle(tone.tint.opacity(0.92))
+            Text(company.companyName)
+                .font(.system(.title2, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("\(company.ticker) ・ \(company.formType)")
+                .font(.system(.footnote, design: .rounded, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+        }
+
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 10) {
+                titleBlock
+                InvestorToneBadge(tone: tone)
+            }
+        } else {
+            HStack(alignment: .top, spacing: 12) {
+                titleBlock
+                Spacer()
+                InvestorToneBadge(tone: tone)
+            }
+        }
     }
 
     private var summarySentence: String? {
@@ -314,17 +357,15 @@ private struct SummaryLeadCard: View {
 }
 
 private struct SummarySignalMeter: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let positiveCount: Int
     let negativeCount: Int
     let focusCount: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                OverviewCountBadge(title: "良い", count: positiveCount, tint: KabuyomiTheme.positive)
-                OverviewCountBadge(title: "注意", count: negativeCount, tint: KabuyomiTheme.negative)
-                OverviewCountBadge(title: "論点", count: focusCount, tint: KabuyomiTheme.accentDeep)
-            }
+            countBadges
 
             GeometryReader { geometry in
                 let segmentWidths = summarySignalSegmentWidths(
@@ -351,6 +392,23 @@ private struct SummarySignalMeter: View {
                 }
             }
             .frame(height: 8)
+        }
+    }
+
+    @ViewBuilder
+    private var countBadges: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                OverviewCountBadge(title: "良い", count: positiveCount, tint: KabuyomiTheme.positive)
+                OverviewCountBadge(title: "注意", count: negativeCount, tint: KabuyomiTheme.negative)
+                OverviewCountBadge(title: "論点", count: focusCount, tint: KabuyomiTheme.accentDeep)
+            }
+        } else {
+            HStack(spacing: 8) {
+                OverviewCountBadge(title: "良い", count: positiveCount, tint: KabuyomiTheme.positive)
+                OverviewCountBadge(title: "注意", count: negativeCount, tint: KabuyomiTheme.negative)
+                OverviewCountBadge(title: "論点", count: focusCount, tint: KabuyomiTheme.accentDeep)
+            }
         }
     }
 }
@@ -485,6 +543,8 @@ private struct InvestorChangeBoard: View {
 }
 
 private struct InvestorChangeTableRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let metric: MetricPayload
     let isLast: Bool
 
@@ -498,39 +558,23 @@ private struct InvestorChangeTableRow: View {
         } ?? "—"
     }
 
+    private var yoyDisplay: MetricYoYDisplay? {
+        metricYoYDisplay(for: metric)
+    }
+
     private var yoyText: String {
-        metric.yoyPercent.map { formattedSignedYoY($0) } ?? "—"
+        yoyDisplay?.text ?? "—"
     }
 
     private var yoyTint: Color {
-        guard let yoy = metric.yoyPercent else { return KabuyomiTheme.inkMuted }
-        return yoy >= 0 ? KabuyomiTheme.positive : KabuyomiTheme.negative
+        yoyDisplay?.tint ?? KabuyomiTheme.inkMuted
     }
 
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(MetricLabeler.title(for: metric.logicalName))
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                        .lineLimit(1)
-
-                    Spacer(minLength: 8)
-
-                    Text(yoyText)
-                        .font(.system(.footnote, design: .rounded, weight: .bold))
-                        .foregroundStyle(yoyTint)
-                        .lineLimit(1)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(yoyTint.opacity(0.14)))
-                }
-
-                HStack(alignment: .top, spacing: 10) {
-                    InvestorChangeValueBlock(title: "今回", value: currentValueText, tint: KabuyomiTheme.ink)
-                    InvestorChangeValueBlock(title: "前年", value: comparisonValueText, tint: KabuyomiTheme.inkSoft)
-                }
+                header
+                valueBlocks
             }
             .padding(.vertical, 12)
 
@@ -540,9 +584,56 @@ private struct InvestorChangeTableRow: View {
             }
         }
     }
+
+    @ViewBuilder
+    private var header: some View {
+        let title = Text(MetricLabeler.title(for: metric.logicalName))
+            .font(.system(.subheadline, design: .rounded, weight: .bold))
+            .foregroundStyle(KabuyomiTheme.ink)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+            .fixedSize(horizontal: false, vertical: true)
+
+        let yoyBadge = Text(yoyText)
+            .font(.system(.footnote, design: .rounded, weight: .bold))
+            .foregroundStyle(yoyTint)
+            .lineLimit(1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(yoyTint.opacity(0.14)))
+
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                title
+                yoyBadge
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                title
+                Spacer(minLength: 8)
+                yoyBadge
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var valueBlocks: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 10) {
+                InvestorChangeValueBlock(title: "今回", value: currentValueText, tint: KabuyomiTheme.ink)
+                InvestorChangeValueBlock(title: "前年", value: comparisonValueText, tint: KabuyomiTheme.inkSoft)
+            }
+        } else {
+            HStack(alignment: .top, spacing: 10) {
+                InvestorChangeValueBlock(title: "今回", value: currentValueText, tint: KabuyomiTheme.ink)
+                InvestorChangeValueBlock(title: "前年", value: comparisonValueText, tint: KabuyomiTheme.inkSoft)
+            }
+        }
+    }
 }
 
 private struct InvestorChangeValueBlock: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let title: String
     let value: String
     let tint: Color
@@ -555,7 +646,7 @@ private struct InvestorChangeValueBlock: View {
             Text(value)
                 .font(.system(.subheadline, design: .rounded, weight: .semibold))
                 .foregroundStyle(tint)
-                .lineLimit(1)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                 .minimumScaleFactor(0.78)
                 .monospacedDigit()
         }
@@ -587,24 +678,12 @@ private struct InvestorHistoricalTrendBoard: View {
         historicalMetricSummaryText(for: overview.series)
     }
 
-    private var showsMetricColumn: Bool {
-        overview.series.count > 1
-    }
-
-    private var tableMinWidth: CGFloat {
-        let elementCount = orderedPeriods.count + 1 + (showsMetricColumn ? 1 : 0)
-        let spacingWidth = CGFloat(max(elementCount - 1, 0)) * 10
-        let metricWidth: CGFloat = showsMetricColumn ? 90 : 0
-        let periodWidth = CGFloat(orderedPeriods.count) * 108
-        return max(300, metricWidth + periodWidth + 68 + spacingWidth)
-    }
-
     var body: some View {
         SummaryBoardCard(
             eyebrow: copy.eyebrow,
             title: copy.title,
             subtitle: copy.subtitle,
-            systemImage: "tablecells"
+            systemImage: "chart.bar.xaxis"
         ) {
             if let metricSummaryText {
                 Text(metricSummaryText)
@@ -615,131 +694,190 @@ private struct InvestorHistoricalTrendBoard: View {
                     .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                VStack(spacing: 0) {
-                    InvestorHistoricalTableHeader(
-                        periods: orderedPeriods,
-                        showsMetricColumn: showsMetricColumn
-                    )
-
-                    ForEach(Array(overview.series.enumerated()), id: \.element.id) { index, series in
-                        InvestorHistoricalTableRow(
-                            series: series,
-                            periods: orderedPeriods,
-                            showsMetricColumn: showsMetricColumn,
-                            isLast: index == overview.series.count - 1
-                        )
-                    }
-                }
-                .padding(14)
-                .frame(minWidth: tableMinWidth, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(Color.white.opacity(0.72))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .stroke(Color.white.opacity(0.88), lineWidth: 1)
-                        )
-                )
-            }
+            historicalContent
 
             Text(copy.note)
                 .font(.system(.caption, design: .rounded, weight: .medium))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
         }
     }
-}
 
-private struct InvestorHistoricalTableHeader: View {
-    let periods: [String]
-    let showsMetricColumn: Bool
-
-    var body: some View {
-        HStack(spacing: 10) {
-            if showsMetricColumn {
-                Text("指標")
-                    .frame(width: 90, alignment: .leading)
+    @ViewBuilder
+    private var historicalContent: some View {
+        VStack(spacing: 10) {
+            ForEach(overview.series) { series in
+                InvestorHistoricalSeriesChartCard(series: series, periods: orderedPeriods)
             }
-
-            ForEach(periods, id: \.self) { period in
-                Text(shortHistoricalPeriod(period))
-                    .frame(width: 108, alignment: .trailing)
-            }
-
-            Text("直近YoY")
-                .frame(width: 68, alignment: .trailing)
         }
-        .font(.system(.caption, design: .rounded, weight: .bold))
-        .foregroundStyle(KabuyomiTheme.inkMuted)
-        .padding(.bottom, 10)
     }
 }
 
-private struct InvestorHistoricalTableRow: View {
+private struct InvestorHistoricalSeriesChartCard: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let series: HistoricalMetricSeriesPayload
     let periods: [String]
-    let showsMetricColumn: Bool
-    let isLast: Bool
 
     private var pointsByPeriod: [String: HistoricalMetricPointPayload] {
         Dictionary(uniqueKeysWithValues: series.points.map { ($0.periodEnd, $0) })
     }
 
-    private var latestYoYText: String {
-        guard let latest = series.points.max(by: { $0.periodEnd < $1.periodEnd }),
-              let yoy = latest.yoyPercent else {
-            return "—"
+    private var orderedPoints: [HistoricalMetricPointPayload] {
+        periods.compactMap { pointsByPeriod[$0] }
+    }
+
+    private var latestYoYDisplay: MetricYoYDisplay? {
+        guard let latest = orderedPoints.max(by: { $0.periodEnd < $1.periodEnd }) else {
+            return nil
         }
-        return formattedSignedYoY(yoy)
+        return metricYoYDisplay(
+            logicalName: series.logicalName,
+            value: latest.value,
+            comparisonValue: nil,
+            yoyPercent: latest.yoyPercent
+        )
+    }
+
+    private var latestYoYText: String {
+        latestYoYDisplay?.text ?? "YoY なし"
     }
 
     private var latestYoYTint: Color {
-        guard let latest = series.points.max(by: { $0.periodEnd < $1.periodEnd }),
-              let yoy = latest.yoyPercent else {
-            return KabuyomiTheme.inkMuted
+        latestYoYDisplay?.tint ?? KabuyomiTheme.inkMuted
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            header
+
+            InvestorHistoricalBarChart(points: orderedPoints)
+
+            VStack(spacing: 0) {
+                ForEach(Array(orderedPoints.enumerated()), id: \.element.id) { index, point in
+                    InvestorHistoricalValueRow(
+                        point: point,
+                        logicalName: series.logicalName,
+                        isLast: index == orderedPoints.count - 1
+                    )
+                }
+            }
         }
-        return yoy >= 0 ? KabuyomiTheme.positive : KabuyomiTheme.negative
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground)
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        let title = Text(series.label)
+            .font(.system(.subheadline, design: .rounded, weight: .bold))
+            .foregroundStyle(KabuyomiTheme.ink)
+            .fixedSize(horizontal: false, vertical: true)
+
+        let yoyBadge = Text(latestYoYText)
+            .font(.system(.footnote, design: .rounded, weight: .bold))
+            .foregroundStyle(latestYoYTint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(latestYoYTint.opacity(0.14)))
+
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                title
+                yoyBadge
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                title
+                Spacer(minLength: 8)
+                yoyBadge
+            }
+        }
+    }
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .fill(Color.white.opacity(0.72))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.white.opacity(0.88), lineWidth: 1)
+            )
+    }
+}
+
+private struct InvestorHistoricalBarChart: View {
+    let points: [HistoricalMetricPointPayload]
+
+    private var scale: HistoricalChartScale {
+        historicalChartScale(values: points.map(\.value))
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let baselineY = historicalChartY(value: 0, scale: scale, height: size.height)
+            var baselinePath = Path()
+            baselinePath.move(to: CGPoint(x: 0, y: baselineY))
+            baselinePath.addLine(to: CGPoint(x: size.width, y: baselineY))
+            context.stroke(baselinePath, with: .color(KabuyomiTheme.inkMuted.opacity(0.2)), lineWidth: 1)
+
+            guard !points.isEmpty else { return }
+
+            let gap: CGFloat = 8
+            let totalGap = gap * CGFloat(max(points.count - 1, 0))
+            let barWidth = max(12, (size.width - totalGap) / CGFloat(points.count))
+
+            for (index, point) in points.enumerated() {
+                let x = CGFloat(index) * (barWidth + gap)
+                let valueY = historicalChartY(value: point.value, scale: scale, height: size.height)
+                let y = min(valueY, baselineY)
+                let height = max(abs(valueY - baselineY), 4)
+                let rect = CGRect(x: x, y: y, width: barWidth, height: height)
+                let tint = point.value < 0 ? KabuyomiTheme.negative : KabuyomiTheme.accentDeep
+                context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(tint.opacity(0.72)))
+            }
+        }
+        .frame(height: 86)
+        .padding(.vertical, 6)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct InvestorHistoricalValueRow: View {
+    let point: HistoricalMetricPointPayload
+    let logicalName: String
+    let isLast: Bool
+
+    private var valueText: String {
+        if logicalName == "epsBasic" {
+            return point.value.formatted(.number.precision(.fractionLength(2)))
+        }
+
+        return formattedMetricValue(point.value, logicalName: logicalName, unit: point.unit)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                if showsMetricColumn {
-                    Text(series.label)
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                        .frame(width: 90, alignment: .leading)
-                }
+                Text(shortHistoricalPeriod(point.periodEnd))
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
 
-                ForEach(periods, id: \.self) { period in
-                    Text(periodValue(period))
-                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                        .foregroundStyle(KabuyomiTheme.inkSoft)
-                        .frame(width: 108, alignment: .trailing)
-                }
+                Spacer(minLength: 8)
 
-                Text(latestYoYText)
-                    .font(.system(.footnote, design: .rounded, weight: .bold))
-                    .foregroundStyle(latestYoYTint)
-                    .frame(width: 68, alignment: .trailing)
+                Text(valueText)
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.inkSoft)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
             }
-            .padding(.vertical, 11)
+            .padding(.vertical, 9)
 
             if !isLast {
                 Divider()
                     .overlay(Color.white.opacity(0.7))
             }
         }
-    }
-
-    private func periodValue(_ period: String) -> String {
-        guard let point = pointsByPeriod[period] else { return "—" }
-
-        if series.logicalName == "epsBasic" {
-            return point.value.formatted(.number.precision(.fractionLength(2)))
-        }
-
-        return formattedMetricValue(point.value, logicalName: series.logicalName, unit: point.unit)
     }
 }
 
@@ -837,20 +975,30 @@ private struct OverviewCountBadge: View {
     let tint: Color
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Text(title)
                 .font(.system(.caption, design: .rounded, weight: .bold))
+
+            Rectangle()
+                .fill(tint.opacity(0.26))
+                .frame(width: 1, height: 16)
+
             Text("\(count)")
                 .font(.system(.caption, design: .rounded, weight: .bold))
+                .monospacedDigit()
         }
         .foregroundStyle(tint)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .background(
-            Capsule()
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .fill(Color.white.opacity(0.78))
-                .overlay(Capsule().stroke(tint.opacity(0.18), lineWidth: 1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .stroke(tint.opacity(0.18), lineWidth: 1)
+                )
         )
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -885,56 +1033,76 @@ private struct InvestorMetricMapCard: View {
 }
 
 private struct InvestorMetricMapRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let metric: MetricPayload
     let maxMagnitude: Double
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(MetricLabeler.title(for: metric.logicalName))
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                    Text(formattedMetricValue(metric))
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
-                        .monospacedDigit()
-                    if let comparisonValue = metric.comparisonValue {
-                        Text("前年 \(formattedMetricValue(comparisonValue, logicalName: metric.logicalName, unit: metric.unit))")
-                            .font(.system(.caption, design: .rounded, weight: .medium))
-                            .foregroundStyle(KabuyomiTheme.inkMuted)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.82)
-                    }
-                }
+            header
 
-                Spacer(minLength: 0)
-
-                Text(metric.yoyPercent.map { formattedSignedYoY($0) } ?? "YoY なし")
-                    .font(.system(.footnote, design: .rounded, weight: .bold))
-                    .foregroundStyle(metricTint)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(metricTint.opacity(0.14)))
-            }
-
-            InvestorDeltaBar(yoyPercent: metric.yoyPercent, maxMagnitude: maxMagnitude)
+            InvestorDeltaBar(display: yoyDisplay, maxMagnitude: maxMagnitude)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .kabuyomiCard(.secondary, radius: 20)
     }
 
+    private var yoyDisplay: MetricYoYDisplay? {
+        metricYoYDisplay(for: metric)
+    }
+
     private var metricTint: Color {
-        guard let yoy = metric.yoyPercent else { return KabuyomiTheme.inkMuted }
-        return yoy >= 0 ? KabuyomiTheme.positive : KabuyomiTheme.negative
+        yoyDisplay?.tint ?? KabuyomiTheme.inkMuted
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        let valueBlock = VStack(alignment: .leading, spacing: 4) {
+            Text(MetricLabeler.title(for: metric.logicalName))
+                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(formattedMetricValue(metric))
+                .font(.system(.headline, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.ink)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                .minimumScaleFactor(0.82)
+                .monospacedDigit()
+            if let comparisonValue = metric.comparisonValue {
+                Text("前年 \(formattedMetricValue(comparisonValue, logicalName: metric.logicalName, unit: metric.unit))")
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    .minimumScaleFactor(0.82)
+            }
+        }
+
+        let yoyBadge = Text(yoyDisplay?.text ?? "YoY なし")
+            .font(.system(.footnote, design: .rounded, weight: .bold))
+            .foregroundStyle(metricTint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(metricTint.opacity(0.14)))
+
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                valueBlock
+                yoyBadge
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                valueBlock
+                Spacer(minLength: 0)
+                yoyBadge
+            }
+        }
     }
 }
 
 private struct InvestorDeltaBar: View {
-    let yoyPercent: Double?
+    let display: MetricYoYDisplay?
     let maxMagnitude: Double
 
     var body: some View {
@@ -950,7 +1118,7 @@ private struct InvestorDeltaBar: View {
                     .fill(Color.white.opacity(0.9))
                     .frame(width: 1)
 
-                if yoyPercent != nil {
+                if display != nil {
                     Capsule()
                         .fill(fillColor)
                         .frame(width: filledWidth)
@@ -963,24 +1131,27 @@ private struct InvestorDeltaBar: View {
     }
 
     private var normalizedMagnitude: Double {
-        guard let yoyPercent else { return 0 }
-        return min(abs(yoyPercent) / maxMagnitude, 1)
+        guard let display else { return 0 }
+        return min(display.magnitudePercent / maxMagnitude, 1)
     }
 
     private var fillColor: Color {
-        guard let yoyPercent else { return KabuyomiTheme.inkMuted }
-        return yoyPercent >= 0 ? KabuyomiTheme.positive : KabuyomiTheme.negative
+        display?.tint ?? KabuyomiTheme.inkMuted
     }
 
     private var accessibilityLabel: String {
-        guard let yoyPercent else { return "前年比データなし" }
-        return yoyPercent >= 0 ? "前年比プラス" : "前年比マイナス"
+        display?.text ?? "前年比データなし"
     }
 
     private func horizontalOffset(for filledWidth: CGFloat) -> CGFloat {
-        guard let yoyPercent else { return 0 }
-        let direction: CGFloat = yoyPercent >= 0 ? 1 : -1
-        return direction * (filledWidth / 2)
+        switch display?.direction {
+        case .positive:
+            return filledWidth / 2
+        case .negative:
+            return -filledWidth / 2
+        case .some(.none), nil:
+            return 0
+        }
     }
 }
 

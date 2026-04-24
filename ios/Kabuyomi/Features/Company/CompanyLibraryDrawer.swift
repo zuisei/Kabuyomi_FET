@@ -10,13 +10,16 @@ struct ConversationLibraryDrawer: View {
     let starterCompanies: [StarterCompany]
     let searchResults: [SearchItem]
     let isSearchLoading: Bool
+    let searchErrorMessage: String?
     let pendingTicker: String?
     let pendingCompanyName: String?
     let pendingDetail: String?
     let selectTicker: (String, String) -> Void
+    let saveSearchResult: (SearchItem) -> Void
     let openSearchResult: (SearchItem) -> Void
     let openSettings: () -> Void
     let close: () -> Void
+    let cancelPendingOpen: () -> Void
 
     private var isSearching: Bool {
         !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -49,7 +52,9 @@ struct ConversationLibraryDrawer: View {
             TickerOpenTransitionOverlay(
                 ticker: pendingTicker,
                 companyName: pendingCompanyName,
-                detail: pendingDetail
+                detail: pendingDetail,
+                cancelTitle: "中止",
+                cancelAction: cancelPendingOpen
             )
         }
     }
@@ -249,6 +254,8 @@ struct ConversationLibraryDrawer: View {
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .kabuyomiCard(.muted, radius: 18)
+            } else if let searchErrorMessage {
+                DrawerSearchErrorState(message: searchErrorMessage)
             } else if searchResults.isEmpty {
                 Text("一致する銘柄がありません。")
                     .font(.system(.footnote, design: .rounded))
@@ -258,10 +265,34 @@ struct ConversationLibraryDrawer: View {
                     .kabuyomiCard(.muted, radius: 18)
             } else {
                 ForEach(searchResults) { item in
-                    DrawerSearchRow(item: item, action: { openSearchResult(item) })
+                    DrawerSearchRow(
+                        item: item,
+                        saveAction: { saveSearchResult(item) },
+                        openAction: { openSearchResult(item) }
+                    )
                 }
             }
         }
+    }
+}
+
+private struct DrawerSearchErrorState: View {
+    let message: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("検索できませんでした", systemImage: "wifi.exclamationmark")
+                .font(.system(.footnote, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.negative)
+
+            Text(message)
+                .font(.system(.caption, design: .rounded, weight: .medium))
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .kabuyomiCard(.muted, radius: 18)
     }
 }
 
@@ -364,23 +395,29 @@ private struct DrawerCompanyRow: View {
     let prominence: DrawerRowProminence
     let action: () -> Void
 
+    private var isCompact: Bool {
+        prominence == .subdued && !isCurrent
+    }
+
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: isCompact ? .center : .top, spacing: isCompact ? 10 : 12) {
                 Capsule()
                     .fill(isCurrent ? KabuyomiTheme.accentDeep : prominence.accent.opacity(prominence == .subdued ? 0.18 : 0.28))
-                    .frame(width: isCurrent ? 6 : 3)
-                    .frame(maxHeight: .infinity)
+                    .frame(width: isCurrent ? 6 : 3, height: isCompact ? 38 : nil)
+                    .frame(maxHeight: isCompact ? nil : .infinity)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: isCompact ? 2 : 4) {
                     Text(ticker)
-                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .font(.system(isCompact ? .subheadline : .headline, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.ink)
                     Text(companyName)
-                        .font(.system(.subheadline, design: .rounded))
+                        .font(.system(isCompact ? .footnote : .subheadline, design: .rounded, weight: isCompact ? .medium : .regular))
                         .foregroundStyle(KabuyomiTheme.inkSoft)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.86)
                     Text(subtitle)
-                        .font(.system(.caption, design: .rounded))
+                        .font(.system(isCompact ? .caption2 : .caption, design: .rounded))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
@@ -400,15 +437,16 @@ private struct DrawerCompanyRow: View {
                     }
                 }
             }
-            .padding(14)
+            .padding(.horizontal, isCompact ? 12 : 14)
+            .padding(.vertical, isCompact ? 9 : 14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .kabuyomiCard(isCurrent ? .primary : prominence.surface, radius: 18)
+            .kabuyomiCard(isCurrent ? .primary : prominence.surface, radius: isCompact ? 15 : 18)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: isCompact ? 15 : 18, style: .continuous)
                     .fill(isCurrent ? KabuyomiTheme.accentSoft.opacity(0.14) : Color.clear)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: isCompact ? 15 : 18, style: .continuous)
                     .stroke(isCurrent ? KabuyomiTheme.accentDeep.opacity(0.26) : Color.clear, lineWidth: 1.2)
             )
             .opacity(prominence == .subdued && !isCurrent ? 0.9 : 1)
@@ -421,7 +459,8 @@ private struct DrawerSearchRow: View {
     @Environment(AppModel.self) private var appModel
 
     let item: SearchItem
-    let action: () -> Void
+    let saveAction: () -> Void
+    let openAction: () -> Void
 
     private var isSaved: Bool {
         appModel.isTickerInWatchlist(item.ticker, cik: item.cik)
@@ -431,71 +470,145 @@ private struct DrawerSearchRow: View {
         appModel.isAddingTicker(item.ticker)
     }
 
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.ticker)
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                    Text(item.companyName)
-                        .font(.system(.subheadline, design: .rounded))
-                        .foregroundStyle(KabuyomiTheme.inkSoft)
-                    Text("\(item.supportDisplayLabel) ・ \(item.exchange)")
-                        .font(.system(.caption, design: .rounded))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                    if !item.isSupportedInV1 {
-                        Text(item.availabilityNote)
-                            .font(.system(.caption2, design: .rounded, weight: .medium))
-                            .foregroundStyle(KabuyomiTheme.inkMuted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                Spacer()
-
-                HStack(spacing: 6) {
-                    if isAdding {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(KabuyomiTheme.accentDeep)
-                    }
-
-                    Text(
-                        item.isSupportedInV1
-                            ? actionTitle
-                            : item.availabilityBadgeTitle
-                    )
-                }
-                .font(.system(.caption, design: .rounded, weight: .bold))
-                .foregroundStyle(item.isSupportedInV1 ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(
-                    Capsule().fill(
-                        item.isSupportedInV1
-                            ? AnyShapeStyle(KabuyomiTheme.accentSoft.opacity(0.58))
-                            : KabuyomiTheme.fill(for: .secondary)
-                    )
-                )
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .kabuyomiCard(.muted, radius: 18)
-        }
-        .buttonStyle(.plain)
-        .disabled(!item.isSupportedInV1 || isAdding)
+    private var canOpen: Bool {
+        appModel.companyPayload(for: item.ticker) != nil
     }
 
-    private var actionTitle: String {
+    private var isOpenPending: Bool {
+        isSaved && !canOpen
+    }
+
+    private var canAttemptOpen: Bool {
+        isSaved || canOpen
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.ticker)
+                    .font(.system(.headline, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                Text(item.companyName)
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(KabuyomiTheme.inkSoft)
+                Text("\(item.supportDisplayLabel) ・ \(item.exchange)")
+                    .font(.system(.caption, design: .rounded))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                if !item.isSupportedInV1 {
+                    Text(item.availabilityNote)
+                        .font(.system(.caption2, design: .rounded, weight: .medium))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer()
+
+            if item.isSupportedInV1 {
+                VStack(alignment: .trailing, spacing: 7) {
+                    Button(action: saveAction) {
+                        DrawerSearchActionLabel(
+                            title: saveTitle,
+                            systemImage: saveIcon,
+                            isLoading: isAdding
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSaved || isAdding)
+                    .accessibilityLabel(isSaved ? "保存済み" : "\(item.ticker) を保存")
+
+                    Button(action: openAction) {
+                        DrawerSearchActionLabel(
+                            title: openTitle,
+                            systemImage: openIcon,
+                            isLoading: isOpenPending
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canAttemptOpen || isAdding)
+                    .opacity(canAttemptOpen && !isAdding ? 1 : 0.48)
+                    .accessibilityLabel("\(item.ticker) を開く")
+                    .accessibilityHint(openAccessibilityHint)
+                }
+            } else {
+                Text(item.availabilityBadgeTitle)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        Capsule().fill(KabuyomiTheme.fill(for: .secondary))
+                    )
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .kabuyomiCard(.muted, radius: 18)
+    }
+
+    private var saveTitle: String {
         if isAdding {
-            return "準備中"
+            return "保存中"
         }
 
         if isSaved {
-            return "開く"
+            return "保存済み"
         }
 
-        return "保存して開く"
+        return "保存"
+    }
+
+    private var saveIcon: String {
+        isSaved ? "checkmark" : "bookmark"
+    }
+
+    private var openTitle: String {
+        isOpenPending ? "準備中" : "開く"
+    }
+
+    private var openIcon: String {
+        isOpenPending ? "hourglass" : "arrow.up.right"
+    }
+
+    private var openAccessibilityHint: String {
+        if canOpen {
+            return "保存済み銘柄の会話を開きます"
+        }
+
+        if isOpenPending {
+            return "準備が終わると開けます"
+        }
+
+        return "先に保存すると開けます"
+    }
+}
+
+private struct DrawerSearchActionLabel: View {
+    let title: String
+    let systemImage: String
+    let isLoading: Bool
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(KabuyomiTheme.accentDeep)
+            } else {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .bold))
+            }
+
+            Text(title)
+        }
+        .font(.system(.caption, design: .rounded, weight: .bold))
+        .foregroundStyle(KabuyomiTheme.accentDeep)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .frame(minWidth: 74)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(KabuyomiTheme.accentSoft.opacity(0.58))
+        )
     }
 }

@@ -1,7 +1,7 @@
 import type { Env, FilingCacheRecord, FilingReference, TickerRecord } from "../../env";
 import {
   type SubmissionResponse,
-  fetchSubmissions,
+  fetchSubmissionsWithHistory,
   listSupportedFilings,
   lookupTicker,
   pickComparisonFiling
@@ -120,7 +120,7 @@ async function preloadHistoricalCoverage(
     return;
   }
 
-  const submissions = options.submissions ?? (await fetchSubmissions(tickerRecord.cik, env));
+  const submissions = options.submissions ?? (await fetchSubmissionsWithHistory(tickerRecord.cik, env));
   const candidates = selectHistoricalAutohydrationCandidates(
     {
       formType: record.formType,

@@ -108,7 +108,7 @@ struct ConversationTimeline: View {
                         ConversationContextCard(
                             company: company,
                             suggestedQuestions: Array(suggestions.prefix(3)),
-                            historicalQuestions: Array(historicalSuggestions.prefix(4)),
+                            historicalQuestions: Array(historicalSuggestions.prefix(3)),
                             selectQuestion: { draftQuestion = $0 }
                         )
                     }
@@ -282,54 +282,30 @@ private struct ConversationSessionHeader: View {
 }
 
 struct ConversationContextCard: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let company: CompanyPayload
     let suggestedQuestions: [String]
     let historicalQuestions: [String]
     let selectQuestion: (String) -> Void
 
-    private let promptColumns = [
-        GridItem(.adaptive(minimum: 150), spacing: 10, alignment: .top)
-    ]
+    private var promptColumns: [GridItem] {
+        if dynamicTypeSize.isAccessibilitySize {
+            return [GridItem(.flexible(), spacing: 10, alignment: .top)]
+        }
+
+        return [GridItem(.adaptive(minimum: 260), spacing: 8, alignment: .top)]
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 10) {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [KabuyomiTheme.accent.opacity(0.95), KabuyomiTheme.accentDeep.opacity(0.95)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 12, height: 12)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Live Filing")
-                        .font(.system(.caption, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
-                    Text(company.companyName)
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                    Text("\(company.formType) ・ filed \(company.filedAt)")
-                        .font(.system(.footnote, design: .rounded, weight: .medium))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
-
-                Spacer()
-
-                Text(company.formType)
-                    .font(.system(.caption, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
-            }
+        VStack(alignment: .leading, spacing: 14) {
+            filingHeader
 
             if !suggestedQuestions.isEmpty {
                 promptSection(
-                    title: "まず聞く",
-                    systemImage: "arrow.up.right.circle.fill",
+                    title: "今回を読む",
+                    caption: "この資料だけで先に押さえる",
+                    systemImage: "doc.text.magnifyingglass",
                     questions: suggestedQuestions,
                     icon: "bubble.left.and.bubble.right.fill"
                 )
@@ -338,7 +314,8 @@ struct ConversationContextCard: View {
             if !historicalQuestions.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     promptSection(
-                        title: company.formType == "10-Q" ? "3年の同四半期で比べる" : "3年の年次で比べる",
+                        title: company.formType == "10-Q" ? "過去3年と比べる" : "過去3年の年次比較",
+                        caption: company.formType == "10-Q" ? "10-Q は同四半期同士で比較" : "年次 10-K 同士で比較",
                         systemImage: "clock.arrow.circlepath",
                         questions: historicalQuestions,
                         icon: "chart.bar.xaxis"
@@ -350,23 +327,80 @@ struct ConversationContextCard: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
         .kabuyomiGlass(radius: 24)
+    }
+
+    @ViewBuilder
+    private var filingHeader: some View {
+        let marker = Image(systemName: "doc.text.fill")
+            .font(.system(size: 14, weight: .bold))
+            .foregroundStyle(KabuyomiTheme.accentDeep)
+            .frame(width: 34, height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(KabuyomiTheme.accentSoft.opacity(0.62))
+            )
+
+        let titleBlock = VStack(alignment: .leading, spacing: 5) {
+            Text("最新資料")
+                .font(.system(.caption2, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.accentDeep)
+            Text(company.companyName)
+                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("\(company.formType) ・ \(company.filedAt) 提出")
+                .font(.system(.footnote, design: .rounded, weight: .medium))
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        let formBadge = Text(company.formType)
+            .font(.system(.caption, design: .rounded, weight: .bold))
+            .foregroundStyle(KabuyomiTheme.accentDeep)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    marker
+                    titleBlock
+                }
+                formBadge
+            }
+        } else {
+            HStack(alignment: .center, spacing: 10) {
+                marker
+                titleBlock
+                Spacer()
+                formBadge
+            }
+        }
     }
 
     private func promptSection(
         title: String,
+        caption: String,
         systemImage: String,
         questions: [String],
         icon: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .center, spacing: 8) {
                 Image(systemName: systemImage)
                     .font(.system(size: 13, weight: .bold))
-                Text(title)
-                    .font(.system(.footnote, design: .rounded, weight: .bold))
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                    Text(caption)
+                        .font(.system(.caption2, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                }
             }
             .foregroundStyle(KabuyomiTheme.accentDeep)
 
@@ -384,40 +418,55 @@ struct ConversationContextCard: View {
 
     private var historyPromptFootnote: String {
         if company.formType == "10-Q" {
-            return "履歴比較は同四半期ベースです。必要な過去年だけ自動補完して、無駄な取得を増やさないようにしています。"
+            return "初回だけ準備に時間がかかることがあります。揃った分から比較します。"
         }
 
-        return "履歴比較は年次 10-K ベースです。必要な過去年だけ自動補完して、無駄な取得を増やさないようにしています。"
+        return "初回だけ準備に時間がかかることがあります。揃った分から比較します。"
     }
 }
 
 struct ConversationPromptChip: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let text: String
     let systemImage: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
                 Image(systemName: systemImage)
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .padding(.top, 1)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(KabuyomiTheme.accentSoft.opacity(0.5))
+                    )
 
                 Text(text)
                     .font(.system(.footnote, design: .rounded, weight: .semibold))
                     .foregroundStyle(KabuyomiTheme.ink)
                     .multilineTextAlignment(.leading)
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.86)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                    .minimumScaleFactor(0.9)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep.opacity(0.48))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
             .background(
-                Capsule()
-                    .fill(Color.white.opacity(0.88))
-                    .overlay(Capsule().stroke(Color.white.opacity(0.95), lineWidth: 1))
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white.opacity(0.72))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.white.opacity(0.82), lineWidth: 1)
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -540,6 +589,8 @@ struct ConversationLoadingState: View {
     let ticker: String
     let isLoading: Bool
     let loadState: CompanyLoadStatePayload?
+    let openLibrary: () -> Void
+    let retry: () -> Void
 
     private var isPreparingState: Bool {
         loadState?.status == .preparing
@@ -566,12 +617,12 @@ struct ConversationLoadingState: View {
     }
 
     private var detailText: String {
-        if isLoading {
-            return "英語の決算を日本語で読みやすくしています。"
+        if isPreparingState {
+            return "保存は完了しています。準備中は一覧に戻って、別の銘柄を開けます。"
         }
 
-        if isPreparingState {
-            return "保存は完了しました。準備でき次第、自動で表示します。"
+        if isLoading {
+            return "取得中です。待たずに一覧へ戻れます。"
         }
 
         if showsRetryableState {
@@ -607,6 +658,26 @@ struct ConversationLoadingState: View {
                 .font(.system(.footnote, design: .rounded))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
                 .multilineTextAlignment(.center)
+
+            VStack(spacing: 10) {
+                Button(action: openLibrary) {
+                    Label("一覧に戻る", systemImage: "list.bullet")
+                        .frame(maxWidth: 210)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(KabuyomiTheme.accentDeep)
+
+                if showsRetryableState {
+                    Button(action: retry) {
+                        Label("もう一度取得", systemImage: "arrow.clockwise")
+                            .frame(maxWidth: 210)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(KabuyomiTheme.accentDeep)
+                }
+            }
+            .font(.system(.callout, design: .rounded, weight: .bold))
+            .padding(.top, 2)
 
             Spacer()
         }

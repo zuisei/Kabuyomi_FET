@@ -3,7 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../src/clients/sec", () => ({
   buildFilingKey: vi.fn((extractorVersion: string, filing: { cik: string; accessionNumber: string }) =>
     `${extractorVersion}:${filing.cik}:${filing.accessionNumber.replaceAll("-", "")}`
-  )
+  ),
+  fetchSubmissions: vi.fn(),
+  fetchSubmissionsWithHistory: vi.fn(),
+  listSupportedFilings: vi.fn(),
+  lookupTicker: vi.fn(),
+  pickComparisonFiling: vi.fn()
 }));
 
 vi.mock("../src/lib/history-store", () => ({

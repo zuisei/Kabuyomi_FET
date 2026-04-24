@@ -27,6 +27,7 @@ vi.mock("../src/lib/filings/content-upgrade", () => ({
   backfillCompanyWebsite: vi.fn(async (record: { companyWebsiteUrl?: string }) =>
     record.companyWebsiteUrl ? record : { ...record, companyWebsiteUrl: "https://www.circle.com/" }
   ),
+  enqueueCompanyWebsiteBackfill: vi.fn(),
   enqueueContentUpgrade: vi.fn(),
   needsCompanyWebsiteBackfill: vi.fn((record: { companyWebsiteUrl?: string; contentMode?: string }) =>
     record.contentMode !== "metrics_only" && !record.companyWebsiteUrl
@@ -78,7 +79,7 @@ describe("ensureLatestFiling", () => {
     vi.clearAllMocks();
   });
 
-  it("reingests when forceRemoteCheck is enabled instead of returning a stale cache record", async () => {
+  it("checks the remote latest filing on forceRemoteCheck and reuses an already-current archive", async () => {
     const tickerRecord = {
       ticker: "CRCL",
       companyName: "Circle Internet Group, Inc.",
@@ -105,6 +106,7 @@ describe("ensureLatestFiling", () => {
       filedAt: "2026-03-09",
       periodOfReport: "2025-12-31",
       primaryDocumentUrl: "https://example.com/crcl-20251231.htm",
+      companyWebsiteUrl: "https://www.circle.com/",
       mdaText: "",
       mdaTokenCount: 0,
       metrics: [],
@@ -116,7 +118,7 @@ describe("ensureLatestFiling", () => {
     };
     const env = {
       KABUYOMI_CACHE: {
-        get: vi.fn(),
+        get: vi.fn().mockResolvedValue(null),
         put: vi.fn()
       }
     };
@@ -139,15 +141,12 @@ describe("ensureLatestFiling", () => {
 
     expect(result).toEqual(ingestedRecord);
     expect(mockLoadCachedLatestFiling).not.toHaveBeenCalled();
-    expect(mockLoadArchivedFilingByKey).not.toHaveBeenCalled();
-    expect(env.KABUYOMI_CACHE.get).not.toHaveBeenCalled();
-    expect(mockIngestFiling).toHaveBeenCalledWith(currentFiling, null, env, config, {
-      summaryMode: "default",
-      contentMode: "full"
-    });
+    expect(env.KABUYOMI_CACHE.get).toHaveBeenCalledTimes(1);
+    expect(mockLoadArchivedFilingByKey).toHaveBeenCalledWith("v4:0001876042:000187604226000062", env);
+    expect(mockIngestFiling).not.toHaveBeenCalled();
   });
 
-  it("keeps request-path ingests full and queues a background summary upgrade when needed", async () => {
+  it("keeps deferred request-path ingests metrics-only and queues full content upgrade", async () => {
     const executionContext = {
       waitUntil: vi.fn()
     };
@@ -183,7 +182,7 @@ describe("ensureLatestFiling", () => {
       sourceChunks: [],
       summary: { verdict: "", highlights: [], changes: [] },
       summaryProvider: "fallback",
-      contentMode: "full",
+      contentMode: "metrics_only",
       generatedAt: "2026-04-22T00:00:00.000Z",
       extractorVersion: "v4",
       promptVersion: "v1"
@@ -207,16 +206,17 @@ describe("ensureLatestFiling", () => {
     mockIngestFiling.mockResolvedValue(ingestedRecord as never);
 
     await ensureLatestFiling("CRCL", env as never, config as never, {
+      deferFullContent: true,
       executionContext: executionContext as never,
       tickerRecord: tickerRecord as never
     });
 
     expect(mockIngestFiling).toHaveBeenCalledWith(currentFiling, null, env, config, {
-      summaryMode: "default",
-      contentMode: "full"
+      summaryMode: "fallback_only",
+      contentMode: "metrics_only"
     });
-    expect(mockEnqueueContentUpgrade).not.toHaveBeenCalled();
-    expect(mockEnqueueSummaryUpgrade).toHaveBeenCalledWith(ingestedRecord, env, executionContext);
+    expect(mockEnqueueContentUpgrade).toHaveBeenCalledWith(ingestedRecord, env, executionContext);
+    expect(mockEnqueueSummaryUpgrade).not.toHaveBeenCalled();
   });
 
   it("backfills missing companyWebsiteUrl before returning a current cached filing", async () => {
@@ -302,6 +302,55 @@ describe("ensureLatestFiling", () => {
     expect(result.mdaText).toBe("upgraded md&a");
     expect(mockFetchSubmissions).not.toHaveBeenCalled();
     expect(mockBackfillCompanyWebsite).not.toHaveBeenCalled();
+  });
+
+  it("returns a metrics-only latest cache immediately when full content is deferred", async () => {
+    const executionContext = {
+      waitUntil: vi.fn()
+    };
+    const cachedRecord = {
+      filingKey: "v4:0001876042:000187604226000062",
+      ticker: "CRCL",
+      companyName: "Circle Internet Group, Inc.",
+      cik: "0001876042",
+      formType: "10-K",
+      filedAt: "2026-03-09",
+      periodOfReport: "2025-12-31",
+      primaryDocumentUrl: "https://www.sec.gov/Archives/edgar/data/1876042/000187604226000062/crcl-20251231.htm",
+      companyWebsiteUrl: undefined,
+      mdaText: "",
+      mdaTokenCount: 0,
+      metrics: [],
+      sourceChunks: [],
+      summary: { verdict: "partial", highlights: [], changes: [] },
+      summaryProvider: "fallback",
+      contentMode: "metrics_only",
+      generatedAt: "2026-04-22T00:00:00.000Z",
+      extractorVersion: "v4",
+      promptVersion: "v1"
+    };
+    const env = {
+      KABUYOMI_CACHE: {
+        get: vi.fn(),
+        put: vi.fn()
+      }
+    };
+    const config = {
+      extractorVersion: "v4",
+      promptVersion: "v1"
+    };
+
+    mockLoadCachedLatestFiling.mockResolvedValue(cachedRecord as never);
+
+    const result = await ensureLatestFiling("CRCL", env as never, config as never, {
+      deferFullContent: true,
+      executionContext: executionContext as never
+    });
+
+    expect(result).toEqual(cachedRecord);
+    expect(mockUpgradeMetricsOnlyRecord).not.toHaveBeenCalled();
+    expect(mockFetchSubmissions).not.toHaveBeenCalled();
+    expect(mockEnqueueContentUpgrade).toHaveBeenCalledWith(cachedRecord, env, executionContext);
   });
 
   it("falls through to full ingest instead of taking a nested upgrade lock after acquiring the filing lock", async () => {

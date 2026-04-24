@@ -74,6 +74,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var watchlist: [WatchlistCard] = []
     var recentCompanies: [WatchlistCard] = []
     var searchResults: [SearchItem] = []
+    var searchErrorMessage: String?
     var usage: UsagePayload?
     var usageLoadState: UsageLoadState = .idle
     var companyCache: [String: CompanyPayload] = [:]
@@ -279,12 +280,14 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         guard !trimmed.isEmpty else {
             if stateGeneration == self.stateGeneration, generation == searchGeneration {
                 searchResults = []
+                searchErrorMessage = nil
                 searchIsLoading = false
             }
             return
         }
 
         searchIsLoading = true
+        searchErrorMessage = nil
 
         do {
             let results = try await apiClient.search(query: trimmed)
@@ -304,9 +307,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 })
             guard stateGeneration == self.stateGeneration, generation == searchGeneration else { return }
             searchResults = results
+            searchErrorMessage = nil
         } catch {
             guard stateGeneration == self.stateGeneration, generation == searchGeneration else { return }
-            handle(error)
+            searchResults = []
+            searchErrorMessage = shouldIgnore(error) ? nil : presentableMessage(for: error)
         }
 
         if stateGeneration == self.stateGeneration, generation == searchGeneration {
@@ -323,6 +328,17 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             return
         }
         await saveTicker(item.ticker, searchItem: item, redirectToConversation: true)
+    }
+
+    func saveSearchResult(_ item: SearchItem) async {
+        guard item.isSupportedInV1 else {
+            activeAlert = AppAlertState(
+                message: item.unsupportedAlertMessage,
+                kind: .dismissOnly
+            )
+            return
+        }
+        await saveTicker(item.ticker, searchItem: item, redirectToConversation: false)
     }
 
     func saveTicker(_ ticker: String) async {
@@ -567,6 +583,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             watchlist = []
             recentCompanies = []
             searchResults = []
+            searchErrorMessage = nil
             usage = nil
             usageLoadState = .loading
             companyCache = [:]
@@ -728,11 +745,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             applyLocalWatchlistAddFallback(savedTicker: savedTicker, cik: company.cik)
         }
         setLastSeenFilingKey(company.filingKey, for: savedTicker)
-        activeConversationTicker = savedTicker
-        UserDefaults.standard.set(savedTicker, forKey: Self.activeConversationTickerKey)
         loadHomeFromPersistence()
 
         if redirectToConversation {
+            activeConversationTicker = savedTicker
+            UserDefaults.standard.set(savedTicker, forKey: Self.activeConversationTickerKey)
             openConversation(for: savedTicker)
         }
     }
@@ -755,11 +772,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         if usage.savedTickers == nil {
             applyLocalWatchlistAddFallback(savedTicker: savedTicker, cik: loadState.cik ?? searchItem?.cik)
         }
-        activeConversationTicker = savedTicker
-        UserDefaults.standard.set(savedTicker, forKey: Self.activeConversationTickerKey)
         loadHomeFromPersistence()
 
         if redirectToConversation {
+            activeConversationTicker = savedTicker
+            UserDefaults.standard.set(savedTicker, forKey: Self.activeConversationTickerKey)
             openConversation(for: savedTicker)
         }
     }

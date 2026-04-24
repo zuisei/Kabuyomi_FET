@@ -1,6 +1,16 @@
 import Foundation
 import SwiftUI
 
+func displayableMessageSources(_ sources: [LocalMessageSourceRef], in company: CompanyPayload) -> [LocalMessageSourceRef] {
+    var seen = Set<String>()
+
+    return sources.filter { source in
+        let label = investorFacingSourceLabel(for: source, in: company)
+        let key = "\(source.sourceKind.rawValue):\(label)"
+        return seen.insert(key).inserted
+    }
+}
+
 struct ConversationMessageRow: View {
     let company: CompanyPayload
     let message: LocalChatMessage
@@ -9,6 +19,10 @@ struct ConversationMessageRow: View {
     let followUpSuggestions: [String]
     let applySuggestion: (String) -> Void
     let openSource: (LocalMessageSourceRef) -> Void
+
+    private var displaySources: [LocalMessageSourceRef] {
+        displayableMessageSources(message.sources, in: company)
+    }
 
     var body: some View {
         VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 8) {
@@ -41,7 +55,7 @@ struct ConversationMessageRow: View {
                 }
             }
 
-            if !message.sources.isEmpty {
+            if !displaySources.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     if let groundingCaption {
                         Label(groundingCaption, systemImage: groundingIcon)
@@ -51,12 +65,24 @@ struct ConversationMessageRow: View {
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(message.sources) { source in
+                            ForEach(Array(displaySources.prefix(3))) { source in
                                 Button(action: { openSource(source) }) {
                                     sourceChip(for: source)
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("根拠を開く: \(displaySourceLabel(for: source))")
+                            }
+
+                            if displaySources.count > 3 {
+                                Text("+\(displaySources.count - 3)")
+                                    .font(.system(.caption2, design: .rounded, weight: .bold))
+                                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                            .fill(Color.white.opacity(0.58))
+                                    )
                             }
                         }
                         .padding(.trailing, 20)
@@ -90,7 +116,7 @@ struct ConversationMessageRow: View {
     }
 
     private var groundingCaption: String? {
-        let kinds = Set(message.sources.map(\.sourceKind))
+        let kinds = Set(displaySources.map(\.sourceKind))
 
         if kinds.contains(.historicalFiling) && kinds.contains(.secFiling) {
             return "最新決算資料と過去資料を併用"
@@ -139,10 +165,10 @@ struct ConversationMessageRow: View {
         }
 
         if let precedingUserPrompt, isHistoricalQuestionText(precedingUserPrompt) {
-            return "同じ軸で続きを見る"
+            return "同じ軸で聞く"
         }
 
-        return "続きを見る"
+        return "続けて聞く"
     }
 
     @ViewBuilder
@@ -165,7 +191,7 @@ struct ConversationMessageRow: View {
     }
 
     private var groundingIcon: String {
-        let kinds = Set(message.sources.map(\.sourceKind))
+        let kinds = Set(displaySources.map(\.sourceKind))
         if kinds.contains(.historicalFiling) {
             return "clock.arrow.circlepath"
         }
@@ -204,17 +230,15 @@ struct ConversationMessageRow: View {
 
     @ViewBuilder
     private func sourceChip(for source: LocalMessageSourceRef) -> some View {
-        HStack(spacing: 6) {
-            Text(source.sourceKind.badgeTitle)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
+        HStack(spacing: 7) {
+            Image(systemName: source.sourceKind.systemImage)
+                .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(sourceBadgeForeground(for: source))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(sourceBadgeBackground(for: source)))
 
-            Label(displaySourceLabel(for: source), systemImage: source.sourceKind.systemImage)
-                .font(.system(.caption2, design: .rounded, weight: .semibold))
+            Text(displaySourceLabel(for: source))
+                .font(.system(.caption2, design: .rounded, weight: .bold))
                 .foregroundStyle(KabuyomiTheme.accentDeep)
+                .lineLimit(1)
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .bold))
@@ -222,7 +246,14 @@ struct ConversationMessageRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+        .background(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(Color.white.opacity(0.58))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .stroke(sourceBadgeBackground(for: source), lineWidth: 1)
+                )
+        )
     }
 
     private var messageMetaLine: some View {
@@ -236,21 +267,8 @@ struct ConversationMessageRow: View {
                     .font(.system(.caption2, design: .rounded, weight: .semibold))
                     .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.92))
 
-                if let compactModelLabel {
-                    Text(compactModelLabel)
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.55)))
-                }
             }
         }
-    }
-
-    private var compactModelLabel: String? {
-        guard message.role != "user" else { return nil }
-        return AIModelName.compactLabel(for: message.modelName)
     }
 
     private func avatarBubble<S: StringProtocol>(label: S, accent: Bool) -> some View {
@@ -353,10 +371,6 @@ private struct AssistantStructuredBubble: View {
     let content: String
     let comparisonLimitation: AssistantComparisonNotice?
 
-    private var structure: AssistantMessageStructure {
-        structureAssistantMessage(content)
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let comparisonLimitation {
@@ -366,33 +380,7 @@ private struct AssistantStructuredBubble: View {
                 )
             }
 
-            AssistantSectionBlock(title: "結論", tint: KabuyomiTheme.accentDeep) {
-                Text(localizedAssistantDisplayText(structure.conclusion))
-                    .font(.system(.body, design: .rounded, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if !structure.evidence.isEmpty {
-                AssistantSectionBlock(title: "根拠", tint: KabuyomiTheme.inkMuted) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(structure.evidence.enumerated()), id: \.offset) { _, sentence in
-                            AssistantSentenceRow(text: sentence)
-                        }
-                    }
-                }
-            }
-
-            if !structure.limitations.isEmpty {
-                AssistantSectionBlock(title: "補足 / 次に見る点", tint: KabuyomiTheme.negative) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(structure.limitations.enumerated()), id: \.offset) { _, sentence in
-                            AssistantSentenceRow(text: sentence)
-                        }
-                    }
-                }
-            }
+            AssistantNaturalText(content)
         }
     }
 }
@@ -410,14 +398,25 @@ private struct AssistantFallbackBubble: View {
                 )
             }
 
-            AssistantSectionBlock(title: "いま分かること", tint: KabuyomiTheme.accentDeep) {
-                Text(message)
-                    .font(.system(.body, design: .rounded, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            AssistantNaturalText(message)
         }
+    }
+}
+
+private struct AssistantNaturalText: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(localizedAssistantDisplayText(text))
+            .font(.system(.body, design: .rounded, weight: .medium))
+            .foregroundStyle(KabuyomiTheme.ink)
+            .lineSpacing(4)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
     }
 }
 
@@ -830,7 +829,8 @@ private func stripMixedEnglishBoilerplate(from text: String) -> String {
     let patterns = [
         #"\bItem\s+\d+[A-Za-z]?\.\s*"#,
         #"(?i)\b(?:Management'?s Discussion|Results of Operations|Our Business Risks|Forward-?looking statements|Investors are cautioned|Available Information)\b[^ぁ-んァ-ヶ一-龠]{0,280}"#,
-        #"(?i)\b[A-Z][A-Za-z0-9'’\-.,/:;() ]{24,}(?=(?:[ぁ-んァ-ヶ一-龠]|$))"#
+        #"(?i)\bA detailed discussion of [^ぁ-んァ-ヶ一-龠]{0,320}(?:forward-?looking statements|actual results|included elsewhere)[^ぁ-んァ-ヶ一-龠]{0,160}"#,
+        #"(?i)\b(?:risks and uncertainties|actual results and events|could cause actual results)[^ぁ-んァ-ヶ一-龠]{0,220}"#
     ]
 
     for pattern in patterns {

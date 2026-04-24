@@ -67,4 +67,41 @@ describe("extractCompanyWebsiteUrl", () => {
       })
     ).toBe("https://www.investor.circle.com/");
   });
+
+  it("does not treat relative filing html names as company website domains", () => {
+    const html = `
+      <html>
+        <body>
+          <p>
+            Available Information. Our filings include
+            <a href="entalagreementn.htm">supplemental agreement</a>.
+          </p>
+        </body>
+      </html>
+    `;
+
+    expect(
+      extractCompanyWebsiteUrl(html, {
+        companyName: "Alcoa Corp",
+        primaryDocumentUrl: "https://www.sec.gov/Archives/edgar/data/4281/000000428126000001/aa-20260331.htm"
+      })
+    ).toBeUndefined();
+  });
+
+  it("rejects html-looking pseudo hosts even with a scheme", () => {
+    const html = `
+      <html>
+        <body>
+          <p>Our website is https://entalagreementn.htm for reference.</p>
+        </body>
+      </html>
+    `;
+
+    expect(
+      extractCompanyWebsiteUrl(html, {
+        companyName: "Alcoa Corp",
+        primaryDocumentUrl: "https://www.sec.gov/Archives/edgar/data/4281/000000428126000001/aa-20260331.htm"
+      })
+    ).toBeUndefined();
+  });
 });

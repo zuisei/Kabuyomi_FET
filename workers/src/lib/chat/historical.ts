@@ -1,5 +1,5 @@
 import type { Env, FilingCacheRecord, FilingReference, MetricSnapshot } from "../../env";
-import { fetchSubmissions, listSupportedFilings, lookupTicker, pickComparisonFiling } from "../../clients/sec";
+import { fetchSubmissions, fetchSubmissionsWithHistory, listSupportedFilings, lookupTicker, pickComparisonFiling } from "../../clients/sec";
 import { ensureHistoricalFilingStored } from "../filings/history-persistence";
 import { selectHistoricalAutohydrationCandidates } from "../history-autohydration";
 import { hasHistoricalBindings, isHistoricalQuestion, maybeBuildHistoricalChatResponse } from "../history-store";
@@ -241,7 +241,7 @@ async function prepareHistoricalHydration(
     };
   }
 
-  const submissions = await fetchSubmissions(tickerRecord.cik, env);
+  const submissions = await fetchSubmissionsWithHistory(tickerRecord.cik, env);
   const candidates = selectHistoricalAutohydrationCandidates(
     {
       formType: filing.formType,

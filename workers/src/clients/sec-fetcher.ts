@@ -19,6 +19,10 @@ export interface FilingAssetsFetcherResponse extends MetricsFetcherResponse {
   primaryDocumentUrl: string;
 }
 
+export interface FetchSubmissionsOptions {
+  includeHistory?: boolean;
+}
+
 const DEFAULT_FETCHER_TIMEOUT_MS = 25_000;
 const DEFAULT_FETCHER_RETRY_COUNT = 1;
 
@@ -26,8 +30,15 @@ export async function fetchTickerSnapshotFromFetcher(env: Env): Promise<TickerSn
   return fetcherRequest(env, "/internal/sec/tickers-snapshot", {});
 }
 
-export async function fetchSubmissionsFromFetcher(cik: string, env: Env): Promise<SubmissionResponse> {
-  return fetcherRequest(env, "/internal/sec/submissions", { cik });
+export async function fetchSubmissionsFromFetcher(
+  cik: string,
+  env: Env,
+  options: FetchSubmissionsOptions = {}
+): Promise<SubmissionResponse> {
+  return fetcherRequest(env, "/internal/sec/submissions", {
+    cik,
+    includeHistory: options.includeHistory === true
+  });
 }
 
 export async function fetchFilingHtmlFromFetcher(filing: FilingReference, env: Env): Promise<FilingHtmlResponse> {

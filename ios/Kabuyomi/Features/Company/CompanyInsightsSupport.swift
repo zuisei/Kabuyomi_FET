@@ -168,6 +168,154 @@ func formattedSignedYoY(_ yoyPercent: Double) -> String {
     return "\(sign)\(formattedYoY(yoyPercent))"
 }
 
+enum MetricDeltaTone: Equatable {
+    case positive
+    case negative
+    case neutral
+
+    var tint: Color {
+        switch self {
+        case .positive:
+            return KabuyomiTheme.positive
+        case .negative:
+            return KabuyomiTheme.negative
+        case .neutral:
+            return KabuyomiTheme.inkMuted
+        }
+    }
+}
+
+enum MetricDeltaDirection: Equatable {
+    case positive
+    case negative
+    case none
+}
+
+struct MetricYoYDisplay: Equatable {
+    let text: String
+    let tone: MetricDeltaTone
+    let direction: MetricDeltaDirection
+    let magnitudePercent: Double
+
+    var tint: Color {
+        tone.tint
+    }
+}
+
+func metricYoYDisplay(for metric: MetricPayload) -> MetricYoYDisplay? {
+    metricYoYDisplay(
+        logicalName: metric.logicalName,
+        value: metric.value,
+        comparisonValue: metric.comparisonValue,
+        yoyPercent: metric.yoyPercent
+    )
+}
+
+func metricYoYDisplay(
+    logicalName: String,
+    value: Double,
+    comparisonValue: Double?,
+    yoyPercent: Double?
+) -> MetricYoYDisplay? {
+    guard let yoyPercent else { return nil }
+
+    let magnitude = abs(yoyPercent)
+    if let comparisonValue {
+        if isProfitLikeMetric(logicalName) {
+            if value < 0, comparisonValue < 0 {
+                if value > comparisonValue {
+                    return MetricYoYDisplay(
+                        text: "赤字縮小 \(formattedYoY(magnitude))",
+                        tone: .positive,
+                        direction: .positive,
+                        magnitudePercent: magnitude
+                    )
+                }
+
+                if value < comparisonValue {
+                    return MetricYoYDisplay(
+                        text: "赤字拡大 \(formattedYoY(magnitude))",
+                        tone: .negative,
+                        direction: .negative,
+                        magnitudePercent: magnitude
+                    )
+                }
+
+                return MetricYoYDisplay(text: "赤字横ばい", tone: .neutral, direction: .none, magnitudePercent: 0)
+            }
+
+            if value >= 0, comparisonValue < 0 {
+                return MetricYoYDisplay(text: "黒字転換", tone: .positive, direction: .positive, magnitudePercent: magnitude)
+            }
+
+            if value < 0, comparisonValue >= 0 {
+                return MetricYoYDisplay(text: "赤字転落", tone: .negative, direction: .negative, magnitudePercent: magnitude)
+            }
+        }
+
+        if isCashFlowMetric(logicalName) {
+            if value < 0, comparisonValue < 0 {
+                if value > comparisonValue {
+                    return MetricYoYDisplay(
+                        text: "流出縮小 \(formattedYoY(magnitude))",
+                        tone: .positive,
+                        direction: .positive,
+                        magnitudePercent: magnitude
+                    )
+                }
+
+                if value < comparisonValue {
+                    return MetricYoYDisplay(
+                        text: "流出拡大 \(formattedYoY(magnitude))",
+                        tone: .negative,
+                        direction: .negative,
+                        magnitudePercent: magnitude
+                    )
+                }
+
+                return MetricYoYDisplay(text: "流出横ばい", tone: .neutral, direction: .none, magnitudePercent: 0)
+            }
+
+            if value >= 0, comparisonValue < 0 {
+                return MetricYoYDisplay(text: "流入転換", tone: .positive, direction: .positive, magnitudePercent: magnitude)
+            }
+
+            if value < 0, comparisonValue >= 0 {
+                return MetricYoYDisplay(text: "流出転落", tone: .negative, direction: .negative, magnitudePercent: magnitude)
+            }
+        }
+    } else if value < 0, isProfitLikeMetric(logicalName) {
+        return MetricYoYDisplay(
+            text: yoyPercent >= 0 ? "赤字縮小 \(formattedYoY(magnitude))" : "赤字拡大 \(formattedYoY(magnitude))",
+            tone: yoyPercent >= 0 ? .positive : .negative,
+            direction: yoyPercent >= 0 ? .positive : .negative,
+            magnitudePercent: magnitude
+        )
+    } else if value < 0, isCashFlowMetric(logicalName) {
+        return MetricYoYDisplay(
+            text: yoyPercent >= 0 ? "流出縮小 \(formattedYoY(magnitude))" : "流出拡大 \(formattedYoY(magnitude))",
+            tone: yoyPercent >= 0 ? .positive : .negative,
+            direction: yoyPercent >= 0 ? .positive : .negative,
+            magnitudePercent: magnitude
+        )
+    }
+
+    return MetricYoYDisplay(
+        text: formattedSignedYoY(yoyPercent),
+        tone: yoyPercent >= 0 ? .positive : .negative,
+        direction: yoyPercent >= 0 ? .positive : .negative,
+        magnitudePercent: magnitude
+    )
+}
+
+private func isProfitLikeMetric(_ logicalName: String) -> Bool {
+    ["operatingIncome", "netIncome", "epsBasic"].contains(logicalName)
+}
+
+private func isCashFlowMetric(_ logicalName: String) -> Bool {
+    logicalName == "operatingCashFlow"
+}
+
 func leadSentence(from text: String) -> String? {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }

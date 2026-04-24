@@ -298,7 +298,61 @@ test("fetchSubmissions serves cached data when the upstream later fails", async 
   }
 });
 
-test("fetchSubmissions merges older split submissions files when recent annual history is incomplete", async () => {
+test("fetchSubmissions skips older split submission files on latest-only requests", async () => {
+  const originalFetch = global.fetch;
+  const calls = [];
+
+  global.fetch = async (url) => {
+    const target = String(url);
+    calls.push(target);
+
+    if (target.endsWith("/CIK0001326801.json")) {
+      return new Response(
+        JSON.stringify({
+          filings: {
+            recent: {
+              form: ["10-K"],
+              accessionNumber: ["0001326801-26-000017"],
+              primaryDocument: ["meta-20251231.htm"],
+              filingDate: ["2026-01-29"],
+              reportDate: ["2025-12-31"]
+            },
+            files: [
+              {
+                name: "CIK0001326801-submissions-001.json",
+                filingCount: 2001,
+                filingFrom: "2016-11-02",
+                filingTo: "2024-03-18"
+              }
+            ]
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+
+    throw new Error(`Unexpected fetch: ${target}`);
+  };
+
+  try {
+    const service = createSecService({
+      internalToken: "",
+      userAgent: "Kabuyomi admin@kabuyomi.app",
+      rateLimitPerSecond: 8,
+      retryCount: 0,
+      initialBackoffMs: 1,
+      requestTimeoutMs: 10
+    });
+    const payload = await service.fetchSubmissions("0001326801");
+
+    assert.deepEqual(payload.filings.recent.accessionNumber, ["0001326801-26-000017"]);
+    assert.deepEqual(calls, ["https://data.sec.gov/submissions/CIK0001326801.json"]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("fetchSubmissions merges older split submissions files when history is requested and recent annual history is incomplete", async () => {
   const originalFetch = global.fetch;
   const calls = [];
 
@@ -390,7 +444,7 @@ test("fetchSubmissions merges older split submissions files when recent annual h
       initialBackoffMs: 1,
       requestTimeoutMs: 10
     });
-    const payload = await service.fetchSubmissions("0001326801");
+    const payload = await service.fetchSubmissions("0001326801", { includeHistory: true });
 
     assert.deepEqual(
       payload.filings.recent.accessionNumber.slice(0, 7),

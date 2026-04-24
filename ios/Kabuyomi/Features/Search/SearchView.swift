@@ -5,7 +5,6 @@ struct SearchView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var searchTask: Task<Void, Never>?
-    @State private var pendingOpenItem: SearchItem?
     @FocusState private var isSearchFieldFocused: Bool
 
     var body: some View {
@@ -21,17 +20,14 @@ struct SearchView: View {
                 VStack(spacing: 16) {
                     searchBar
 
-                    if let pendingOpenItem {
-                        TickerOpenTransitionOverlay(
-                            ticker: pendingOpenItem.ticker,
-                            companyName: pendingOpenItem.companyName,
-                            detail: "初回だけ数秒かかります。"
-                        )
-                    }
-
                     if appModel.searchIsLoading {
                         ProgressView("検索中...")
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    } else if let searchErrorMessage = appModel.searchErrorMessage {
+                        SearchErrorState(message: searchErrorMessage) {
+                            searchNow(query)
+                        }
+                        .frame(maxHeight: .infinity)
                     } else if appModel.searchResults.isEmpty {
                         SearchEmptyState()
                             .frame(maxHeight: .infinity)
@@ -42,10 +38,11 @@ struct SearchView: View {
                                     SearchResultCard(
                                         item: item,
                                         isAdding: appModel.isAddingTicker(item.ticker),
-                                        isAdded: appModel.isTickerInWatchlist(item.ticker, cik: item.cik)
-                                    ) {
-                                        addSearchResult(item)
-                                    }
+                                        isAdded: appModel.isTickerInWatchlist(item.ticker, cik: item.cik),
+                                        canOpen: appModel.companyPayload(for: item.ticker) != nil,
+                                        saveAction: { saveSearchResult(item) },
+                                        openAction: { openSearchResult(item) }
+                                    )
                                 }
                             }
                             .padding(.bottom, 20)
@@ -55,7 +52,6 @@ struct SearchView: View {
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .allowsHitTesting(pendingOpenItem == nil)
             }
             .navigationTitle("銘柄を検索")
             .toolbar {
@@ -81,21 +77,41 @@ struct SearchView: View {
         .onDisappear {
             searchTask?.cancel()
             isSearchFieldFocused = false
-            pendingOpenItem = nil
         }
     }
 
-    private func addSearchResult(_ item: SearchItem) {
-        guard pendingOpenItem == nil else { return }
+    private func saveSearchResult(_ item: SearchItem) {
         isSearchFieldFocused = false
-        pendingOpenItem = item
         Task {
-            await appModel.addToWatchlist(item)
-            if appModel.isTickerInWatchlist(item.ticker, cik: item.cik) {
-                dismiss()
-            } else if pendingOpenItem?.id == item.id {
-                pendingOpenItem = nil
-            }
+            await appModel.saveSearchResult(item)
+        }
+    }
+
+    private func openSearchResult(_ item: SearchItem) {
+        guard appModel.isTickerInWatchlist(item.ticker, cik: item.cik) else {
+            appModel.activeAlert = AppAlertState(
+                message: "この銘柄は先に保存してから開いてください。",
+                kind: .dismissOnly
+            )
+            return
+        }
+
+        guard appModel.companyPayload(for: item.ticker) != nil else {
+            appModel.activeAlert = AppAlertState(
+                message: "この銘柄はまだ準備中です。保存済みなので、準備が終わると開けます。",
+                kind: .dismissOnly
+            )
+            return
+        }
+
+        appModel.openConversation(for: item.ticker)
+        dismiss()
+    }
+
+    private func searchNow(_ query: String) {
+        searchTask?.cancel()
+        searchTask = Task {
+            await appModel.search(query: query)
         }
     }
 
@@ -104,7 +120,7 @@ struct SearchView: View {
             Text("質問したい銘柄を保存")
                 .font(.system(.headline, design: .rounded, weight: .bold))
 
-            Text("保存すると、そのまま会話画面を開きます。v1 は 10-K / 10-Q に対応しています。20-F / 6-K 企業はまだ保存できません。")
+            Text("保存したあと、開く銘柄を選べます。v1 は 10-K / 10-Q に対応しています。20-F / 6-K 企業はまだ保存できません。")
                 .font(.system(.footnote, design: .rounded))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
                 .lineSpacing(2)
@@ -134,7 +150,7 @@ struct SearchView: View {
                 if !query.isEmpty {
                     Button {
                         query = ""
-                        appModel.searchResults = []
+                        searchNow("")
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(KabuyomiTheme.inkMuted)
@@ -144,6 +160,39 @@ struct SearchView: View {
             .padding(14)
             .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.20), stroke: Color.white.opacity(0.58))
         }
+    }
+}
+
+private struct SearchErrorState: View {
+    let message: String
+    let retryAction: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 40, weight: .light))
+                .foregroundStyle(KabuyomiTheme.negative.opacity(0.72))
+
+            Text("検索できませんでした")
+                .font(.system(.title3, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.ink)
+
+            Text(message)
+                .font(.system(.footnote, design: .rounded))
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button(action: retryAction) {
+                Label("再検索", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(KabuyomiTheme.accentDeep)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 44)
+        .kabuyomiGlass(radius: 28, tint: Color.white.opacity(0.18), stroke: Color.white.opacity(0.58))
     }
 }
 
@@ -173,7 +222,17 @@ private struct SearchResultCard: View {
     let item: SearchItem
     let isAdding: Bool
     let isAdded: Bool
-    let addAction: () -> Void
+    let canOpen: Bool
+    let saveAction: () -> Void
+    let openAction: () -> Void
+
+    private var isOpenPending: Bool {
+        isAdded && !canOpen
+    }
+
+    private var canAttemptOpen: Bool {
+        isAdded || canOpen
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -201,23 +260,31 @@ private struct SearchResultCard: View {
             Spacer()
 
             if item.isSupportedInV1 {
-                Button(action: addAction) {
-                    HStack(spacing: 6) {
-                        if isAdding {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(.white)
-                        } else if isAdded {
-                            Image(systemName: "checkmark")
-                        }
-
-                        Text(buttonTitle)
+                VStack(alignment: .trailing, spacing: 8) {
+                    Button(action: saveAction) {
+                        SearchResultActionLabel(
+                            title: saveButtonTitle,
+                            systemImage: saveButtonIcon,
+                            isLoading: isAdding
+                        )
                     }
-                    .frame(minWidth: 112)
+                    .buttonStyle(.plain)
+                    .disabled(isAdding || isAdded)
+                    .accessibilityLabel(isAdded ? "保存済み" : "\(item.ticker) を保存")
+
+                    Button(action: openAction) {
+                        SearchResultActionLabel(
+                            title: openButtonTitle,
+                            systemImage: openButtonIcon,
+                            isLoading: isOpenPending
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canAttemptOpen || isAdding)
+                    .opacity(canAttemptOpen && !isAdding ? 1 : 0.48)
+                    .accessibilityLabel("\(item.ticker) を開く")
+                    .accessibilityHint(openAccessibilityHint)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(isAdded ? KabuyomiTheme.inkMuted : KabuyomiTheme.accent)
-                .disabled(isAdding || isAdded)
             } else {
                 VStack(alignment: .trailing, spacing: 8) {
                     Text(item.availabilityBadgeTitle)
@@ -237,16 +304,44 @@ private struct SearchResultCard: View {
         .kabuyomiCard(.primary, radius: 24)
     }
 
-    private var buttonTitle: String {
+    private var saveButtonTitle: String {
         if isAdding {
-            return "準備中"
+            return "保存中"
         }
 
         if isAdded {
             return "保存済み"
         }
 
-        return "保存して開く"
+        return "保存"
+    }
+
+    private var saveButtonIcon: String {
+        if isAdded {
+            return "checkmark"
+        }
+
+        return "bookmark"
+    }
+
+    private var openButtonTitle: String {
+        isOpenPending ? "準備中" : "開く"
+    }
+
+    private var openButtonIcon: String {
+        isOpenPending ? "hourglass" : "arrow.up.right"
+    }
+
+    private var openAccessibilityHint: String {
+        if canOpen {
+            return "保存済み銘柄の会話を開きます"
+        }
+
+        if isOpenPending {
+            return "準備が終わると開けます"
+        }
+
+        return "先に保存すると開けます"
     }
 
     private func searchMetaPill(title: String, tint: Color) -> some View {
@@ -262,10 +357,60 @@ private struct SearchResultCard: View {
     }
 }
 
+private struct SearchResultActionLabel: View {
+    let title: String
+    let systemImage: String
+    let isLoading: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(KabuyomiTheme.accentDeep)
+            } else {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11, weight: .bold))
+            }
+
+            Text(title)
+        }
+        .font(.system(.caption, design: .rounded, weight: .bold))
+        .foregroundStyle(KabuyomiTheme.accentDeep)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .frame(minWidth: 92)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(KabuyomiTheme.accentSoft.opacity(0.62))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.white.opacity(0.72), lineWidth: 1)
+                )
+        )
+    }
+}
+
 struct TickerOpenTransitionOverlay: View {
     let ticker: String
     let companyName: String
     let detail: String
+    let cancelTitle: String?
+    let cancelAction: (() -> Void)?
+
+    init(
+        ticker: String,
+        companyName: String,
+        detail: String,
+        cancelTitle: String? = nil,
+        cancelAction: (() -> Void)? = nil
+    ) {
+        self.ticker = ticker
+        self.companyName = companyName
+        self.detail = detail
+        self.cancelTitle = cancelTitle
+        self.cancelAction = cancelAction
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
@@ -290,6 +435,13 @@ struct TickerOpenTransitionOverlay: View {
             }
 
             Spacer(minLength: 0)
+
+            if let cancelAction {
+                Button(cancelTitle ?? "キャンセル", action: cancelAction)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .buttonStyle(.bordered)
+                    .tint(KabuyomiTheme.inkMuted)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

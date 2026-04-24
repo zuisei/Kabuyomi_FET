@@ -42,6 +42,7 @@ export const handleCompanyRoute: RouteHandler = async ({ request, url, env, conf
       }
       fallbackTicker = tickerRecord.ticker;
       const filing = await ensureLatestFiling(tickerRecord.ticker, env, config, {
+        deferFullContent: true,
         executionContext: ctx,
         tickerRecord
       });
@@ -97,6 +98,7 @@ export const handleCompanyRoute: RouteHandler = async ({ request, url, env, conf
       try {
         filing = await ensureLatestFiling(tickerRecord.ticker, env, config, {
           forceRemoteCheck: true,
+          deferFullContent: true,
           executionContext: ctx,
           tickerRecord
         });

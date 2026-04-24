@@ -18,6 +18,7 @@ Kabuyomi is an iOS + Cloudflare Workers app for reading SEC filings in Japanese 
 - Kabuyomi is currently a beta with a two-tier quota ladder: `free` (`3` saved tickers / `10` daily chats) and `pro` (`20` saved tickers / `50` daily chats).
 - StoreKit purchase / restore and Worker billing sync stay on the same `/v1/*` API surface. If a detachable offer such as unlimited returns later, keep it outside the core free/pro ladder.
 - Beta chat is filing-grounded by default. External web supplements stay off unless you intentionally re-enable them for testing via Worker remote config.
+- Future `pro` / upper-tier exploration may add AI-assisted web search and a news tab, but the product intent should stay "filing-first": web/news context should explain market reaction, recent developments, and follow-up questions around the filing, not replace SEC-sourced answers or turn the app into a generic news feed.
 - Workers routes live under `workers/src/routes/`; shared logic is split across `workers/src/lib/` and `workers/src/clients/gemini/`.
 
 ## Quick Start

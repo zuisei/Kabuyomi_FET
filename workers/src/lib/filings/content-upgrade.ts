@@ -37,6 +37,26 @@ export function enqueueContentUpgrade(
   );
 }
 
+export function enqueueCompanyWebsiteBackfill(
+  record: FilingCacheRecord,
+  env: Env,
+  executionContext?: Pick<ExecutionContext, "waitUntil">
+): void {
+  if (!executionContext || !needsCompanyWebsiteBackfill(record)) {
+    return;
+  }
+
+  executionContext.waitUntil(
+    backfillCompanyWebsite(record, env).catch((error) => {
+      logErrorEvent("filing_company_website_backfill_failed", {
+        filingKey: record.filingKey,
+        ticker: record.ticker,
+        reason: error instanceof Error ? error.message : String(error)
+      });
+    })
+  );
+}
+
 export async function upgradeMetricsOnlyRecord(record: FilingCacheRecord, env: Env): Promise<FilingCacheRecord | null> {
   if (!isMetricsOnlyRecord(record)) {
     return record;

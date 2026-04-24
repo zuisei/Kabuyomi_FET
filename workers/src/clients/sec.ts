@@ -435,6 +435,10 @@ export async function fetchSubmissions(cik: string, env: Env): Promise<Submissio
   return fetchSubmissionsFromFetcher(cik, env);
 }
 
+export async function fetchSubmissionsWithHistory(cik: string, env: Env): Promise<SubmissionResponse> {
+  return fetchSubmissionsFromFetcher(cik, env, { includeHistory: true });
+}
+
 export function pickLatestSupportedFiling(
   tickerRecord: TickerRecord,
   submissions: SubmissionResponse
