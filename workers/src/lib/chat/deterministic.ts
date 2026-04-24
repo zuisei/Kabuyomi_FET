@@ -328,6 +328,11 @@ function summarizeBusinessOverview(sourceChunks: SourceChunkRecord[]): {
       patterns: [/iphone/i, /ipad/i, /mac/i, /services/i]
     },
     {
+      label: "製品・サービス販売",
+      priority: 55,
+      patterns: [/product and service introductions/i, /new product and service introductions/i]
+    },
+    {
       label: "クラウドサービス",
       priority: 60,
       patterns: [/cloud/i, /azure/i]

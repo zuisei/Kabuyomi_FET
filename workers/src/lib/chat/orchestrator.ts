@@ -81,6 +81,36 @@ export async function buildChatResponse(
   const validSourceIds = new Set(filing.sourceChunks.map((chunk) => chunk.sourceId));
   const approvedSourceIds = modelResponse.sourceIds.filter((sourceId) => validSourceIds.has(sourceId));
 
+  if (
+    deterministic?.strategy === "business_overview" &&
+    shouldPreferDeterministicBusinessOverview(modelResponse.answer, modelResponse.usedRemoteModel === true)
+  ) {
+    logWarnEvent("chat_grounding_repair_used", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      reason: modelResponse.usedRemoteModel === true ? "weak_business_overview_answer" : "business_overview_remote_fallback"
+    });
+    logEvent("chat_path_selected", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      path: "deterministic",
+      strategy: deterministic.strategy
+    });
+
+    const response = await maybeAppendWebSupplement(
+      filing,
+      question,
+      ensureFilingGroundedResponse(deterministic.response),
+      env,
+      resolvedConfig
+    );
+    const responseWithUrls = attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl);
+    return {
+      ...responseWithUrls,
+      responsePath: "deterministic"
+    };
+  }
+
   if (approvedSourceIds.length !== modelResponse.sourceIds.length) {
     logWarnEvent("chat_grounding_repair_used", {
       filingKey: filing.filingKey,
@@ -220,6 +250,20 @@ export async function buildChatResponse(
     ...responseWithUrls,
     responsePath
   };
+}
+
+function shouldPreferDeterministicBusinessOverview(answer: string, usedRemoteModel: boolean): boolean {
+  if (!usedRemoteModel) {
+    return true;
+  }
+
+  return (
+    answer === CONTEXT_UNAVAILABLE_ANSWER ||
+    /売上高は|revenue|net sales|前年同期比|一般的な注意書き|案内文|材料としては弱め/i.test(answer) ||
+    /historically experienced higher net sales|forward-looking statements|available information|investor relations website/i.test(
+      answer
+    )
+  );
 }
 
 async function buildFallbackResponse(

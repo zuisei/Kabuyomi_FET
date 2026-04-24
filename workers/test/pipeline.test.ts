@@ -143,6 +143,47 @@ describe("buildChatResponse", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("recovers business-overview prompts to deterministic filing context when remote output is weak", async () => {
+    const filing = makeSparseAppleOverviewFiling();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer:
+                        "提出資料の本文では「The Company has historically experienced higher net sales...」という文脈で説明されています。",
+                      sourceIds: ["S8"]
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await buildChatResponse(
+      filing,
+      "この企業はなんの企業？",
+      { GEMINI_API_KEY: "test-key" } as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.answer).toContain("Apple Inc.は");
+    expect(response.answer).toContain("製品・サービス販売");
+    expect(response.answer).not.toContain("historically experienced higher net sales");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S8"]);
+    expect(response.responsePath).toBe("deterministic");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("uses revenue buckets for broad what-company prompts when business buckets are available", async () => {
     const filing = makeRevenueBreakdownFiling();
 
@@ -1356,6 +1397,26 @@ function makeBusinessOverviewFiling() {
         tagName: "Revenues",
         sortOrder: 9
       }
+    ]
+  } as any;
+}
+
+function makeSparseAppleOverviewFiling() {
+  const base = makeTestFiling() as any;
+  return {
+    ...base,
+    sourceChunks: [
+      {
+        sourceId: "S8",
+        sectionType: "md_a",
+        sectionTitle: "Part I, Item 2",
+        sourceLabel: "10-Q Part I Item 2, filed 2026-01-30",
+        text: "The Company has historically experienced higher net sales in its first quarter compared to other quarters in its fiscal year due in part to seasonal holiday demand. Additionally, new product and service introductions can significantly impact net sales, cost of sales and operating expenses.",
+        startOffset: 0,
+        endOffset: 275,
+        sortOrder: 8
+      },
+      ...base.sourceChunks.filter((chunk: { sectionType: string }) => chunk.sectionType === "xbrl_metric")
     ]
   } as any;
 }
