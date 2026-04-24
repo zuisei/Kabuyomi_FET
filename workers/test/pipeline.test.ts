@@ -102,6 +102,47 @@ describe("buildChatResponse", () => {
     expect(response.responsePath).toBe("deterministic");
   });
 
+  it("lets Gemini answer business-overview prompts when it stays filing-grounded", async () => {
+    const filing = makeBusinessOverviewFiling();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer:
+                        "Guardant Healthは、がんの血液検査と精密医療を手がける会社です。患者や医療機関向けの検査に加えて、製薬会社の臨床研究も支援しています。",
+                      sourceIds: ["S2"]
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await buildChatResponse(
+      filing,
+      "この企業はなんの企業？",
+      { GEMINI_API_KEY: "test-key" } as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.answer).toContain("がんの血液検査と精密医療");
+    expect(response.answer).toContain("製薬会社の臨床研究");
+    expect(response.answer).not.toContain("売上高は");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S2"]);
+    expect(response.responsePath).toBe("gemini");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("uses revenue buckets for broad what-company prompts when business buckets are available", async () => {
     const filing = makeRevenueBreakdownFiling();
 

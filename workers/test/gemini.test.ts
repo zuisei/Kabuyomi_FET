@@ -316,6 +316,89 @@ describe("Gemini local chat fallback", () => {
     expect(body.generationConfig.responseJsonSchema).toBeTruthy();
   });
 
+  it("recovers company-overview model answers that lead with revenue instead of business", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer:
+                        "売上高は 50.8 億ドルで、前年同期比 6.6%増です。提出資料の一般的な注意書きや案内文が中心で、材料としては弱めです。",
+                      sourceIds: ["S9"]
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await generateChatAnswer(
+      {
+        GEMINI_API_KEY: "test-key"
+      } as never,
+      {
+        question: "この企業はなんの企業？",
+        filing: {
+          filingKey: "v1:0001576280:000157628026000001",
+          ticker: "GH",
+          companyName: "Guardant Health, Inc.",
+          cik: "0001576280",
+          formType: "10-K",
+          filedAt: "2026-02-20",
+          periodOfReport: "2025-12-31",
+          primaryDocumentUrl: "https://example.com",
+          mdaText: "",
+          mdaTokenCount: 0,
+          metrics: [],
+          generatedAt: "2026-04-24T00:00:00.000Z",
+          extractorVersion: "v1",
+          promptVersion: "v1",
+          summary: { verdict: "", highlights: [], changes: [] },
+          sourceChunks: [
+            {
+              sourceId: "S2",
+              sectionType: "md_a",
+              sectionTitle: "Item 7",
+              sourceLabel: "10-K Item 7",
+              text: "Guardant Health is a leading precision oncology company focused on helping conquer cancer globally through proprietary blood-based tests, vast data sets and advanced analytics. The company serves patients, healthcare providers and biopharmaceutical companies.",
+              startOffset: 0,
+              endOffset: 260,
+              sortOrder: 2
+            },
+            {
+              sourceId: "S9",
+              sectionType: "xbrl_metric",
+              sectionTitle: "売上高",
+              sourceLabel: "XBRL 売上高 (Revenues)",
+              text: "売上高: 508000000 USD / 比較値: 476500000 / YoY: 6.6%",
+              startOffset: 0,
+              endOffset: 0,
+              tagName: "Revenues",
+              sortOrder: 9
+            }
+          ]
+        }
+      }
+    );
+
+    expect(response.answer).toContain("Guardant Health, Inc.は");
+    expect(response.answer).toContain("がん領域の精密医療");
+    expect(response.answer).toContain("血液検査・分子診断");
+    expect(response.answer).not.toContain("売上高は 50.8");
+    expect(response.sourceIds).toEqual(["S2"]);
+    expect(response.usedRemoteModel).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("matches Japanese questions against source text without whitespace tokenization", async () => {
     const response = await generateChatAnswer({} as never, {
       question: "利益率悪化の主因は？",
