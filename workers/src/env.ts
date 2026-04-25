@@ -1,4 +1,5 @@
 import type { RemoteConfig } from "./lib/remote-config";
+import type { AccessPlan } from "./lib/billing-catalog";
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -101,7 +102,7 @@ export interface FilingCacheRecord {
 }
 
 export interface UsageState {
-  plan: "free" | "pro";
+  plan: AccessPlan;
   accessMode?: string;
   chatsUsed: number;
   chatLimit: number;

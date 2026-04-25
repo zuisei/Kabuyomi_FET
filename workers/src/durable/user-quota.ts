@@ -1,4 +1,5 @@
 import type { DurableObjectState } from "@cloudflare/workers-types";
+import type { AccessPlan } from "../lib/billing-catalog";
 import { QuotaRequestSchema } from "../lib/contracts";
 import { isAppError } from "../lib/errors";
 import { parseJsonBody } from "../lib/request";
@@ -6,7 +7,7 @@ import { parseJsonBody } from "../lib/request";
 const QUOTA_PAYLOAD_MAX_BYTES = 8_192;
 
 interface QuotaRecord {
-  plan: "free" | "pro";
+  plan: AccessPlan;
   dateJST: string;
   chatsUsed: number;
   chatLimit: number;
@@ -15,7 +16,7 @@ interface QuotaRecord {
 }
 
 interface SavedTickerRecord {
-  plan: "free" | "pro";
+  plan: AccessPlan;
   stockLimit: number;
   savedTickers: string[];
   updatedAt: string;
@@ -23,7 +24,7 @@ interface SavedTickerRecord {
 }
 
 interface CreditStateRecord {
-  plan: "free" | "pro";
+  plan: AccessPlan;
   periodStart: string;
   periodEnd: string;
   monthlyRemaining: number;
@@ -51,9 +52,22 @@ interface CreditOperationRecord {
   refundedAt?: string;
 }
 
+interface MonthlyGrantRecord {
+  operationId: string;
+  plan: AccessPlan;
+  periodStart: string;
+  periodEnd: string;
+  creditsGranted: number;
+  balanceAfter: number;
+  monthlyBalanceAfter: number;
+  purchasedBalanceAfter: number;
+  createdAt: string;
+}
+
 const SAVED_TICKERS_KEY = "saved_tickers";
 const CREDIT_STATE_KEY = "credit_state";
 const CREDIT_OPERATION_PREFIX = "credit_operation:";
+const MONTHLY_GRANT_PREFIX = "monthly_grant:";
 const CREDIT_OPERATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DAILY_KEY_PREFIX = "daily:";
 const LEGACY_DAILY_KEY_LIMIT = 30;
@@ -81,7 +95,9 @@ export class UserQuotaDO {
         this.loadDailyRecord(body.dateJST, body.plan, body.chatLimit),
         this.loadSavedTickerRecord(body.plan, body.stockLimit)
       ]);
-      const creditState = await this.loadCreditState(body.dateJST, body.plan, body.monthlyCreditLimit ?? 0);
+      const creditStateResult = await this.loadCreditState(body.dateJST, body.plan, body.monthlyCreditLimit ?? 0);
+      const creditState = creditStateResult.creditState;
+      const monthlyGrant = creditStateResult.monthlyGrant;
       const currentUsage = () => usagePayload(dailyRecord, savedTickerRecord, creditState, body.accessMode);
 
       const normalizedTicker = normalizeTicker(body.ticker);
@@ -107,12 +123,16 @@ export class UserQuotaDO {
           referenceType: body.referenceType,
           referenceId: body.referenceId
         });
+        if (monthlyGrant) {
+          await this.saveMonthlyGrant(monthlyGrant);
+        }
         return {
           status: creditResult.status,
           payload: {
             usage: currentUsage(),
             didMutate: creditResult.didMutate,
             creditOperation: creditResult.operation,
+            monthlyGrant,
             error: creditResult.error,
             creditsRequired,
             creditsRemaining: creditState.monthlyRemaining + creditState.purchasedRemaining
@@ -139,13 +159,37 @@ export class UserQuotaDO {
           referenceType: body.referenceType,
           referenceId: body.referenceId
         });
+        if (monthlyGrant) {
+          await this.saveMonthlyGrant(monthlyGrant);
+        }
         return {
           status: 200,
           payload: {
             usage: currentUsage(),
             didMutate: creditResult.didMutate,
             creditOperation: creditResult.operation,
+            monthlyGrant,
             creditsRemaining: creditState.monthlyRemaining + creditState.purchasedRemaining
+          }
+        };
+      }
+
+      if (body.action === "ensureMonthlyCreditGrant") {
+        const now = new Date().toISOString();
+        dailyRecord.updatedAt = now;
+        savedTickerRecord.updatedAt = now;
+        await Promise.all([
+          this.state.storage.put(buildDailyKey(body.dateJST), dailyRecord),
+          this.state.storage.put(SAVED_TICKERS_KEY, savedTickerRecord),
+          this.state.storage.put(CREDIT_STATE_KEY, creditState),
+          monthlyGrant ? this.saveMonthlyGrant(monthlyGrant) : Promise.resolve()
+        ]);
+        return {
+          status: 200,
+          payload: {
+            usage: currentUsage(),
+            didMutate: monthlyGrant ? true : didMutate,
+            monthlyGrant
           }
         };
       }
@@ -235,16 +279,17 @@ export class UserQuotaDO {
       await Promise.all([
         this.state.storage.put(buildDailyKey(body.dateJST), dailyRecord),
         this.state.storage.put(SAVED_TICKERS_KEY, savedTickerRecord),
-        this.state.storage.put(CREDIT_STATE_KEY, creditState)
+        this.state.storage.put(CREDIT_STATE_KEY, creditState),
+        monthlyGrant ? this.saveMonthlyGrant(monthlyGrant) : Promise.resolve()
       ]);
 
-      return { status: 200, payload: { usage: currentUsage(), didMutate } };
+      return { status: 200, payload: { usage: currentUsage(), didMutate, monthlyGrant } };
     });
 
     return this.reply(result.payload, result.status);
   }
 
-  private async loadDailyRecord(dateJST: string, plan: "free" | "pro", chatLimit: number): Promise<QuotaRecord> {
+  private async loadDailyRecord(dateJST: string, plan: AccessPlan, chatLimit: number): Promise<QuotaRecord> {
     const current =
       ((await this.state.storage.get<QuotaRecord>(buildDailyKey(dateJST))) as QuotaRecord | undefined) ?? {
         plan,
@@ -260,7 +305,7 @@ export class UserQuotaDO {
     return current;
   }
 
-  private async loadSavedTickerRecord(plan: "free" | "pro", stockLimit: number): Promise<SavedTickerRecord> {
+  private async loadSavedTickerRecord(plan: AccessPlan, stockLimit: number): Promise<SavedTickerRecord> {
     const existing = (await this.state.storage.get<SavedTickerRecord>(SAVED_TICKERS_KEY)) as SavedTickerRecord | undefined;
     if (existing) {
       existing.plan = plan;
@@ -284,9 +329,9 @@ export class UserQuotaDO {
 
   private async loadCreditState(
     dateJST: string,
-    plan: "free" | "pro",
+    plan: AccessPlan,
     monthlyCreditLimit: number
-  ): Promise<CreditStateRecord> {
+  ): Promise<{ creditState: CreditStateRecord; monthlyGrant?: MonthlyGrantRecord }> {
     const period = buildCreditPeriod(dateJST);
     const now = new Date().toISOString();
     const existing = (await this.state.storage.get<CreditStateRecord>(CREDIT_STATE_KEY)) as
@@ -294,7 +339,7 @@ export class UserQuotaDO {
       | undefined;
 
     if (!existing || existing.periodStart !== period.periodStart || existing.periodEnd !== period.periodEnd) {
-      return {
+      const creditState = {
         plan,
         periodStart: period.periodStart,
         periodEnd: period.periodEnd,
@@ -303,6 +348,10 @@ export class UserQuotaDO {
         purchasedRemaining: existing?.purchasedRemaining ?? 0,
         updatedAt: now
       };
+      return {
+        creditState,
+        monthlyGrant: await this.buildMonthlyGrantIfNeeded(creditState, monthlyCreditLimit, now)
+      };
     }
 
     const limitDelta = monthlyCreditLimit - existing.monthlyLimit;
@@ -310,7 +359,10 @@ export class UserQuotaDO {
     existing.monthlyLimit = monthlyCreditLimit;
     existing.monthlyRemaining = Math.max(0, Math.min(monthlyCreditLimit, existing.monthlyRemaining + limitDelta));
     existing.updatedAt = now;
-    return existing;
+    return {
+      creditState: existing,
+      monthlyGrant: limitDelta > 0 ? await this.buildMonthlyGrantIfNeeded(existing, limitDelta, now) : undefined
+    };
   }
 
   private async consumeCredit({
@@ -462,6 +514,40 @@ export class UserQuotaDO {
     await this.state.storage.put(buildCreditOperationKey(operation.operationId), operation);
   }
 
+  private async buildMonthlyGrantIfNeeded(
+    creditState: CreditStateRecord,
+    creditsGranted: number,
+    createdAt: string
+  ): Promise<MonthlyGrantRecord | undefined> {
+    if (creditsGranted <= 0) {
+      return undefined;
+    }
+
+    const operationId = buildMonthlyGrantOperationId(creditState.plan, creditState.periodStart, creditState.periodEnd);
+    const existing = (await this.state.storage.get<MonthlyGrantRecord>(buildMonthlyGrantKey(operationId))) as
+      | MonthlyGrantRecord
+      | undefined;
+    if (existing) {
+      return undefined;
+    }
+
+    return {
+      operationId,
+      plan: creditState.plan,
+      periodStart: creditState.periodStart,
+      periodEnd: creditState.periodEnd,
+      creditsGranted,
+      balanceAfter: creditState.monthlyRemaining + creditState.purchasedRemaining,
+      monthlyBalanceAfter: creditState.monthlyRemaining,
+      purchasedBalanceAfter: creditState.purchasedRemaining,
+      createdAt
+    };
+  }
+
+  private async saveMonthlyGrant(grant: MonthlyGrantRecord): Promise<void> {
+    await this.state.storage.put(buildMonthlyGrantKey(grant.operationId), grant);
+  }
+
   private async pruneOldCreditOperations(nowIso: string): Promise<void> {
     const cutoffMs = Date.parse(nowIso) - CREDIT_OPERATION_RETENTION_MS;
     if (!Number.isFinite(cutoffMs)) {
@@ -576,6 +662,14 @@ function buildDailyKey(dateJST: string): string {
 
 function buildCreditOperationKey(operationId: string): string {
   return `${CREDIT_OPERATION_PREFIX}${operationId}`;
+}
+
+function buildMonthlyGrantKey(operationId: string): string {
+  return `${MONTHLY_GRANT_PREFIX}${operationId}`;
+}
+
+function buildMonthlyGrantOperationId(plan: AccessPlan, periodStart: string, periodEnd: string): string {
+  return `monthly-grant:${plan}:${periodStart}:${periodEnd}`;
 }
 
 function maxIsoTimestamp(left: string, right: string): string {

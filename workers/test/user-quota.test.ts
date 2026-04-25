@@ -717,6 +717,48 @@ describe("UserQuotaDO", () => {
     });
   });
 
+  it("ensures a monthly credit grant only once per plan period", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+    const body = {
+      action: "ensureMonthlyCreditGrant",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30
+    };
+
+    const first = await postQuota(quota, body);
+    const second = await postQuota(quota, body);
+
+    await expect(first.json()).resolves.toMatchObject({
+      didMutate: true,
+      monthlyGrant: {
+        operationId: "monthly-grant:free:2026-04-01T00:00:00+09:00:2026-05-01T00:00:00+09:00",
+        plan: "free",
+        creditsGranted: 30,
+        balanceAfter: 30
+      },
+      usage: {
+        credits: {
+          monthlyRemaining: 30,
+          monthlyLimit: 30,
+          totalRemaining: 30
+        }
+      }
+    });
+    await expect(second.json()).resolves.toMatchObject({
+      didMutate: false,
+      usage: {
+        credits: {
+          monthlyRemaining: 30,
+          totalRemaining: 30
+        }
+      }
+    });
+  });
+
   it("consumes credit once for the same operation id", async () => {
     const quota = new UserQuotaDO(createState() as never);
     const body = {

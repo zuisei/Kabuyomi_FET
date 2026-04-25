@@ -53,7 +53,7 @@ export async function loadActiveEntitlementFromRequest(request: Request, env: En
       new Request(ENTITLEMENT_DO_URL, { method: "GET" }),
       "entitlement_lookup_failed"
     );
-    return payload.plan === "pro" ? payload : null;
+    return payload.plan === "free" ? null : payload;
   } catch (error) {
     if (error instanceof AppError && error.status === 404) {
       return null;

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { consumeCredit, InsufficientCreditsError, refundCredit, type QuotaIdentity } from "../src/lib/quota";
+import { consumeCredit, InsufficientCreditsError, loadUsage, refundCredit, type QuotaIdentity } from "../src/lib/quota";
 import { DEFAULT_REMOTE_CONFIG } from "../src/lib/remote-config";
 
 const identity: QuotaIdentity = {
@@ -21,6 +21,84 @@ function createDb() {
 }
 
 describe("credit quota bridge", () => {
+  it("persists a monthly grant row and ledger row when usage ensures the monthly grant", async () => {
+    const db = createDb();
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          usage: {
+            plan: "free",
+            chatsUsed: 0,
+            chatLimit: 10,
+            stocksUsed: 0,
+            stockLimit: 3,
+            savedTickers: [],
+            dateJST: "2026-04-25",
+            credits: {
+              monthlyRemaining: 30,
+              monthlyLimit: 30,
+              purchasedRemaining: 0,
+              totalRemaining: 30,
+              resetsAt: "2026-05-01T00:00:00+09:00"
+            }
+          },
+          didMutate: true,
+          monthlyGrant: {
+            operationId: "monthly-grant:free:2026-04-01T00:00:00+09:00:2026-05-01T00:00:00+09:00",
+            plan: "free",
+            periodStart: "2026-04-01T00:00:00+09:00",
+            periodEnd: "2026-05-01T00:00:00+09:00",
+            creditsGranted: 30,
+            balanceAfter: 30,
+            monthlyBalanceAfter: 30,
+            purchasedBalanceAfter: 0,
+            createdAt: "2026-04-25T00:00:00.000Z"
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    const usage = await loadUsage(
+      identity,
+      {
+        DB: db.db,
+        USER_QUOTA: {
+          getByName: vi.fn().mockReturnValue({ fetch })
+        }
+      } as never,
+      DEFAULT_REMOTE_CONFIG
+    );
+
+    expect(usage.credits?.totalRemaining).toBe(30);
+    expect(db.db.prepare).toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE INTO monthly_grants"));
+    expect(db.db.prepare).toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE INTO credit_ledger"));
+    expect(db.bind).toHaveBeenCalledWith(
+      expect.any(String),
+      identity.quotaSubject,
+      "free",
+      "2026-04-01T00:00:00+09:00",
+      "2026-05-01T00:00:00+09:00",
+      30,
+      "monthly-grant:free:2026-04-01T00:00:00+09:00:2026-05-01T00:00:00+09:00",
+      "2026-04-25T00:00:00.000Z"
+    );
+    expect(db.bind).toHaveBeenCalledWith(
+      expect.any(String),
+      identity.quotaSubject,
+      "monthly-grant:free:2026-04-01T00:00:00+09:00:2026-05-01T00:00:00+09:00",
+      "monthly_grant",
+      30,
+      30,
+      30,
+      0,
+      "monthly_grant",
+      "free:2026-04-01T00:00:00+09:00:2026-05-01T00:00:00+09:00",
+      expect.stringContaining('"status":"applied"'),
+      "2026-04-25T00:00:00.000Z"
+    );
+  });
+
   it("persists a negative ledger row after a successful credit consume", async () => {
     const db = createDb();
     const fetch = vi.fn().mockResolvedValue(

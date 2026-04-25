@@ -1,4 +1,5 @@
 import type { Env } from "../env";
+import type { CreditPlan } from "./billing-catalog";
 import {
   DEFAULT_TRACKED_TICKERS,
   MAX_TRACKED_TICKERS,
@@ -16,7 +17,9 @@ export interface RemoteConfig {
   chatEnabled: boolean;
   webSupplementEnabled: boolean;
   creditBillingEnabled: boolean;
+  planCredits: Record<CreditPlan, number>;
   freeMonthlyCreditLimit: number;
+  liteMonthlyCreditLimit: number;
   proMonthlyCreditLimit: number;
   maintenanceMode: boolean;
   extractorVersion: string;
@@ -46,7 +49,13 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   chatEnabled: true,
   webSupplementEnabled: false,
   creditBillingEnabled: false,
+  planCredits: {
+    free: 30,
+    lite: 150,
+    pro: 500
+  },
   freeMonthlyCreditLimit: 30,
+  liteMonthlyCreditLimit: 150,
   proMonthlyCreditLimit: 500,
   maintenanceMode: false,
   extractorVersion: CURRENT_EXTRACTOR_VERSION,
@@ -88,7 +97,13 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
     trackedTickers?: unknown;
     dailyRefreshBatchSize?: unknown;
     dailyRefreshConcurrency?: unknown;
+    planCredits?: unknown;
   };
+  const planCredits = normalizePlanCredits(payload.planCredits, {
+    free: normalizeNonNegativeInteger(payload.freeMonthlyCreditLimit, DEFAULT_REMOTE_CONFIG.freeMonthlyCreditLimit),
+    lite: normalizeNonNegativeInteger(payload.liteMonthlyCreditLimit, DEFAULT_REMOTE_CONFIG.liteMonthlyCreditLimit),
+    pro: normalizeNonNegativeInteger(payload.proMonthlyCreditLimit, DEFAULT_REMOTE_CONFIG.proMonthlyCreditLimit)
+  });
 
   const config = {
     ...DEFAULT_REMOTE_CONFIG,
@@ -106,14 +121,10 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
       typeof payload.creditBillingEnabled === "boolean"
         ? payload.creditBillingEnabled
         : DEFAULT_REMOTE_CONFIG.creditBillingEnabled,
-    freeMonthlyCreditLimit: normalizeNonNegativeInteger(
-      payload.freeMonthlyCreditLimit,
-      DEFAULT_REMOTE_CONFIG.freeMonthlyCreditLimit
-    ),
-    proMonthlyCreditLimit: normalizeNonNegativeInteger(
-      payload.proMonthlyCreditLimit,
-      DEFAULT_REMOTE_CONFIG.proMonthlyCreditLimit
-    ),
+    planCredits,
+    freeMonthlyCreditLimit: planCredits.free,
+    liteMonthlyCreditLimit: planCredits.lite,
+    proMonthlyCreditLimit: planCredits.pro,
     dailyRefreshBatchSize: resolveDailyRefreshBatchSize(
       payload.dailyRefreshBatchSize,
       DEFAULT_REMOTE_CONFIG.dailyRefreshBatchSize
@@ -157,4 +168,16 @@ function normalizeExtractorVersion(rawValue: unknown): string {
 
 function normalizeNonNegativeInteger(rawValue: unknown, fallback: number): number {
   return typeof rawValue === "number" && Number.isInteger(rawValue) && rawValue >= 0 ? rawValue : fallback;
+}
+
+function normalizePlanCredits(
+  rawValue: unknown,
+  fallback: Record<CreditPlan, number>
+): Record<CreditPlan, number> {
+  const rawPlanCredits = rawValue && typeof rawValue === "object" ? (rawValue as Partial<Record<CreditPlan, unknown>>) : {};
+  return {
+    free: normalizeNonNegativeInteger(rawPlanCredits.free, fallback.free),
+    lite: normalizeNonNegativeInteger(rawPlanCredits.lite, fallback.lite),
+    pro: normalizeNonNegativeInteger(rawPlanCredits.pro, fallback.pro)
+  };
 }

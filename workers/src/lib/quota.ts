@@ -1,5 +1,5 @@
 import type { Env, UsageState } from "../env";
-import { resolvePlanLimits } from "./billing-catalog";
+import { resolveMonthlyCreditLimit, resolvePlanLimits, type AccessPlan } from "./billing-catalog";
 import { loadDetachedAccessFromRequest } from "./detached-access";
 import { loadActiveEntitlementFromRequest } from "./entitlements";
 import { AppError } from "./errors";
@@ -8,7 +8,7 @@ import type { RemoteConfig } from "./remote-config";
 
 export interface QuotaIdentity {
   quotaSubject: string;
-  plan: "free" | "pro";
+  plan: AccessPlan;
   identityKind: "device_key" | "ip_hash" | "local_device" | "entitlement" | "detached_device";
   accessMode?: string;
   chatLimitOverride?: number;
@@ -23,6 +23,7 @@ interface UsageEnvelope {
   usage: UsageState;
   didMutate?: boolean;
   creditOperation?: CreditOperationResult;
+  monthlyGrant?: MonthlyGrantResult;
   creditsRequired?: number;
   creditsRemaining?: number;
 }
@@ -61,7 +62,7 @@ export class InsufficientCreditsError extends AppError {
 
 interface CreditOperationResult {
   operationId: string;
-  type: "consume" | "refund";
+  type: "consume" | "refund" | "monthly_grant";
   status: "applied" | "insufficient" | "noop";
   delta: number;
   balanceAfter: number;
@@ -70,6 +71,18 @@ interface CreditOperationResult {
   originalOperationId?: string;
   referenceType?: string;
   referenceId?: string;
+  createdAt: string;
+}
+
+interface MonthlyGrantResult {
+  operationId: string;
+  plan: AccessPlan;
+  periodStart: string;
+  periodEnd: string;
+  creditsGranted: number;
+  balanceAfter: number;
+  monthlyBalanceAfter: number;
+  purchasedBalanceAfter: number;
   createdAt: string;
 }
 export async function readQuotaIdentity(
@@ -164,6 +177,14 @@ export async function refundChatQuota(
   config: RemoteConfig
 ): Promise<UsageState> {
   return (await mutateUsage(identity, env, config, "refundChat")).usage;
+}
+
+export async function ensureMonthlyCreditGrant(
+  identity: QuotaIdentity,
+  env: Env,
+  config: RemoteConfig
+): Promise<UsageState> {
+  return (await mutateUsage(identity, env, config, "ensureMonthlyCreditGrant")).usage;
 }
 
 export async function consumeCredit(
@@ -320,7 +341,7 @@ export async function loadUsage(
   env: Env,
   config: RemoteConfig
 ): Promise<UsageState> {
-  return (await mutateUsage(identity, env, config, "state")).usage;
+  return ensureMonthlyCreditGrant(identity, env, config);
 }
 
 function normalizeConnectingIp(rawValue: string | null): string | null {
@@ -351,7 +372,8 @@ async function mutateUsage(
     | "consumeStock"
     | "refundStock"
     | "removeTicker"
-    | "promoteTicker",
+    | "promoteTicker"
+    | "ensureMonthlyCreditGrant",
   ticker?: string,
   options: TickerQuotaOptions = {}
 ): Promise<QuotaMutationResult> {
@@ -387,6 +409,10 @@ async function mutateUsage(
     throw new AppError(response.status, payload.error ?? "Quota request failed");
   }
 
+  if (payload.monthlyGrant) {
+    await persistMonthlyGrant(env, identity, payload.monthlyGrant);
+  }
+
   return {
     usage: payload.usage,
     didMutate: payload.didMutate === true
@@ -398,7 +424,7 @@ function resolveIdentityLimits(identity: QuotaIdentity, config: RemoteConfig) {
   return {
     chatLimit: identity.chatLimitOverride ?? planLimits.chatLimit,
     stockLimit: identity.stockLimitOverride ?? planLimits.stockLimit,
-    monthlyCreditLimit: identity.plan === "pro" ? config.proMonthlyCreditLimit : config.freeMonthlyCreditLimit
+    monthlyCreditLimit: resolveMonthlyCreditLimit(identity.plan, config)
   };
 }
 
@@ -456,6 +482,9 @@ async function mutateCreditUsage(
     throw new AppError(response.status, payload.error ?? "Credit request failed");
   }
 
+  if (payload.monthlyGrant) {
+    await persistMonthlyGrant(env, identity, payload.monthlyGrant);
+  }
   if (payload.creditOperation && payload.creditOperation.delta !== 0) {
     await persistCreditLedgerEntry(env, identity, payload.creditOperation);
   }
@@ -486,6 +515,61 @@ async function mutateCreditUsage(
     creditsRemaining,
     error: payload.error
   };
+}
+
+async function persistMonthlyGrant(env: Env, identity: QuotaIdentity, grant: MonthlyGrantResult): Promise<void> {
+  try {
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO monthly_grants (
+        id,
+        user_id,
+        plan,
+        period_start,
+        period_end,
+        credits_granted,
+        operation_id,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        crypto.randomUUID(),
+        identity.quotaSubject,
+        grant.plan,
+        grant.periodStart,
+        grant.periodEnd,
+        grant.creditsGranted,
+        grant.operationId,
+        grant.createdAt
+      )
+      .run();
+  } catch (error) {
+    logWarnEvent("monthly_grant_write_failed", {
+      userId: identity.quotaSubject,
+      operationId: grant.operationId,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+  }
+
+  await persistCreditLedgerEntry(env, identity, {
+    operationId: grant.operationId,
+    type: "monthly_grant",
+    status: "applied",
+    delta: grant.creditsGranted,
+    balanceAfter: grant.balanceAfter,
+    monthlyBalanceAfter: grant.monthlyBalanceAfter,
+    purchasedBalanceAfter: grant.purchasedBalanceAfter,
+    referenceType: "monthly_grant",
+    referenceId: `${grant.plan}:${grant.periodStart}:${grant.periodEnd}`,
+    createdAt: grant.createdAt
+  });
+
+  logEvent("credit_monthly_grant", {
+    userId: identity.quotaSubject,
+    operationId: grant.operationId,
+    plan: grant.plan,
+    creditsGranted: grant.creditsGranted,
+    creditsRemaining: grant.balanceAfter
+  });
 }
 
 async function persistCreditLedgerEntry(

@@ -20,8 +20,55 @@ describe("remote config", () => {
     expect(config.dailyRefreshEnabled).toBe(false);
     expect(config.webSupplementEnabled).toBe(false);
     expect(config.creditBillingEnabled).toBe(false);
+    expect(config.planCredits).toEqual({
+      free: 30,
+      lite: 150,
+      pro: 500
+    });
     expect(config.freeMonthlyCreditLimit).toBe(30);
+    expect(config.liteMonthlyCreditLimit).toBe(150);
     expect(config.proMonthlyCreditLimit).toBe(500);
+  });
+
+  it("normalizes plan credit limits from the compact planCredits map", async () => {
+    const config = await loadRemoteConfig({
+      KABUYOMI_CACHE: {
+        get: async () => ({
+          planCredits: {
+            free: 25,
+            lite: 175,
+            pro: 600
+          }
+        })
+      }
+    } as never);
+
+    expect(config.planCredits).toEqual({
+      free: 25,
+      lite: 175,
+      pro: 600
+    });
+    expect(config.freeMonthlyCreditLimit).toBe(25);
+    expect(config.liteMonthlyCreditLimit).toBe(175);
+    expect(config.proMonthlyCreditLimit).toBe(600);
+  });
+
+  it("keeps legacy monthly credit config fields as fallbacks", async () => {
+    const config = await loadRemoteConfig({
+      KABUYOMI_CACHE: {
+        get: async () => ({
+          freeMonthlyCreditLimit: 20,
+          liteMonthlyCreditLimit: 120,
+          proMonthlyCreditLimit: 450
+        })
+      }
+    } as never);
+
+    expect(config.planCredits).toEqual({
+      free: 20,
+      lite: 120,
+      pro: 450
+    });
   });
 
   it("normalizes tracked tickers and caps the beta warm set at 30 tickers", async () => {

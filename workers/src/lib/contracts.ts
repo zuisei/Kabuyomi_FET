@@ -68,11 +68,12 @@ export const QuotaRequestSchema = z.object({
     "removeTicker",
     "promoteTicker",
     "checkCompanyAccess",
+    "ensureMonthlyCreditGrant",
     "consumeCredit",
     "refundCredit"
   ]),
   quotaSubject: z.string().trim().min(1),
-  plan: z.enum(["free", "pro"]),
+  plan: z.enum(["free", "lite", "pro"]),
   accessMode: z.string().trim().min(1).optional(),
   dateJST: z.string().trim().min(1),
   ticker: z.string().trim().min(1).max(16).optional(),
