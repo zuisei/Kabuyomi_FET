@@ -25,6 +25,14 @@ export interface RemoteConfig {
 }
 
 const CURRENT_EXTRACTOR_VERSION = "v6";
+const REMOTE_CONFIG_MEMORY_TTL_MS = 60 * 1000;
+
+interface RemoteConfigMemoryCache {
+  config: RemoteConfig;
+  expiresAt: number;
+}
+
+let remoteConfigMemoryCaches = new WeakMap<KVNamespace, RemoteConfigMemoryCache>();
 
 export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   freeStockLimit: 3,
@@ -44,8 +52,29 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
 };
 
 export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
-  const raw = await env.KABUYOMI_CACHE.get("remote_config", "json");
+  const now = Date.now();
+  const cached = remoteConfigMemoryCaches.get(env.KABUYOMI_CACHE);
+  if (cached && cached.expiresAt > now) {
+    return cached.config;
+  }
+
+  let raw: unknown;
+  try {
+    raw = await env.KABUYOMI_CACHE.get("remote_config", "json");
+  } catch {
+    const fallback = DEFAULT_REMOTE_CONFIG;
+    remoteConfigMemoryCaches.set(env.KABUYOMI_CACHE, {
+      config: fallback,
+      expiresAt: now + REMOTE_CONFIG_MEMORY_TTL_MS
+    });
+    return fallback;
+  }
+
   if (!raw || typeof raw !== "object") {
+    remoteConfigMemoryCaches.set(env.KABUYOMI_CACHE, {
+      config: DEFAULT_REMOTE_CONFIG,
+      expiresAt: now + REMOTE_CONFIG_MEMORY_TTL_MS
+    });
     return DEFAULT_REMOTE_CONFIG;
   }
 
@@ -55,7 +84,7 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
     dailyRefreshConcurrency?: unknown;
   };
 
-  return {
+  const config = {
     ...DEFAULT_REMOTE_CONFIG,
     ...payload,
     extractorVersion: normalizeExtractorVersion(payload.extractorVersion),
@@ -76,6 +105,15 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
       DEFAULT_REMOTE_CONFIG.dailyRefreshConcurrency
     )
   };
+  remoteConfigMemoryCaches.set(env.KABUYOMI_CACHE, {
+    config,
+    expiresAt: now + REMOTE_CONFIG_MEMORY_TTL_MS
+  });
+  return config;
+}
+
+export function resetRemoteConfigMemoryCache(): void {
+  remoteConfigMemoryCaches = new WeakMap<KVNamespace, RemoteConfigMemoryCache>();
 }
 
 function normalizeExtractorVersion(rawValue: unknown): string {

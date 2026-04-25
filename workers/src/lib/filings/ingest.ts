@@ -4,6 +4,7 @@ import { buildPrimaryDocumentUrl, fetchFilingAssets, fetchMetricSnapshots } from
 import { extractMDASectionWithDiagnostics } from "../../extractors/mda";
 import { AppError } from "../errors";
 import { extractCompanyWebsiteUrl } from "./company-website";
+import { logLlmUsage } from "../llm-usage";
 import { logEvent } from "../logging";
 import { metricLabel } from "../metrics";
 import type { RemoteConfig } from "../remote-config";
@@ -111,6 +112,13 @@ export async function ingestFiling(
     periodOfReport: filing.periodOfReport,
     metrics,
     sourceChunks
+  });
+  logLlmUsage(generatedSummary.llmUsage, {
+    aiTask: "summary",
+    route: "filing_ingest",
+    ticker: filing.ticker,
+    filingKey,
+    responsePath: generatedSummary.provider
   });
   const finishedAt = Date.now();
 

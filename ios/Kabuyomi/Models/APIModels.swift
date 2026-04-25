@@ -43,6 +43,20 @@ struct SearchItem: Decodable, Identifiable, Hashable {
         hasSupportedLatestFiling
     }
 
+    var canAttemptInV1: Bool {
+        if case .unsupported = filingSupportStatus {
+            return false
+        }
+        return true
+    }
+
+    var requiresFilingVerification: Bool {
+        if case .unknown = filingSupportStatus {
+            return true
+        }
+        return false
+    }
+
     var supportDisplayLabel: String {
         switch filingSupportStatus {
         case .supported(let formType):
@@ -72,7 +86,7 @@ struct SearchItem: Decodable, Identifiable, Hashable {
         case .unsupported(let formType):
             return "最新 \(formType) は v1 の対象外です。10-K / 10-Q のみ対応しています。"
         case .unknown:
-            return "10-K / 10-Q を確認できる銘柄のみ保存できます。"
+            return "保存または表示時に 10-K / 10-Q を確認します。"
         }
     }
 
@@ -83,7 +97,7 @@ struct SearchItem: Decodable, Identifiable, Hashable {
         case .unsupported(let formType):
             return "この銘柄の最新開示は \(formType) で、Kabuyomi v1 の対象外です。10-K / 10-Q のみ対応しています。"
         case .unknown:
-            return "この銘柄は 10-K / 10-Q をまだ確認できないため、今は保存できません。"
+            return "この銘柄は 10-K / 10-Q をまだ確認できませんでした。時間を置いてもう一度お試しください。"
         }
     }
 }

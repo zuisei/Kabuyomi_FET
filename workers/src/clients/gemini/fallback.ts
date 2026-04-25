@@ -65,9 +65,10 @@ export function localSummaryFallback(input: SummaryPromptInput): SummaryRecord {
 
 export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
   const profile = analyzeQuestion(input.question);
+  const sourceChunks = fallbackSourceChunks(input);
   const metric = selectRelevantMetric(input.filing, profile);
-  const metricSourceId = metric ? findMetricSourceId(input.filing, metric) : undefined;
-  const narrative = selectRelevantNarrative(input.filing, profile, metricSourceId);
+  const metricSourceId = metric ? findMetricSourceId(sourceChunks, metric) : undefined;
+  const narrative = selectRelevantNarrative(sourceChunks, profile, metricSourceId);
 
   if (profile.asksBusinessOverview) {
     if (narrative) {
@@ -91,7 +92,7 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
   }
 
   if (profile.asksDurability) {
-    const durability = buildDurabilityFallbackAnswer(input.filing, profile);
+    const durability = buildDurabilityFallbackAnswer(input.filing, sourceChunks, profile);
     if (durability) {
       return durability;
     }
@@ -105,7 +106,7 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
     return buildNarrativeFallbackAnswer(narrative, profile);
   }
 
-  const anchorSource = selectFallbackAnchorSource(input.filing.sourceChunks);
+  const anchorSource = selectFallbackAnchorSource(sourceChunks);
   if (!anchorSource) {
     return {
       answer: "この決算資料の範囲では確認できません。",
@@ -128,8 +129,9 @@ export function recoverBroaderFallbackIfNeeded(
   }
 
   const profile = analyzeQuestion(input.question);
+  const sourceChunks = fallbackSourceChunks(input);
   const narratives = response.sourceIds
-    .map((sourceId) => input.filing.sourceChunks.find((chunk) => chunk.sourceId == sourceId && chunk.sectionType === "md_a"))
+    .map((sourceId) => sourceChunks.find((chunk) => chunk.sourceId == sourceId && chunk.sectionType === "md_a"))
     .filter((chunk): chunk is SourceChunkRecord => Boolean(chunk));
 
   if (narratives.length > 0 && narratives.every(isLowSignalNarrative) && wantsNarrativeDepth(profile)) {
@@ -237,11 +239,11 @@ function selectRelevantMetric(filing: FilingCacheRecord, profile: QuestionProfil
 }
 
 function selectRelevantNarrative(
-  filing: FilingCacheRecord,
+  sourceChunks: SourceChunkRecord[],
   profile: QuestionProfile,
   metricSourceId?: string
 ): SourceChunkRecord | undefined {
-  const narratives = filing.sourceChunks.filter(
+  const narratives = sourceChunks.filter(
     (chunk) => chunk.sectionType === "md_a" && chunk.sourceId !== metricSourceId && !isLowSignalNarrative(chunk)
   );
 
@@ -273,7 +275,7 @@ function selectRelevantNarrative(
 
   if (profile.asksBusinessOverview) {
     return findNarrative(
-      /precision oncology|oncology|cancer|tumor|screening|diagnostic|blood[- ]based|liquid biopsy|molecular|biopharmaceutical|revenue by|disaggregation of revenue|vehicle sales|automotive|energy generation and storage|subscription and services|transaction revenue|cloud|advertising/
+      /precision oncology|oncology|cancer|tumor|screening|diagnostic|blood[- ]based|liquid biopsy|molecular|biopharmaceutical|revenue by|disaggregation of revenue|vehicle sales|automotive|energy generation and storage|subscription and services|transaction revenue|cloud|advertising|accelerated computing|artificial intelligence|\bai\b|gpu|data center|compute|networking|graphics|gaming|professional visualization|cloud service providers?|enterprise/
     ) ?? driverNarrative;
   }
 
@@ -386,13 +388,17 @@ function buildNarrativeFallbackAnswer(narrative: SourceChunkRecord, profile: Que
   };
 }
 
-function buildDurabilityFallbackAnswer(filing: FilingCacheRecord, profile: QuestionProfile): GeminiChatAnswer | null {
-  const narrative = selectDurabilityNarrative(filing.sourceChunks);
+function buildDurabilityFallbackAnswer(
+  filing: FilingCacheRecord,
+  sourceChunks: SourceChunkRecord[],
+  profile: QuestionProfile
+): GeminiChatAnswer | null {
+  const narrative = selectDurabilityNarrative(sourceChunks);
   const metric = selectRelevantMetric(filing, {
     ...profile,
     asksRevenue: profile.asksRevenue || (!profile.asksProfit && !profile.asksProfitability && !profile.asksCashFlow)
   });
-  const metricSourceId = metric ? findMetricSourceId(filing, metric) : undefined;
+  const metricSourceId = metric ? findMetricSourceId(sourceChunks, metric) : undefined;
   const sourceIds: string[] = [];
   const parts: string[] = [];
 
@@ -506,6 +512,12 @@ function summarizeBusinessNarrativeEvidence(narrative: SourceChunkRecord, compan
   add("クラウドサービス", /cloud|azure/i);
   add("広告", /advertising|\bads\b/i);
   add("サブスク・サービス", /subscription and services|subscription/i);
+  add("AI向けアクセラレーテッドコンピューティング", /accelerated computing|artificial intelligence|\bai\b|gpu/i);
+  add("データセンター向けコンピューティング", /data center|blackwell|gb200|gb300/i);
+  add("ネットワーキング", /networking|ethernet|infiniband|nvlink/i);
+  add("ゲーミング", /gaming/i);
+  add("プロ向け可視化", /professional visualization/i);
+  add("自動車向け", /automotive/i);
 
   if (labels.length > 0) {
     const subject = companyName ? `${companyName}は` : "この会社は";
@@ -849,13 +861,29 @@ function translateDriverList(raw: string): string {
     .trim();
 }
 
-function findMetricSourceId(filing: FilingCacheRecord, metric: MetricSnapshot): string | undefined {
-  return filing.sourceChunks.find((chunk) => chunk.sectionType === "xbrl_metric" && chunk.tagName === metric.tagUsed)?.sourceId;
+function fallbackSourceChunks(input: ChatPromptInput): SourceChunkRecord[] {
+  return input.contextPack?.sourceChunks ?? input.filing.sourceChunks;
+}
+
+function findMetricSourceId(sourceChunks: SourceChunkRecord[], metric: MetricSnapshot): string | undefined {
+  return sourceChunks.find((chunk) => chunk.sectionType === "xbrl_metric" && chunk.tagName === metric.tagUsed)?.sourceId;
 }
 
 function isLowSignalNarrative(chunk: SourceChunkRecord): boolean {
-  return /available information|forward-looking statements|private securities litigation reform act|investor relations website|corporate website|securities and exchange commission|should be read in conjunction/i.test(
-    chunk.text
+  const text = chunk.text;
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const hasBusinessSignal = /accelerated computing|artificial intelligence|\bai\b|gpu|data center|compute|networking|graphics|gaming|professional visualization|automotive|customers?|cloud service providers?|enterprise|revenue from/i.test(
+    normalized
+  );
+  const hasTableNoise = /table of contents|following table sets forth|expressed as a percentage of revenue/i.test(
+    normalized
+  );
+  if (hasTableNoise && hasBusinessSignal && normalized.length >= 500) {
+    return false;
+  }
+
+  return /available information|available free of charge|forward-looking statements|private securities litigation reform act|investor relations website|corporate website|sec.?s website|securities and exchange commission|investor\.nvidia\.com|table of contents|following table sets forth|expressed as a percentage of revenue|should be read in conjunction/i.test(
+    normalized
   );
 }
 

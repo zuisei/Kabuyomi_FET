@@ -28,6 +28,39 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(items.map(\.ticker), ["MSFT"])
     }
 
+    func testSearchItemAllowsUnknownFilingStatusToBeVerifiedOnOpenOrSave() {
+        let item = SearchItem(
+            ticker: "SSB",
+            companyName: "SouthState Bank Corp",
+            cik: "0000764038",
+            exchange: "NYSE",
+            latestFormType: nil
+        )
+
+        XCTAssertFalse(item.hasSupportedLatestFiling)
+        XCTAssertFalse(item.isSupportedInV1)
+        XCTAssertTrue(item.canAttemptInV1)
+        XCTAssertTrue(item.requiresFilingVerification)
+        XCTAssertEqual(item.supportDisplayLabel, "10-K / 10-Q 未確認")
+        XCTAssertEqual(item.availabilityNote, "保存または表示時に 10-K / 10-Q を確認します。")
+    }
+
+    func testSearchItemBlocksKnownUnsupportedFilingStatus() {
+        let item = SearchItem(
+            ticker: "SSL",
+            companyName: "SASOL LTD",
+            cik: "0000314590",
+            exchange: "NYSE",
+            latestFormType: "6-K"
+        )
+
+        XCTAssertFalse(item.hasSupportedLatestFiling)
+        XCTAssertFalse(item.isSupportedInV1)
+        XCTAssertFalse(item.canAttemptInV1)
+        XCTAssertFalse(item.requiresFilingVerification)
+        XCTAssertEqual(item.supportDisplayLabel, "6-K 対象")
+    }
+
     func testAddToWatchlistSendsDeviceHeaderAndJSONBody() async throws {
         let client = makeClient(context: standardContext) { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/watchlist/add")

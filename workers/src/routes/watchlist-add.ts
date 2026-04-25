@@ -1,5 +1,6 @@
-import { listTickersByCik, lookupTicker } from "../clients/sec";
+import { listTickersByCik, lookupTicker, resolveLatestSearchFormType } from "../clients/sec";
 import { WatchlistAddRequestSchema } from "../lib/contracts";
+import { AppError } from "../lib/errors";
 import { logErrorEvent, logEvent } from "../lib/logging";
 import { ensureLatestFiling } from "../lib/pipeline";
 import { consumeStockQuotaWithMutation, promoteSavedTickerAlias, readQuotaIdentity, refundStockQuota } from "../lib/quota";
@@ -31,8 +32,20 @@ export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env,
   }
   const relatedTickers = await listTickersByCik(tickerRecord.cik, env);
 
-  const stockQuota = await consumeStockQuotaWithMutation(identity, tickerRecord.ticker, env, config, { relatedTickers });
   const asyncMode = request.headers.get(WATCHLIST_ASYNC_MODE_HEADER)?.toLowerCase() === "async";
+  if (asyncMode) {
+    const latestFormType = await resolveLatestSearchFormType(tickerRecord, env);
+    if (latestFormType !== "10-K" && latestFormType !== "10-Q") {
+      logEvent("watchlist_add_async_unsupported_filing", {
+        ticker: tickerRecord.ticker,
+        cik: tickerRecord.cik,
+        latestFormType: latestFormType ?? "unknown"
+      });
+      throw new AppError(422, `No supported filing found for ${tickerRecord.ticker}`);
+    }
+  }
+
+  const stockQuota = await consumeStockQuotaWithMutation(identity, tickerRecord.ticker, env, config, { relatedTickers });
   if (asyncMode) {
     const usage = stockQuota.didMutate
       ? stockQuota.usage

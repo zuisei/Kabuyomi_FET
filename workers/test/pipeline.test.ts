@@ -6,6 +6,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function findLogEvent(logSpy: { mock: { calls: unknown[][] } }, event: string): Record<string, unknown> {
+  const payload = logSpy.mock.calls
+    .map(([line]) => (typeof line === "string" ? JSON.parse(line) as Record<string, unknown> : null))
+    .find((entry): entry is Record<string, unknown> => entry?.event === event);
+
+  expect(payload).toBeDefined();
+  return payload!;
+}
+
 describe("buildChatResponse", () => {
   it("answers deterministically when a margin deterioration premise is contradicted by metrics", async () => {
     const filing = makeTestFiling();
@@ -121,6 +130,7 @@ describe("buildChatResponse", () => {
   });
 
   it("lets Gemini answer business-overview prompts when it stays filing-grounded", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const filing = makeBusinessOverviewFiling();
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -139,7 +149,12 @@ describe("buildChatResponse", () => {
                 ]
               }
             }
-          ]
+          ],
+          usageMetadata: {
+            promptTokenCount: 1200,
+            candidatesTokenCount: 80,
+            totalTokenCount: 1280
+          }
         }),
         { status: 200, headers: { "content-type": "application/json" } }
       )
@@ -159,29 +174,46 @@ describe("buildChatResponse", () => {
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S2"]);
     expect(response.responsePath).toBe("gemini");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const llmUsage = findLogEvent(logSpy, "llm_usage");
+    expect(llmUsage).toMatchObject({
+      aiTask: "chat",
+      model: "gemma-4-31b-it",
+      route: "/v1/chat",
+      ticker: filing.ticker,
+      filingKey: filing.filingKey,
+      responsePath: "gemini",
+      promptTokenCount: 1200,
+      candidatesTokenCount: 80,
+      totalTokenCount: 1280,
+      latencyMs: expect.any(Number)
+    });
+    expect(JSON.stringify(llmUsage)).not.toContain("この企業はなんの企業");
   });
 
   it("recovers business-overview prompts when remote output starts without a subject", async () => {
     const filing = makeBusinessOverviewFiling();
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          candidates: [
-            {
-              content: {
-                parts: [
-                  {
-                    text: JSON.stringify({
-                      answer: "は、がんの血液検査と精密医療を手がける会社です。患者や医療機関向けの検査も提供しています。",
-                      sourceIds: ["S2"]
-                    })
-                  }
-                ]
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        answer: "は、がんの血液検査と精密医療を手がける会社です。患者や医療機関向けの検査も提供しています。",
+                        sourceIds: ["S2"]
+                      })
+                    }
+                  ]
+                }
               }
-            }
-          ]
-        }),
-        { status: 200, headers: { "content-type": "application/json" } }
+            ]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
       )
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -196,7 +228,7 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("Guardant Health, Inc.は");
     expect(response.answer).not.toMatch(/^は、/);
     expect(response.responsePath).toBe("deterministic");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("recovers business-overview prompts to deterministic filing context when remote output is weak", async () => {
@@ -784,6 +816,7 @@ describe("buildChatResponse", () => {
   });
 
   it("recovers to filing-first fallback when Gemini returns only invalid sourceIds", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 
@@ -805,7 +838,12 @@ describe("buildChatResponse", () => {
                   ]
                 }
               }
-            ]
+            ],
+            usageMetadata: {
+              promptTokenCount: 1500,
+              candidatesTokenCount: 95,
+              totalTokenCount: 1595
+            }
           })
         } as Response;
       }
@@ -815,9 +853,10 @@ describe("buildChatResponse", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const filing = makeTestFiling();
+    const question = "ガイダンスや今後の見通しは強い？";
     const response = await buildChatResponse(
       filing,
-      "ガイダンスや今後の見通しは強い？",
+      question,
       { GEMINI_API_KEY: "test-key" } as never,
       { webSupplementEnabled: false }
     );
@@ -827,6 +866,209 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("見通しの強さは、会社の需要コメントやリスクの言い方");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const llmUsage = findLogEvent(logSpy, "llm_usage");
+    expect(llmUsage).toMatchObject({
+      aiTask: "chat",
+      model: "gemma-4-31b-it",
+      route: "/v1/chat",
+      ticker: filing.ticker,
+      filingKey: filing.filingKey,
+      responsePath: "fallback",
+      promptTokenCount: 1500,
+      candidatesTokenCount: 95,
+      totalTokenCount: 1595,
+      latencyMs: expect.any(Number)
+    });
+    expect(JSON.stringify(llmUsage)).not.toContain("ガイダンスや今後の見通し");
+
+    const decision = findLogEvent(logSpy, "chat_path_decision");
+    expect(decision).toMatchObject({
+      ticker: filing.ticker,
+      filingKey: filing.filingKey,
+      questionIntent: "mda_summary",
+      responsePath: "fallback",
+      geminiCalled: true,
+      geminiSucceeded: true,
+      fallbackReason: "invalid_source_id",
+      schemaValid: true,
+      sourceIdsValid: false,
+      sourceCount: 2,
+      promptTokenCount: 3000,
+      candidatesTokenCount: 190,
+      totalTokenCount: 3190,
+      latencyMs: expect.any(Number),
+      contentMode: "full",
+      retryAttempt: 1,
+      retryReason: "invalid_source_id",
+      finalFallbackReason: "invalid_source_id"
+    });
+    expect(JSON.stringify(decision)).not.toContain("ガイダンスや今後の見通し");
+    const contextSelection = findLogEvent(logSpy, "chat_context_selection");
+    expect(contextSelection).toMatchObject({
+      ticker: filing.ticker,
+      filingKey: filing.filingKey,
+      questionIntent: "mda_summary",
+      candidateSourceCount: expect.any(Number),
+      selectedSourceCount: expect.any(Number),
+      selectedSourceCharCount: expect.any(Number),
+      avgSelectedSourceChars: expect.any(Number),
+      contextTokenBudget: expect.any(Number),
+      estimatedContextTokens: expect.any(Number),
+      rejectedShortCount: expect.any(Number),
+      rejectedTableFragmentCount: expect.any(Number),
+      rejectedLowTextQualityCount: expect.any(Number),
+      sectionHitCountBusiness: expect.any(Number),
+      sectionHitCountRisk: expect.any(Number),
+      sectionHitCountMda: expect.any(Number)
+    });
+    expect(JSON.stringify(contextSelection)).not.toContain("ガイダンスや今後の見通し");
+    expect(logSpy.mock.calls.map(([line]) => String(line)).join("\n")).not.toContain(question);
+  });
+
+  it("repairs a schema_invalid chat response once when the retry returns valid JSON", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    let callCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.startsWith("https://generativelanguage.googleapis.com/")) {
+        callCount += 1;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify(
+                        callCount === 1
+                          ? {
+                              unsupported: "shape"
+                            }
+                          : {
+                              answer: "売上増は、本文ではiPhoneとServicesの売上増が支えたと説明されています。",
+                              sourceIds: ["S7"]
+                            }
+                      )
+                    }
+                  ]
+                }
+              }
+            ],
+            usageMetadata: {
+              promptTokenCount: callCount === 1 ? 1000 : 1200,
+              candidatesTokenCount: callCount === 1 ? 20 : 60,
+              totalTokenCount: callCount === 1 ? 1020 : 1260
+            }
+          })
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filing = makeTestFiling();
+    const question = "ガイダンスや今後の見通しは強い？";
+    const response = await buildChatResponse(
+      filing,
+      question,
+      { GEMINI_API_KEY: "test-key" } as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(response.responsePath).toBe("gemini");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S7"]);
+
+    const decision = findLogEvent(logSpy, "chat_path_decision");
+    expect(decision).toMatchObject({
+      responsePath: "gemini",
+      fallbackReason: null,
+      finalFallbackReason: null,
+      schemaValid: true,
+      sourceIdsValid: true,
+      retryAttempt: 1,
+      retryReason: "schema_invalid",
+      promptTokenCount: 2200,
+      candidatesTokenCount: 80,
+      totalTokenCount: 2280
+    });
+    expect(logSpy.mock.calls.map(([line]) => String(line)).join("\n")).not.toContain(question);
+  });
+
+  it("logs schema_invalid and stops after one repair retry when Gemini keeps returning an unusable chat schema", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.startsWith("https://generativelanguage.googleapis.com/")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        unsupported: "shape"
+                      })
+                    }
+                  ]
+                }
+              }
+            ],
+            usageMetadata: {
+              promptTokenCount: 1420,
+              candidatesTokenCount: 12,
+              totalTokenCount: 1432
+            }
+          })
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filing = makeTestFiling();
+    const question = "ガイダンスや今後の見通しは強い？";
+    const response = await buildChatResponse(
+      filing,
+      question,
+      { GEMINI_API_KEY: "test-key" } as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const decision = findLogEvent(logSpy, "chat_path_decision");
+    expect(decision).toMatchObject({
+      questionIntent: "mda_summary",
+      responsePath: "fallback",
+      geminiCalled: true,
+      geminiSucceeded: true,
+      fallbackReason: "schema_invalid",
+      schemaValid: false,
+      sourceIdsValid: true,
+      sourceCount: 2,
+      promptTokenCount: 2840,
+      candidatesTokenCount: 24,
+      totalTokenCount: 2864,
+      retryAttempt: 1,
+      retryReason: "schema_invalid",
+      finalFallbackReason: "schema_invalid"
+    });
+    expect(JSON.stringify(decision)).not.toContain("ガイダンスや今後の見通し");
+    expect(logSpy.mock.calls.map(([line]) => String(line)).join("\n")).not.toContain(question);
   });
 
   it("preserves the gemini response path when a remote answer returns valid filing sources", async () => {

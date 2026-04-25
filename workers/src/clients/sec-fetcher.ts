@@ -25,6 +25,7 @@ export interface FetchSubmissionsOptions {
 
 const DEFAULT_FETCHER_TIMEOUT_MS = 25_000;
 const DEFAULT_FETCHER_RETRY_COUNT = 1;
+const SEC_RATE_LIMITER_NAME = "global";
 
 export async function fetchTickerSnapshotFromFetcher(env: Env): Promise<TickerSnapshotEnvelope> {
   return fetcherRequest(env, "/internal/sec/tickers-snapshot", {});
@@ -116,6 +117,7 @@ async function fetcherRequest<ResponseType>(
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
+      await waitForSecRateLimit(env, path);
       const response = await fetch(new URL(path, env.SEC_FETCHER_BASE_URL).toString(), {
         method: "POST",
         headers,
@@ -192,6 +194,20 @@ async function fetcherRequest<ResponseType>(
   }
 
   throw new AppError(503, "SEC data is temporarily unavailable", `SEC fetcher request failed for ${path}`);
+}
+
+async function waitForSecRateLimit(env: Env, path: string): Promise<void> {
+  if (!env.SEC_RATE_LIMITER) {
+    return;
+  }
+
+  const tokens = path === "/internal/sec/filing-assets" ? 2 : 1;
+  const response = await env.SEC_RATE_LIMITER.getByName(SEC_RATE_LIMITER_NAME).fetch(
+    `https://do/sec-rate-limit?tokens=${tokens}`
+  );
+  if (!response.ok) {
+    throw new AppError(503, "SEC data is temporarily unavailable", "SEC rate limiter request failed");
+  }
 }
 
 function parsePositiveInt(rawValue: string | undefined, fallback: number): number {

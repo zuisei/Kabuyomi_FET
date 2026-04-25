@@ -1,7 +1,9 @@
 import type { Env, FilingCacheRecord, FilingReference, MetricSnapshot, SourceChunkRecord, TickerRecord } from "../env";
-import { fetchSubmissionsWithHistory, listSupportedFilings, lookupTicker, pickComparisonFiling } from "../clients/sec";
+import { fetchSubmissionsWithHistory, listSupportedFilings, lookupTicker, pickComparisonFiling, pickLatestSupportedFiling } from "../clients/sec";
 import { logEvent } from "./logging";
 import type { RemoteConfig } from "./remote-config";
+import { upsertLatestFilingAliases } from "./filings/latest-alias-store";
+import { upsertSearchFormTypeCache } from "./search-form-type-cache";
 
 const HISTORY_YEARS = 3;
 const ARCHIVE_PREFIX = "filings";
@@ -382,6 +384,10 @@ export async function backfillHistoricalFilings(
       }
 
       const submissions = await fetchSubmissionsWithHistory(tickerRecord.cik, env as Env);
+      const latestSupportedFiling = pickLatestSupportedFiling(tickerRecord, submissions);
+      if (latestSupportedFiling) {
+        await upsertSearchFormTypeCache(tickerRecord.ticker, latestSupportedFiling.formType, env);
+      }
       const candidates = listSupportedFilings(tickerRecord, submissions)
         .filter((filingReference) => requestedForms.includes(filingReference.formType))
         .filter((filingReference) => filingReference.periodOfReport >= subtractYearsIsoDate(new Date().toISOString(), request.years))
@@ -425,6 +431,9 @@ export async function backfillHistoricalFilings(
         remainingBudget -= 1;
         const comparisonFiling = pickComparisonFiling(tickerRecord, submissions, filingReference);
         const stored = await ensureStoredFiling(filingReference, comparisonFiling, env as Env, config);
+        if (latestSupportedFiling && filingReference.accessionNumber === latestSupportedFiling.accessionNumber) {
+          await upsertLatestFilingAliases(config.extractorVersion, tickerRecord.ticker, stored.filingKey, env);
+        }
         processedFilings.push({
           ticker,
           filingKey: stored.filingKey

@@ -320,7 +320,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     func addToWatchlist(_ item: SearchItem) async {
-        guard item.isSupportedInV1 else {
+        guard item.canAttemptInV1 else {
             activeAlert = AppAlertState(
                 message: item.unsupportedAlertMessage,
                 kind: .dismissOnly
@@ -331,7 +331,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     func saveSearchResult(_ item: SearchItem) async {
-        guard item.isSupportedInV1 else {
+        guard item.canAttemptInV1 else {
             activeAlert = AppAlertState(
                 message: item.unsupportedAlertMessage,
                 kind: .dismissOnly

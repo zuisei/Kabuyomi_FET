@@ -26,8 +26,18 @@ export function buildSummaryPrompt(input: SummaryPromptInput): string {
 }
 
 export function buildChatPrompt(input: ChatPromptInput): string {
+  const contextPack = input.contextPack ?? {
+    questionIntent: input.questionIntent ?? "unknown",
+    contentMode: input.filing.contentMode ?? "full",
+    metrics: input.filing.metrics,
+    sourceChunks: input.filing.sourceChunks
+  };
   return [
     "You are a source-bound but helpful assistant for a Japanese SEC filing reader.",
+    "Answer must be based only on the provided filing, historical, or web sources.",
+    "Do not invent facts. Use concrete numbers when available.",
+    "If evidence is insufficient, say what is missing instead of guessing.",
+    "Return valid sourceIds from the provided Sources list only.",
     "Do not be rigid: if the exact answer is unavailable but related filing facts exist, lead with the closest useful facts and explain the remaining gap at the end.",
     "Use the explicit unavailable answer only as a true last resort.",
     "Before refusing, first look for the closest supported filing facts such as metrics, MD&A explanations, demand comments, risk language, liquidity or capital return comments, and any outlook language that is actually present in the provided context.",
@@ -37,7 +47,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "Write the answer in natural Japanese.",
     "Assume the user may be new to U.S. stocks and does not want to read English filings directly.",
     "Use simple Japanese first. Prefer everyday words over investor jargon whenever possible.",
-    "Sound like a concise chat reply, not a report template. Do not force a fixed conclusion/evidence/next-step structure.",
+    "Sound like a concise chat reply. Use the intent-specific format below when it fits the user's question.",
     "Avoid repeating stock phrases such as まず, 次に見るなら, 判断しやすい, この決算資料から確認できる範囲で, or 提出資料では unless that wording is actually useful.",
     "Do not answer in English except for company names, product names, SEC form names, or sourceIds.",
     "Translate finance and supply-chain terminology into Japanese whenever a natural Japanese expression exists.",
@@ -66,6 +76,11 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "Do not cite sourceIds that do not exist.",
     "",
     `Question: ${input.question}`,
+    `Question intent: ${contextPack.questionIntent}`,
+    `Content mode: ${contextPack.contentMode}`,
+    "Answer format:",
+    answerFormatInstruction(contextPack.questionIntent),
+    retryInstruction(input),
     "",
     "Filing metadata:",
     JSON.stringify({
@@ -77,8 +92,11 @@ export function buildChatPrompt(input: ChatPromptInput): string {
       periodOfReport: input.filing.periodOfReport
     }),
     "",
+    "Factual metrics pack:",
+    JSON.stringify(contextPack.metrics),
+    "",
     "Sources:",
-    JSON.stringify(input.filing.sourceChunks)
+    JSON.stringify(contextPack.sourceChunks)
   ].join("\n");
 }
 
@@ -161,4 +179,80 @@ export function quoteTranslationResponseJsonSchema() {
     },
     required: ["translatedText"]
   };
+}
+
+function answerFormatInstruction(intent: NonNullable<ChatPromptInput["questionIntent"]>): string {
+  switch (intent) {
+    case "business_overview":
+      return "Cover, in this order: 一言概要, 主な収益源, 直近filingで見える変化, 注意点。";
+    case "revenue_breakdown":
+    case "segment_analysis":
+      return "Cover, in this order: 主な売上区分, 大きい区分, 変化があればその方向, この資料だけでは分からない内訳。";
+    case "margin_profitability":
+      return "Cover, in this order: 売上・営業利益・純利益, 営業利益率または純利益率, 改善/悪化の要因, 注意点。";
+    case "cash_flow":
+      return "Cover, in this order: 営業CF, 利益との違い, 増減要因, 持続性を見る上で足りない情報。";
+    case "risk_factors":
+      return "Cover, in this order: 主要リスク3つ以内, 影響, 根拠, まだ数字に出ているか。";
+    case "mda_summary":
+      return "Cover, in this order: 会社コメントの要点, 数字とのつながり, 強い材料, 注意点。";
+    case "yoy_change":
+      return "Cover, in this order: 一番大きい変化, 主要数値, 本文で説明されている要因, 追加確認が必要な点。";
+    case "historical_comparison":
+      return "Cover, in this order: 比較できる期間, 主要数値の推移, 変化の読み方, 比較不足の点。";
+    case "stock_market_context":
+      return "Cover, in this order: SEC filingから言えること, 株価・ニュースなど外部情報が必要なこと, 投資判断には不足している情報。";
+    case "investment_view":
+      return "Cover, in this order: SEC filingから言える材料, SEC filingから見えるリスク, SECだけでは不足する材料。Do not tell the user to buy or sell.";
+    case "unknown":
+      return "Answer directly first, then add the closest filing-backed evidence and any important limitation.";
+  }
+}
+
+function retryInstruction(input: ChatPromptInput): string {
+  if (!input.retryInstruction) {
+    return "";
+  }
+
+  const lines = [
+    "",
+    `Retry attempt: ${input.retryInstruction.attempt}`,
+    `Retry reason: ${input.retryInstruction.reason}`,
+    "This retry must fix only the stated failure. Keep the answer source-bound and do not add facts outside the provided Sources list.",
+    "Return exactly one JSON object with keys answer and sourceIds. sourceIds must be strings copied from the Sources list."
+  ];
+
+  switch (input.retryInstruction.reason) {
+    case "schema_invalid":
+    case "json_parse_failed":
+      lines.push(
+        "The previous output was rejected because it did not match the required JSON schema. Convert it to the required schema without adding unsupported facts."
+      );
+      break;
+    case "no_sources":
+    case "weak_grounding":
+    case "invalid_source_id":
+      lines.push(
+        "The previous output did not cite usable sources. Choose the closest valid sourceIds from the Sources list and keep the explanation tied to those sources."
+      );
+      break;
+    case "low_quality_answer":
+    case "deterministic_repair":
+      lines.push(
+        "The previous output was too generic or led with the wrong fact. Follow the intent-specific answer format and start with the most useful filing-backed fact."
+      );
+      break;
+    case "gemini_timeout":
+    case "gemini_api_error":
+    case "metrics_only_insufficient":
+      lines.push("Use a shorter answer and cite only the strongest provided sources.");
+      break;
+  }
+
+  if (input.retryInstruction.previousResponse !== undefined) {
+    lines.push("Previous output, for internal repair only:");
+    lines.push(JSON.stringify(input.retryInstruction.previousResponse).slice(0, 4_000));
+  }
+
+  return lines.join("\n");
 }

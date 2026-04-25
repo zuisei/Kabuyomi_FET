@@ -482,7 +482,7 @@ private struct DrawerSearchRow: View {
                 Text("\(item.supportDisplayLabel) ・ \(item.exchange)")
                     .font(.system(.caption, design: .rounded))
                     .foregroundStyle(KabuyomiTheme.inkMuted)
-                if !item.isSupportedInV1 {
+                if item.requiresFilingVerification || !item.canAttemptInV1 {
                     Text(item.availabilityNote)
                         .font(.system(.caption2, design: .rounded, weight: .medium))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
@@ -492,7 +492,7 @@ private struct DrawerSearchRow: View {
 
             Spacer()
 
-            if item.isSupportedInV1 {
+            if item.canAttemptInV1 {
                 VStack(alignment: .trailing, spacing: 7) {
                     Button(action: saveAction) {
                         DrawerSearchActionLabel(
@@ -539,6 +539,10 @@ private struct DrawerSearchRow: View {
 
         if isSaved {
             return "保存済み"
+        }
+
+        if item.requiresFilingVerification {
+            return "確認して保存"
         }
 
         return "保存"

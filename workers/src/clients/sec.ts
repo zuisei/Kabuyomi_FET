@@ -6,6 +6,8 @@ import {
   fetchSubmissionsFromFetcher,
   fetchTickerSnapshotFromFetcher
 } from "./sec-fetcher";
+import { logWarnEvent } from "../lib/logging";
+import { loadSearchFormTypeCache, upsertSearchFormTypeCache } from "../lib/search-form-type-cache";
 
 const METRIC_TAGS = {
   revenue: [
@@ -101,6 +103,7 @@ interface TickerSnapshotMemoryCache {
 }
 
 const SEARCH_RESULT_LIMIT = 20;
+const SEARCH_FORM_TYPE_REMOTE_LOOKUP_LIMIT = 6;
 const TICKER_SNAPSHOT_MEMORY_TTL_MS = 5 * 60 * 1000;
 const TICKER_SEARCH_SCORE_ORDER = [0, 1, 1.5, 1.75, 2, 3, 4, 5, 6, 7, 8] as const;
 const tickerSnapshotMemoryCaches = new WeakMap<KVNamespace, TickerSnapshotMemoryCache>();
@@ -121,102 +124,53 @@ export function sortTickerSearchResults(items: TickerRecord[], normalizedQuery: 
   return selectTickerSearchResults(buildTickerSearchIndex(items), normalizedQuery, Number.POSITIVE_INFINITY);
 }
 
-const SEARCH_FORM_TYPE_CACHE_TTL_SECONDS = 24 * 60 * 60;
-const SEARCH_FORM_TYPE_NEGATIVE_SENTINEL = "__none__";
-const SEARCH_FORM_TYPE_HYDRATE_LIMIT = 5;
-
 async function enrichTickerSearchResults(
   items: TickerRecord[],
   _normalizedQuery: string,
   env: Env
 ): Promise<TickerRecord[]> {
-  const cachedFormTypes = await Promise.all(items.map((item) => loadCachedLatestFormType(item.ticker, env)));
-  const hydrated = items.map((item, index) => {
-    const cachedFormType = cachedFormTypes[index];
-    if (cachedFormType === undefined || cachedFormType === null) {
-      return item;
-    }
+  const cachedFormTypes = await loadSearchFormTypeCache(items.map((item) => item.ticker), env);
+  const remoteFormTypes = await loadMissingSearchFormTypes(items, cachedFormTypes, env);
 
-    return {
-      ...item,
-      latestFormType: cachedFormType
-    };
+  return items.map((item) => {
+    const key = normalizeTickerInput(item.ticker);
+    const latestFormType = cachedFormTypes.has(key) ? cachedFormTypes.get(key) : remoteFormTypes.get(key);
+    return latestFormType ? { ...item, latestFormType } : item;
   });
-
-  const unresolved = hydrated
-    .filter((item, index) => item.latestFormType === undefined && cachedFormTypes[index] === undefined)
-    .slice(0, SEARCH_FORM_TYPE_HYDRATE_LIMIT);
-  if (unresolved.length === 0) {
-    return hydrated;
-  }
-
-  const resolved = await Promise.allSettled(
-    unresolved.map(async (item) => ({
-      ticker: item.ticker,
-      latestFormType: await fetchAndCacheLatestFormType(item, env)
-    }))
-  );
-  const byTicker = new Map<string, string | null>();
-
-  for (const entry of resolved) {
-    if (entry.status === "fulfilled") {
-      byTicker.set(entry.value.ticker, entry.value.latestFormType);
-    }
-  }
-
-  if (byTicker.size === 0) {
-    return hydrated;
-  }
-
-  return hydrated.map((item) =>
-    byTicker.has(item.ticker)
-      ? {
-          ...item,
-          latestFormType: byTicker.get(item.ticker) ?? undefined
-        }
-      : item
-  );
 }
 
-async function loadCachedLatestFormType(
-  ticker: string,
+async function loadMissingSearchFormTypes(
+  items: TickerRecord[],
+  cachedFormTypes: Map<string, string | null>,
   env: Env
-): Promise<string | null | undefined> {
-  const cached = await env.KABUYOMI_CACHE.get(buildSearchFormTypeCacheKey(ticker));
-  if (!cached) {
-    return undefined;
+): Promise<Map<string, string | null>> {
+  const missing = items
+    .slice(0, SEARCH_FORM_TYPE_REMOTE_LOOKUP_LIMIT)
+    .filter((item) => !cachedFormTypes.has(normalizeTickerInput(item.ticker)));
+
+  if (missing.length === 0) {
+    return new Map();
   }
 
-  if (cached === SEARCH_FORM_TYPE_NEGATIVE_SENTINEL) {
-    return null;
-  }
-
-  return cached;
-}
-
-async function fetchAndCacheLatestFormType(
-  item: TickerRecord,
-  env: Env
-): Promise<string | null> {
-  const submissions = await fetchSubmissions(item.cik, env);
-  const latestFiling = pickLatestSupportedFiling(item, submissions);
-  const latestFormType = latestFiling?.formType ?? normalizeLatestRawForm(submissions.filings.recent.form);
-  await env.KABUYOMI_CACHE.put(
-    buildSearchFormTypeCacheKey(item.ticker),
-    latestFormType ?? SEARCH_FORM_TYPE_NEGATIVE_SENTINEL,
-    { expirationTtl: SEARCH_FORM_TYPE_CACHE_TTL_SECONDS }
+  const entries = await Promise.all(
+    missing.map(async (item): Promise<[string, string | null]> => {
+      const ticker = normalizeTickerInput(item.ticker);
+      try {
+        const latestFormType = await resolveLatestSearchFormType(item, env);
+        await upsertSearchFormTypeCache(ticker, latestFormType, env);
+        return [ticker, latestFormType];
+      } catch (error) {
+        logWarnEvent("search_form_type_lookup_failed", {
+          ticker,
+          cik: item.cik,
+          reason: error instanceof Error ? error.message : String(error)
+        });
+        return [ticker, null];
+      }
+    })
   );
-  return latestFormType;
-}
 
-function buildSearchFormTypeCacheKey(ticker: string): string {
-  return `search_latest_form_type:${ticker.trim().toUpperCase()}`;
-}
-
-function normalizeLatestRawForm(forms: readonly string[]): string | null {
-  const raw = forms.find((form) => typeof form === "string" && form.trim().length > 0);
-  const normalized = raw?.trim().toUpperCase();
-  return normalized ? normalized : null;
+  return new Map(entries);
 }
 
 function selectTickerSearchResults(
@@ -466,6 +420,12 @@ export function pickLatestSupportedFiling(
   }
 
   return null;
+}
+
+export async function resolveLatestSearchFormType(tickerRecord: TickerRecord, env: Env): Promise<string | null> {
+  const submissions = await fetchSubmissions(tickerRecord.cik, env);
+  const supported = pickLatestSupportedFiling(tickerRecord, submissions);
+  return supported?.formType ?? pickLatestRecentFormType(submissions);
 }
 
 export function pickComparisonFiling(
@@ -786,6 +746,29 @@ function normalizeForm(form: string | undefined): "10-K" | "10-Q" | null {
     return "10-Q";
   }
   return null;
+}
+
+function pickLatestRecentFormType(submissions: SubmissionResponse): string | null {
+  const form = submissions.filings.recent.form.find((candidate) => candidate.trim().length > 0);
+  return normalizeDisplayForm(form);
+}
+
+function normalizeDisplayForm(form: string | undefined): string | null {
+  if (!form) {
+    return null;
+  }
+
+  const compact = form.trim().replace(/\s+/g, " ");
+  if (!compact) {
+    return null;
+  }
+
+  const supported = normalizeForm(compact);
+  if (supported) {
+    return supported;
+  }
+
+  return compact.length > 24 ? compact.slice(0, 24) : compact;
 }
 
 function accessionWithoutDashes(accessionNumber: string): string {

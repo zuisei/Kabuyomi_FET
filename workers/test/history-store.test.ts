@@ -6,7 +6,8 @@ vi.mock("../src/clients/sec", () => ({
   listTickersByCik: vi.fn(),
   listSupportedFilings: vi.fn(),
   lookupTicker: vi.fn(),
-  pickComparisonFiling: vi.fn().mockReturnValue(null)
+  pickComparisonFiling: vi.fn().mockReturnValue(null),
+  pickLatestSupportedFiling: vi.fn().mockReturnValue(null)
 }));
 
 import { backfillHistoricalFilings, loadHistoricalOverview, maybeBuildHistoricalChatResponse } from "../src/lib/history-store";

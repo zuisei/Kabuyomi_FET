@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/clients/sec", () => ({
   lookupTicker: vi.fn(),
-  listTickersByCik: vi.fn()
+  listTickersByCik: vi.fn(),
+  resolveLatestSearchFormType: vi.fn()
 }));
 
 vi.mock("../src/lib/pipeline", () => ({
@@ -24,7 +25,7 @@ vi.mock("../src/lib/quota", () => ({
 import { handleCompanyRoute } from "../src/routes/company";
 import { handleWatchlistAddRoute } from "../src/routes/watchlist-add";
 import { handleWatchlistRemoveRoute } from "../src/routes/watchlist-remove";
-import { listTickersByCik, lookupTicker } from "../src/clients/sec";
+import { listTickersByCik, lookupTicker, resolveLatestSearchFormType } from "../src/clients/sec";
 import { ensureLatestFiling } from "../src/lib/pipeline";
 import { loadCachedLatestFiling } from "../src/lib/filings/cache";
 import {
@@ -38,6 +39,7 @@ import { AppError } from "../src/lib/errors";
 
 const mockLookupTicker = vi.mocked(lookupTicker);
 const mockListTickersByCik = vi.mocked(listTickersByCik);
+const mockResolveLatestSearchFormType = vi.mocked(resolveLatestSearchFormType);
 const mockEnsureLatestFiling = vi.mocked(ensureLatestFiling);
 const mockLoadCachedLatestFiling = vi.mocked(loadCachedLatestFiling);
 const mockReadQuotaIdentity = vi.mocked(readQuotaIdentity);
@@ -92,6 +94,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockReadQuotaIdentity.mockResolvedValue(identity as never);
   mockListTickersByCik.mockResolvedValue(["GOOG", "GOOGL"] as never);
+  mockResolveLatestSearchFormType.mockResolvedValue("10-Q");
   mockPromoteSavedTickerAlias.mockResolvedValue(usage as never);
   mockLoadCachedLatestFiling.mockResolvedValue(null);
 });
@@ -198,6 +201,13 @@ describe("ticker-aware routes", () => {
       usage
     });
     expect(ctx.waitUntil).toHaveBeenCalledTimes(1);
+    expect(mockResolveLatestSearchFormType).toHaveBeenCalledWith(
+      expect.objectContaining({ ticker: "GOOG" }),
+      expect.anything()
+    );
+    expect(mockResolveLatestSearchFormType.mock.invocationCallOrder[0]).toBeLessThan(
+      mockConsumeStockQuotaWithMutation.mock.invocationCallOrder[0]!
+    );
     expect(mockEnsureLatestFiling).toHaveBeenCalledWith(
       "GOOG",
       expect.anything(),
@@ -212,6 +222,45 @@ describe("ticker-aware routes", () => {
 
     resolveFiling(makeFiling({ ticker: "GOOG" }));
     await Promise.all(waitUntilPromises);
+  });
+
+  it("rejects async watchlist add for unsupported filing forms before saving quota", async () => {
+    mockLookupTicker.mockResolvedValue({
+      ticker: "SSL",
+      companyName: "SASOL LTD",
+      cik: "0000314590",
+      exchange: "NYSE"
+    });
+    mockListTickersByCik.mockResolvedValue(["SSL"] as never);
+    mockResolveLatestSearchFormType.mockResolvedValue("6-K");
+    const ctx = {
+      waitUntil: vi.fn()
+    };
+
+    await expect(
+      handleWatchlistAddRoute({
+        request: new Request("https://kabuyomi.test/v1/watchlist/add", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-device-key": "device-123",
+            "x-kabuyomi-watchlist-mode": "async"
+          },
+          body: JSON.stringify({ ticker: "SSL" })
+        }),
+        url: new URL("https://kabuyomi.test/v1/watchlist/add"),
+        env: {} as never,
+        config: {} as never,
+        ctx: ctx as never
+      })
+    ).rejects.toMatchObject({
+      status: 422,
+      publicMessage: "No supported filing found for SSL"
+    });
+
+    expect(mockConsumeStockQuotaWithMutation).not.toHaveBeenCalled();
+    expect(mockEnsureLatestFiling).not.toHaveBeenCalled();
+    expect(ctx.waitUntil).not.toHaveBeenCalled();
   });
 
   it("promotes the requested ticker label when the issuer group was already saved", async () => {

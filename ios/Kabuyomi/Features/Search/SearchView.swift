@@ -87,7 +87,7 @@ struct SearchView: View {
     }
 
     private func openSearchResult(_ item: SearchItem) {
-        guard item.isSupportedInV1 else {
+        guard item.canAttemptInV1 else {
             appModel.activeAlert = AppAlertState(
                 message: item.unsupportedAlertMessage,
                 kind: .dismissOnly
@@ -227,11 +227,11 @@ private struct SearchResultCard: View {
                 HStack(spacing: 8) {
                     searchMetaPill(
                         title: item.supportDisplayLabel,
-                        tint: item.isSupportedInV1 ? KabuyomiTheme.accent : KabuyomiTheme.inkMuted
+                        tint: item.hasSupportedLatestFiling ? KabuyomiTheme.accent : KabuyomiTheme.inkMuted
                     )
                     searchMetaPill(title: item.exchange, tint: KabuyomiTheme.inkMuted)
                 }
-                if !item.isSupportedInV1 {
+                if item.requiresFilingVerification || !item.canAttemptInV1 {
                     Text(item.availabilityNote)
                         .font(.system(.caption, design: .rounded, weight: .medium))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
@@ -241,7 +241,7 @@ private struct SearchResultCard: View {
 
             Spacer()
 
-            if item.isSupportedInV1 {
+            if item.canAttemptInV1 {
                 VStack(alignment: .trailing, spacing: 8) {
                     Button(action: saveAction) {
                         SearchResultActionLabel(
@@ -291,6 +291,10 @@ private struct SearchResultCard: View {
 
         if isAdded {
             return "保存済み"
+        }
+
+        if item.requiresFilingVerification {
+            return "確認して保存"
         }
 
         return "保存"

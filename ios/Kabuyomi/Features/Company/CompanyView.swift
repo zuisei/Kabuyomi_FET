@@ -534,7 +534,7 @@ struct CompanyView: View {
     }
 
     private func openSearchResult(_ item: SearchItem) {
-        guard item.isSupportedInV1 else {
+        guard item.canAttemptInV1 else {
             appModel.activeAlert = AppAlertState(
                 message: item.unsupportedAlertMessage,
                 kind: .dismissOnly

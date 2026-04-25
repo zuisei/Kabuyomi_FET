@@ -224,7 +224,7 @@ describe("SEC filing selection", () => {
     expect(match?.ticker).toBe("GOOG");
   });
 
-  it("hydrates multiple short-query search results instead of only the first unresolved ticker", async () => {
+  it("reads multiple short-query latest form types from D1 without hot-path hydration", async () => {
     const cache = new Map<string, unknown>([
       [
         "tickers_snapshot",
@@ -238,63 +238,38 @@ describe("SEC filing selection", () => {
       ]
     ]);
 
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      const body = JSON.parse(String(init?.body ?? ""));
-      void url;
-      if (body.cik === "0000040545") {
-        return new Response(JSON.stringify({
-          name: "GE Aerospace",
-          filings: {
-            recent: {
-              form: ["10-K"],
-              accessionNumber: ["0000040545-26-000001"],
-              primaryDocument: ["ge10k.htm"],
-              filingDate: ["2026-02-13"],
-              reportDate: ["2025-12-31"]
-            }
-          }
-        }), { status: 200 });
-      }
-
-      if (body.cik === "0000043920") {
-        return new Response(JSON.stringify({
-          name: "Greif, Inc.",
-          filings: {
-            recent: {
-              form: ["10-Q"],
-              accessionNumber: ["0000043920-26-000002"],
-              primaryDocument: ["gef10q.htm"],
-              filingDate: ["2026-03-01"],
-              reportDate: ["2026-01-31"]
-            }
-          }
-        }), { status: 200 });
-      }
-
-      throw new Error(`Unexpected fetch body: ${JSON.stringify(body)}`);
-    });
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    const kvPut = vi.fn();
 
     const result = await searchTickers("ge", {
       KABUYOMI_CACHE: {
         get: async (key: string) => cache.get(key),
-        put: async (key: string, value: unknown) => {
-          cache.set(key, value);
-        }
+        put: kvPut
       },
-      SEC_FETCHER_BASE_URL: "http://127.0.0.1:8789",
-      SEC_FETCHER_SHARED_SECRET: "secret"
+      DB: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({
+            all: vi.fn().mockResolvedValue({
+              results: [
+                { ticker: "GE", latestFormType: "10-K" },
+                { ticker: "GEF", latestFormType: "10-Q" }
+              ]
+            })
+          }))
+        }))
+      }
     } as never);
 
     expect(result.items.map((item) => [item.ticker, item.latestFormType])).toEqual([
       ["GE", "10-K"],
       ["GEF", "10-Q"]
     ]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(kvPut).not.toHaveBeenCalled();
   });
 
-  it("keeps fulfilled latest-form hydrations when a sibling SEC lookup fails", async () => {
+  it("fills missing D1 latest form types with bounded submissions lookups", async () => {
     const cache = new Map<string, unknown>([
       [
         "tickers_snapshot",
@@ -308,49 +283,114 @@ describe("SEC filing selection", () => {
       ]
     ]);
 
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body ?? ""));
-      if (body.cik === "0000040545") {
-        return new Response(JSON.stringify({
-          name: "GE Aerospace",
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: "Greif, Inc.",
           filings: {
             recent: {
-              form: ["10-K"],
-              accessionNumber: ["0000040545-26-000001"],
-              primaryDocument: ["ge10k.htm"],
-              filingDate: ["2026-02-13"],
-              reportDate: ["2025-12-31"]
+              form: ["8-K", "10-Q"],
+              accessionNumber: ["0000043920-26-000010", "0000043920-26-000008"],
+              primaryDocument: ["gef-8k.htm", "gef-10q.htm"],
+              filingDate: ["2026-04-01", "2026-02-26"],
+              reportDate: ["2026-04-01", "2026-01-31"]
             }
           }
-        }), { status: 200 });
-      }
-
-      if (body.cik === "0000043920") {
-        throw new Error("temporary SEC outage");
-      }
-
-      throw new Error(`Unexpected fetch body: ${JSON.stringify(body)}`);
-    });
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
     vi.stubGlobal("fetch", fetchMock);
+    const kvPut = vi.fn();
+    const d1Run = vi.fn().mockResolvedValue({ success: true });
 
     const result = await searchTickers("ge", {
+      SEC_FETCHER_BASE_URL: "https://sec-fetcher.test",
       KABUYOMI_CACHE: {
         get: async (key: string) => cache.get(key),
-        put: async (key: string, value: unknown) => {
-          cache.set(key, value);
-        }
+        put: kvPut
       },
-      SEC_FETCHER_BASE_URL: "http://127.0.0.1:8789",
-      SEC_FETCHER_SHARED_SECRET: "secret"
+      DB: {
+        prepare: vi.fn((sql: string) => ({
+          bind: vi.fn(() =>
+            sql.includes("SELECT")
+              ? {
+                  all: vi.fn().mockResolvedValue({
+                    results: [{ ticker: "GE", latestFormType: "10-K" }]
+                  })
+                }
+              : {
+                  run: d1Run
+                }
+          )
+        }))
+      }
     } as never);
 
     expect(result.items.map((item) => [item.ticker, item.latestFormType])).toEqual([
       ["GE", "10-K"],
-      ["GEF", undefined]
+      ["GEF", "10-Q"]
     ]);
-    expect(cache.get("search_latest_form_type:GE")).toBe("10-K");
+    expect(cache.has("search_latest_form_type:GE")).toBe(false);
     expect(cache.has("search_latest_form_type:GEF")).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(d1Run).toHaveBeenCalledTimes(1);
+    expect(kvPut).not.toHaveBeenCalled();
+  });
+
+  it("surfaces unsupported recent filing forms for search results", async () => {
+    const cache = new Map<string, unknown>([
+      [
+        "tickers_snapshot",
+        {
+          updatedAt: "2026-04-15T00:00:00.000Z",
+          items: [{ ticker: "SSL", companyName: "SASOL LTD", cik: "0000314590", exchange: "NYSE" }]
+        }
+      ]
+    ]);
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: "SASOL LTD",
+          filings: {
+            recent: {
+              form: ["6-K", "20-F"],
+              accessionNumber: ["0000000000-26-000010", "0000000000-26-000001"],
+              primaryDocument: ["ssl-6k.htm", "ssl-20f.htm"],
+              filingDate: ["2026-04-01", "2026-02-20"],
+              reportDate: ["2026-04-01", "2025-12-31"]
+            }
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await searchTickers("ssl", {
+      SEC_FETCHER_BASE_URL: "https://sec-fetcher.test",
+      KABUYOMI_CACHE: {
+        get: async (key: string) => cache.get(key),
+        put: vi.fn()
+      },
+      DB: {
+        prepare: vi.fn((sql: string) => ({
+          bind: vi.fn(() =>
+            sql.includes("SELECT")
+              ? {
+                  all: vi.fn().mockResolvedValue({ results: [] })
+                }
+              : {
+                  run: vi.fn().mockResolvedValue({ success: true })
+                }
+          )
+        }))
+      }
+    } as never);
+
+    expect(result.items.map((item) => [item.ticker, item.latestFormType])).toEqual([["SSL", "6-K"]]);
   });
 
   it("ranks separator-alias class ticker queries against the resolved ticker", () => {

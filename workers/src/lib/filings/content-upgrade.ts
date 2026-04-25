@@ -3,8 +3,9 @@ import { fetchFilingHtml } from "../../clients/sec";
 import type { Env, FilingCacheRecord, FilingReference } from "../../env";
 import { extractMDASectionWithDiagnostics } from "../../extractors/mda";
 import { buildArchiveObjectKey, upsertHistoricalIndex } from "../history-store";
+import { logLlmUsage } from "../llm-usage";
 import { logErrorEvent, logEvent } from "../logging";
-import { buildCacheKey, loadFilingByKey } from "./cache";
+import { loadFilingByKey } from "./cache";
 import { extractCompanyWebsiteUrl } from "./company-website";
 import { buildSourceChunks } from "./ingest";
 import { acquireFilingLock } from "./lock";
@@ -111,6 +112,13 @@ export async function upgradeMetricsOnlyRecord(record: FilingCacheRecord, env: E
       periodOfReport: current.periodOfReport,
       metrics: current.metrics,
       sourceChunks
+    });
+    logLlmUsage(generated.llmUsage, {
+      aiTask: "summary",
+      route: "filing_content_upgrade",
+      ticker: current.ticker,
+      filingKey: current.filingKey,
+      responsePath: generated.provider
     });
 
     const upgraded: FilingCacheRecord = {
@@ -246,7 +254,6 @@ async function persistUpgradedRecord(record: FilingCacheRecord, env: Env): Promi
   }
 
   await Promise.all([
-    env.KABUYOMI_CACHE.put(buildCacheKey(record.extractorVersion, cik, accession), JSON.stringify(record)),
     env.FILINGS_BUCKET.put(buildArchiveObjectKey(record.filingKey), JSON.stringify(record), {
       httpMetadata: { contentType: "application/json" }
     }),

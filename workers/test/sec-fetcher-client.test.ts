@@ -33,6 +33,27 @@ describe("sec fetcher client", () => {
     });
   });
 
+  it("passes submissions requests through the SEC rate limiter before the fetcher", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const limiterFetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+
+    await fetchSubmissionsFromFetcher("0000320193", {
+      SEC_FETCHER_BASE_URL: "http://127.0.0.1:8789",
+      SEC_RATE_LIMITER: {
+        getByName: vi.fn().mockReturnValue({ fetch: limiterFetch })
+      }
+    } as never);
+
+    expect(limiterFetch).toHaveBeenCalledWith("https://do/sec-rate-limit?tokens=1");
+    expect(limiterFetch.mock.invocationCallOrder[0]).toBeLessThan(fetchMock.mock.invocationCallOrder[0]);
+  });
+
   it("can request expanded submission history only for history-aware paths", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } }), {
@@ -124,6 +145,66 @@ describe("sec fetcher client", () => {
         headers: expect.any(Headers)
       })
     );
+  });
+
+  it("charges two SEC rate limiter tokens for filing-assets requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ html: "<html></html>", primaryDocumentUrl: "https://sec.test/doc", concepts: {}, companyFacts: null }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const limiterFetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+
+    await fetchFilingAssetsFromFetcher(
+      {
+        cik: "0000320193",
+        ticker: "AAPL",
+        companyName: "Apple Inc.",
+        exchange: "Nasdaq",
+        formType: "10-Q",
+        accessionNumber: "0000320193-26-000057",
+        primaryDocument: "a10q.htm",
+        filedAt: "2026-02-03",
+        periodOfReport: "2025-12-28"
+      },
+      ["Revenues"],
+      {
+        SEC_FETCHER_BASE_URL: "http://127.0.0.1:8789",
+        SEC_RATE_LIMITER: {
+          getByName: vi.fn().mockReturnValue({ fetch: limiterFetch })
+        }
+      } as never
+    );
+
+    expect(limiterFetch).toHaveBeenCalledWith("https://do/sec-rate-limit?tokens=2");
+  });
+
+  it("passes each retry attempt through the SEC rate limiter", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "busy" }), { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const limiterFetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+
+    await fetchSubmissionsFromFetcher("0000320193", {
+      SEC_FETCHER_BASE_URL: "http://127.0.0.1:8789",
+      SEC_RATE_LIMITER: {
+        getByName: vi.fn().mockReturnValue({ fetch: limiterFetch })
+      }
+    } as never);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(limiterFetch).toHaveBeenCalledTimes(2);
+    expect(limiterFetch).toHaveBeenNthCalledWith(1, "https://do/sec-rate-limit?tokens=1");
+    expect(limiterFetch).toHaveBeenNthCalledWith(2, "https://do/sec-rate-limit?tokens=1");
   });
 
   it("falls back to filing and metrics endpoints when filing-assets is unavailable on the fetcher", async () => {

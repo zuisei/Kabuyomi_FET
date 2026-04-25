@@ -1,8 +1,9 @@
 import { generateSummary } from "../../clients/gemini";
 import type { Env, FilingCacheRecord } from "../../env";
 import { buildArchiveObjectKey } from "../history-store";
+import { logLlmUsage } from "../llm-usage";
 import { logErrorEvent, logEvent } from "../logging";
-import { buildCacheKey, loadFilingByKey } from "./cache";
+import { loadFilingByKey } from "./cache";
 import { acquireFilingLock } from "./lock";
 
 export function enqueueSummaryUpgrade(
@@ -48,6 +49,13 @@ async function upgradeSummary(record: FilingCacheRecord, env: Env): Promise<void
       metrics: current.metrics,
       sourceChunks: current.sourceChunks
     });
+    logLlmUsage(generated.llmUsage, {
+      aiTask: "summary",
+      route: "filing_summary_upgrade",
+      ticker: current.ticker,
+      filingKey: current.filingKey,
+      responsePath: generated.provider
+    });
     if (generated.provider !== "gemini") {
       logEvent("filing_summary_upgrade_skipped", {
         filingKey: current.filingKey,
@@ -68,10 +76,6 @@ async function upgradeSummary(record: FilingCacheRecord, env: Env): Promise<void
     }
 
     await Promise.all([
-      env.KABUYOMI_CACHE.put(
-        buildCacheKey(current.extractorVersion, cik, accessionNumber),
-        JSON.stringify(upgraded)
-      ),
       env.FILINGS_BUCKET.put(buildArchiveObjectKey(current.filingKey), JSON.stringify(upgraded), {
         httpMetadata: { contentType: "application/json" }
       })

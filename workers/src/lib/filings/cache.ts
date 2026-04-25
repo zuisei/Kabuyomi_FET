@@ -1,17 +1,19 @@
 import type { Env, FilingCacheRecord } from "../../env";
 import { loadArchivedFilingByKey } from "../history-store";
 import type { RemoteConfig } from "../remote-config";
+import { upsertSearchFormTypeCache } from "../search-form-type-cache";
+import {
+  buildTickerAliasKey,
+  buildTickerAliasKeys,
+  buildTickerAliasTickers,
+  loadLatestFilingAliasFromD1,
+  upsertLatestFilingAliases
+} from "./latest-alias-store";
+
+export { buildTickerAliasKey, buildTickerAliasKeys };
 
 export function buildCacheKey(extractorVersion: string, cik: string, accessionNumber: string): string {
   return `filing_cache:${extractorVersion}:${cik}:${accessionNumber.replaceAll("-", "")}`;
-}
-
-export function buildTickerAliasKey(extractorVersion: string, ticker: string): string {
-  return `latest_filing_by_ticker:${extractorVersion}:${ticker.toUpperCase()}`;
-}
-
-export function buildTickerAliasKeys(extractorVersion: string, ticker: string): string[] {
-  return classTickerVariants(ticker).map((variant) => buildTickerAliasKey(extractorVersion, variant));
 }
 
 export function isCurrentCacheRecord(record: FilingCacheRecord, config: RemoteConfig): boolean {
@@ -24,18 +26,7 @@ export async function loadFilingByKey(filingKey: string, env: Env): Promise<Fili
     return null;
   }
 
-  const cacheKey = buildCacheKey(extractorVersion, cik, accession);
-  const cached = await env.KABUYOMI_CACHE.get(cacheKey, "json");
-  if (cached) {
-    return cached as FilingCacheRecord;
-  }
-
-  const archived = await loadArchivedFilingByKey(filingKey, env);
-  if (archived) {
-    await env.KABUYOMI_CACHE.put(cacheKey, JSON.stringify(archived));
-  }
-
-  return archived;
+  return loadArchivedFilingByKey(filingKey, env);
 }
 
 export async function loadCachedLatestFiling(
@@ -43,7 +34,16 @@ export async function loadCachedLatestFiling(
   env: Env,
   config: RemoteConfig
 ): Promise<FilingCacheRecord | null> {
-  for (const aliasKey of buildTickerAliasKeys(config.extractorVersion, ticker)) {
+  for (const aliasTicker of buildTickerAliasTickers(ticker)) {
+    const d1FilingKey = await loadLatestFilingAliasFromD1(config.extractorVersion, aliasTicker, env);
+    if (d1FilingKey) {
+      const record = await loadFilingByKey(d1FilingKey, env);
+      if (record) {
+        return record;
+      }
+    }
+
+    const aliasKey = buildTickerAliasKey(config.extractorVersion, aliasTicker);
     const filingKey = await env.KABUYOMI_CACHE.get(aliasKey);
     if (!filingKey) {
       continue;
@@ -51,6 +51,7 @@ export async function loadCachedLatestFiling(
 
     const record = await loadFilingByKey(filingKey, env);
     if (record) {
+      await cacheLatestFilingMetadata(config.extractorVersion, aliasTicker, filingKey, record.formType, env);
       return record;
     }
   }
@@ -58,12 +59,15 @@ export async function loadCachedLatestFiling(
   return null;
 }
 
-function classTickerVariants(ticker: string): string[] {
-  const normalized = ticker.trim().toUpperCase().replace(/\s+/g, " ");
-  const match = normalized.match(/^([A-Z0-9]+)[.\-\s]+([A-Z0-9]+)$/);
-  if (!match?.[1] || !match[2]) {
-    return [normalized];
-  }
-
-  return [...new Set([`${match[1]}-${match[2]}`, `${match[1]}.${match[2]}`, `${match[1]} ${match[2]}`])];
+export async function cacheLatestFilingMetadata(
+  extractorVersion: string,
+  ticker: string,
+  filingKey: string,
+  latestFormType: string | null,
+  env: Env
+): Promise<void> {
+  await Promise.all([
+    upsertLatestFilingAliases(extractorVersion, ticker, filingKey, env),
+    latestFormType ? upsertSearchFormTypeCache(ticker, latestFormType, env) : Promise.resolve()
+  ]);
 }

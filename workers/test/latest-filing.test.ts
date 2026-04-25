@@ -11,7 +11,8 @@ vi.mock("../src/clients/sec", () => ({
 }));
 
 vi.mock("../src/lib/history-store", () => ({
-  loadArchivedFilingByKey: vi.fn()
+  loadArchivedFilingByKey: vi.fn(),
+  upsertHistoricalArtifacts: vi.fn()
 }));
 
 vi.mock("../src/lib/filings/cache", () => ({
@@ -19,6 +20,7 @@ vi.mock("../src/lib/filings/cache", () => ({
     `filing_cache:${extractorVersion}:${cik}:${accessionNumber.replaceAll("-", "")}`
   ),
   buildTickerAliasKeys: vi.fn(() => []),
+  cacheLatestFilingMetadata: vi.fn(),
   isCurrentCacheRecord: vi.fn(() => true),
   loadCachedLatestFiling: vi.fn()
 }));
@@ -56,8 +58,8 @@ vi.mock("../src/lib/filings/lock", () => ({
 }));
 
 import { fetchSubmissions, pickComparisonFiling, pickLatestSupportedFiling } from "../src/clients/sec";
-import { loadArchivedFilingByKey } from "../src/lib/history-store";
-import { loadCachedLatestFiling } from "../src/lib/filings/cache";
+import { loadArchivedFilingByKey, upsertHistoricalArtifacts } from "../src/lib/history-store";
+import { cacheLatestFilingMetadata, loadCachedLatestFiling } from "../src/lib/filings/cache";
 import { backfillCompanyWebsite, enqueueContentUpgrade, upgradeMetricsOnlyRecord } from "../src/lib/filings/content-upgrade";
 import { ingestFiling } from "../src/lib/filings/ingest";
 import { ensureLatestFiling } from "../src/lib/filings/latest";
@@ -67,7 +69,9 @@ const mockFetchSubmissions = vi.mocked(fetchSubmissions);
 const mockPickComparisonFiling = vi.mocked(pickComparisonFiling);
 const mockPickLatestSupportedFiling = vi.mocked(pickLatestSupportedFiling);
 const mockLoadArchivedFilingByKey = vi.mocked(loadArchivedFilingByKey);
+const mockUpsertHistoricalArtifacts = vi.mocked(upsertHistoricalArtifacts);
 const mockLoadCachedLatestFiling = vi.mocked(loadCachedLatestFiling);
+const mockCacheLatestFilingMetadata = vi.mocked(cacheLatestFilingMetadata);
 const mockBackfillCompanyWebsite = vi.mocked(backfillCompanyWebsite);
 const mockEnqueueContentUpgrade = vi.mocked(enqueueContentUpgrade);
 const mockUpgradeMetricsOnlyRecord = vi.mocked(upgradeMetricsOnlyRecord);
@@ -141,9 +145,16 @@ describe("ensureLatestFiling", () => {
 
     expect(result).toEqual(ingestedRecord);
     expect(mockLoadCachedLatestFiling).not.toHaveBeenCalled();
-    expect(env.KABUYOMI_CACHE.get).toHaveBeenCalledTimes(1);
+    expect(env.KABUYOMI_CACHE.get).not.toHaveBeenCalled();
     expect(mockLoadArchivedFilingByKey).toHaveBeenCalledWith("v4:0001876042:000187604226000062", env);
     expect(mockIngestFiling).not.toHaveBeenCalled();
+    expect(mockCacheLatestFilingMetadata).toHaveBeenCalledWith(
+      "v4",
+      "CRCL",
+      "v4:0001876042:000187604226000062",
+      "10-K",
+      env
+    );
   });
 
   it("keeps deferred request-path ingests metrics-only and queues full content upgrade", async () => {
@@ -215,6 +226,7 @@ describe("ensureLatestFiling", () => {
       summaryMode: "fallback_only",
       contentMode: "metrics_only"
     });
+    expect(mockUpsertHistoricalArtifacts).toHaveBeenCalledWith(ingestedRecord, env);
     expect(mockEnqueueContentUpgrade).toHaveBeenCalledWith(ingestedRecord, env, executionContext);
     expect(mockEnqueueSummaryUpgrade).not.toHaveBeenCalled();
   });
@@ -425,6 +437,7 @@ describe("ensureLatestFiling", () => {
       summaryMode: "default",
       contentMode: "full"
     });
+    expect(mockUpsertHistoricalArtifacts).toHaveBeenCalledWith(fullRecord, env);
     expect(result.contentMode).toBe("full");
     expect(result.mdaText).toBe("full md&a");
   });

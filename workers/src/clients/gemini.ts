@@ -12,12 +12,20 @@ import {
 } from "./gemini/normalize";
 import { buildChatPrompt, buildQuoteTranslationPrompt, buildSummaryPrompt } from "./gemini/prompts";
 import { invokeGemini, resolveGeminiTranslationModel } from "./gemini/request";
-import type { ChatPromptInput, GeminiChatAnswer, QuoteTranslationPromptInput, SummaryPromptInput } from "./gemini/types";
+import type {
+  ChatFallbackReason,
+  ChatPromptInput,
+  ChatRetryInstruction,
+  GeminiChatAnswer,
+  GeminiInvocationUsage,
+  QuoteTranslationPromptInput,
+  SummaryPromptInput
+} from "./gemini/types";
 
 export async function generateSummary(
   env: Env,
   input: SummaryPromptInput
-): Promise<{ summary: SummaryRecord; provider: "gemini" | "fallback" }> {
+): Promise<{ summary: SummaryRecord; provider: "gemini" | "fallback"; llmUsage?: GeminiInvocationUsage[] }> {
   if (!env.GEMINI_API_KEY) {
     logEvent("gemini_fallback_used", { kind: "summary", reason: "missing_api_key" });
     return {
@@ -26,9 +34,9 @@ export async function generateSummary(
     };
   }
 
-  let response: unknown;
+  let invocation: Awaited<ReturnType<typeof invokeGemini>>;
   try {
-    response = await invokeGemini(env, buildSummaryPrompt(input), "summary");
+    invocation = await invokeGemini(env, buildSummaryPrompt(input), "summary");
   } catch {
     logEvent("gemini_fallback_used", { kind: "summary", reason: "request_failed" });
     return {
@@ -37,13 +45,15 @@ export async function generateSummary(
     };
   }
 
+  const response = invocation.data;
   const normalized = normalizeSummaryResponse(response);
   if (!normalized) {
     logSchemaMismatch("summary", response);
     logEvent("gemini_fallback_used", { kind: "summary", reason: "schema_validation_failed" });
     return {
       summary: localSummaryFallback(input),
-      provider: "fallback"
+      provider: "fallback",
+      ...usagePayload(invocation.usage)
     };
   }
 
@@ -59,40 +69,80 @@ export async function generateSummary(
         text: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(line.text)))
       }))
     },
-    provider: "gemini"
+    provider: "gemini",
+    ...usagePayload(invocation.usage)
   };
 }
 
 export async function generateChatAnswer(env: Env, input: ChatPromptInput): Promise<GeminiChatAnswer> {
   if (!env.GEMINI_API_KEY) {
     logEvent("gemini_fallback_used", { kind: "chat", reason: "missing_api_key" });
-    return localChatFallback(input);
+    return attachChatDecisionMeta(localChatFallback(input), {
+      geminiCalled: false,
+      geminiSucceeded: false,
+      schemaValid: false
+    });
   }
 
-  let response: unknown;
+  let invocation: Awaited<ReturnType<typeof invokeGemini>>;
   try {
-    response = await invokeGemini(env, buildChatPrompt(input), "chat");
-  } catch {
-    logEvent("gemini_fallback_used", { kind: "chat", reason: "request_failed" });
-    return localChatFallback(input);
+    invocation = await invokeGemini(env, buildChatPrompt(input), "chat");
+  } catch (error) {
+    const fallbackReason = isGeminiTimeout(error) ? "gemini_timeout" : "gemini_api_error";
+    logEvent("gemini_fallback_used", { kind: "chat", reason: fallbackReason });
+    return attachChatDecisionMeta(localChatFallback(input), {
+      geminiCalled: true,
+      geminiSucceeded: false,
+      fallbackReason,
+      schemaValid: false
+    });
   }
 
-  const normalized = normalizeChatResponse(response);
+  const normalized = normalizeChatResponse(invocation.data);
   if (!normalized) {
-    logSchemaMismatch("chat", response);
-    logEvent("gemini_fallback_used", { kind: "chat", reason: "schema_validation_failed" });
-    return localChatFallback(input);
+    logSchemaMismatch("chat", invocation.data);
+    const fallbackReason: ChatFallbackReason = invocation.failureReason ?? "schema_invalid";
+    const repaired = await maybeRepairChatSchema(env, input, invocation.data, invocation.usage, fallbackReason);
+    if (repaired) {
+      return repaired;
+    }
+
+    logEvent("gemini_fallback_used", { kind: "chat", reason: fallbackReason });
+    return attachChatDecisionMeta(attachLlmUsage(localChatFallback(input), invocation.usage), {
+      geminiCalled: true,
+      geminiSucceeded: true,
+      fallbackReason,
+      schemaValid: false,
+      retryAttempt: input.retryInstruction?.attempt ?? 0,
+      retryReason: input.retryInstruction?.reason
+    });
   }
 
-  const recovered = recoverBroaderFallbackIfNeeded(input, {
+  const remoteAnswer: GeminiChatAnswer = {
     answer: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(normalized.answer))),
     sourceIds: normalized.sourceIds,
     usedRemoteModel: normalized.usedRemoteModel
+  };
+  const recoveredWithoutUsage = recoverBroaderFallbackIfNeeded(input, remoteAnswer);
+  const recovered = attachChatDecisionMeta(attachLlmUsage(recoveredWithoutUsage, invocation.usage), {
+    geminiCalled: true,
+    geminiSucceeded: true,
+    fallbackReason: didRecoverWithLocalFallback(remoteAnswer, recoveredWithoutUsage)
+      ? remoteAnswer.sourceIds.length === 0
+        ? "no_sources"
+        : "weak_grounding"
+      : undefined,
+    schemaValid: true
   });
 
   if (shouldRecoverLowQualityChatAnswer(input, recovered.answer, recovered.sourceIds)) {
     logEvent("gemini_fallback_used", { kind: "chat", reason: "low_quality_answer" });
-    return localChatFallback(input);
+    return attachChatDecisionMeta(attachLlmUsage(localChatFallback(input), invocation.usage), {
+      geminiCalled: true,
+      geminiSucceeded: true,
+      fallbackReason: "low_quality_answer",
+      schemaValid: true
+    });
   }
 
   return recovered;
@@ -101,12 +151,13 @@ export async function generateChatAnswer(env: Env, input: ChatPromptInput): Prom
 export async function generateQuoteTranslation(
   env: Env,
   input: QuoteTranslationPromptInput
-): Promise<{ translatedText: string; modelName: string }> {
+): Promise<{ translatedText: string; modelName: string; llmUsage?: GeminiInvocationUsage[] }> {
   if (!env.GEMINI_API_KEY) {
     throw new Error("Gemini API key is missing");
   }
 
-  const response = await invokeGemini(env, buildQuoteTranslationPrompt(input), "quote_translation");
+  const invocation = await invokeGemini(env, buildQuoteTranslationPrompt(input), "quote_translation");
+  const response = invocation.data;
   const translatedText = normalizeQuoteTranslationResponse(response);
 
   if (!translatedText) {
@@ -116,8 +167,136 @@ export async function generateQuoteTranslation(
 
   return {
     translatedText,
-    modelName: resolveGeminiTranslationModel(env)
+    modelName: resolveGeminiTranslationModel(env),
+    ...usagePayload(invocation.usage)
   };
+}
+
+function attachLlmUsage(answer: GeminiChatAnswer, usage: GeminiChatAnswer["llmUsage"]): GeminiChatAnswer {
+  return usage && usage.length > 0
+    ? {
+        ...answer,
+        llmUsage: usage
+      }
+    : answer;
+}
+
+function attachChatDecisionMeta(
+  answer: GeminiChatAnswer,
+  meta: Pick<GeminiChatAnswer, "geminiCalled" | "geminiSucceeded" | "fallbackReason" | "schemaValid"> &
+    Pick<Partial<GeminiChatAnswer>, "retryAttempt" | "retryReason">
+): GeminiChatAnswer {
+  return {
+    ...answer,
+    ...meta
+  };
+}
+
+async function maybeRepairChatSchema(
+  env: Env,
+  input: ChatPromptInput,
+  previousResponse: unknown,
+  previousUsage: GeminiInvocationUsage[],
+  fallbackReason: ChatFallbackReason
+): Promise<GeminiChatAnswer | null> {
+  if (input.retryInstruction || (fallbackReason !== "schema_invalid" && fallbackReason !== "json_parse_failed")) {
+    return null;
+  }
+
+  const retryInstruction: ChatRetryInstruction = {
+    attempt: 1,
+    reason: fallbackReason,
+    previousResponse
+  };
+  let repairInvocation: Awaited<ReturnType<typeof invokeGemini>>;
+  try {
+    repairInvocation = await invokeGemini(
+      env,
+      buildChatPrompt({
+        ...input,
+        retryInstruction
+      }),
+      "chat"
+    );
+  } catch {
+    logEvent("gemini_fallback_used", { kind: "chat", reason: fallbackReason, retryAttempt: 1 });
+    return attachChatDecisionMeta(attachLlmUsage(localChatFallback(input), previousUsage), {
+      geminiCalled: true,
+      geminiSucceeded: true,
+      fallbackReason,
+      schemaValid: false,
+      retryAttempt: 1,
+      retryReason: fallbackReason
+    });
+  }
+
+  const combinedUsage = [...previousUsage, ...repairInvocation.usage];
+  const normalized = normalizeChatResponse(repairInvocation.data);
+  if (!normalized) {
+    logSchemaMismatch("chat", repairInvocation.data);
+    logEvent("gemini_fallback_used", { kind: "chat", reason: fallbackReason, retryAttempt: 1 });
+    return attachChatDecisionMeta(attachLlmUsage(localChatFallback(input), combinedUsage), {
+      geminiCalled: true,
+      geminiSucceeded: true,
+      fallbackReason,
+      schemaValid: false,
+      retryAttempt: 1,
+      retryReason: fallbackReason
+    });
+  }
+
+  const remoteAnswer: GeminiChatAnswer = {
+    answer: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(normalized.answer))),
+    sourceIds: normalized.sourceIds,
+    usedRemoteModel: normalized.usedRemoteModel
+  };
+  const recoveredWithoutUsage = recoverBroaderFallbackIfNeeded(input, remoteAnswer);
+  const recovered = attachChatDecisionMeta(attachLlmUsage(recoveredWithoutUsage, combinedUsage), {
+    geminiCalled: true,
+    geminiSucceeded: true,
+    fallbackReason: didRecoverWithLocalFallback(remoteAnswer, recoveredWithoutUsage)
+      ? remoteAnswer.sourceIds.length === 0
+        ? "no_sources"
+        : "weak_grounding"
+      : undefined,
+    schemaValid: true,
+    retryAttempt: 1,
+    retryReason: fallbackReason
+  });
+
+  if (shouldRecoverLowQualityChatAnswer(input, recovered.answer, recovered.sourceIds)) {
+    logEvent("gemini_fallback_used", { kind: "chat", reason: "low_quality_answer", retryAttempt: 1 });
+    return attachChatDecisionMeta(attachLlmUsage(localChatFallback(input), combinedUsage), {
+      geminiCalled: true,
+      geminiSucceeded: true,
+      fallbackReason: "low_quality_answer",
+      schemaValid: true,
+      retryAttempt: 1,
+      retryReason: fallbackReason
+    });
+  }
+
+  return recovered;
+}
+
+function usagePayload(usage: GeminiInvocationUsage[]): { llmUsage?: GeminiInvocationUsage[] } {
+  return usage.length > 0 ? { llmUsage: usage } : {};
+}
+
+function didRecoverWithLocalFallback(remoteAnswer: GeminiChatAnswer, recovered: GeminiChatAnswer): boolean {
+  return (
+    remoteAnswer.answer !== recovered.answer ||
+    remoteAnswer.sourceIds.length !== recovered.sourceIds.length ||
+    remoteAnswer.sourceIds.some((sourceId, index) => recovered.sourceIds[index] !== sourceId)
+  );
+}
+
+function isGeminiTimeout(error: unknown): boolean {
+  return (
+    (error instanceof Error && error.name === "AbortError") ||
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && /timeout|timed out|aborted/i.test(error.message))
+  );
 }
 
 function logSchemaMismatch(kind: "summary" | "chat" | "quote_translation", payload: unknown) {
@@ -183,8 +362,9 @@ function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: strin
       return true;
     }
 
+    const sourceCandidates = input.contextPack?.sourceChunks ?? input.filing.sourceChunks;
     const citedChunks = sourceIds
-      .map((sourceId) => input.filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId))
+      .map((sourceId) => sourceCandidates.find((chunk) => chunk.sourceId === sourceId))
       .filter((chunk): chunk is NonNullable<typeof chunk> => chunk !== undefined);
     const citesOnlyMetrics = citedChunks.length > 0 && citedChunks.every((chunk) => chunk.sectionType === "xbrl_metric");
     const metricIndex = firstPatternIndex(
@@ -193,7 +373,7 @@ function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: strin
     );
     const businessIndex = firstPatternIndex(
       normalizedAnswer,
-      /事業|主な|手がけ|提供|販売|製造|開発|運営|サービス|製品|プラットフォーム|顧客|患者|医療|検査|診断|がん|癌|腫瘍|精密医療|血液|分子|製薬|臨床研究|創薬|自動車|車両|エネルギー|蓄電|クラウド|広告|決済|サブスク|oncology|cancer|diagnostic|blood|biopharmaceutical|automotive|vehicle|energy|cloud|advertising|payment|subscription/
+      /事業|主な|手がけ|提供|販売|製造|開発|運営|サービス|製品|プラットフォーム|顧客|患者|医療|検査|診断|がん|癌|腫瘍|精密医療|血液|分子|製薬|臨床研究|創薬|自動車|車両|エネルギー|蓄電|クラウド|広告|決済|サブスク|ai|gpu|データセンター|半導体|アクセラレーテッド|コンピューティング|ネットワーキング|グラフィックス|ゲーミング|oncology|cancer|diagnostic|blood|biopharmaceutical|automotive|vehicle|energy|cloud|advertising|payment|subscription|data center|semiconductor|networking|graphics|gaming/
     );
     const boilerplateIndex = firstPatternIndex(
       normalizedAnswer,

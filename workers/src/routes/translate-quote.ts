@@ -1,5 +1,6 @@
 import { generateQuoteTranslation } from "../clients/gemini";
 import { TranslateQuoteRequestSchema } from "../lib/contracts";
+import { logLlmUsage } from "../lib/llm-usage";
 import { logErrorEvent, logEvent } from "../lib/logging";
 import { readQuotaIdentity } from "../lib/quota";
 import { parseJsonBody } from "../lib/request";
@@ -28,6 +29,11 @@ export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, en
 
   try {
     const translation = await generateQuoteTranslation(env, payload);
+    logLlmUsage(translation.llmUsage, {
+      aiTask: "translation",
+      route: "/v1/translate-quote",
+      responsePath: "gemini"
+    });
 
     logEvent("quote_translation_request", {
       quotaSubject: identity.quotaSubject,
@@ -37,7 +43,10 @@ export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, en
       latencyMs: Date.now() - startedAt
     });
 
-    return json(translation);
+    return json({
+      translatedText: translation.translatedText,
+      modelName: translation.modelName
+    });
   } catch (error) {
     logErrorEvent("quote_translation_failed", {
       quotaSubject: identity.quotaSubject,

@@ -153,11 +153,11 @@ describe("enqueueContentUpgrade", () => {
 
     expect(mockFetchFilingHtml).toHaveBeenCalledTimes(1);
     expect(mockGenerateSummary).toHaveBeenCalledTimes(1);
-    expect(env.KABUYOMI_CACHE.put).toHaveBeenCalledTimes(1);
+    expect(env.KABUYOMI_CACHE.put).not.toHaveBeenCalled();
     expect(env.FILINGS_BUCKET.put).toHaveBeenCalledTimes(1);
     expect(mockUpsertHistoricalIndex).toHaveBeenCalledTimes(1);
 
-    const storedRecord = JSON.parse(env.KABUYOMI_CACHE.put.mock.calls[0][1] as string);
+    const storedRecord = JSON.parse(env.FILINGS_BUCKET.put.mock.calls[0][1] as string);
     expect(storedRecord.contentMode).toBe("full");
     expect(storedRecord.summaryProvider).toBe("gemini");
     expect(storedRecord.companyWebsiteUrl).toBe("https://www.apple.com/investor/");
@@ -209,7 +209,7 @@ describe("enqueueContentUpgrade", () => {
     expect(upgraded.companyWebsiteUrl).toBe("https://www.circle.com/");
     expect(mockFetchFilingHtml).toHaveBeenCalledTimes(1);
     expect(mockGenerateSummary).not.toHaveBeenCalled();
-    expect(env.KABUYOMI_CACHE.put).toHaveBeenCalledTimes(1);
+    expect(env.KABUYOMI_CACHE.put).not.toHaveBeenCalled();
     expect(env.FILINGS_BUCKET.put).toHaveBeenCalledTimes(1);
     expect(mockUpsertHistoricalIndex).toHaveBeenCalledTimes(1);
   });

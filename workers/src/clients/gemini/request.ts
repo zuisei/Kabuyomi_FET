@@ -2,6 +2,7 @@ import type { Env } from "../../env";
 import { logEvent } from "../../lib/logging";
 import { parseJsonishText } from "./normalize";
 import { chatResponseJsonSchema, quoteTranslationResponseJsonSchema, summaryResponseJsonSchema } from "./prompts";
+import type { GeminiInvocationUsage } from "./types";
 
 export const DEFAULT_GEMINI_MODEL = "gemma-4-31b-it";
 export const DEFAULT_GEMINI_TRANSLATION_MODEL = "gemma-4-26b-a4b-it";
@@ -25,11 +26,26 @@ const CHAT_GENERATION_CONFIG = {
   responseMimeType: "application/json"
 };
 
+interface GeminiApiPayload {
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+  };
+}
+
+interface GeminiInvocationResult {
+  data: unknown;
+  usage: GeminiInvocationUsage[];
+  failureReason?: "json_parse_failed";
+}
+
 export async function invokeGemini(
   env: Env,
   prompt: string,
   kind: "summary" | "chat" | "quote_translation"
-): Promise<unknown> {
+): Promise<GeminiInvocationResult> {
   const model = kind === "quote_translation" ? resolveGeminiTranslationModel(env) : resolveGeminiModel(env);
   const timeoutMs = resolveGeminiTimeoutMs(env);
   const responseJsonSchema =
@@ -74,10 +90,13 @@ export async function invokeGemini(
         { model, includeSchema: false, generationConfig: CHAT_GENERATION_CONFIG }
       ];
 
+  const usage: GeminiInvocationUsage[] = [];
+
   for (const [index, attempt] of attempts.entries()) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     let response: Response;
+    const startedAt = Date.now();
 
     try {
       response = await fetch(
@@ -137,36 +156,50 @@ export async function invokeGemini(
       throw new Error(`Gemini request failed (${response.status})`);
     }
 
+    const latencyMs = Date.now() - startedAt;
     logEvent("gemini_request_succeeded", {
       kind,
       model: attempt.model,
       status: response.status,
+      includeSchema: attempt.includeSchema,
+      latencyMs
+    });
+
+    const payload = await response.json<GeminiApiPayload>();
+    const usageMetadata = normalizeUsageMetadata(payload.usageMetadata, attempt.model, latencyMs);
+    if (usageMetadata) {
+      usage.push(usageMetadata);
+    }
+    const text = payload.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+    logEvent("gemini_response_received", {
+      kind,
+      model: attempt.model,
       includeSchema: attempt.includeSchema
     });
 
-    const payload = await response.json<{
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    }>();
-    const text = payload.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-    logEvent("gemini_response_preview", {
-      kind,
-      model: attempt.model,
-      includeSchema: attempt.includeSchema,
-      textPreview: text.slice(0, 240)
-    });
-
     try {
-      return parseJsonishText(text);
+      return {
+        data: parseJsonishText(text),
+        usage
+      };
     } catch {
       logEvent("gemini_invalid_response", { kind, includeSchema: attempt.includeSchema });
       if (attempt.includeSchema && attempts[index + 1]) {
         continue;
       }
-      return {};
+      return {
+        data: {},
+        usage,
+        failureReason: "json_parse_failed"
+      };
     }
   }
 
-  return {};
+  return {
+    data: {},
+    usage,
+    failureReason: "json_parse_failed"
+  };
 }
 
 export function resolveGeminiModel(env: Env): string {
@@ -201,4 +234,26 @@ function resolveGeminiTimeoutMs(env: Env): number {
 async function waitBeforeGeminiRetry(attemptIndex: number) {
   const delayMs = Math.min(250 * (attemptIndex + 1), 750);
   await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function normalizeUsageMetadata(
+  usageMetadata: GeminiApiPayload["usageMetadata"],
+  model: string,
+  latencyMs: number
+): GeminiInvocationUsage | null {
+  if (!usageMetadata) {
+    return null;
+  }
+
+  return {
+    model,
+    promptTokenCount: normalizeTokenCount(usageMetadata.promptTokenCount),
+    candidatesTokenCount: normalizeTokenCount(usageMetadata.candidatesTokenCount),
+    totalTokenCount: normalizeTokenCount(usageMetadata.totalTokenCount),
+    latencyMs
+  };
+}
+
+function normalizeTokenCount(value: number | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }

@@ -399,6 +399,129 @@ describe("Gemini local chat fallback", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("uses substantive business context even when the excerpt contains table-of-contents noise", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "NVDA 何の会社？",
+      filing: {
+        filingKey: "v6:0001045810:000104581026000021",
+        ticker: "NVDA",
+        companyName: "NVIDIA CORP",
+        cik: "0001045810",
+        formType: "10-K",
+        filedAt: "2026-02-25",
+        periodOfReport: "2026-01-25",
+        primaryDocumentUrl: "https://example.com",
+        mdaText: "",
+        mdaTokenCount: 0,
+        metrics: [],
+        generatedAt: "2026-04-25T00:00:00.000Z",
+        extractorVersion: "v6",
+        promptVersion: "v2",
+        summary: { verdict: "", highlights: [], changes: [] },
+        sourceChunks: [
+          {
+            sourceId: "CTX1",
+            sectionType: "md_a",
+            sectionTitle: "Business overview context",
+            sourceLabel: "10-K Business overview context",
+            text:
+              "39 Table of Contents The following table sets forth certain items expressed as a percentage of revenue. Compute & Networking revenue increased due to the major platform shifts to accelerated computing and AI. Revenue from Data Center computing grew because of demand for the Blackwell computing platform. Revenue from Data Center networking grew with Ethernet, InfiniBand and NVLink compute fabric. Graphics revenue was driven by Blackwell architecture. Customers include cloud service providers, enterprises, AI model makers and system integrators.",
+            startOffset: 0,
+            endOffset: 560,
+            sortOrder: 1
+          }
+        ]
+      }
+    });
+
+    expect(response.sourceIds).toEqual(["CTX1"]);
+    expect(response.answer).toContain("NVIDIA CORPは");
+    expect(response.answer).toContain("AI向けアクセラレーテッドコンピューティング");
+    expect(response.answer).toContain("データセンター向けコンピューティング");
+  });
+
+  it("accepts NVDA-style business overview answers that cite context-pack sources", async () => {
+    const answer = "NVIDIAは、AI向けGPU、データセンター向けコンピューティング、ネットワーキング製品を提供する会社です。";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [{ text: JSON.stringify({ answer, sourceIds: ["CTX1"] }) }]
+              }
+            }
+          ]
+        })
+      })
+    );
+
+    const contextSource = {
+      sourceId: "CTX1",
+      sectionType: "md_a" as const,
+      sectionTitle: "Business overview context",
+      sourceLabel: "10-K Business overview context",
+      text:
+        "Compute & Networking revenue increased due to accelerated computing and AI. Revenue from Data Center computing grew because of demand for Blackwell. Customers include cloud service providers and enterprises.",
+      startOffset: 0,
+      endOffset: 190,
+      sortOrder: 1
+    };
+    const response = await generateChatAnswer({ GEMINI_API_KEY: "test-key" } as never, {
+      question: "NVDA 何の会社？",
+      questionIntent: "business_overview",
+      contextPack: {
+        questionIntent: "business_overview",
+        contentMode: "full",
+        metrics: [],
+        sourceChunks: [contextSource],
+        contextTokenBudget: 7000,
+        selectedSourceCount: 1,
+        sourceSelectionStrategy: "business_overview:standard:intent_ranked",
+        selectionDiagnostics: {
+          candidateSourceCount: 1,
+          selectedSourceCount: 1,
+          selectedSourceCharCount: contextSource.text.length,
+          avgSelectedSourceChars: contextSource.text.length,
+          contextTokenBudget: 7000,
+          estimatedContextTokens: 80,
+          sourceSelectionStrategy: "business_overview:standard:intent_ranked",
+          rejectedShortCount: 0,
+          rejectedTableFragmentCount: 0,
+          rejectedLowTextQualityCount: 0,
+          sectionHitCountBusiness: 1,
+          sectionHitCountRisk: 0,
+          sectionHitCountMda: 0
+        }
+      },
+      filing: {
+        filingKey: "v6:0001045810:000104581026000021",
+        ticker: "NVDA",
+        companyName: "NVIDIA CORP",
+        cik: "0001045810",
+        formType: "10-K",
+        filedAt: "2026-02-25",
+        periodOfReport: "2026-01-25",
+        primaryDocumentUrl: "https://example.com",
+        mdaText: "",
+        mdaTokenCount: 0,
+        metrics: [],
+        generatedAt: "2026-04-25T00:00:00.000Z",
+        extractorVersion: "v6",
+        promptVersion: "v2",
+        summary: { verdict: "", highlights: [], changes: [] },
+        sourceChunks: []
+      }
+    });
+
+    expect(response.answer).toBe(answer);
+    expect(response.sourceIds).toEqual(["CTX1"]);
+    expect(response.fallbackReason).toBeUndefined();
+  });
+
   it("matches Japanese questions against source text without whitespace tokenization", async () => {
     const response = await generateChatAnswer({} as never, {
       question: "利益率悪化の主因は？",

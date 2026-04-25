@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { DEFAULT_REMOTE_CONFIG, loadRemoteConfig } from "../src/lib/remote-config";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_REMOTE_CONFIG, loadRemoteConfig, resetRemoteConfigMemoryCache } from "../src/lib/remote-config";
 
 describe("remote config", () => {
+  afterEach(() => {
+    resetRemoteConfigMemoryCache();
+    vi.useRealTimers();
+  });
+
   it("keeps the curated ticker seed but leaves scheduled refresh opt-in", async () => {
     const config = await loadRemoteConfig({
       KABUYOMI_CACHE: {
@@ -84,5 +89,52 @@ describe("remote config", () => {
     } as never);
 
     expect(config.extractorVersion).toBe(DEFAULT_REMOTE_CONFIG.extractorVersion);
+  });
+
+  it("reuses the last KV value within the 60 second memory TTL", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-25T00:00:00.000Z"));
+
+    const get = vi.fn().mockResolvedValue({
+      freeDailyChatLimit: 3,
+      extractorVersion: DEFAULT_REMOTE_CONFIG.extractorVersion
+    });
+    const env = {
+      KABUYOMI_CACHE: { get }
+    } as never;
+
+    const first = await loadRemoteConfig(env);
+    const second = await loadRemoteConfig(env);
+
+    expect(first.freeDailyChatLimit).toBe(3);
+    expect(second.freeDailyChatLimit).toBe(3);
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads KV again after the memory TTL expires", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-25T00:00:00.000Z"));
+
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce({
+        freeDailyChatLimit: 3,
+        extractorVersion: DEFAULT_REMOTE_CONFIG.extractorVersion
+      })
+      .mockResolvedValueOnce({
+        freeDailyChatLimit: 7,
+        extractorVersion: DEFAULT_REMOTE_CONFIG.extractorVersion
+      });
+    const env = {
+      KABUYOMI_CACHE: { get }
+    } as never;
+
+    const first = await loadRemoteConfig(env);
+    vi.setSystemTime(new Date("2026-04-25T00:01:01.000Z"));
+    const second = await loadRemoteConfig(env);
+
+    expect(first.freeDailyChatLimit).toBe(3);
+    expect(second.freeDailyChatLimit).toBe(7);
+    expect(get).toHaveBeenCalledTimes(2);
   });
 });
