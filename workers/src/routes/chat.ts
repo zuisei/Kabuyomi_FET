@@ -4,7 +4,15 @@ import { resolveContextualQuestion } from "../lib/chat/context";
 import { enqueueContentUpgrade, isMetricsOnlyRecord, upgradeMetricsOnlyRecord } from "../lib/filings/content-upgrade";
 import { isCurrentCacheRecord, loadFilingByKey } from "../lib/filings/cache";
 import { buildChatResponse } from "../lib/pipeline";
-import { consumeChatQuota, readQuotaIdentity, refundChatQuota } from "../lib/quota";
+import {
+  consumeChatQuota,
+  consumeCredit,
+  InsufficientCreditsError,
+  readQuotaIdentity,
+  refundChatQuota,
+  refundCredit,
+  type CreditMutationResult
+} from "../lib/quota";
 import { parseJsonBody } from "../lib/request";
 import { logErrorEvent, logEvent } from "../lib/logging";
 import { json, notFound, unavailable } from "../lib/response";
@@ -35,7 +43,14 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
 
     const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
     requestedFiling = await prepareFilingForChat(requestedFiling, env, ctx);
-    const usage = await consumeChatQuota(identity, env, config);
+    const creditOperationId = payload.operationId ?? crypto.randomUUID();
+    const chatCharge = await chargeChat({
+      identity,
+      env,
+      config,
+      creditOperationId,
+      filingKey: requestedFiling.filingKey
+    });
     const startedAt = Date.now();
     const resolvedQuestion = resolveContextualQuestion(payload.question, payload.conversationContext);
     const answer = await (async () => {
@@ -45,7 +60,14 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
         });
       } catch (error) {
         try {
-          await refundChatQuota(identity, env, config);
+          await refundChat({
+            identity,
+            env,
+            config,
+            chatCharge,
+            creditOperationId,
+            filingKey: requestedFiling.filingKey
+          });
         } catch (refundError) {
           logErrorEvent("chat_quota_refund_failed", {
             filingKey: requestedFiling.filingKey,
@@ -72,9 +94,22 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
       sources: answer.sources,
       responsePath: answer.responsePath,
       modelName: answer.responsePath === "gemini" ? resolveGeminiModel(env) : null,
-      usage
+      usage: chatCharge.usage,
+      creditsCharged: chatCharge.creditsCharged,
+      creditsRemaining: chatCharge.creditsRemaining
     });
   } catch (error) {
+    if (error instanceof InsufficientCreditsError) {
+      return json(
+        {
+          error: "insufficient_credits",
+          creditsRequired: error.creditsRequired,
+          creditsRemaining: error.creditsRemaining
+        },
+        { status: error.status }
+      );
+    }
+
     logErrorEvent("chat_request_failed", {
       filingKey: payload.filingKey,
       reason: error instanceof Error ? error.message : String(error)
@@ -82,6 +117,76 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
     throw error;
   }
 };
+
+interface ChatChargeResult {
+  usage: Awaited<ReturnType<typeof consumeChatQuota>>;
+  creditsCharged?: number;
+  creditsRemaining?: number;
+}
+
+async function chargeChat({
+  identity,
+  env,
+  config,
+  creditOperationId,
+  filingKey
+}: {
+  identity: Awaited<ReturnType<typeof readQuotaIdentity>>;
+  env: Parameters<typeof consumeChatQuota>[1];
+  config: Parameters<typeof consumeChatQuota>[2];
+  creditOperationId: string;
+  filingKey: string;
+}): Promise<ChatChargeResult> {
+  if (!config.creditBillingEnabled) {
+    return {
+      usage: await consumeChatQuota(identity, env, config)
+    };
+  }
+
+  const credit = await consumeCredit(identity, env, config, {
+    operationId: creditOperationId,
+    creditsRequired: 1,
+    reference: {
+      type: "chat",
+      id: filingKey
+    }
+  });
+  return {
+    usage: credit.usage,
+    creditsCharged: credit.creditsCharged ?? 0,
+    creditsRemaining: credit.creditsRemaining
+  };
+}
+
+async function refundChat({
+  identity,
+  env,
+  config,
+  chatCharge,
+  creditOperationId,
+  filingKey
+}: {
+  identity: Awaited<ReturnType<typeof readQuotaIdentity>>;
+  env: Parameters<typeof consumeChatQuota>[1];
+  config: Parameters<typeof consumeChatQuota>[2];
+  chatCharge: ChatChargeResult;
+  creditOperationId: string;
+  filingKey: string;
+}): Promise<CreditMutationResult | Awaited<ReturnType<typeof refundChatQuota>>> {
+  if (!config.creditBillingEnabled) {
+    return refundChatQuota(identity, env, config);
+  }
+
+  return refundCredit(identity, env, config, {
+    originalOperationId: creditOperationId,
+    refundOperationId: `refund:${creditOperationId}`,
+    credits: chatCharge.creditsCharged ?? 1,
+    reference: {
+      type: "chat",
+      id: filingKey
+    }
+  });
+}
 
 async function prepareFilingForChat(
   filing: NonNullable<Awaited<ReturnType<typeof loadFilingByKey>>>,

@@ -15,7 +15,8 @@ export const ChatContextMessageSchema = z.object({
 export const ChatRequestSchema = z.object({
   filingKey: z.string().min(1),
   question: z.string().trim().min(1).max(1_000),
-  conversationContext: z.array(ChatContextMessageSchema).max(6).optional()
+  conversationContext: z.array(ChatContextMessageSchema).max(6).optional(),
+  operationId: z.string().trim().min(1).max(128).optional()
 });
 
 export const TranslateQuoteRequestSchema = z.object({
@@ -66,7 +67,9 @@ export const QuotaRequestSchema = z.object({
     "refundStock",
     "removeTicker",
     "promoteTicker",
-    "checkCompanyAccess"
+    "checkCompanyAccess",
+    "consumeCredit",
+    "refundCredit"
   ]),
   quotaSubject: z.string().trim().min(1),
   plan: z.enum(["free", "pro"]),
@@ -75,6 +78,13 @@ export const QuotaRequestSchema = z.object({
   ticker: z.string().trim().min(1).max(16).optional(),
   chatLimit: z.number().int().min(0),
   stockLimit: z.number().int().min(0),
+  monthlyCreditLimit: z.number().int().min(0).optional(),
+  operationId: z.string().trim().min(1).max(128).optional(),
+  originalOperationId: z.string().trim().min(1).max(128).optional(),
+  creditsRequired: z.number().int().min(1).max(100).optional(),
+  credits: z.number().int().min(1).max(100).optional(),
+  referenceType: z.string().trim().min(1).max(64).optional(),
+  referenceId: z.string().trim().min(1).max(256).optional(),
   previewTickers: z.array(z.string().trim().min(1).max(16)).optional(),
   relatedTickers: z.array(z.string().trim().min(1).max(16)).optional()
 });

@@ -19,6 +19,9 @@ describe("remote config", () => {
     expect(config.trackedTickers).toHaveLength(30);
     expect(config.dailyRefreshEnabled).toBe(false);
     expect(config.webSupplementEnabled).toBe(false);
+    expect(config.creditBillingEnabled).toBe(false);
+    expect(config.freeMonthlyCreditLimit).toBe(30);
+    expect(config.proMonthlyCreditLimit).toBe(500);
   });
 
   it("normalizes tracked tickers and caps the beta warm set at 30 tickers", async () => {

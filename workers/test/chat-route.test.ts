@@ -21,7 +21,20 @@ vi.mock("../src/lib/filings/content-upgrade", () => ({
 vi.mock("../src/lib/quota", () => ({
   readQuotaIdentity: vi.fn(),
   consumeChatQuota: vi.fn(),
-  refundChatQuota: vi.fn()
+  refundChatQuota: vi.fn(),
+  consumeCredit: vi.fn(),
+  refundCredit: vi.fn(),
+  InsufficientCreditsError: class InsufficientCreditsError extends Error {
+    readonly status = 402;
+    readonly publicMessage = "insufficient_credits";
+
+    constructor(
+      readonly creditsRequired: number,
+      readonly creditsRemaining: number
+    ) {
+      super("insufficient_credits");
+    }
+  }
 }));
 
 vi.mock("../src/clients/gemini/request", () => ({
@@ -34,8 +47,11 @@ import { upgradeMetricsOnlyRecord } from "../src/lib/filings/content-upgrade";
 import { buildChatResponse } from "../src/lib/pipeline";
 import {
   consumeChatQuota,
+  consumeCredit,
   readQuotaIdentity,
-  refundChatQuota
+  refundChatQuota,
+  refundCredit,
+  InsufficientCreditsError
 } from "../src/lib/quota";
 
 const mockBuildChatResponse = vi.mocked(buildChatResponse);
@@ -45,6 +61,8 @@ const mockUpgradeMetricsOnlyRecord = vi.mocked(upgradeMetricsOnlyRecord);
 const mockReadQuotaIdentity = vi.mocked(readQuotaIdentity);
 const mockConsumeChatQuota = vi.mocked(consumeChatQuota);
 const mockRefundChatQuota = vi.mocked(refundChatQuota);
+const mockConsumeCredit = vi.mocked(consumeCredit);
+const mockRefundCredit = vi.mocked(refundCredit);
 
 describe("handleChatRoute", () => {
   const env = {} as never;
@@ -77,6 +95,29 @@ describe("handleChatRoute", () => {
     mockReadQuotaIdentity.mockResolvedValue(identity as never);
     mockConsumeChatQuota.mockResolvedValue(usage as never);
     mockRefundChatQuota.mockResolvedValue(usage as never);
+    mockConsumeCredit.mockResolvedValue({
+      usage: {
+        ...usage,
+        credits: {
+          monthlyRemaining: 29,
+          monthlyLimit: 30,
+          purchasedRemaining: 0,
+          totalRemaining: 29,
+          resetsAt: "2026-05-01T00:00:00+09:00"
+        }
+      },
+      didMutate: true,
+      operationId: "chat-op-1",
+      creditsCharged: 1,
+      creditsRemaining: 29
+    } as never);
+    mockRefundCredit.mockResolvedValue({
+      usage,
+      didMutate: true,
+      operationId: "refund-chat-op-1",
+      creditsRefunded: 1,
+      creditsRemaining: 30
+    } as never);
   });
 
   it("returns a null modelName for non-remote response paths", async () => {
@@ -120,6 +161,7 @@ describe("handleChatRoute", () => {
       mockBuildChatResponse.mock.invocationCallOrder[0]!
     );
     expect(mockRefundChatQuota).not.toHaveBeenCalled();
+    expect(mockConsumeCredit).not.toHaveBeenCalled();
   });
 
   it("anchors short follow-up questions to recent chat context", async () => {
@@ -301,6 +343,129 @@ describe("handleChatRoute", () => {
 
     expect(mockConsumeChatQuota).toHaveBeenCalledWith(identity, expect.anything(), expect.anything());
     expect(mockRefundChatQuota).toHaveBeenCalledWith(identity, expect.anything(), expect.anything());
+  });
+
+  it("uses credit billing when enabled and returns credit charge metadata", async () => {
+    mockBuildChatResponse.mockResolvedValue({
+      answer: "Credit answer",
+      sources: [],
+      responsePath: "gemini"
+    });
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "ガイダンスの見方は？",
+          operationId: "chat-op-1"
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env,
+      config: {
+        ...DEFAULT_REMOTE_CONFIG,
+        creditBillingEnabled: true
+      },
+      ctx
+    });
+
+    expect(response?.status).toBe(200);
+    expect(mockConsumeChatQuota).not.toHaveBeenCalled();
+    expect(mockConsumeCredit).toHaveBeenCalledWith(identity, env, expect.anything(), {
+      operationId: "chat-op-1",
+      creditsRequired: 1,
+      reference: {
+        type: "chat",
+        id: "filing-1"
+      }
+    });
+    await expect(response?.json()).resolves.toMatchObject({
+      creditsCharged: 1,
+      creditsRemaining: 29,
+      usage: {
+        credits: {
+          totalRemaining: 29
+        }
+      }
+    });
+  });
+
+  it("refunds credit when chat generation fails after credit consumption", async () => {
+    mockBuildChatResponse.mockRejectedValue(new Error("Gemini unavailable"));
+
+    await expect(
+      handleChatRoute({
+        request: new Request("https://kabuyomi.test/v1/chat", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-device-key": "device-123"
+          },
+          body: JSON.stringify({
+            filingKey: "filing-1",
+            question: "ガイダンスの見方は？",
+            operationId: "chat-op-1"
+          })
+        }),
+        url: new URL("https://kabuyomi.test/v1/chat"),
+        env,
+        config: {
+          ...DEFAULT_REMOTE_CONFIG,
+          creditBillingEnabled: true
+        },
+        ctx
+      })
+    ).rejects.toThrow("Gemini unavailable");
+
+    expect(mockRefundChatQuota).not.toHaveBeenCalled();
+    expect(mockRefundCredit).toHaveBeenCalledWith(identity, env, expect.anything(), {
+      originalOperationId: "chat-op-1",
+      refundOperationId: "refund:chat-op-1",
+      credits: 1,
+      reference: {
+        type: "chat",
+        id: "filing-1"
+      }
+    });
+  });
+
+  it("returns insufficient_credits without running chat generation", async () => {
+    mockConsumeCredit.mockRejectedValue(new InsufficientCreditsError(1, 0));
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "ガイダンスの見方は？",
+          operationId: "chat-op-empty"
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env,
+      config: {
+        ...DEFAULT_REMOTE_CONFIG,
+        creditBillingEnabled: true
+      },
+      ctx
+    });
+
+    expect(response?.status).toBe(402);
+    expect(mockBuildChatResponse).not.toHaveBeenCalled();
+    await expect(response?.json()).resolves.toEqual({
+      error: "insufficient_credits",
+      creditsRequired: 1,
+      creditsRemaining: 0
+    });
   });
 
   it("allows filing chat access without a saved ticker gate", async () => {

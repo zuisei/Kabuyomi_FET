@@ -15,6 +15,9 @@ export interface RemoteConfig {
   adsEnabled: boolean;
   chatEnabled: boolean;
   webSupplementEnabled: boolean;
+  creditBillingEnabled: boolean;
+  freeMonthlyCreditLimit: number;
+  proMonthlyCreditLimit: number;
   maintenanceMode: boolean;
   extractorVersion: string;
   promptVersion: string;
@@ -42,6 +45,9 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   adsEnabled: true,
   chatEnabled: true,
   webSupplementEnabled: false,
+  creditBillingEnabled: false,
+  freeMonthlyCreditLimit: 30,
+  proMonthlyCreditLimit: 500,
   maintenanceMode: false,
   extractorVersion: CURRENT_EXTRACTOR_VERSION,
   promptVersion: "v1",
@@ -96,6 +102,18 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
       typeof payload.dailyRefreshEnabled === "boolean"
         ? payload.dailyRefreshEnabled
         : DEFAULT_REMOTE_CONFIG.dailyRefreshEnabled,
+    creditBillingEnabled:
+      typeof payload.creditBillingEnabled === "boolean"
+        ? payload.creditBillingEnabled
+        : DEFAULT_REMOTE_CONFIG.creditBillingEnabled,
+    freeMonthlyCreditLimit: normalizeNonNegativeInteger(
+      payload.freeMonthlyCreditLimit,
+      DEFAULT_REMOTE_CONFIG.freeMonthlyCreditLimit
+    ),
+    proMonthlyCreditLimit: normalizeNonNegativeInteger(
+      payload.proMonthlyCreditLimit,
+      DEFAULT_REMOTE_CONFIG.proMonthlyCreditLimit
+    ),
     dailyRefreshBatchSize: resolveDailyRefreshBatchSize(
       payload.dailyRefreshBatchSize,
       DEFAULT_REMOTE_CONFIG.dailyRefreshBatchSize
@@ -135,4 +153,8 @@ function normalizeExtractorVersion(rawValue: unknown): string {
   }
 
   return requestedVersion < currentVersion ? CURRENT_EXTRACTOR_VERSION : trimmed;
+}
+
+function normalizeNonNegativeInteger(rawValue: unknown, fallback: number): number {
+  return typeof rawValue === "number" && Number.isInteger(rawValue) && rawValue >= 0 ? rawValue : fallback;
 }

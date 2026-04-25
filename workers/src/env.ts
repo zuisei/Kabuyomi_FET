@@ -109,4 +109,13 @@ export interface UsageState {
   stockLimit: number;
   dateJST: string;
   savedTickers?: string[];
+  credits?: CreditUsageState;
+}
+
+export interface CreditUsageState {
+  monthlyRemaining: number;
+  monthlyLimit: number;
+  purchasedRemaining: number;
+  totalRemaining: number;
+  resetsAt: string;
 }

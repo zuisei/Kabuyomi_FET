@@ -689,4 +689,249 @@ describe("UserQuotaDO", () => {
       didMutate: false
     });
   });
+
+  it("returns monthly credit state in the usage payload", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+
+    const response = await postQuota(quota, {
+      action: "state",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      usage: {
+        credits: {
+          monthlyRemaining: 30,
+          monthlyLimit: 30,
+          purchasedRemaining: 0,
+          totalRemaining: 30,
+          resetsAt: "2026-05-01T00:00:00+09:00"
+        }
+      }
+    });
+  });
+
+  it("consumes credit once for the same operation id", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+    const body = {
+      action: "consumeCredit",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30,
+      operationId: "chat-op-1",
+      creditsRequired: 1,
+      referenceType: "chat",
+      referenceId: "filing-1"
+    };
+
+    const first = await postQuota(quota, body);
+    const second = await postQuota(quota, body);
+
+    await expect(first.json()).resolves.toMatchObject({
+      usage: {
+        credits: {
+          totalRemaining: 29
+        }
+      },
+      didMutate: true,
+      creditOperation: {
+        operationId: "chat-op-1",
+        type: "consume",
+        status: "applied",
+        delta: -1,
+        balanceAfter: 29
+      },
+      creditsRemaining: 29
+    });
+    await expect(second.json()).resolves.toMatchObject({
+      usage: {
+        credits: {
+          totalRemaining: 29
+        }
+      },
+      didMutate: false,
+      creditOperation: {
+        operationId: "chat-op-1",
+        status: "applied",
+        delta: -1
+      },
+      creditsRemaining: 29
+    });
+  });
+
+  it("returns insufficient_credits without decrementing the balance", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+
+    const response = await postQuota(quota, {
+      action: "consumeCredit",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 0,
+      operationId: "chat-op-empty",
+      creditsRequired: 1,
+      referenceType: "chat",
+      referenceId: "filing-1"
+    });
+
+    expect(response.status).toBe(402);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "insufficient_credits",
+      usage: {
+        credits: {
+          totalRemaining: 0
+        }
+      },
+      didMutate: false,
+      creditOperation: {
+        status: "insufficient",
+        delta: 0
+      },
+      creditsRequired: 1,
+      creditsRemaining: 0
+    });
+  });
+
+  it("refunds a credit operation only once", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+
+    await postQuota(quota, {
+      action: "consumeCredit",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30,
+      operationId: "chat-op-2",
+      creditsRequired: 1,
+      referenceType: "chat",
+      referenceId: "filing-1"
+    });
+
+    const firstRefund = await postQuota(quota, {
+      action: "refundCredit",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30,
+      operationId: "refund-chat-op-2",
+      originalOperationId: "chat-op-2",
+      credits: 1,
+      referenceType: "chat",
+      referenceId: "filing-1"
+    });
+    const secondRefund = await postQuota(quota, {
+      action: "refundCredit",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30,
+      operationId: "refund-chat-op-2-again",
+      originalOperationId: "chat-op-2",
+      credits: 1,
+      referenceType: "chat",
+      referenceId: "filing-1"
+    });
+
+    await expect(firstRefund.json()).resolves.toMatchObject({
+      usage: {
+        credits: {
+          totalRemaining: 30
+        }
+      },
+      didMutate: true,
+      creditOperation: {
+        type: "refund",
+        status: "applied",
+        delta: 1
+      }
+    });
+    await expect(secondRefund.json()).resolves.toMatchObject({
+      usage: {
+        credits: {
+          totalRemaining: 30
+        }
+      },
+      didMutate: false,
+      creditOperation: {
+        type: "refund",
+        status: "noop",
+        delta: 0
+      }
+    });
+  });
+
+  it("prunes credit operation idempotency records after 30 days", async () => {
+    const quota = new UserQuotaDO(
+      createState({
+        "credit_operation:old-op": {
+          operationId: "old-op",
+          type: "consume",
+          status: "applied",
+          delta: -1,
+          balanceAfter: 29,
+          monthlyBalanceAfter: 29,
+          purchasedBalanceAfter: 0,
+          createdAt: "2026-03-01T00:00:00.000Z"
+        }
+      }) as never
+    );
+
+    await postQuota(quota, {
+      action: "consumeCredit",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30,
+      operationId: "new-op",
+      creditsRequired: 1,
+      referenceType: "chat",
+      referenceId: "filing-1"
+    });
+
+    const repeatedOldOperation = await postQuota(quota, {
+      action: "consumeCredit",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30,
+      operationId: "old-op",
+      creditsRequired: 1,
+      referenceType: "chat",
+      referenceId: "filing-1"
+    });
+
+    await expect(repeatedOldOperation.json()).resolves.toMatchObject({
+      didMutate: true,
+      creditOperation: {
+        operationId: "old-op",
+        status: "applied"
+      },
+      usage: {
+        credits: {
+          totalRemaining: 28
+        }
+      }
+    });
+  });
 });

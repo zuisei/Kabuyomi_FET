@@ -3,7 +3,7 @@ import { resolvePlanLimits } from "./billing-catalog";
 import { loadDetachedAccessFromRequest } from "./detached-access";
 import { loadActiveEntitlementFromRequest } from "./entitlements";
 import { AppError } from "./errors";
-import { logEvent } from "./logging";
+import { logEvent, logWarnEvent } from "./logging";
 import type { RemoteConfig } from "./remote-config";
 
 export interface QuotaIdentity {
@@ -22,6 +22,9 @@ interface QuotaIdentityOptions {
 interface UsageEnvelope {
   usage: UsageState;
   didMutate?: boolean;
+  creditOperation?: CreditOperationResult;
+  creditsRequired?: number;
+  creditsRemaining?: number;
 }
 
 export interface QuotaMutationResult {
@@ -31,6 +34,43 @@ export interface QuotaMutationResult {
 
 interface TickerQuotaOptions {
   relatedTickers?: readonly string[];
+}
+
+export interface CreditReference {
+  type: string;
+  id: string;
+}
+
+export interface CreditMutationResult {
+  usage: UsageState;
+  didMutate: boolean;
+  operationId: string;
+  creditsCharged?: number;
+  creditsRefunded?: number;
+  creditsRemaining: number;
+}
+
+export class InsufficientCreditsError extends AppError {
+  constructor(
+    readonly creditsRequired: number,
+    readonly creditsRemaining: number
+  ) {
+    super(402, "insufficient_credits", "Credit balance is insufficient");
+  }
+}
+
+interface CreditOperationResult {
+  operationId: string;
+  type: "consume" | "refund";
+  status: "applied" | "insufficient" | "noop";
+  delta: number;
+  balanceAfter: number;
+  monthlyBalanceAfter: number;
+  purchasedBalanceAfter: number;
+  originalOperationId?: string;
+  referenceType?: string;
+  referenceId?: string;
+  createdAt: string;
 }
 export async function readQuotaIdentity(
   request: Request,
@@ -126,6 +166,59 @@ export async function refundChatQuota(
   return (await mutateUsage(identity, env, config, "refundChat")).usage;
 }
 
+export async function consumeCredit(
+  identity: QuotaIdentity,
+  env: Env,
+  config: RemoteConfig,
+  options: {
+    operationId: string;
+    creditsRequired: number;
+    reference: CreditReference;
+  }
+): Promise<CreditMutationResult> {
+  const result = await mutateCreditUsage(identity, env, config, "consumeCredit", {
+    operationId: options.operationId,
+    creditsRequired: options.creditsRequired,
+    reference: options.reference
+  });
+  if (result.error === "insufficient_credits") {
+    throw new InsufficientCreditsError(options.creditsRequired, result.creditsRemaining);
+  }
+  return {
+    usage: result.usage,
+    didMutate: result.didMutate,
+    operationId: options.operationId,
+    creditsCharged: result.creditOperation?.delta && result.creditOperation.delta < 0 ? -result.creditOperation.delta : 0,
+    creditsRemaining: result.creditsRemaining
+  };
+}
+
+export async function refundCredit(
+  identity: QuotaIdentity,
+  env: Env,
+  config: RemoteConfig,
+  options: {
+    originalOperationId: string;
+    refundOperationId: string;
+    credits: number;
+    reference: CreditReference;
+  }
+): Promise<CreditMutationResult> {
+  const result = await mutateCreditUsage(identity, env, config, "refundCredit", {
+    operationId: options.refundOperationId,
+    originalOperationId: options.originalOperationId,
+    credits: options.credits,
+    reference: options.reference
+  });
+  return {
+    usage: result.usage,
+    didMutate: result.didMutate,
+    operationId: options.refundOperationId,
+    creditsRefunded: result.creditOperation?.delta && result.creditOperation.delta > 0 ? result.creditOperation.delta : 0,
+    creditsRemaining: result.creditsRemaining
+  };
+}
+
 export async function consumeStockQuota(
   identity: QuotaIdentity,
   ticker: string,
@@ -203,6 +296,7 @@ export async function ensureCompanyAccessAllowed(
       ticker,
       chatLimit: limits.chatLimit,
       stockLimit: limits.stockLimit,
+      monthlyCreditLimit: limits.monthlyCreditLimit,
       previewTickers: normalizePreviewTickers(previewTickers),
       relatedTickers: normalizePreviewTickers(options.relatedTickers ?? [])
     })
@@ -277,7 +371,8 @@ async function mutateUsage(
       ticker,
       relatedTickers: normalizePreviewTickers(options.relatedTickers ?? []),
       chatLimit: limits.chatLimit,
-      stockLimit: limits.stockLimit
+      stockLimit: limits.stockLimit,
+      monthlyCreditLimit: limits.monthlyCreditLimit
     })
   });
 
@@ -302,8 +397,144 @@ function resolveIdentityLimits(identity: QuotaIdentity, config: RemoteConfig) {
   const planLimits = resolvePlanLimits(identity.plan, config);
   return {
     chatLimit: identity.chatLimitOverride ?? planLimits.chatLimit,
-    stockLimit: identity.stockLimitOverride ?? planLimits.stockLimit
+    stockLimit: identity.stockLimitOverride ?? planLimits.stockLimit,
+    monthlyCreditLimit: identity.plan === "pro" ? config.proMonthlyCreditLimit : config.freeMonthlyCreditLimit
   };
+}
+
+async function mutateCreditUsage(
+  identity: QuotaIdentity,
+  env: Env,
+  config: RemoteConfig,
+  action: "consumeCredit" | "refundCredit",
+  options: {
+    operationId: string;
+    originalOperationId?: string;
+    creditsRequired?: number;
+    credits?: number;
+    reference: CreditReference;
+  }
+): Promise<
+  QuotaMutationResult & {
+    creditOperation?: CreditOperationResult;
+    creditsRemaining: number;
+    error?: string;
+  }
+> {
+  const stub = env.USER_QUOTA.getByName(identity.quotaSubject);
+  const dateJST = buildQuotaDateJST();
+  const limits = resolveIdentityLimits(identity, config);
+  const response = await stub.fetch("https://do/quota", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      action,
+      quotaSubject: identity.quotaSubject,
+      plan: identity.plan,
+      accessMode: identity.accessMode,
+      dateJST,
+      chatLimit: limits.chatLimit,
+      stockLimit: limits.stockLimit,
+      monthlyCreditLimit: limits.monthlyCreditLimit,
+      operationId: options.operationId,
+      originalOperationId: options.originalOperationId,
+      creditsRequired: options.creditsRequired,
+      credits: options.credits,
+      referenceType: options.reference.type,
+      referenceId: options.reference.id
+    })
+  });
+
+  const payload = (await response.json()) as UsageEnvelope & { error?: string };
+  if (!payload.usage) {
+    logEvent("quota_denial", {
+      action,
+      quotaSubject: identity.quotaSubject,
+      plan: identity.plan,
+      reason: payload.error ?? "Credit request failed"
+    });
+    throw new AppError(response.status, payload.error ?? "Credit request failed");
+  }
+
+  if (payload.creditOperation && payload.creditOperation.delta !== 0) {
+    await persistCreditLedgerEntry(env, identity, payload.creditOperation);
+  }
+
+  const creditsRemaining = payload.creditsRemaining ?? payload.usage.credits?.totalRemaining ?? 0;
+  if (payload.error === "insufficient_credits") {
+    logEvent("credit_consume", {
+      userId: identity.quotaSubject,
+      operationId: options.operationId,
+      status: "insufficient",
+      creditsRequired: options.creditsRequired ?? null,
+      creditsRemaining
+    });
+  } else {
+    logEvent(action === "consumeCredit" ? "credit_consume" : "credit_refund", {
+      userId: identity.quotaSubject,
+      operationId: options.operationId,
+      status: payload.creditOperation?.status ?? "unknown",
+      delta: payload.creditOperation?.delta ?? 0,
+      creditsRemaining
+    });
+  }
+
+  return {
+    usage: payload.usage,
+    didMutate: payload.didMutate === true,
+    creditOperation: payload.creditOperation,
+    creditsRemaining,
+    error: payload.error
+  };
+}
+
+async function persistCreditLedgerEntry(
+  env: Env,
+  identity: QuotaIdentity,
+  operation: CreditOperationResult
+): Promise<void> {
+  try {
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO credit_ledger (
+        id,
+        user_id,
+        operation_id,
+        type,
+        delta,
+        balance_after,
+        monthly_balance_after,
+        purchased_balance_after,
+        reference_type,
+        reference_id,
+        metadata_json,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        crypto.randomUUID(),
+        identity.quotaSubject,
+        operation.operationId,
+        operation.type,
+        operation.delta,
+        operation.balanceAfter,
+        operation.monthlyBalanceAfter,
+        operation.purchasedBalanceAfter,
+        operation.referenceType ?? null,
+        operation.referenceId ?? null,
+        JSON.stringify({
+          status: operation.status,
+          originalOperationId: operation.originalOperationId ?? null
+        }),
+        operation.createdAt
+      )
+      .run();
+  } catch (error) {
+    logWarnEvent("credit_ledger_write_failed", {
+      userId: identity.quotaSubject,
+      operationId: operation.operationId,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+  }
 }
 
 function buildQuotaDateJST(): string {

@@ -3,9 +3,12 @@ export {
   ensureChatQuotaAvailable,
   ensureStockQuotaAvailable,
   consumeChatQuota,
+  consumeCredit,
   consumeStockQuota,
+  refundCredit,
   removeTickerFromSavedQuota,
   loadUsage,
+  InsufficientCreditsError,
   type QuotaIdentity
 } from "./quota";
 export { ensureLatestFiling } from "./filings/latest";
