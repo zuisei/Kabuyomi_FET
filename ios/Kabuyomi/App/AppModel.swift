@@ -400,6 +400,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         let pendingStartedAt = Date()
         pendingChats[normalized] = PendingChatState(ticker: normalized, question: trimmed)
         chatIsSending = true
+        let conversationContext = recentChatContext(for: normalized)
         defer {
             finishPendingChat(ticker: normalized, stateGeneration: stateGeneration)
         }
@@ -407,7 +408,8 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         do {
             let response = try await apiClient.sendChat(
                 filingKey: company.filingKey,
-                question: trimmed
+                question: trimmed,
+                conversationContext: conversationContext
             )
             guard stateGeneration == self.stateGeneration else {
                 await ensureMinimumPendingChatDuration(since: pendingStartedAt)
@@ -427,6 +429,17 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             await ensureMinimumPendingChatDuration(since: pendingStartedAt)
             return false
         }
+    }
+
+    private func recentChatContext(for ticker: String) -> [ChatContextMessage] {
+        chatHistory(for: ticker)
+            .suffix(6)
+            .compactMap { message in
+                guard ["user", "assistant"].contains(message.role) else { return nil }
+                let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !content.isEmpty else { return nil }
+                return ChatContextMessage(role: message.role, content: String(content.prefix(420)))
+            }
     }
 
     func setAIConsent(_ value: Bool) {

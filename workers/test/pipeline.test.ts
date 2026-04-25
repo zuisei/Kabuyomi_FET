@@ -43,6 +43,24 @@ describe("buildChatResponse", () => {
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
   });
 
+  it("keeps cash-flow cause follow-ups anchored to operating cash flow", async () => {
+    const filing = makeCashFlowFiling();
+
+    const response = await buildChatResponse(
+      filing,
+      "営業CFが変化した理由は？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.answer).toContain("営業CFは -676.3億ドル");
+    expect(response.answer).toContain("営業CFは売上高ではなく");
+    expect(response.answer).toContain("減少理由の内訳は断定できません");
+    expect(response.answer).not.toContain("売上高は");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S11"]);
+    expect(response.responsePath).toBe("deterministic");
+  });
+
   it("keeps revenue-driver questions conversational even without model output", async () => {
     const filing = makeTestFiling();
 
@@ -1275,6 +1293,69 @@ function makeTestFiling() {
         endOffset: 0,
         tagName: "OperatingIncomeLoss",
         sortOrder: 12
+      }
+    ]
+  } as any;
+}
+
+function makeCashFlowFiling() {
+  return {
+    filingKey: "v3:0001729678:000172967826000001",
+    ticker: "C",
+    companyName: "Citigroup Inc.",
+    cik: "0000831001",
+    formType: "10-Q",
+    filedAt: "2026-01-30",
+    periodOfReport: "2025-12-31",
+    primaryDocumentUrl: "https://example.com/c",
+    mdaText: "",
+    mdaTokenCount: 0,
+    extractorVersion: "v3",
+    promptVersion: "v1",
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    summary: { verdict: "", highlights: [], changes: [] },
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        value: 85230000000,
+        unit: "USD",
+        periodEnd: "2025-12-31",
+        comparisonValue: 80710000000,
+        yoyPercent: 5.6
+      },
+      {
+        logicalName: "operatingCashFlow",
+        tagUsed: "NetCashProvidedByUsedInOperatingActivities",
+        value: -67632000000,
+        unit: "USD",
+        periodEnd: "2025-12-31",
+        comparisonValue: 47000000000,
+        yoyPercent: -243.9
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)",
+        text: "売上高: 85230000000 USD / 比較値: 80710000000 / YoY: 5.6%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        sortOrder: 9
+      },
+      {
+        sourceId: "S11",
+        sectionType: "xbrl_metric",
+        sectionTitle: "営業CF",
+        sourceLabel: "XBRL 営業CF (NetCashProvidedByUsedInOperatingActivities)",
+        text: "営業CF: -67632000000 USD / 比較値: 47000000000 / YoY: -243.9%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "NetCashProvidedByUsedInOperatingActivities",
+        sortOrder: 11
       }
     ]
   } as any;

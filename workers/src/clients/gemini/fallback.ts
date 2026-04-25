@@ -166,7 +166,9 @@ function analyzeQuestion(question: string): QuestionProfile {
     asksProfit: /(赤字|黒字|損失|欠損|純利益|利益|netincome|netloss|netincome\(loss\)|net loss|profit|income|earnings|eps|loss)/.test(
       normalized
     ),
-    asksCashFlow: /(キャッシュフロー|cashflow|cash flow|現金|創出|お金.*稼|稼げてる)/.test(normalized),
+    asksCashFlow: /(営業cf|フリーcf|キャッシュフロー|operatingcashflow|freecashflow|cashflow|cash flow|現金|創出|お金.*稼|稼げてる)/.test(
+      normalized
+    ),
     asksRisk: /(リスク|懸念|逆風|不確実|不透明|risk|uncertain|uncertainty|macro)/.test(normalized),
     asksTariff: /(関税|tariff)/.test(normalized),
     asksRegion: /(地域|中国|japan|americas|asia|segment|地域別)/.test(normalized),

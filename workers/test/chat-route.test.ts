@@ -122,6 +122,45 @@ describe("handleChatRoute", () => {
     expect(mockRefundChatQuota).not.toHaveBeenCalled();
   });
 
+  it("anchors short follow-up questions to recent chat context", async () => {
+    mockBuildChatResponse.mockResolvedValue({
+      answer: "営業CF answer",
+      sources: [],
+      responsePath: "deterministic"
+    });
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "なぜ？",
+          conversationContext: [
+            { role: "user", content: "営業CF" },
+            { role: "assistant", content: "営業キャッシュフローはマイナスで、前年比で減少しました。" }
+          ]
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env,
+      config: DEFAULT_REMOTE_CONFIG,
+      ctx
+    });
+
+    expect(response?.status).toBe(200);
+    expect(mockBuildChatResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ filingKey: "filing-1" }),
+      "営業CFが変化した理由は？",
+      expect.anything(),
+      expect.anything(),
+      { executionContext: ctx }
+    );
+  });
+
   it("upgrades metrics-only filings before consuming chat quota", async () => {
     const metricsOnlyFiling = {
       filingKey: "filing-1",

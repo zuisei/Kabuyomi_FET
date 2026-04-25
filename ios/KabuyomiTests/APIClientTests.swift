@@ -274,6 +274,52 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(response.sources.first?.sourceUrl, "https://www.sec.gov/Archives/AAPL.htm")
     }
 
+    func testSendChatIncludesConversationContext() async throws {
+        let client = makeClient(context: standardContext) { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/chat")
+            XCTAssertEqual(request.httpMethod, "POST")
+
+            let body = try XCTUnwrap(Self.requestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(json["filingKey"] as? String, "v1:AAPL:0000320193-24-000001")
+            XCTAssertEqual(json["question"] as? String, "なぜ？")
+            let context = try XCTUnwrap(json["conversationContext"] as? [[String: String]])
+            XCTAssertEqual(context, [
+                ["role": "user", "content": "営業CF"],
+                ["role": "assistant", "content": "営業CFは 312億ドル です。"]
+            ])
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "answer": "営業CFの理由です。",
+                    "sources": [],
+                    "responsePath": "deterministic",
+                    "modelName": NSNull(),
+                    "usage": [
+                        "plan": "free",
+                        "chatsUsed": 1,
+                        "chatLimit": 10,
+                        "stocksUsed": 1,
+                        "stockLimit": 3,
+                        "dateJST": "2026-04-18"
+                    ]
+                ])
+            )
+        }
+
+        let response = try await client.sendChat(
+            filingKey: "v1:AAPL:0000320193-24-000001",
+            question: "なぜ？",
+            conversationContext: [
+                ChatContextMessage(role: "user", content: "営業CF"),
+                ChatContextMessage(role: "assistant", content: "営業CFは 312億ドル です。")
+            ]
+        )
+
+        XCTAssertEqual(response.responsePath, .deterministic)
+    }
+
     func testSendChatDecodesLegacyResponseWithoutResponsePath() async throws {
         let client = makeClient(context: standardContext) { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/chat")

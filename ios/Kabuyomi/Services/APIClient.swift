@@ -133,13 +133,18 @@ struct APIClient {
 
     func sendChat(
         filingKey: String,
-        question: String
+        question: String,
+        conversationContext: [ChatContextMessage] = []
     ) async throws -> ChatResponse {
         try await sendRequest(
             path: "/v1/chat",
             method: "POST",
             headers: requestHeaders(),
-            body: ["filingKey": filingKey, "question": question]
+            body: ChatRequest(
+                filingKey: filingKey,
+                question: question,
+                conversationContext: conversationContext
+            )
         )
     }
 

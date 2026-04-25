@@ -1,5 +1,6 @@
 import { resolveGeminiModel } from "../clients/gemini/request";
 import { ChatRequestSchema } from "../lib/contracts";
+import { resolveContextualQuestion } from "../lib/chat/context";
 import { enqueueContentUpgrade, isMetricsOnlyRecord, upgradeMetricsOnlyRecord } from "../lib/filings/content-upgrade";
 import { isCurrentCacheRecord, loadFilingByKey } from "../lib/filings/cache";
 import { buildChatResponse } from "../lib/pipeline";
@@ -36,9 +37,10 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
     requestedFiling = await prepareFilingForChat(requestedFiling, env, ctx);
     const usage = await consumeChatQuota(identity, env, config);
     const startedAt = Date.now();
+    const resolvedQuestion = resolveContextualQuestion(payload.question, payload.conversationContext);
     const answer = await (async () => {
       try {
-        return await buildChatResponse(requestedFiling, payload.question, env, config, {
+        return await buildChatResponse(requestedFiling, resolvedQuestion, env, config, {
           executionContext: ctx
         });
       } catch (error) {
@@ -60,6 +62,8 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
       quotaSubject: identity.quotaSubject,
       identityKind: identity.identityKind,
       latencyMs: Date.now() - startedAt,
+      contextMessageCount: payload.conversationContext?.length ?? 0,
+      contextApplied: resolvedQuestion !== payload.question,
       sourceCount: answer.sources.length
     });
 

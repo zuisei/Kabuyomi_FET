@@ -406,6 +406,17 @@ struct BillingSyncRequest: Encodable {
     let active: Bool
 }
 
+struct ChatContextMessage: Encodable, Equatable {
+    let role: String
+    let content: String
+}
+
+struct ChatRequest: Encodable {
+    let filingKey: String
+    let question: String
+    let conversationContext: [ChatContextMessage]
+}
+
 struct BillingSyncResponse: Decodable {
     let plan: String
     let quotaSubject: String

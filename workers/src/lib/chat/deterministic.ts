@@ -37,7 +37,9 @@ export function buildDeterministicMetricAnswer(
     /(支え|押し上げ|牽引|ドライバ|主因|要因|原因|理由|どの変化|何が)/.test(normalizedQuestion);
   const asksBusinessOverview = isBusinessOverviewQuestion(normalizedQuestion);
   const asksCashGeneration =
-    /(キャッシュフロー|cashflow|cash flow|現金|お金.*稼|稼げてる)/.test(normalizedQuestion) &&
+    /(営業cf|フリーcf|キャッシュフロー|operatingcashflow|freecashflow|cashflow|cash flow|現金|お金.*稼|稼げてる)/.test(
+      normalizedQuestion
+    ) &&
     !/(還元|自社株買い|buyback|repurchase|配当|dividend|株主還元)/.test(normalizedQuestion);
   const asksAboutMargin = /(利益率|マージン|採算)/.test(normalizedQuestion);
   const asksAboutCause = /(主因|要因|原因|理由|なぜ)/.test(normalizedQuestion);
@@ -75,7 +77,10 @@ export function buildDeterministicMetricAnswer(
   }
 
   if (asksCashGeneration) {
-    const response = buildCashGenerationAnswer(filing);
+    const response = buildCashGenerationAnswer(filing, {
+      asksAboutCause,
+      asksAboutDeterioration
+    });
     return response ? { strategy: "cash_generation", response } : null;
   }
 
@@ -487,7 +492,13 @@ function buildContrastiveMarketReactionAnswer(filing: FilingCacheRecord): ChatRe
   };
 }
 
-function buildCashGenerationAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {
+function buildCashGenerationAnswer(
+  filing: FilingCacheRecord,
+  options: { asksAboutCause: boolean; asksAboutDeterioration: boolean } = {
+    asksAboutCause: false,
+    asksAboutDeterioration: false
+  }
+): ChatResponsePayload | null {
   const metric = filing.metrics.find((entry) => entry.logicalName === "operatingCashFlow");
   const sourceId = findMetricSourceId(filing, "operatingCashFlow");
   if (!metric || !sourceId) {
@@ -499,10 +510,62 @@ function buildCashGenerationAnswer(filing: FilingCacheRecord): ChatResponsePaylo
     return null;
   }
 
+  if (options.asksAboutCause || options.asksAboutDeterioration) {
+    const context = summarizeCashFlowContext(filing.sourceChunks);
+    const sources: ChatEvidenceSource[] = [buildSecFilingSource(source)];
+    if (context) {
+      for (const contextSourceId of context.sourceIds) {
+        const contextSource = filing.sourceChunks.find((chunk) => chunk.sourceId === contextSourceId);
+        if (contextSource) {
+          sources.push(buildSecFilingSource(contextSource));
+        }
+      }
+    }
+
+    const answerParts = [
+      buildMetricObservationSentence(metric),
+      "営業CFは売上高ではなく、運転資本、在庫・売掛金・買掛金、金融機関なら貸出・預金や取引資産負債の増減にも大きく振れます。"
+    ];
+    if (context) {
+      answerParts.push(context.text);
+    } else {
+      answerParts.push("この抜粋で確認できる根拠はXBRL上の営業CF数値までで、減少理由の内訳は断定できません。");
+    }
+
+    return {
+      answer: answerParts.join(" "),
+      sources: dedupeChatSources(sources)
+    };
+  }
+
   return {
     answer: `${buildMetricObservationSentence(metric)} この数字がプラスで伸びているなら、本業からの現金創出は確認できます。`,
     sources: [buildSecFilingSource(source)]
   };
+}
+
+function summarizeCashFlowContext(sourceChunks: SourceChunkRecord[]): { text: string; sourceIds: string[] } | null {
+  for (const chunk of sourceChunks) {
+    if (chunk.sectionType !== "md_a") {
+      continue;
+    }
+
+    const haystack = chunk.text.toLowerCase();
+    if (
+      !/(cash flow|operating activities|liquidity|working capital|deposits|loans|trading assets|cash provided|cash used)/.test(
+        haystack
+      )
+    ) {
+      continue;
+    }
+
+    return {
+      text: "提出資料の本文にも、営業活動キャッシュフローや流動性に関わる記述があります。数値だけでなく、その本文側の説明と合わせて見る必要があります。",
+      sourceIds: [chunk.sourceId]
+    };
+  }
+
+  return null;
 }
 
 function buildChangeOverviewAnswer(

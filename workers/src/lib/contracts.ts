@@ -7,9 +7,15 @@ export const WatchlistTickerRequestSchema = z.object({
 export const WatchlistAddRequestSchema = WatchlistTickerRequestSchema;
 export const WatchlistRemoveRequestSchema = WatchlistTickerRequestSchema;
 
+export const ChatContextMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string().trim().min(1).max(420)
+});
+
 export const ChatRequestSchema = z.object({
   filingKey: z.string().min(1),
-  question: z.string().trim().min(1).max(1_000)
+  question: z.string().trim().min(1).max(1_000),
+  conversationContext: z.array(ChatContextMessageSchema).max(6).optional()
 });
 
 export const TranslateQuoteRequestSchema = z.object({

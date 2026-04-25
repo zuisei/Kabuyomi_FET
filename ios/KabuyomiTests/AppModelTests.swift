@@ -683,6 +683,79 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.activeAlert?.message, "チャット応答を現在生成できません。少し待ってから、もう一度お試しください。")
     }
 
+    func testSendChatSendsRecentConversationContextForFollowUps() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let company = TestFixtures.companyPayload()
+        try persistence.saveCompany(company, searchItem: nil)
+        try persistence.saveChat(
+            question: "営業CF",
+            response: ChatResponse(
+                answer: "営業CFは 312億ドル で、前年同期比 11.0%増です。",
+                sources: [],
+                responsePath: .deterministic,
+                modelName: nil,
+                usage: TestFixtures.usagePayload()
+            ),
+            for: company
+        )
+
+        let model = makeAppModel(persistence: persistence)
+        model.setAIConsent(true)
+        let chatRequests = ThreadSafeCounter()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            if request.url?.path == "/v1/chat" {
+                XCTAssertEqual(chatRequests.incrementAndGet(), 1)
+                let body = try XCTUnwrap(Self.requestBodyData(from: request))
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(json["question"] as? String, "なぜ？")
+                let context = try XCTUnwrap(json["conversationContext"] as? [[String: String]])
+                XCTAssertEqual(context.map { $0["role"] }, ["user", "assistant"])
+                XCTAssertEqual(context.map { $0["content"] }, [
+                    "営業CF",
+                    "営業CFは 312億ドル で、前年同期比 11.0%増です。"
+                ])
+
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "answer": "営業CFの変化理由です。",
+                        "sources": [],
+                        "responsePath": "deterministic",
+                        "modelName": NSNull(),
+                        "usage": [
+                            "plan": "free",
+                            "chatsUsed": 2,
+                            "chatLimit": 10,
+                            "stocksUsed": 1,
+                            "stockLimit": 3,
+                            "dateJST": "2026-04-18"
+                        ]
+                    ])
+                )
+            }
+
+            return (
+                response,
+                try TestFixtures.jsonData([
+                    "plan": "free",
+                    "chatsUsed": 1,
+                    "chatLimit": 10,
+                    "stocksUsed": 1,
+                    "stockLimit": 3,
+                    "dateJST": "2026-04-18"
+                ])
+            )
+        }
+
+        let sent = await model.sendChat(question: "なぜ？", ticker: "AAPL")
+
+        XCTAssertTrue(sent)
+        XCTAssertEqual(chatRequests.count, 1)
+    }
+
     func testRemoveFromWatchlistKeepsLocalConversationForNonStarterTickers() async throws {
         UserDefaults.standard.set(["ORCL"], forKey: AppModel.savedTickersKey)
         UserDefaults.standard.set(["ORCL"], forKey: AppModel.recentTickersKey)
