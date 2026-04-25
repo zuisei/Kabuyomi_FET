@@ -39,7 +39,6 @@ struct SearchView: View {
                                         item: item,
                                         isAdding: appModel.isAddingTicker(item.ticker),
                                         isAdded: appModel.isTickerInWatchlist(item.ticker, cik: item.cik),
-                                        canOpen: appModel.companyPayload(for: item.ticker) != nil,
                                         saveAction: { saveSearchResult(item) },
                                         openAction: { openSearchResult(item) }
                                     )
@@ -88,17 +87,9 @@ struct SearchView: View {
     }
 
     private func openSearchResult(_ item: SearchItem) {
-        guard appModel.isTickerInWatchlist(item.ticker, cik: item.cik) else {
+        guard item.isSupportedInV1 else {
             appModel.activeAlert = AppAlertState(
-                message: "この銘柄は先に保存してから開いてください。",
-                kind: .dismissOnly
-            )
-            return
-        }
-
-        guard appModel.companyPayload(for: item.ticker) != nil else {
-            appModel.activeAlert = AppAlertState(
-                message: "この銘柄はまだ準備中です。保存済みなので、準備が終わると開けます。",
+                message: item.unsupportedAlertMessage,
                 kind: .dismissOnly
             )
             return
@@ -117,10 +108,10 @@ struct SearchView: View {
 
     private var searchBar: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("質問したい銘柄を保存")
+            Text("質問したい銘柄を検索")
                 .font(.system(.headline, design: .rounded, weight: .bold))
 
-            Text("保存したあと、開く銘柄を選べます。v1 は 10-K / 10-Q に対応しています。20-F / 6-K 企業はまだ保存できません。")
+            Text("保存しなくても開けます。保存はあとで戻るためのブックマークです。v1 は 10-K / 10-Q に対応しています。")
                 .font(.system(.footnote, design: .rounded))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
                 .lineSpacing(2)
@@ -222,17 +213,8 @@ private struct SearchResultCard: View {
     let item: SearchItem
     let isAdding: Bool
     let isAdded: Bool
-    let canOpen: Bool
     let saveAction: () -> Void
     let openAction: () -> Void
-
-    private var isOpenPending: Bool {
-        isAdded && !canOpen
-    }
-
-    private var canAttemptOpen: Bool {
-        isAdded || canOpen
-    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -276,12 +258,10 @@ private struct SearchResultCard: View {
                         SearchResultActionLabel(
                             title: openButtonTitle,
                             systemImage: openButtonIcon,
-                            isLoading: isOpenPending
+                            isLoading: false
                         )
                     }
                     .buttonStyle(.plain)
-                    .disabled(!canAttemptOpen || isAdding)
-                    .opacity(canAttemptOpen && !isAdding ? 1 : 0.48)
                     .accessibilityLabel("\(item.ticker) を開く")
                     .accessibilityHint(openAccessibilityHint)
                 }
@@ -325,23 +305,15 @@ private struct SearchResultCard: View {
     }
 
     private var openButtonTitle: String {
-        isOpenPending ? "準備中" : "開く"
+        "開く"
     }
 
     private var openButtonIcon: String {
-        isOpenPending ? "hourglass" : "arrow.up.right"
+        "arrow.up.right"
     }
 
     private var openAccessibilityHint: String {
-        if canOpen {
-            return "保存済み銘柄の会話を開きます"
-        }
-
-        if isOpenPending {
-            return "準備が終わると開けます"
-        }
-
-        return "先に保存すると開けます"
+        "保存せずにこの銘柄の会話を開きます"
     }
 
     private func searchMetaPill(title: String, tint: Color) -> some View {

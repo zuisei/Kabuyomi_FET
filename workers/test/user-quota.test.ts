@@ -159,7 +159,7 @@ describe("UserQuotaDO", () => {
     });
   });
 
-  it("allows starter preview access without consuming a stock slot", async () => {
+  it("allows company access without consuming a stock slot", async () => {
     const quota = new UserQuotaDO(createState() as never);
 
     const response = await postQuota(quota, {
@@ -167,7 +167,7 @@ describe("UserQuotaDO", () => {
       quotaSubject: "free:test-device",
       plan: "free",
       dateJST: "2026-04-14",
-      ticker: "AAPL",
+      ticker: "ORCL",
       previewTickers: ["AAPL", "MSFT"],
       chatLimit: 3,
       stockLimit: 3
@@ -213,10 +213,10 @@ describe("UserQuotaDO", () => {
     });
   });
 
-  it("blocks non-starter company access until the ticker has been saved", async () => {
+  it("allows non-saved company access without consuming a stock slot", async () => {
     const quota = new UserQuotaDO(createState() as never);
 
-    const blocked = await postQuota(quota, {
+    const opened = await postQuota(quota, {
       action: "checkCompanyAccess",
       quotaSubject: "free:test-device",
       plan: "free",
@@ -227,9 +227,13 @@ describe("UserQuotaDO", () => {
       stockLimit: 3
     });
 
-    expect(blocked.status).toBe(403);
-    await expect(blocked.json()).resolves.toMatchObject({
-      error: "Ticker access requires watchlist add"
+    expect(opened.status).toBe(200);
+    await expect(opened.json()).resolves.toMatchObject({
+      usage: {
+        savedTickers: [],
+        stocksUsed: 0
+      },
+      didMutate: false
     });
 
     await postQuota(quota, {
@@ -385,19 +389,19 @@ describe("UserQuotaDO", () => {
     const quota = new UserQuotaDO(state as never);
 
     const response = await postQuota(quota, {
-      action: "checkCompanyAccess",
+      action: "checkStock",
       quotaSubject: "free:test-device",
       plan: "free",
       dateJST: "2026-04-16",
       ticker: "AAPL",
       previewTickers: ["NVDA"],
       chatLimit: 3,
-      stockLimit: 3
+      stockLimit: 1
     });
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(429);
     await expect(response.json()).resolves.toMatchObject({
-      error: "Ticker access requires watchlist add",
+      error: "Watchlist limit exceeded",
       usage: {
         stocksUsed: 1
       }
@@ -439,14 +443,14 @@ describe("UserQuotaDO", () => {
     });
 
     const blocked = await postQuota(quota, {
-      action: "checkCompanyAccess",
+      action: "checkStock",
       quotaSubject: "free:test-device",
       plan: "free",
       dateJST: "2026-04-17",
       ticker: "AAPL",
       previewTickers: [],
       chatLimit: 3,
-      stockLimit: 3
+      stockLimit: 0
     });
 
     await expect(removed.json()).resolves.toMatchObject({
@@ -454,9 +458,9 @@ describe("UserQuotaDO", () => {
         stocksUsed: 0
       }
     });
-    expect(blocked.status).toBe(403);
+    expect(blocked.status).toBe(429);
     await expect(blocked.json()).resolves.toMatchObject({
-      error: "Ticker access requires watchlist add",
+      error: "Watchlist limit exceeded",
       usage: {
         stocksUsed: 0
       }

@@ -683,7 +683,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.activeAlert?.message, "チャット応答を現在生成できません。少し待ってから、もう一度お試しください。")
     }
 
-    func testRemoveFromWatchlistRevokesLocalAccessForNonStarterTickers() async throws {
+    func testRemoveFromWatchlistKeepsLocalConversationForNonStarterTickers() async throws {
         UserDefaults.standard.set(["ORCL"], forKey: AppModel.savedTickersKey)
         UserDefaults.standard.set(["ORCL"], forKey: AppModel.recentTickersKey)
         UserDefaults.standard.set("ORCL", forKey: AppModel.lastViewedTickerKey)
@@ -733,10 +733,10 @@ final class AppModelTests: XCTestCase {
         await model.removeFromWatchlist("ORCL")
 
         XCTAssertFalse(model.isTickerInWatchlist("ORCL"))
-        XCTAssertNil(model.companyPayload(for: "ORCL"))
-        XCTAssertNil(persistence.loadCompany(ticker: "ORCL"))
-        XCTAssertNil(model.activeConversationTicker)
-        XCTAssertNil(model.lastViewedTicker)
+        XCTAssertNotNil(model.companyPayload(for: "ORCL"))
+        XCTAssertNotNil(persistence.loadCompany(ticker: "ORCL"))
+        XCTAssertEqual(model.activeConversationTicker, "ORCL")
+        XCTAssertEqual(model.lastViewedTicker, "ORCL")
         XCTAssertFalse(model.watchlist.contains(where: { $0.ticker == "ORCL" }))
     }
 
@@ -1063,7 +1063,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.activeConversationTicker, "BRK-A")
     }
 
-    func testRemoveFromWatchlistRevokesLocalAccessAcrossIssuerAliases() async throws {
+    func testRemoveFromWatchlistKeepsLocalConversationAcrossIssuerAliases() async throws {
         let cik = "0001067983"
         UserDefaults.standard.set(["BRK-B"], forKey: AppModel.savedTickersKey)
         UserDefaults.standard.set(["BRK-A"], forKey: AppModel.recentTickersKey)
@@ -1113,12 +1113,12 @@ final class AppModelTests: XCTestCase {
         await model.removeFromWatchlist("BRK-A")
 
         XCTAssertFalse(model.isTickerInWatchlist("BRK-A"))
-        XCTAssertNil(model.companyPayload(for: "BRK-A"))
-        XCTAssertNil(persistence.loadCompany(ticker: "BRK-A"))
-        XCTAssertNil(model.activeConversationTicker)
-        XCTAssertNil(model.lastViewedTicker)
+        XCTAssertNotNil(model.companyPayload(for: "BRK-A"))
+        XCTAssertNotNil(persistence.loadCompany(ticker: "BRK-A"))
+        XCTAssertEqual(model.activeConversationTicker, "BRK-A")
+        XCTAssertEqual(model.lastViewedTicker, "BRK-A")
         XCTAssertTrue(model.watchlist.isEmpty)
-        XCTAssertTrue(model.recentCompanies.isEmpty)
+        XCTAssertEqual(model.recentCompanies.map(\.ticker), ["BRK-A"])
     }
 
     func testAddToWatchlistKeepsMultipleDistinctTickersVisible() async throws {
@@ -1439,6 +1439,11 @@ final class AppModelTests: XCTestCase {
             case "/v1/company/AAPL":
                 let failure = HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!
                 return (failure, try TestFixtures.jsonData(["error": "Internal server error"]))
+            case "/v1/company/AMZN":
+                return (
+                    response,
+                    try TestFixtures.companyPayloadData(ticker: "AMZN", cik: "0001018724")
+                )
             default:
                 throw URLError(.badServerResponse)
             }
@@ -1455,7 +1460,7 @@ final class AppModelTests: XCTestCase {
         )
 
         await model.bootstrap()
-        try? await Task.sleep(nanoseconds: 250_000_000)
+        try? await Task.sleep(nanoseconds: 500_000_000)
 
         XCTAssertEqual(model.watchlist.map(\.ticker), ["AAPL", "AMZN"])
         XCTAssertEqual(model.watchlist.map(\.isPlaceholder), [true, false])

@@ -112,6 +112,8 @@ Overview 相当は独立タブではなく右ドロワーになっている
 - 検索欄 1 本。debounce 280ms。
 - 結果カード: ticker / 会社名 / exchange /
   サポート状況バッジ (「最新 10-K」「10-Q 対応」「未対応」「未確認」)。
+- **開く**: 保存していない銘柄でも会話画面を開ける。保存は後で戻るための
+  ブックマーク操作であり、開く前提ではない。
 - **保存不可条件**: 対応 form が 10-K / 10-Q 以外 (20-F / 6-K など)。
   「v1 対応範囲外」と表示してボタンを無効化
   ([SearchView.swift:1-234](ios/Kabuyomi/Features/Search/SearchView.swift)).
@@ -141,7 +143,7 @@ Overview 相当は独立タブではなく右ドロワーになっている
 | Method | Path | iOS 側の用途 |
 |---|---|---|
 | GET | `/v1/search?q=` | 検索 |
-| GET | `/v1/company/{ticker}` | 企業の最新 filing 取得 |
+| GET | `/v1/company/{ticker}` | 企業の最新 filing 取得 (保存不要) |
 | POST | `/v1/company/{ticker}/refresh` | filing 強制再取得 |
 | POST | `/v1/watchlist/add` | 保存銘柄追加 |
 | POST | `/v1/chat` | 会話 (filingKey + question) |
@@ -189,7 +191,7 @@ ticker 不明 / SEC 不通)。
 | Method | Path | 認証 | 概要 |
 |---|---|---|---|
 | GET | `/v1/search` | なし | ticker スナップショット検索 |
-| GET | `/v1/company/{ticker}` | `x-device-key` | 最新対応 filing を返す |
+| GET | `/v1/company/{ticker}` | `x-device-key` | 最新対応 filing を返す (保存不要) |
 | POST | `/v1/company/{ticker}/refresh` | `x-device-key` | 強制再取得 (5xx は cache フォールバック) |
 | POST | `/v1/watchlist/add` | `x-device-key` | stock quota 消費 + filing 取得 |
 | POST | `/v1/chat` | `x-device-key` | filing コンテキスト上の Q&A |
@@ -381,11 +383,14 @@ MD&A の抽出・メトリクス整形は Workers 側 (`pipeline.ts`) の責務�
 
 ## 5. データフロー (主要ユースケース)
 
-### 5.1 検索から保存まで
+### 5.1 検索から開く / 保存まで
 
 ```
 iOS Search → Workers /v1/search
                 └─ KV スナップショット参照 (sec-fetcher 非経由)
+iOS 開くタップ → /v1/company/{ticker}
+                └─ Company pipeline (KV → R2 → sec-fetcher → Gemini)
+                └─ 保存 slot は消費しない
 iOS 保存タップ → /v1/watchlist/add
                 └─ UserQuotaDO.consumeStock
                 └─ Company pipeline (KV → R2 → sec-fetcher → Gemini)

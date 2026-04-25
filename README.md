@@ -63,6 +63,7 @@ Unit tests live under `ios/KabuyomiTests/` and can be run with `xcodebuild test`
 ## Current Beta Semantics
 
 - Saved tickers are persistent on the server. In `/v1/usage`, `stocksUsed` means the current saved ticker count, not "today's stock consumption".
+- Opening a ticker is independent from saving it. `/v1/company/{ticker}` and `/v1/chat` require a device identity, but they do not consume or require a saved ticker slot.
 - Daily quota currently applies only to chats and resets on JST day boundaries.
 - Free-plan quota identity currently trusts the client-provided `x-device-key`. That is acceptable for the current beta, but it is not abuse-resistant because rotating keys can evade the free limits; production hardening would need a server-issued identity or attestation.
 - `/v1/watchlist/add` saves a ticker. `/v1/watchlist/remove` removes it and returns updated usage.

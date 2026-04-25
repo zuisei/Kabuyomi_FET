@@ -542,30 +542,8 @@ struct CompanyView: View {
             return
         }
 
-        guard appModel.isTickerInWatchlist(item.ticker, cik: item.cik) else {
-            appModel.activeAlert = AppAlertState(
-                message: "この銘柄は先に保存してから開いてください。",
-                kind: .dismissOnly
-            )
-            return
-        }
-
-        guard pendingDrawerTickerOpen == nil else { return }
-
         let normalized = item.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-
-        if appModel.companyPayload(for: normalized) != nil {
-            selectTicker(normalized)
-            return
-        }
-
-        appModel.activeAlert = AppAlertState(
-            message: "この銘柄はまだ準備中です。保存済みなので、準備が終わると開けます。",
-            kind: .dismissOnly
-        )
-        Task {
-            await appModel.loadCompany(ticker: normalized)
-        }
+        openDrawerTicker(normalized, item.companyName)
     }
 
     private func saveSearchResult(_ item: SearchItem) {

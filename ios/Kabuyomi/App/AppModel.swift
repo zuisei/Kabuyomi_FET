@@ -1030,7 +1030,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         }
 
         if rawMessage.contains("Ticker access requires watchlist add") {
-            return "この銘柄は先に保存してから開いてください。スターター銘柄以外の直接表示はできません。"
+            return "この銘柄を開けませんでした。もう一度検索して開いてください。"
         }
 
         if rawMessage.contains("No supported filing found") {
@@ -1177,8 +1177,8 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         }
     }
 
-    private func shouldRevokeLocalAccessWithoutWatchlist(for ticker: String) -> Bool {
-        !isStarterTicker(ticker)
+    private func shouldRevokeLocalAccessWithoutWatchlist(for _: String) -> Bool {
+        false
     }
 
     @discardableResult
@@ -1413,11 +1413,6 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     private func clearLastSeenFilingKey(for ticker: String) {
         UserDefaults.standard.removeObject(forKey: lastSeenFilingKeyKey(for: ticker))
-    }
-
-    private func isStarterTicker(_ ticker: String) -> Bool {
-        let normalized = normalizedTicker(ticker)
-        return starterCompanies.contains(where: { $0.ticker == normalized })
     }
 
     private func applyLocalWatchlistAddFallback(savedTicker: String, cik: String?) {

@@ -283,7 +283,7 @@ struct ConversationEntryView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("自分の銘柄で始める")
                         .font(.system(.footnote, design: .rounded, weight: .bold))
-                    Text("検索して保存済みの一覧に追加")
+                    Text("検索してそのまま開けます")
                         .font(.system(.caption2, design: .rounded, weight: .medium))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }

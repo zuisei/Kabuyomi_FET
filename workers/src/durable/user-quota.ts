@@ -55,8 +55,6 @@ export class UserQuotaDO {
       const relatedTickers = buildTickerGroup(normalizedTicker, body.relatedTickers ?? []);
       const trackedTicker = findTrackedTicker(savedTickerRecord.savedTickers, relatedTickers);
       const alreadyTracked = trackedTicker !== null;
-      const previewTickers = buildTickerGroup(null, body.previewTickers ?? []);
-      const isPreviewTicker = relatedTickers.some((ticker) => previewTickers.includes(ticker));
       let didMutate = false;
 
       if (body.action === "checkChat") {
@@ -97,20 +95,9 @@ export class UserQuotaDO {
       }
 
       if (body.action === "checkCompanyAccess") {
-        if (body.plan === "pro" || alreadyTracked || isPreviewTicker) {
-          return { status: 200, payload: { usage: currentUsage(), didMutate } };
-        }
-
-        if (savedTickerRecord.savedTickers.length >= savedTickerRecord.stockLimit) {
-          return {
-            status: 429,
-            payload: { error: "Watchlist limit exceeded", usage: currentUsage(), didMutate }
-          };
-        }
-
         return {
-          status: 403,
-          payload: { error: "Ticker access requires watchlist add", usage: currentUsage(), didMutate }
+          status: 200,
+          payload: { usage: currentUsage(), didMutate }
         };
       }
 

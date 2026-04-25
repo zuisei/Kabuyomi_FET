@@ -1,14 +1,12 @@
-import { listTickersByCik } from "../clients/sec";
 import { resolveGeminiModel } from "../clients/gemini/request";
 import { ChatRequestSchema } from "../lib/contracts";
 import { enqueueContentUpgrade, isMetricsOnlyRecord, upgradeMetricsOnlyRecord } from "../lib/filings/content-upgrade";
 import { isCurrentCacheRecord, loadFilingByKey } from "../lib/filings/cache";
 import { buildChatResponse } from "../lib/pipeline";
-import { consumeChatQuota, ensureCompanyAccessAllowed, readQuotaIdentity, refundChatQuota } from "../lib/quota";
+import { consumeChatQuota, readQuotaIdentity, refundChatQuota } from "../lib/quota";
 import { parseJsonBody } from "../lib/request";
 import { logErrorEvent, logEvent } from "../lib/logging";
 import { json, notFound, unavailable } from "../lib/response";
-import { STARTER_TICKERS } from "../lib/starter-tickers";
 import type { RouteHandler } from "./types";
 
 const CHAT_PAYLOAD_MAX_BYTES = 4_096;
@@ -35,8 +33,6 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
     }
 
     const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
-    const relatedTickers = await listTickersByCik(requestedFiling.cik, env);
-    await ensureCompanyAccessAllowed(identity, requestedFiling.ticker, STARTER_TICKERS, env, config, { relatedTickers });
     requestedFiling = await prepareFilingForChat(requestedFiling, env, ctx);
     const usage = await consumeChatQuota(identity, env, config);
     const startedAt = Date.now();

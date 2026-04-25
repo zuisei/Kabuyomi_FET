@@ -470,18 +470,6 @@ private struct DrawerSearchRow: View {
         appModel.isAddingTicker(item.ticker)
     }
 
-    private var canOpen: Bool {
-        appModel.companyPayload(for: item.ticker) != nil
-    }
-
-    private var isOpenPending: Bool {
-        isSaved && !canOpen
-    }
-
-    private var canAttemptOpen: Bool {
-        isSaved || canOpen
-    }
-
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -521,12 +509,10 @@ private struct DrawerSearchRow: View {
                         DrawerSearchActionLabel(
                             title: openTitle,
                             systemImage: openIcon,
-                            isLoading: isOpenPending
+                            isLoading: false
                         )
                     }
                     .buttonStyle(.plain)
-                    .disabled(!canAttemptOpen || isAdding)
-                    .opacity(canAttemptOpen && !isAdding ? 1 : 0.48)
                     .accessibilityLabel("\(item.ticker) を開く")
                     .accessibilityHint(openAccessibilityHint)
                 }
@@ -563,23 +549,15 @@ private struct DrawerSearchRow: View {
     }
 
     private var openTitle: String {
-        isOpenPending ? "準備中" : "開く"
+        "開く"
     }
 
     private var openIcon: String {
-        isOpenPending ? "hourglass" : "arrow.up.right"
+        "arrow.up.right"
     }
 
     private var openAccessibilityHint: String {
-        if canOpen {
-            return "保存済み銘柄の会話を開きます"
-        }
-
-        if isOpenPending {
-            return "準備が終わると開けます"
-        }
-
-        return "先に保存すると開けます"
+        "保存せずにこの銘柄の会話を開きます"
     }
 }
 

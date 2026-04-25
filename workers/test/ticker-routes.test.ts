@@ -18,8 +18,7 @@ vi.mock("../src/lib/quota", () => ({
   consumeStockQuotaWithMutation: vi.fn(),
   promoteSavedTickerAlias: vi.fn(),
   refundStockQuota: vi.fn(),
-  removeTickerFromSavedQuota: vi.fn(),
-  ensureCompanyAccessAllowed: vi.fn()
+  removeTickerFromSavedQuota: vi.fn()
 }));
 
 import { handleCompanyRoute } from "../src/routes/company";
@@ -30,7 +29,6 @@ import { ensureLatestFiling } from "../src/lib/pipeline";
 import { loadCachedLatestFiling } from "../src/lib/filings/cache";
 import {
   consumeStockQuotaWithMutation,
-  ensureCompanyAccessAllowed,
   promoteSavedTickerAlias,
   readQuotaIdentity,
   refundStockQuota,
@@ -47,7 +45,6 @@ const mockConsumeStockQuotaWithMutation = vi.mocked(consumeStockQuotaWithMutatio
 const mockPromoteSavedTickerAlias = vi.mocked(promoteSavedTickerAlias);
 const mockRefundStockQuota = vi.mocked(refundStockQuota);
 const mockRemoveTickerFromSavedQuota = vi.mocked(removeTickerFromSavedQuota);
-const mockEnsureCompanyAccessAllowed = vi.mocked(ensureCompanyAccessAllowed);
 
 const identity = {
   quotaSubject: "free:local:device-123",
@@ -253,15 +250,13 @@ describe("ticker-aware routes", () => {
     );
   });
 
-  it("normalizes separator aliases before company access checks and response serialization", async () => {
+  it("normalizes separator aliases before response serialization", async () => {
     mockLookupTicker.mockResolvedValue({
       ticker: "BRK-B",
       companyName: "Berkshire Hathaway Inc.",
       cik: "0001067983",
       exchange: "NYSE"
     });
-    mockListTickersByCik.mockResolvedValue(["BRK-A", "BRK-B"] as never);
-    mockEnsureCompanyAccessAllowed.mockResolvedValue(undefined);
     mockEnsureLatestFiling.mockResolvedValue(
       makeFiling({
         ticker: "BRK-A",
@@ -290,14 +285,6 @@ describe("ticker-aware routes", () => {
       ticker: "BRK-B",
       companyWebsiteUrl: "https://www.berkshirehathaway.com"
     });
-    expect(mockEnsureCompanyAccessAllowed).toHaveBeenCalledWith(
-      identity,
-      "BRK-B",
-      expect.any(Array),
-      expect.anything(),
-      expect.anything(),
-      { relatedTickers: ["BRK-A", "BRK-B"] }
-    );
     expect(mockEnsureLatestFiling).toHaveBeenCalledWith(
       "BRK-B",
       expect.anything(),
@@ -315,8 +302,6 @@ describe("ticker-aware routes", () => {
       cik: "0000320193",
       exchange: "Nasdaq"
     });
-    mockListTickersByCik.mockResolvedValue(["AAPL"] as never);
-    mockEnsureCompanyAccessAllowed.mockResolvedValue(undefined);
     mockEnsureLatestFiling.mockRejectedValue(new AppError(503, "SEC data is temporarily unavailable") as never);
     mockLoadCachedLatestFiling.mockResolvedValue(
       makeFiling({
@@ -357,8 +342,6 @@ describe("ticker-aware routes", () => {
       cik: "0000320193",
       exchange: "Nasdaq"
     });
-    mockListTickersByCik.mockResolvedValue(["AAPL"] as never);
-    mockEnsureCompanyAccessAllowed.mockResolvedValue(undefined);
     mockEnsureLatestFiling.mockRejectedValue(new AppError(503, "SEC data is temporarily unavailable") as never);
     mockLoadCachedLatestFiling.mockResolvedValue(
       makeFiling({
@@ -400,8 +383,6 @@ describe("ticker-aware routes", () => {
       cik: "0000320193",
       exchange: "Nasdaq"
     });
-    mockListTickersByCik.mockResolvedValue(["AAPL"] as never);
-    mockEnsureCompanyAccessAllowed.mockResolvedValue(undefined);
     mockEnsureLatestFiling.mockRejectedValue(new AppError(503, "SEC data is temporarily unavailable") as never);
     mockLoadCachedLatestFiling.mockResolvedValue(null);
 
@@ -427,7 +408,7 @@ describe("ticker-aware routes", () => {
     });
   });
 
-  it("does not use stale fallback before company access has been checked", async () => {
+  it("does not use stale fallback before the ticker has been resolved", async () => {
     mockLookupTicker.mockRejectedValue(new AppError(503, "SEC data is temporarily unavailable") as never);
     mockLoadCachedLatestFiling.mockResolvedValue(makeFiling({ ticker: "AAPL" }) as never);
 
@@ -446,7 +427,6 @@ describe("ticker-aware routes", () => {
       })
     ).rejects.toMatchObject({ status: 503 });
 
-    expect(mockEnsureCompanyAccessAllowed).not.toHaveBeenCalled();
     expect(mockLoadCachedLatestFiling).not.toHaveBeenCalled();
   });
 
@@ -486,7 +466,7 @@ describe("ticker-aware routes", () => {
     );
   });
 
-  it("returns notFound for unknown tickers before access checks", async () => {
+  it("returns notFound for unknown tickers before filing load", async () => {
     mockLookupTicker.mockResolvedValue(null);
 
     const response = await handleCompanyRoute({
@@ -506,7 +486,7 @@ describe("ticker-aware routes", () => {
     await expect(response?.json()).resolves.toMatchObject({
       error: "Ticker not found: NOPE"
     });
-    expect(mockEnsureCompanyAccessAllowed).not.toHaveBeenCalled();
+    expect(mockEnsureLatestFiling).not.toHaveBeenCalled();
   });
 
   it("refunds a newly consumed stock slot when filing ingestion fails", async () => {
