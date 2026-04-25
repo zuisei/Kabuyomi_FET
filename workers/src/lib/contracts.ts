@@ -56,6 +56,13 @@ export const EntitlementRequestSchema = BillingSyncRequestSchema.extend({
   serverVerified: z.boolean().default(false)
 });
 
+export const InternalCreditPurchaseGrantRequestSchema = z.object({
+  productId: z.string().trim().min(1).max(128),
+  transactionId: z.string().trim().min(1).max(256),
+  originalTransactionId: z.string().trim().min(1).max(256).optional(),
+  purchasedAt: z.string().trim().min(1).max(64).optional()
+});
+
 export const QuotaRequestSchema = z.object({
   action: z.enum([
     "state",
@@ -70,7 +77,8 @@ export const QuotaRequestSchema = z.object({
     "checkCompanyAccess",
     "ensureMonthlyCreditGrant",
     "consumeCredit",
-    "refundCredit"
+    "refundCredit",
+    "grantPurchasedCredit"
   ]),
   quotaSubject: z.string().trim().min(1),
   plan: z.enum(["free", "lite", "pro"]),
@@ -84,6 +92,11 @@ export const QuotaRequestSchema = z.object({
   originalOperationId: z.string().trim().min(1).max(128).optional(),
   creditsRequired: z.number().int().min(1).max(100).optional(),
   credits: z.number().int().min(1).max(100).optional(),
+  purchaseCredits: z.number().int().min(1).max(10_000).optional(),
+  productId: z.string().trim().min(1).max(128).optional(),
+  transactionId: z.string().trim().min(1).max(256).optional(),
+  originalTransactionId: z.string().trim().min(1).max(256).optional(),
+  purchasedAt: z.string().trim().min(1).max(64).optional(),
   referenceType: z.string().trim().min(1).max(64).optional(),
   referenceId: z.string().trim().min(1).max(256).optional(),
   previewTickers: z.array(z.string().trim().min(1).max(16)).optional(),

@@ -14,6 +14,7 @@ import { handleChatRoute } from "./routes/chat";
 import { handleCompanyRoute } from "./routes/company";
 import { handleInternalBackfillHistoryRoute } from "./routes/internal-backfill-history";
 import { handleInternalCleanupFilingsRoute } from "./routes/internal-cleanup-filings";
+import { handleInternalCreditPurchaseGrantRoute } from "./routes/internal-credit-purchase-grant";
 import { handleSearchRoute } from "./routes/search";
 import { handleTranslateQuoteRoute } from "./routes/translate-quote";
 import type { RouteHandler } from "./routes/types";
@@ -23,7 +24,11 @@ import { handleWatchlistRemoveRoute } from "./routes/watchlist-remove";
 
 export { EntitlementDO, FilingLockDO, SecRateLimiterDO, UserQuotaDO };
 
-const preMaintenanceRoutes: RouteHandler[] = [handleInternalBackfillHistoryRoute, handleInternalCleanupFilingsRoute];
+const preMaintenanceRoutes: RouteHandler[] = [
+  handleInternalBackfillHistoryRoute,
+  handleInternalCleanupFilingsRoute,
+  handleInternalCreditPurchaseGrantRoute
+];
 const apiRoutes: RouteHandler[] = [
   handleSearchRoute,
   handleWatchlistAddRoute,

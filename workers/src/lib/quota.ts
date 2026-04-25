@@ -1,5 +1,10 @@
 import type { Env, UsageState } from "../env";
-import { resolveMonthlyCreditLimit, resolvePlanLimits, type AccessPlan } from "./billing-catalog";
+import {
+  resolveCreditPackCredits,
+  resolveMonthlyCreditLimit,
+  resolvePlanLimits,
+  type AccessPlan
+} from "./billing-catalog";
 import { loadDetachedAccessFromRequest } from "./detached-access";
 import { loadActiveEntitlementFromRequest } from "./entitlements";
 import { AppError } from "./errors";
@@ -28,6 +33,18 @@ interface UsageEnvelope {
   creditsRemaining?: number;
 }
 
+interface PurchaseTransactionRow {
+  user_id: string;
+  product_id: string;
+  transaction_id: string;
+  original_transaction_id: string | null;
+  credits_granted: number;
+  status: "pending" | "granted";
+  purchased_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface QuotaMutationResult {
   usage: UsageState;
   didMutate: boolean;
@@ -51,6 +68,16 @@ export interface CreditMutationResult {
   creditsRemaining: number;
 }
 
+export interface PurchaseCreditGrantResult {
+  usage: UsageState;
+  didMutate: boolean;
+  transactionId: string;
+  productId: string;
+  creditsGranted: number;
+  creditsRemaining: number;
+  transactionStatus: "pending" | "granted";
+}
+
 export class InsufficientCreditsError extends AppError {
   constructor(
     readonly creditsRequired: number,
@@ -62,7 +89,7 @@ export class InsufficientCreditsError extends AppError {
 
 interface CreditOperationResult {
   operationId: string;
-  type: "consume" | "refund" | "monthly_grant";
+  type: "consume" | "refund" | "monthly_grant" | "purchase_grant";
   status: "applied" | "insufficient" | "noop";
   delta: number;
   balanceAfter: number;
@@ -237,6 +264,74 @@ export async function refundCredit(
     operationId: options.refundOperationId,
     creditsRefunded: result.creditOperation?.delta && result.creditOperation.delta > 0 ? result.creditOperation.delta : 0,
     creditsRemaining: result.creditsRemaining
+  };
+}
+
+export async function grantPurchasedCredits(
+  identity: QuotaIdentity,
+  env: Env,
+  config: RemoteConfig,
+  options: {
+    productId: string;
+    transactionId: string;
+    originalTransactionId?: string;
+    purchasedAt?: string;
+  }
+): Promise<PurchaseCreditGrantResult> {
+  const creditsGranted = resolveCreditPackCredits(options.productId);
+  if (!creditsGranted) {
+    throw new AppError(400, "Unsupported credit product");
+  }
+
+  const transaction = await ensurePurchaseTransactionRow(identity, env, {
+    productId: options.productId,
+    transactionId: options.transactionId,
+    originalTransactionId: options.originalTransactionId,
+    creditsGranted,
+    purchasedAt: options.purchasedAt
+  });
+
+  if (transaction.user_id !== identity.quotaSubject) {
+    throw new AppError(409, "Purchase transaction already belongs to another user");
+  }
+  if (transaction.product_id !== options.productId || transaction.credits_granted !== creditsGranted) {
+    throw new AppError(409, "Purchase transaction product mismatch");
+  }
+  if (transaction.status !== "pending" && transaction.status !== "granted") {
+    throw new AppError(409, "Purchase transaction is in an unsupported state");
+  }
+
+  if (transaction.status === "granted") {
+    const usage = await loadUsage(identity, env, config);
+    return {
+      usage,
+      didMutate: false,
+      transactionId: options.transactionId,
+      productId: transaction.product_id,
+      creditsGranted: transaction.credits_granted,
+      creditsRemaining: usage.credits?.totalRemaining ?? 0,
+      transactionStatus: "granted"
+    };
+  }
+
+  const result = await mutatePurchaseCreditGrant(identity, env, config, {
+    operationId: buildPurchaseOperationId(options.transactionId),
+    transactionId: options.transactionId,
+    productId: options.productId,
+    originalTransactionId: options.originalTransactionId,
+    purchasedAt: options.purchasedAt,
+    purchaseCredits: creditsGranted
+  });
+  await markPurchaseTransactionGranted(env, options.transactionId);
+
+  return {
+    usage: result.usage,
+    didMutate: result.didMutate,
+    transactionId: options.transactionId,
+    productId: options.productId,
+    creditsGranted,
+    creditsRemaining: result.creditsRemaining,
+    transactionStatus: "granted"
   };
 }
 
@@ -517,6 +612,157 @@ async function mutateCreditUsage(
   };
 }
 
+async function mutatePurchaseCreditGrant(
+  identity: QuotaIdentity,
+  env: Env,
+  config: RemoteConfig,
+  options: {
+    operationId: string;
+    transactionId: string;
+    productId: string;
+    originalTransactionId?: string;
+    purchasedAt?: string;
+    purchaseCredits: number;
+  }
+): Promise<
+  QuotaMutationResult & {
+    creditOperation?: CreditOperationResult;
+    creditsRemaining: number;
+  }
+> {
+  const stub = env.USER_QUOTA.getByName(identity.quotaSubject);
+  const dateJST = buildQuotaDateJST();
+  const limits = resolveIdentityLimits(identity, config);
+  const response = await stub.fetch("https://do/quota", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      action: "grantPurchasedCredit",
+      quotaSubject: identity.quotaSubject,
+      plan: identity.plan,
+      accessMode: identity.accessMode,
+      dateJST,
+      chatLimit: limits.chatLimit,
+      stockLimit: limits.stockLimit,
+      monthlyCreditLimit: limits.monthlyCreditLimit,
+      operationId: options.operationId,
+      transactionId: options.transactionId,
+      productId: options.productId,
+      originalTransactionId: options.originalTransactionId,
+      purchasedAt: options.purchasedAt,
+      purchaseCredits: options.purchaseCredits
+    })
+  });
+
+  const payload = (await response.json()) as UsageEnvelope & { error?: string };
+  if (!response.ok || !payload.usage) {
+    logEvent("quota_denial", {
+      action: "grantPurchasedCredit",
+      quotaSubject: identity.quotaSubject,
+      plan: identity.plan,
+      reason: payload.error ?? "Purchase credit grant failed"
+    });
+    throw new AppError(response.status, payload.error ?? "Purchase credit grant failed");
+  }
+
+  if (payload.monthlyGrant) {
+    await persistMonthlyGrant(env, identity, payload.monthlyGrant);
+  }
+  if (payload.creditOperation && payload.creditOperation.delta !== 0) {
+    await persistCreditLedgerEntry(env, identity, payload.creditOperation);
+  }
+
+  const creditsRemaining = payload.creditsRemaining ?? payload.usage.credits?.totalRemaining ?? 0;
+  logEvent("credit_purchase_grant", {
+    userId: identity.quotaSubject,
+    operationId: options.operationId,
+    transactionId: options.transactionId,
+    productId: options.productId,
+    status: payload.creditOperation?.status ?? "unknown",
+    delta: payload.creditOperation?.delta ?? 0,
+    creditsRemaining
+  });
+
+  return {
+    usage: payload.usage,
+    didMutate: payload.didMutate === true,
+    creditOperation: payload.creditOperation,
+    creditsRemaining
+  };
+}
+
+async function ensurePurchaseTransactionRow(
+  identity: QuotaIdentity,
+  env: Env,
+  options: {
+    productId: string;
+    transactionId: string;
+    originalTransactionId?: string;
+    creditsGranted: number;
+    purchasedAt?: string;
+  }
+): Promise<PurchaseTransactionRow> {
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO purchase_transactions (
+      id,
+      user_id,
+      product_id,
+      transaction_id,
+      original_transaction_id,
+      credits_granted,
+      status,
+      purchased_at,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      crypto.randomUUID(),
+      identity.quotaSubject,
+      options.productId,
+      options.transactionId,
+      options.originalTransactionId ?? null,
+      options.creditsGranted,
+      "pending",
+      options.purchasedAt ?? null,
+      now,
+      now
+    )
+    .run();
+
+  const row = await env.DB.prepare(
+    `SELECT
+      user_id,
+      product_id,
+      transaction_id,
+      original_transaction_id,
+      credits_granted,
+      status,
+      purchased_at,
+      created_at,
+      updated_at
+    FROM purchase_transactions
+    WHERE transaction_id = ?`
+  )
+    .bind(options.transactionId)
+    .first<PurchaseTransactionRow>();
+  if (!row) {
+    throw new AppError(500, "Purchase transaction could not be recorded");
+  }
+  return row;
+}
+
+async function markPurchaseTransactionGranted(env: Env, transactionId: string): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE purchase_transactions
+    SET status = ?, updated_at = ?
+    WHERE transaction_id = ?`
+  )
+    .bind("granted", new Date().toISOString(), transactionId)
+    .run();
+}
+
 async function persistMonthlyGrant(env: Env, identity: QuotaIdentity, grant: MonthlyGrantResult): Promise<void> {
   try {
     await env.DB.prepare(
@@ -628,6 +874,10 @@ function buildQuotaDateJST(): string {
     month: "2-digit",
     day: "2-digit"
   }).format(new Date());
+}
+
+function buildPurchaseOperationId(transactionId: string): string {
+  return `purchase:${transactionId}`;
 }
 
 function normalizePreviewTickers(values: readonly string[]): string[] {

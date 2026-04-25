@@ -254,6 +254,59 @@ describe("worker routing", () => {
     });
   });
 
+  it("requires the internal token for credit purchase grants", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/internal/credits/purchase-grant", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          productId: "credit_pack_100",
+          transactionId: "tx-100"
+        })
+      }),
+      {
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized"
+    });
+  });
+
+  it("returns 400 for invalid internal credit purchase JSON instead of bubbling a 500", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/internal/credits/purchase-grant", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-internal-token": "secret",
+          "x-device-key": "device-123"
+        },
+        body: "{"
+      }),
+      {
+        BACKFILL_SHARED_SECRET: "secret",
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid credit purchase payload"
+    });
+  });
+
   it("returns 415 for quote translation requests without a JSON content type", async () => {
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/v1/translate-quote", {

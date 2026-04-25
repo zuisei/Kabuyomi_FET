@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolveMonthlyCreditLimit, resolvePlanFromBilling, resolvePlanLimits } from "../src/lib/billing-catalog";
+import {
+  resolveCreditPackCredits,
+  resolveMonthlyCreditLimit,
+  resolvePlanFromBilling,
+  resolvePlanLimits
+} from "../src/lib/billing-catalog";
 import { DEFAULT_REMOTE_CONFIG } from "../src/lib/remote-config";
 
 describe("billing catalog", () => {
@@ -20,5 +25,12 @@ describe("billing catalog", () => {
       chatLimit: DEFAULT_REMOTE_CONFIG.freeDailyChatLimit,
       stockLimit: DEFAULT_REMOTE_CONFIG.freeStockLimit
     });
+  });
+
+  it("resolves consumable credit pack products", () => {
+    expect(resolveCreditPackCredits("credit_pack_100")).toBe(100);
+    expect(resolveCreditPackCredits("credit_pack_300")).toBe(300);
+    expect(resolveCreditPackCredits("credit_pack_700")).toBe(700);
+    expect(resolveCreditPackCredits("unknown_pack")).toBeNull();
   });
 });

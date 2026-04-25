@@ -919,6 +919,68 @@ describe("UserQuotaDO", () => {
     });
   });
 
+  it("grants purchased credits only once for the same transaction id", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+    const body = {
+      action: "grantPurchasedCredit",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30,
+      operationId: "purchase:tx-100",
+      transactionId: "tx-100",
+      productId: "credit_pack_100",
+      originalTransactionId: "orig-tx-100",
+      purchasedAt: "2026-04-16T00:00:00.000Z",
+      purchaseCredits: 100
+    };
+
+    const first = await postQuota(quota, body);
+    const second = await postQuota(quota, body);
+
+    await expect(first.json()).resolves.toMatchObject({
+      didMutate: true,
+      usage: {
+        credits: {
+          monthlyRemaining: 30,
+          purchasedRemaining: 100,
+          totalRemaining: 130
+        }
+      },
+      creditOperation: {
+        operationId: "purchase:tx-100",
+        type: "purchase_grant",
+        status: "applied",
+        delta: 100,
+        balanceAfter: 130,
+        monthlyBalanceAfter: 30,
+        purchasedBalanceAfter: 100,
+        referenceType: "purchase",
+        referenceId: "tx-100"
+      },
+      creditsRemaining: 130
+    });
+    await expect(second.json()).resolves.toMatchObject({
+      didMutate: false,
+      usage: {
+        credits: {
+          monthlyRemaining: 30,
+          purchasedRemaining: 100,
+          totalRemaining: 130
+        }
+      },
+      creditOperation: {
+        operationId: "purchase:tx-100",
+        type: "purchase_grant",
+        delta: 100,
+        balanceAfter: 130
+      },
+      creditsRemaining: 130
+    });
+  });
+
   it("prunes credit operation idempotency records after 30 days", async () => {
     const quota = new UserQuotaDO(
       createState({

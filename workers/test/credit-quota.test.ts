@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { consumeCredit, InsufficientCreditsError, loadUsage, refundCredit, type QuotaIdentity } from "../src/lib/quota";
+import {
+  consumeCredit,
+  grantPurchasedCredits,
+  InsufficientCreditsError,
+  loadUsage,
+  refundCredit,
+  type QuotaIdentity
+} from "../src/lib/quota";
 import { DEFAULT_REMOTE_CONFIG } from "../src/lib/remote-config";
 
 const identity: QuotaIdentity = {
@@ -20,7 +27,228 @@ function createDb() {
   };
 }
 
+function usagePayload(purchasedRemaining = 0) {
+  return {
+    plan: "free",
+    chatsUsed: 0,
+    chatLimit: 10,
+    stocksUsed: 0,
+    stockLimit: 3,
+    savedTickers: [],
+    dateJST: "2026-04-25",
+    credits: {
+      monthlyRemaining: 30,
+      monthlyLimit: 30,
+      purchasedRemaining,
+      totalRemaining: 30 + purchasedRemaining,
+      resetsAt: "2026-05-01T00:00:00+09:00"
+    }
+  };
+}
+
+function createPurchaseDb(row: Record<string, unknown>) {
+  const run = vi.fn().mockResolvedValue({});
+  const first = vi.fn().mockResolvedValue(row);
+  const bind = vi.fn().mockReturnValue({ run, first });
+  return {
+    run,
+    first,
+    bind,
+    db: {
+      prepare: vi.fn().mockReturnValue({ bind })
+    }
+  };
+}
+
 describe("credit quota bridge", () => {
+  it("records and grants purchased credits once for a consumable transaction", async () => {
+    const db = createPurchaseDb({
+      user_id: identity.quotaSubject,
+      product_id: "credit_pack_100",
+      transaction_id: "tx-100",
+      original_transaction_id: "orig-tx-100",
+      credits_granted: 100,
+      status: "pending",
+      purchased_at: "2026-04-25T00:00:00.000Z",
+      created_at: "2026-04-25T00:00:00.000Z",
+      updated_at: "2026-04-25T00:00:00.000Z"
+    });
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          usage: usagePayload(100),
+          didMutate: true,
+          creditsRemaining: 130,
+          creditOperation: {
+            operationId: "purchase:tx-100",
+            type: "purchase_grant",
+            status: "applied",
+            delta: 100,
+            balanceAfter: 130,
+            monthlyBalanceAfter: 30,
+            purchasedBalanceAfter: 100,
+            referenceType: "purchase",
+            referenceId: "tx-100",
+            createdAt: "2026-04-25T00:00:01.000Z"
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    const result = await grantPurchasedCredits(
+      identity,
+      {
+        DB: db.db,
+        USER_QUOTA: {
+          getByName: vi.fn().mockReturnValue({ fetch })
+        }
+      } as never,
+      DEFAULT_REMOTE_CONFIG,
+      {
+        productId: "credit_pack_100",
+        transactionId: "tx-100",
+        originalTransactionId: "orig-tx-100",
+        purchasedAt: "2026-04-25T00:00:00.000Z"
+      }
+    );
+
+    expect(result.didMutate).toBe(true);
+    expect(result.creditsGranted).toBe(100);
+    expect(result.creditsRemaining).toBe(130);
+    expect(db.db.prepare).toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE INTO purchase_transactions"));
+    expect(db.db.prepare).toHaveBeenCalledWith(expect.stringContaining("UPDATE purchase_transactions"));
+    expect(db.db.prepare).toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE INTO credit_ledger"));
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(db.bind).toHaveBeenCalledWith(
+      expect.any(String),
+      identity.quotaSubject,
+      "credit_pack_100",
+      "tx-100",
+      "orig-tx-100",
+      100,
+      "pending",
+      "2026-04-25T00:00:00.000Z",
+      expect.any(String),
+      expect.any(String)
+    );
+    expect(db.bind).toHaveBeenCalledWith(
+      expect.any(String),
+      identity.quotaSubject,
+      "purchase:tx-100",
+      "purchase_grant",
+      100,
+      130,
+      30,
+      100,
+      "purchase",
+      "tx-100",
+      expect.stringContaining('"status":"applied"'),
+      "2026-04-25T00:00:01.000Z"
+    );
+  });
+
+  it("does not grant credits again when the transaction is already granted", async () => {
+    const db = createPurchaseDb({
+      user_id: identity.quotaSubject,
+      product_id: "credit_pack_300",
+      transaction_id: "tx-300",
+      original_transaction_id: null,
+      credits_granted: 300,
+      status: "granted",
+      purchased_at: null,
+      created_at: "2026-04-25T00:00:00.000Z",
+      updated_at: "2026-04-25T00:00:01.000Z"
+    });
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ usage: usagePayload(300), didMutate: false }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const result = await grantPurchasedCredits(
+      identity,
+      {
+        DB: db.db,
+        USER_QUOTA: {
+          getByName: vi.fn().mockReturnValue({ fetch })
+        }
+      } as never,
+      DEFAULT_REMOTE_CONFIG,
+      {
+        productId: "credit_pack_300",
+        transactionId: "tx-300"
+      }
+    );
+
+    expect(result.didMutate).toBe(false);
+    expect(result.creditsGranted).toBe(300);
+    expect(result.creditsRemaining).toBe(330);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(db.db.prepare).not.toHaveBeenCalledWith(expect.stringContaining("UPDATE purchase_transactions"));
+    expect(db.db.prepare).not.toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE INTO credit_ledger"));
+  });
+
+  it("rejects unknown credit pack products before writing a transaction", async () => {
+    const db = createDb();
+
+    await expect(
+      grantPurchasedCredits(
+        identity,
+        {
+          DB: db.db,
+          USER_QUOTA: {
+            getByName: vi.fn()
+          }
+        } as never,
+        DEFAULT_REMOTE_CONFIG,
+        {
+          productId: "unknown_pack",
+          transactionId: "tx-unknown"
+        }
+      )
+    ).rejects.toMatchObject({
+      status: 400,
+      publicMessage: "Unsupported credit product"
+    });
+    expect(db.db.prepare).not.toHaveBeenCalled();
+  });
+
+  it("rejects a reused transaction id with a different credit pack", async () => {
+    const db = createPurchaseDb({
+      user_id: identity.quotaSubject,
+      product_id: "credit_pack_100",
+      transaction_id: "tx-reused",
+      original_transaction_id: null,
+      credits_granted: 100,
+      status: "pending",
+      purchased_at: null,
+      created_at: "2026-04-25T00:00:00.000Z",
+      updated_at: "2026-04-25T00:00:00.000Z"
+    });
+
+    await expect(
+      grantPurchasedCredits(
+        identity,
+        {
+          DB: db.db,
+          USER_QUOTA: {
+            getByName: vi.fn()
+          }
+        } as never,
+        DEFAULT_REMOTE_CONFIG,
+        {
+          productId: "credit_pack_700",
+          transactionId: "tx-reused"
+        }
+      )
+    ).rejects.toMatchObject({
+      status: 409,
+      publicMessage: "Purchase transaction product mismatch"
+    });
+  });
+
   it("persists a monthly grant row and ledger row when usage ensures the monthly grant", async () => {
     const db = createDb();
     const fetch = vi.fn().mockResolvedValue(
