@@ -103,23 +103,23 @@ describe("handleChatRoute", () => {
       usage: {
         ...usage,
         credits: {
-          monthlyRemaining: 29,
+          monthlyRemaining: 28,
           monthlyLimit: 30,
           purchasedRemaining: 0,
-          totalRemaining: 29,
+          totalRemaining: 28,
           resetsAt: "2026-05-01T00:00:00+09:00"
         }
       },
       didMutate: true,
       operationId: "chat-op-1",
-      creditsCharged: 1,
-      creditsRemaining: 29
+      creditsCharged: 2,
+      creditsRemaining: 28
     } as never);
     mockRefundCredit.mockResolvedValue({
       usage,
       didMutate: true,
       operationId: "refund-chat-op-1",
-      creditsRefunded: 1,
+      creditsRefunded: 2,
       creditsRemaining: 30
     } as never);
   });
@@ -382,18 +382,18 @@ describe("handleChatRoute", () => {
     expect(mockConsumeChatQuota).not.toHaveBeenCalled();
     expect(mockConsumeCredit).toHaveBeenCalledWith(identity, env, expect.anything(), {
       operationId: "chat-op-1",
-      creditsRequired: 1,
+      creditsRequired: 2,
       reference: {
         type: "chat",
         id: "filing-1"
       }
     });
     await expect(response?.json()).resolves.toMatchObject({
-      creditsCharged: 1,
-      creditsRemaining: 29,
+      creditsCharged: 2,
+      creditsRemaining: 28,
       usage: {
         credits: {
-          totalRemaining: 29
+          totalRemaining: 28
         }
       }
     });
@@ -439,8 +439,8 @@ describe("handleChatRoute", () => {
       usage: {
         creditBillingEnabled: true
       },
-      creditsCharged: 1,
-      creditsRemaining: 29
+      creditsCharged: 2,
+      creditsRemaining: 28
     });
   });
 
@@ -475,7 +475,7 @@ describe("handleChatRoute", () => {
     expect(mockRefundCredit).toHaveBeenCalledWith(identity, env, expect.anything(), {
       originalOperationId: "chat-op-1",
       refundOperationId: "refund:chat-op-1",
-      credits: 1,
+      credits: 2,
       reference: {
         type: "chat",
         id: "filing-1"
@@ -484,7 +484,7 @@ describe("handleChatRoute", () => {
   });
 
   it("returns insufficient_credits without running chat generation", async () => {
-    mockConsumeCredit.mockRejectedValue(new InsufficientCreditsError(1, 0));
+    mockConsumeCredit.mockRejectedValue(new InsufficientCreditsError(2, 0));
 
     const response = await handleChatRoute({
       request: new Request("https://kabuyomi.test/v1/chat", {
@@ -512,7 +512,7 @@ describe("handleChatRoute", () => {
     expect(mockBuildChatResponse).not.toHaveBeenCalled();
     await expect(response?.json()).resolves.toEqual({
       error: "insufficient_credits",
-      creditsRequired: 1,
+      creditsRequired: 2,
       creditsRemaining: 0
     });
   });

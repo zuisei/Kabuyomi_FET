@@ -36,6 +36,7 @@ enum UsageLoadState {
 private enum UsageUpdateSource {
     case refresh
     case chat
+    case quoteTranslation
     case watchlistAdd
     case watchlistRemove
 }
@@ -210,7 +211,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     var chatCreditCost: Int {
-        1
+        2
     }
 
     var creditUsage: CreditUsagePayload? {
@@ -219,9 +220,9 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     var chatCreditStatusText: String {
         guard let credits = usage?.credits else {
-            return "1 credit"
+            return "\(chatCreditCost) credits"
         }
-        return "1 credit / 残り \(credits.totalRemaining)"
+        return "\(chatCreditCost) credits / 残り \(credits.totalRemaining)"
     }
 
     var hasChatCreditAvailable: Bool {
@@ -300,6 +301,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         } catch {
             handle(error)
         }
+    }
+
+    func applyQuoteTranslationUsage(_ response: QuoteTranslationResponse) {
+        guard let usage = response.usage else { return }
+        storeUsage(usage, source: .quoteTranslation)
     }
 
     func loadSubscriptionProducts(showErrors: Bool = true) async {

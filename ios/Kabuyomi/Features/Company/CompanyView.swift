@@ -259,9 +259,9 @@ struct CompanyView: View {
                 question = restoredDraft
             }
         }
-        .sheet(isPresented: $settingsPresented) {
+        .fullScreenCover(isPresented: $settingsPresented) {
             SettingsView()
-                .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled(true)
         }
         .sheet(isPresented: $searchPresented) {
             SearchView()
@@ -643,6 +643,7 @@ private struct SourceEvidenceSheet: View {
     let company: CompanyPayload
     let source: LocalMessageSourceRef
 
+    @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var selectedDocumentRequest: SourceDocumentRequest?
@@ -1022,6 +1023,7 @@ private struct SourceEvidenceSheet: View {
         do {
             Self.logger.debug("request started length=\(trimmed.count, privacy: .public) source=\(source.sourceLabelSnapshot, privacy: .public)")
             let response = try await APIClient().translateQuote(text: trimmed, targetLanguage: "ja")
+            appModel.applyQuoteTranslationUsage(response)
             let translated = response.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard !translated.isEmpty, translated != trimmed else {
@@ -1033,6 +1035,8 @@ private struct SourceEvidenceSheet: View {
         } catch is CancellationError {
             Self.logger.debug("request cancelled")
             previewTranslationState = .idle
+        } catch APIError.insufficientCredits(let required, let remaining) {
+            previewTranslationState = .failed("翻訳には \(required) credit 必要です。残り \(remaining) credits です。")
         } catch {
             Self.logger.error("request failed error=\(String(describing: error), privacy: .public)")
             if let fallback = fallbackPreviewTranslation(for: trimmed) {

@@ -317,6 +317,9 @@ struct ChatResponse: Decodable {
 struct QuoteTranslationResponse: Decodable {
     let translatedText: String
     let modelName: String
+    let usage: UsagePayload?
+    let creditsCharged: Int?
+    let creditsRemaining: Int?
 }
 
 enum MessageSourceKind: String, Decodable, Hashable {

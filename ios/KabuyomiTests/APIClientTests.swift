@@ -464,6 +464,7 @@ final class APIClientTests: XCTestCase {
             XCTAssertEqual(json["text"], "Revenue increased year over year.")
             XCTAssertEqual(json["targetLanguage"], "ja")
             XCTAssertNil(json["sourceLanguage"])
+            XCTAssertFalse(json["operationId"]?.isEmpty ?? true)
 
             return (
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,

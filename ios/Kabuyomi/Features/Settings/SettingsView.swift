@@ -5,9 +5,29 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                KabuyomiTheme.background.ignoresSafeArea()
+        ZStack {
+            KabuyomiTheme.background.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                HStack(alignment: .center) {
+                    Text("設定")
+                        .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+
+                    Spacer()
+
+                    Button("閉じる") {
+                        dismiss()
+                    }
+                    .font(.system(.body, design: .rounded, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .kabuyomiCard(.secondary, radius: 22)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 14)
 
                 ScrollView {
                     VStack(spacing: 16) {
@@ -22,17 +42,9 @@ struct SettingsView: View {
                         resetCard
                     }
                     .padding(20)
+                    .padding(.top, 2)
                 }
-            }
-            .navigationTitle("設定")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("閉じる") {
-                        dismiss()
-                    }
-                    .font(.system(.body, design: .rounded, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                }
+                .scrollBounceBehavior(.basedOnSize, axes: .vertical)
             }
         }
     }
@@ -59,7 +71,7 @@ struct SettingsView: View {
                         }
                     }
 
-                    Text("AIチャットは1回あたり1 creditです。月間creditは \(formattedResetDate(credits.resetsAt)) にリセットされます。")
+                    Text("AIチャットは1回あたり \(appModel.chatCreditCost) creditsです。月間creditは \(formattedResetDate(credits.resetsAt)) にリセットされます。")
                         .font(.footnote)
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 } else if appModel.isUsageSynchronizing {

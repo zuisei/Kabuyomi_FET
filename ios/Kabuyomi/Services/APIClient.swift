@@ -156,7 +156,8 @@ struct APIClient {
     ) async throws -> QuoteTranslationResponse {
         var body: [String: String] = [
             "text": text,
-            "targetLanguage": targetLanguage
+            "targetLanguage": targetLanguage,
+            "operationId": UUID().uuidString
         ]
         if let sourceLanguage,
            !sourceLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

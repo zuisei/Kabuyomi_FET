@@ -22,7 +22,8 @@ export const ChatRequestSchema = z.object({
 export const TranslateQuoteRequestSchema = z.object({
   text: z.string().trim().min(1).max(3_000),
   sourceLanguage: z.string().trim().min(2).max(16).optional(),
-  targetLanguage: z.enum(["ja"]).default("ja")
+  targetLanguage: z.enum(["ja"]).default("ja"),
+  operationId: z.string().trim().min(1).max(128).optional()
 });
 
 export const BackfillHistoryRequestSchema = z.object({

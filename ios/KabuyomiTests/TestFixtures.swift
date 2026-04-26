@@ -146,8 +146,8 @@ enum TestFixtures {
             responsePath: .gemini,
             modelName: AIModelName.remoteFallback,
             usage: usagePayload(),
-            creditsCharged: 1,
-            creditsRemaining: 29
+            creditsCharged: 2,
+            creditsRemaining: 28
         )
     }
 

@@ -21,6 +21,7 @@ import { json, notFound, unavailable } from "../lib/response";
 import type { RouteHandler } from "./types";
 
 const CHAT_PAYLOAD_MAX_BYTES = 4_096;
+const CHAT_CREDIT_COST = 2;
 
 export const handleChatRoute: RouteHandler = async ({ request, url, env, config, ctx }) => {
   if (!(request.method === "POST" && url.pathname === "/v1/chat")) {
@@ -152,7 +153,7 @@ async function chargeChat({
 
   const credit = await consumeCredit(identity, env, config, {
     operationId: creditOperationId,
-    creditsRequired: 1,
+    creditsRequired: CHAT_CREDIT_COST,
     reference: {
       type: "chat",
       id: filingKey
@@ -189,7 +190,7 @@ async function refundChat({
   return refundCredit(identity, env, config, {
     originalOperationId: creditOperationId,
     refundOperationId: `refund:${creditOperationId}`,
-    credits: chatCharge.creditsCharged ?? 1,
+    credits: chatCharge.creditsCharged ?? CHAT_CREDIT_COST,
     reference: {
       type: "chat",
       id: filingKey
