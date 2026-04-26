@@ -349,6 +349,43 @@ describe("handleChatRoute", () => {
     expect(mockRefundChatQuota).toHaveBeenCalledWith(identity, expect.anything(), expect.anything());
   });
 
+  it("refunds chat quota for non-chargeable historical preparation responses", async () => {
+    mockRefundChatQuota.mockResolvedValue({ ...usage, chatsUsed: 0 } as never);
+    mockBuildChatResponse.mockResolvedValue({
+      answer: "履歴比較をバックグラウンドで準備中のため、今回は3年比較を完了できません。",
+      sources: [],
+      responsePath: "fallback",
+      chargeable: false
+    });
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "3年でどう推移した？"
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env,
+      config: legacyQuotaConfig,
+      ctx
+    });
+
+    expect(response?.status).toBe(200);
+    expect(mockRefundChatQuota).toHaveBeenCalledWith(identity, env, expect.anything());
+    await expect(response?.json()).resolves.toMatchObject({
+      responsePath: "fallback",
+      usage: {
+        chatsUsed: 0
+      }
+    });
+  });
+
   it("uses credit billing when enabled and returns credit charge metadata", async () => {
     mockBuildChatResponse.mockResolvedValue({
       answer: "Credit answer",
@@ -394,6 +431,73 @@ describe("handleChatRoute", () => {
       usage: {
         credits: {
           totalRemaining: 28
+        }
+      }
+    });
+  });
+
+  it("refunds credits for non-chargeable historical preparation responses", async () => {
+    mockBuildChatResponse.mockResolvedValue({
+      answer: "履歴比較をバックグラウンドで準備中のため、今回は3年比較を完了できません。",
+      sources: [],
+      responsePath: "fallback",
+      chargeable: false
+    });
+    mockRefundCredit.mockResolvedValue({
+      usage: {
+        ...usage,
+        credits: {
+          monthlyRemaining: 30,
+          monthlyLimit: 30,
+          purchasedRemaining: 0,
+          totalRemaining: 30,
+          resetsAt: "2026-05-01T00:00:00+09:00"
+        }
+      },
+      didMutate: true,
+      operationId: "refund:chat-op-1",
+      creditsRefunded: 2,
+      creditsRemaining: 30
+    } as never);
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "3年でどう推移した？",
+          operationId: "chat-op-1"
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env,
+      config: {
+        ...DEFAULT_REMOTE_CONFIG,
+        creditBillingEnabled: true
+      },
+      ctx
+    });
+
+    expect(response?.status).toBe(200);
+    expect(mockRefundCredit).toHaveBeenCalledWith(identity, env, expect.anything(), {
+      originalOperationId: "chat-op-1",
+      refundOperationId: "refund:chat-op-1",
+      credits: 2,
+      reference: {
+        type: "chat",
+        id: "filing-1"
+      }
+    });
+    await expect(response?.json()).resolves.toMatchObject({
+      creditsCharged: 0,
+      creditsRemaining: 30,
+      usage: {
+        credits: {
+          totalRemaining: 30
         }
       }
     });

@@ -149,6 +149,36 @@ describe("handleTranslateQuoteRoute", () => {
     });
   });
 
+  it("preserves the translation error when refunding the consumed credit fails", async () => {
+    mockGenerateQuoteTranslation.mockRejectedValue(new Error("translation unavailable"));
+    mockRefundCredit.mockRejectedValue(new Error("refund unavailable"));
+
+    await expect(
+      handleTranslateQuoteRoute({
+        request: new Request("https://kabuyomi.test/v1/translate-quote", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-device-key": "device-123"
+          },
+          body: JSON.stringify({
+            text: "Revenue increased year over year.",
+            targetLanguage: "ja",
+            operationId: "translate-op-1"
+          })
+        }),
+        url: new URL("https://kabuyomi.test/v1/translate-quote"),
+        env: {
+          GEMINI_API_KEY: "test-key"
+        } as never,
+        config: DEFAULT_REMOTE_CONFIG,
+        ctx: {} as never
+      })
+    ).rejects.toThrow("translation unavailable");
+
+    expect(mockRefundCredit).toHaveBeenCalled();
+  });
+
   it("returns insufficient_credits before translating", async () => {
     mockConsumeCredit.mockRejectedValue(new InsufficientCreditsError(1, 0));
 

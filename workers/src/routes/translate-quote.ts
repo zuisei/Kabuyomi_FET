@@ -87,15 +87,23 @@ export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, en
     });
   } catch (error) {
     if (creditBillingEnabled && creditsCharged > 0) {
-      await refundCredit(identity, env, config, {
-        originalOperationId: operationId,
-        refundOperationId: `refund:${operationId}`,
-        credits: creditsCharged,
-        reference: {
-          type: "quote_translation",
-          id: "source_preview"
-        }
-      });
+      try {
+        await refundCredit(identity, env, config, {
+          originalOperationId: operationId,
+          refundOperationId: `refund:${operationId}`,
+          credits: creditsCharged,
+          reference: {
+            type: "quote_translation",
+            id: "source_preview"
+          }
+        });
+      } catch (refundError) {
+        logErrorEvent("quote_translation_refund_failed", {
+          quotaSubject: identity.quotaSubject,
+          operationId,
+          reason: refundError instanceof Error ? refundError.message : String(refundError)
+        });
+      }
     }
 
     logErrorEvent("quote_translation_failed", {

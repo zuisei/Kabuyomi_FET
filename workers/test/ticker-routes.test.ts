@@ -224,6 +224,57 @@ describe("ticker-aware routes", () => {
     await Promise.all(waitUntilPromises);
   });
 
+  it("refunds a newly saved async watchlist slot when background filing ingestion fails", async () => {
+    mockLookupTicker.mockResolvedValue({
+      ticker: "GOOG",
+      companyName: "Alphabet Inc.",
+      cik: "0001652044",
+      exchange: "Nasdaq"
+    });
+    mockConsumeStockQuotaWithMutation.mockResolvedValue({ usage, didMutate: true } as never);
+    mockRefundStockQuota.mockResolvedValue({ ...usage, stocksUsed: 0 } as never);
+
+    let rejectFiling: (error: Error) => void = () => {};
+    const pendingFiling = new Promise((_, reject) => {
+      rejectFiling = reject;
+    });
+    mockEnsureLatestFiling.mockReturnValue(pendingFiling as never);
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const ctx = {
+      waitUntil: vi.fn((promise: Promise<unknown>) => {
+        waitUntilPromises.push(promise);
+      })
+    };
+
+    const response = await handleWatchlistAddRoute({
+      request: new Request("https://kabuyomi.test/v1/watchlist/add", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123",
+          "x-kabuyomi-watchlist-mode": "async"
+        },
+        body: JSON.stringify({ ticker: "GOOG" })
+      }),
+      url: new URL("https://kabuyomi.test/v1/watchlist/add"),
+      env: {} as never,
+      config: {} as never,
+      ctx: ctx as never
+    });
+
+    expect(response?.status).toBe(200);
+    rejectFiling(new Error("Filing fetch failed"));
+    await Promise.all(waitUntilPromises);
+
+    expect(mockRefundStockQuota).toHaveBeenCalledWith(
+      identity,
+      "GOOG",
+      expect.anything(),
+      expect.anything(),
+      { relatedTickers: ["GOOG", "GOOGL"] }
+    );
+  });
+
   it("rejects async watchlist add for unsupported filing forms before saving quota", async () => {
     mockLookupTicker.mockResolvedValue({
       ticker: "SSL",
