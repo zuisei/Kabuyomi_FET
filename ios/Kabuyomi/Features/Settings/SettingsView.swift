@@ -72,24 +72,36 @@ struct SettingsView: View {
 
                 if appModel.isCreditBillingEnabled {
                     HStack(spacing: 10) {
-                        Menu {
-                            ForEach(displayCreditPacks) { pack in
-                                Button {
-                                    Task {
-                                        await appModel.purchaseCreditPack(productId: pack.id)
-                                    }
-                                } label: {
-                                    Text(creditPackTitle(pack))
+                        if availableCreditPacks.isEmpty {
+                            Button {
+                                Task {
+                                    await appModel.loadCreditPackProducts(showErrors: true)
                                 }
-                                .disabled(appModel.billingActionInFlight || !pack.isAvailable)
+                            } label: {
+                                Label("商品設定を確認中", systemImage: "exclamationmark.circle.fill")
+                                    .frame(maxWidth: .infinity)
                             }
-                        } label: {
-                            Label(appModel.billingActionInFlight ? "処理中" : "追加購入", systemImage: "plus.circle.fill")
-                                .frame(maxWidth: .infinity)
+                            .buttonStyle(.bordered)
+                            .disabled(appModel.billingActionInFlight)
+                        } else {
+                            Menu {
+                                ForEach(availableCreditPacks) { pack in
+                                    Button {
+                                        Task {
+                                            await appModel.purchaseCreditPack(productId: pack.id)
+                                        }
+                                    } label: {
+                                        Text(creditPackTitle(pack))
+                                    }
+                                }
+                            } label: {
+                                Label(appModel.billingActionInFlight ? "処理中" : "追加購入", systemImage: "plus.circle.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(KabuyomiTheme.accentDeep)
+                            .disabled(appModel.billingActionInFlight)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(KabuyomiTheme.accentDeep)
-                        .disabled(appModel.billingActionInFlight)
 
                         Button {
                             appModel.activeAlert = AppAlertState(
@@ -101,6 +113,12 @@ struct SettingsView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
+                    }
+
+                    if availableCreditPacks.isEmpty {
+                        Text("App Store Connectで価格が未設定、または商品情報がまだSandboxに反映されていない可能性があります。")
+                            .font(.footnote)
+                            .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
                 } else {
                     Label("クレジット購入は準備中", systemImage: "lock.fill")
@@ -116,16 +134,8 @@ struct SettingsView: View {
         }
     }
 
-    private var displayCreditPacks: [CreditPackProduct] {
-        if !appModel.creditPackProducts.isEmpty {
-            return appModel.creditPackProducts
-        }
-
-        return [
-            CreditPackProduct(id: "credit_pack_100", credits: 100, displayPrice: nil, isAvailable: false),
-            CreditPackProduct(id: "credit_pack_300", credits: 300, displayPrice: nil, isAvailable: false),
-            CreditPackProduct(id: "credit_pack_700", credits: 700, displayPrice: nil, isAvailable: false)
-        ]
+    private var availableCreditPacks: [CreditPackProduct] {
+        appModel.creditPackProducts.filter(\.isAvailable)
     }
 
     private func creditPackTitle(_ pack: CreditPackProduct) -> String {
