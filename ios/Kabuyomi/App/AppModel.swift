@@ -698,7 +698,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     func requestCreditOptions() {
         activeAlert = AppAlertState(
-            message: "creditが不足しています。設定のCredit画面から追加credit購入または広告視聴の導線を確認してください。",
+            message: "creditが不足しています。設定のプラン画面で月額プランを確認してください。",
             kind: .dismissOnly
         )
     }
@@ -1160,7 +1160,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         }
 
         if rawMessage.contains("insufficient_credits") || rawMessage.contains("creditが不足") {
-            return "creditが不足しています。設定のCredit画面から追加購入または広告視聴の導線を確認してください。"
+            return "creditが不足しています。設定のプラン画面で月額プランを確認してください。"
         }
 
         if rawMessage.contains("Apple transaction verification") || rawMessage.contains("Apple transaction could not be verified") {

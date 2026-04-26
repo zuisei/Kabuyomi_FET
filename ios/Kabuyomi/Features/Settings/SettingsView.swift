@@ -54,10 +54,10 @@ struct SettingsView: View {
                     VStack(spacing: 10) {
                         CreditMetricRow(title: "残高", value: "\(credits.totalRemaining) credits")
                         CreditMetricRow(title: "月間", value: "\(credits.monthlyRemaining) / \(credits.monthlyLimit)")
-                        CreditMetricRow(title: "購入分", value: "\(credits.purchasedRemaining)")
+                        CreditMetricRow(title: "追加分", value: "\(credits.purchasedRemaining)")
                     }
 
-                    Text("月間creditは \(credits.resetsAt) にリセットされます。通常チャットは1回あたり1 creditです。")
+                    Text("通常チャットは1回あたり1 creditです。月間creditは \(credits.resetsAt) にリセットされます。")
                         .font(.footnote)
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 } else if appModel.isUsageSynchronizing {
@@ -71,26 +71,11 @@ struct SettingsView: View {
                 }
 
                 if appModel.isCreditBillingEnabled {
-                    Label("追加credit購入は初期リリースでは停止中", systemImage: "pause.circle.fill")
+                    Label("月額プランのcreditから消費されます", systemImage: "checkmark.seal.fill")
                         .font(.system(.footnote, design: .rounded, weight: .semibold))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-
-                    Button {
-                        appModel.activeAlert = AppAlertState(
-                            message: "広告視聴でcreditを増やす導線は次の実装で接続します。現時点ではまだ広告SDKは使いません。",
-                            kind: .dismissOnly
-                        )
-                    } label: {
-                        Label("広告で増やす", systemImage: "play.rectangle.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-
-                    Text("まず月間credit付きプランを提供します。追加creditパックはApp Store審査と運用が固まってから再開します。")
-                        .font(.footnote)
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
                 } else {
-                    Label("クレジット購入は準備中", systemImage: "lock.fill")
+                    Label("credit消費は現在無効です", systemImage: "lock.fill")
                         .font(.system(.footnote, design: .rounded, weight: .semibold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -115,6 +100,10 @@ struct SettingsView: View {
                         .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
                     Spacer()
                 }
+
+                Text("月間credit付きプランに登録すると、通常チャットで使えるcreditが毎月付与されます。")
+                    .font(.footnote)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
 
                 if let usage = appModel.usage {
                     VStack(alignment: .leading, spacing: 10) {
@@ -166,7 +155,7 @@ struct SettingsView: View {
                     .disabled(appModel.billingActionInFlight)
                 }
 
-                Text("月額プランは毎月creditを付与します。追加creditパックは初期リリースでは停止中です。")
+                Text("購読はApp Storeのアカウント設定からいつでも管理できます。")
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
             }
@@ -476,7 +465,7 @@ private struct SubscriptionPlanRow: View {
                         .font(.system(.subheadline, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.accentDeep)
                 } else {
-                    Text("設定中")
+                    Text("準備中")
                         .font(.system(.caption, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
