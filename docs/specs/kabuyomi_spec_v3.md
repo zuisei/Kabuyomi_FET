@@ -504,12 +504,12 @@ StoreKit の購読状態をサーバーと同期し、plan / quotaSubject を更
   - 主要数値
   - 更新日
   - 新着バッジ
-- Free のみ画面下部に AdMob バナー
+- Free のみ左カラム下部に AdMob バナー
 
 ### 検索画面
 - ticker / 企業名検索
 - 検索結果に追加ボタン
-- Free のみ画面下部に AdMob バナー
+- 検索画面内には AdMob バナーを出さない
 
 ### 企業ページ
 #### ヘッダー
@@ -759,8 +759,8 @@ App Store Connect の privacy nutrition label は、実装した SDK に応じ�
 ---
 
 ## 広告方針
-- AdMob バナーは Home / Search のみ
-- Company / Chat では広告を出さない
+- AdMob バナーは Free プランの左カラム下部に限定する
+- Company / Chat の会話本文、検索結果、入力欄周辺には広告を出さない
 - v1 はバナーのみ
 - インタースティシャル、リワード、ネイティブ広告は使わない
 - 広告実装時はプライバシーラベルと ATT 要否を release checklist で最終確認する
