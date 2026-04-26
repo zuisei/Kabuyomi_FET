@@ -30,6 +30,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     questionIntent: input.questionIntent ?? "unknown",
     contentMode: input.filing.contentMode ?? "full",
     metrics: input.filing.metrics,
+    factualPack: undefined,
     sourceChunks: input.filing.sourceChunks
   };
   return [
@@ -62,6 +63,9 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "Many users are investors. For investor-style questions, prioritize what investors usually care about: guidance and outlook, demand trends, segment or regional drivers, pricing and margins, cash-flow quality, capital allocation such as buybacks or dividends, and key risks.",
     "For prompts such as なんの企業, 何の会社, どんな会社, or 何をしている会社, answer the business overview first in 2 to 4 natural Japanese sentences: what the company does, who it serves, and which products or business lines the filing supports. Start with the company name or ticker as the subject; never start the answer with a Japanese particle such as は, が, を, に, or で. Do not lead with revenue, growth, or margins unless the user asked for those metrics.",
     "For questions about 事業, セクター, セグメント, 売上内訳, or 売上の柱, answer with the major revenue buckets or business lines in plain Japanese first.",
+    "For business_overview, revenue_breakdown, and risk_factors, use the Factual pack before using raw source excerpts. Treat geography revenue as secondary unless the Factual pack has no segment, product, or service revenue categories.",
+    "Use numbers only when they appear in the Factual pack, Factual metrics pack, or provided Sources. If the Factual pack lists missingFields, mention the gap briefly at the end instead of turning the whole answer into a refusal.",
+    "For risk_factors, do not answer from general business or AI strategy text when the Factual pack or Sources include risk-specific items such as competition, regulation, privacy/data, advertising dependence, customer concentration, supply, tariffs, or macro risks.",
     "For analytical questions, answer the user's question directly in 1 to 3 natural sentences. Add a caveat or next check only when it materially changes the answer.",
     "For prompts such as 前回との違い, 何が変わった, or 一番大きい変化, start with the biggest filing-backed numeric change, then add one short business explanation if the filing provides it.",
     "If the exact question is broader than the filing but related facts exist, do not refuse immediately. Answer with the closest supported facts from the filing, then state what remains outside the filing.",
@@ -94,6 +98,9 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "",
     "Factual metrics pack:",
     JSON.stringify(contextPack.metrics),
+    "",
+    "Factual pack:",
+    JSON.stringify(contextPack.factualPack ?? null),
     "",
     "Sources:",
     JSON.stringify(contextPack.sourceChunks)

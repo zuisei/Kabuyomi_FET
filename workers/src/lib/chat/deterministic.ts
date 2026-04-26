@@ -1,5 +1,6 @@
 import type { FilingCacheRecord, MetricSnapshot, SourceChunkRecord } from "../../env";
 import { formatMetricValue, formatYoYDelta, metricLabel } from "../metrics";
+import { buildChatFactualPack } from "./context-pack";
 import { buildSecFilingSource, dedupeChatSources, type ChatEvidenceSource, type ChatResponsePayload } from "./grounding";
 
 export interface DeterministicChatAnswer {
@@ -255,6 +256,29 @@ function isBusinessOverviewQuestion(normalizedQuestion: string): boolean {
 }
 
 function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {
+  const factualPack = buildChatFactualPack(filing, "business_overview");
+  if (factualPack && ((factualPack.productsServices?.length ?? 0) > 0 || (factualPack.reportableSegments?.length ?? 0) > 0)) {
+    const sources = factualPack.sourceIds.flatMap((sourceId) => {
+      const source = filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId);
+      return source ? [buildSecFilingSource(source)] : [];
+    });
+    if (sources.length > 0) {
+      const businessLines = [
+        ...(factualPack.productsServices ?? []),
+        ...(factualPack.reportableSegments ?? [])
+      ].slice(0, 6);
+      const revenueCategories = factualPack.revenueCategories?.map((fact) => fact.label).filter((label) => !businessLines.includes(label)).slice(0, 3) ?? [];
+      const revenueSentence =
+        revenueCategories.length > 0
+          ? `売上区分としては、${revenueCategories.join("、")}も確認できます。`
+          : "売上区分の細かい金額内訳は、この抜粋だけでは限定的です。";
+      return {
+        answer: `${filing.companyName}は、${businessLines.join("、")}を主な事業・製品群として持つ会社です。${revenueSentence}`,
+        sources: dedupeChatSources(sources)
+      };
+    }
+  }
+
   const overview = summarizeBusinessOverview(filing.sourceChunks);
   if (!overview) {
     return null;
@@ -276,6 +300,29 @@ function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePay
 }
 
 function buildRevenueBreakdownAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {
+  const factualPack = buildChatFactualPack(filing, "revenue_breakdown");
+  const primaryCategories =
+    factualPack?.revenueCategories?.filter((fact) => fact.kind === "segment" || fact.kind === "product_service") ?? [];
+  if (factualPack && primaryCategories.length > 0) {
+    const sources = factualPack.sourceIds.flatMap((sourceId) => {
+      const source = filing.sourceChunks.find((chunk) => chunk.sourceId === sourceId);
+      return source ? [buildSecFilingSource(source)] : [];
+    });
+    if (sources.length > 0) {
+      const labels = primaryCategories.slice(0, 6).map((fact) => fact.label);
+      const geography = factualPack.revenueCategories
+        ?.filter((fact) => fact.kind === "geography")
+        .slice(0, 3)
+        .map((fact) => fact.label) ?? [];
+      const geographySentence =
+        geography.length > 0 ? `地域別では${geography.join("、")}も補助情報として確認できます。` : "";
+      return {
+        answer: `売上の柱は、${labels.join("、")}です。${geographySentence}`,
+        sources: dedupeChatSources(sources)
+      };
+    }
+  }
+
   const breakdown = summarizeRevenueBreakdown(filing.sourceChunks);
   if (!breakdown) {
     return null;

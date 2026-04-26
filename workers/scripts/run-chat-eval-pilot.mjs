@@ -13,6 +13,7 @@ const deviceKey = process.env.KABUYOMI_EVAL_DEVICE_KEY?.trim() || `eval-pilot-${
 const maxQuestions = Number.parseInt(process.env.KABUYOMI_EVAL_LIMIT ?? "5", 10);
 const evalMode = process.env.KABUYOMI_EVAL_MODE?.trim() || "pilot";
 const appVersion = process.env.KABUYOMI_EVAL_APP_VERSION?.trim() || gitRevision();
+const questionIds = parseQuestionIds(process.env.KABUYOMI_EVAL_QUESTION_IDS);
 
 if (!baseURL) {
   console.error(
@@ -113,6 +114,17 @@ function firstQuestionPerTicker(rows) {
 }
 
 function selectRows(rows) {
+  if (questionIds.length > 0) {
+    const requested = new Set(questionIds);
+    const selected = rows.filter((row) => requested.has(row.questionId));
+    const found = new Set(selected.map((row) => row.questionId));
+    const missing = questionIds.filter((questionId) => !found.has(questionId));
+    if (missing.length > 0) {
+      throw new Error(`Unknown KABUYOMI_EVAL_QUESTION_IDS: ${missing.join(", ")}`);
+    }
+    return selected.slice(0, maxQuestions);
+  }
+
   if (evalMode === "full") {
     return rows.slice(0, maxQuestions);
   }
@@ -150,6 +162,13 @@ async function resolveFilingKey(ticker) {
 
 function buildRunId() {
   return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+function parseQuestionIds(rawValue) {
+  return (rawValue ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 function gitRevision() {

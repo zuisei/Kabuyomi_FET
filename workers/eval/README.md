@@ -84,3 +84,12 @@ KABUYOMI_EVAL_MODE=full \
 KABUYOMI_EVAL_LIMIT=50 \
 npm run eval:chat:pilot
 ```
+
+For a targeted regression run:
+
+```bash
+KABUYOMI_EVAL_BASE_URL=https://kabuyomi-api.example.workers.dev \
+KABUYOMI_EVAL_DEVICE_KEY=eval-chat-quality-v1 \
+KABUYOMI_EVAL_QUESTION_IDS=AAPL-01,AAPL-02,MSFT-01,MSFT-02,GOOGL-06,GOOGL-07,GOOGL-08,AMZN-02 \
+npm run eval:chat:pilot
+```

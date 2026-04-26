@@ -265,7 +265,8 @@ describe("buildChatResponse", () => {
     );
 
     expect(response.answer).toContain("Apple Inc.は");
-    expect(response.answer).toContain("製品・サービス販売");
+    expect(response.answer).toContain("iPhone");
+    expect(response.answer).toContain("Services");
     expect(response.answer).not.toContain("historically experienced higher net sales");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S8"]);
     expect(response.responsePath).toBe("deterministic");
