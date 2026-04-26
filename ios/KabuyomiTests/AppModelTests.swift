@@ -335,7 +335,7 @@ final class AppModelTests: XCTestCase {
         let didSend = await model.sendChat(question: "売上高は？", ticker: "AAPL")
 
         XCTAssertFalse(didSend)
-        XCTAssertEqual(model.activeAlert?.message, "creditが不足しています。設定のCredit画面から追加credit購入または広告視聴の導線を確認してください。")
+        XCTAssertEqual(model.activeAlert?.message, "creditが不足しています。設定のプラン画面で月額プランを確認してください。")
     }
 
     func testPurchaseCreditPackBlocksWhenCreditBillingIsDisabled() async {
@@ -366,11 +366,11 @@ final class AppModelTests: XCTestCase {
 
         await model.purchaseCreditPack(productId: "credit_pack_100")
 
-        XCTAssertEqual(model.activeAlert?.message, "クレジット購入は現在準備中です。通常チャットはこれまで通り利用できます。")
+        XCTAssertEqual(model.activeAlert?.message, "追加credit購入は現在利用できません。月額プランから利用してください。")
         XCTAssertFalse(model.billingActionInFlight)
     }
 
-    func testResetLocalDataClearsRecentStateAndRotatesDeviceIdentity() async throws {
+    func testResetLocalDataClearsRecentStateAndKeepsDeviceIdentity() async throws {
         let persistence = PersistenceController(inMemory: true)
         let company = TestFixtures.companyPayload()
         try persistence.saveCompany(company, searchItem: nil)
@@ -420,20 +420,20 @@ final class AppModelTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 150_000_000)
 
-        XCTAssertNotEqual(deviceIdentity.deviceKey(), originalDeviceKey)
+        XCTAssertEqual(deviceIdentity.deviceKey(), originalDeviceKey)
         XCTAssertEqual(model.usage?.stocksUsed, 0)
     }
 
-    func testResetLocalDataIgnoresStaleUsageRefreshFromPreviousDeviceIdentity() async {
+    func testResetLocalDataIgnoresStaleUsageRefreshFromPreviousGeneration() async {
         let deviceIdentity = DeviceIdentityStore()
         deviceIdentity.reset()
         let originalDeviceKey = deviceIdentity.deviceKey()
+        let usageRequestCounter = ThreadSafeCounter()
 
         MockAppModelURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            let deviceKey = request.value(forHTTPHeaderField: "x-device-key")
 
-            if deviceKey == originalDeviceKey {
+            if usageRequestCounter.incrementAndGet() == 1 {
                 Thread.sleep(forTimeInterval: 0.2)
                 return (
                     response,
@@ -478,9 +478,51 @@ final class AppModelTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 350_000_000)
 
-        XCTAssertNotEqual(deviceIdentity.deviceKey(), originalDeviceKey)
+        XCTAssertEqual(deviceIdentity.deviceKey(), originalDeviceKey)
         XCTAssertEqual(model.usage?.stocksUsed, 0)
         XCTAssertEqual(model.usage?.chatsUsed, 0)
+    }
+
+    func testPaidUsageRefreshPreservesLocalSavedTickersWhenEntitlementQuotaStartsEmpty() async throws {
+        UserDefaults.standard.set(["AAPL"], forKey: AppModel.savedTickersKey)
+
+        let persistence = PersistenceController(inMemory: true)
+        try persistence.saveCompany(TestFixtures.companyPayload(), searchItem: nil)
+
+        let model = makeAppModel(persistence: persistence)
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            XCTAssertEqual(request.url?.path, "/v1/usage")
+            return (
+                response,
+                try TestFixtures.jsonData([
+                    "plan": "pro",
+                    "chatsUsed": 0,
+                    "chatLimit": 50,
+                    "stocksUsed": 0,
+                    "stockLimit": 20,
+                    "dateJST": "2026-04-26",
+                    "savedTickers": [],
+                    "credits": [
+                        "monthlyRemaining": 500,
+                        "monthlyLimit": 500,
+                        "purchasedRemaining": 0,
+                        "totalRemaining": 500,
+                        "resetsAt": "2026-05-01T00:00:00+09:00"
+                    ],
+                    "creditBillingEnabled": true
+                ])
+            )
+        }
+
+        await model.bootstrap()
+        try? await Task.sleep(nanoseconds: 150_000_000)
+
+        XCTAssertEqual(model.usage?.plan, "pro")
+        XCTAssertEqual(model.usage?.savedTickers, ["AAPL"])
+        XCTAssertEqual(model.usage?.stocksUsed, 1)
+        XCTAssertTrue(model.isTickerInWatchlist("AAPL"))
     }
 
     func testResetLocalDataKeepsCurrentCompanyLoadIndicatorWhenOldRequestFinishesLater() async {

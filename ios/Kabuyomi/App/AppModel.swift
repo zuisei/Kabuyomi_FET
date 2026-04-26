@@ -689,8 +689,8 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         activeAlert = AppAlertState(
             message: """
 保存済みデータと会話履歴をこの端末から削除します。
-取得済みの決算資料も消え、利用状況は新規ユーザー状態に戻る可能性があります。
-端末識別情報は再生成され、最初からやり直す状態に戻ります。
+取得済みの決算資料も消え、画面の状態は最初からやり直す状態に戻ります。
+credit残高と購読状態に使う端末識別情報は維持されます。
 """,
             kind: .resetConfirmation
         )
@@ -713,7 +713,6 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             stateGeneration += 1
             searchGeneration += 1
             try persistence.reset()
-            deviceIdentity.reset()
             watchlist = []
             recentCompanies = []
             searchResults = []
@@ -1248,8 +1247,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     private func mergeUsageSavedTickersIfNeeded(_ usage: UsagePayload, source: UsageUpdateSource) -> UsagePayload {
-        guard source == .watchlistAdd else { return usage }
         guard let serverTickers = usage.savedTickers else { return usage }
+        guard source == .watchlistAdd || shouldPreserveSavedTickersForBillingRefresh(usage, serverTickers: serverTickers) else {
+            return usage
+        }
 
         let mergedTickers = mergedSavedTickersPreservingServerOrder(
             serverTickers: serverTickers,
@@ -1271,6 +1272,14 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             credits: usage.credits,
             creditBillingEnabled: usage.creditBillingEnabled
         )
+    }
+
+    private func shouldPreserveSavedTickersForBillingRefresh(_ usage: UsagePayload, serverTickers: [String]) -> Bool {
+        guard !savedTickers.isEmpty else { return false }
+        guard BillingCatalog.tier(for: usage.plan).plan != BillingCatalog.free.plan else { return false }
+
+        let currentPlan = self.usage?.plan ?? subscriptionStore.plan
+        return currentPlan != usage.plan || Self.normalizedTickers(serverTickers).isEmpty
     }
 
     private func mergedSavedTickersPreservingServerOrder(serverTickers: [String], existingTickers: [String]) -> [String] {
