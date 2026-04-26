@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ConversationEntryView: View {
     @Environment(AppModel.self) private var appModel
+    @AppStorage(AppModel.hasSeenEntryIntroKey) private var hasSeenEntryIntro = false
     @State private var selectedTicker = StarterCompany.defaults.first?.ticker ?? "AAPL"
     @State private var searchPresented = false
     private let tickerColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
@@ -26,18 +27,13 @@ struct ConversationEntryView: View {
         ZStack {
             KabuyomiTheme.background.ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    entryHeader
-                    tickerSelector
-                    actionCard
-                    searchButton
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 18)
-                .padding(.bottom, 24)
+            if hasSeenEntryIntro {
+                selectionContent
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else {
+                introContent
+                    .transition(.opacity)
             }
-            .scrollBounceBehavior(.basedOnSize)
         }
         .sheet(isPresented: $searchPresented) {
             SearchView()
@@ -52,6 +48,138 @@ struct ConversationEntryView: View {
         .onChange(of: selectedTicker) { _, newValue in
             appModel.prefetchCompany(ticker: newValue)
         }
+    }
+
+    private var selectionContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                entryHeader
+                tickerSelector
+                actionCard
+                searchButton
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
+            .padding(.bottom, 24)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    private var introContent: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            Spacer(minLength: 18)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Kabuyomi")
+                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.84)
+
+                Text("米国株リサーチと会話する")
+                    .font(.system(.headline, design: .rounded, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+            }
+
+            VStack(spacing: 0) {
+                introRow(
+                    title: "決算を読む",
+                    subtitle: "SEC資料から要点を確認",
+                    systemImage: "doc.text.magnifyingglass"
+                )
+                introDivider
+                introRow(
+                    title: "そのまま聞く",
+                    subtitle: "根拠つきでチャット",
+                    systemImage: "bubble.left.and.text.bubble.right"
+                )
+                introDivider
+                introRow(
+                    title: "銘柄を保存",
+                    subtitle: "Watchlistからすぐ戻れる",
+                    systemImage: "bookmark"
+                )
+            }
+            .padding(.vertical, 8)
+            .kabuyomiCard(.primary, radius: 22)
+
+            Spacer(minLength: 10)
+
+            VStack(spacing: 12) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.22)) {
+                        hasSeenEntryIntro = true
+                    }
+                } label: {
+                    Label("始める", systemImage: "arrow.right")
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 54)
+                        .background(
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [KabuyomiTheme.accentDeep, KabuyomiTheme.accent],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                        )
+                        .shadow(color: KabuyomiTheme.accentDeep.opacity(0.22), radius: 14, x: 0, y: 9)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    hasSeenEntryIntro = true
+                    searchPresented = true
+                } label: {
+                    Text("銘柄を検索して始める")
+                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .kabuyomiGlass(radius: 23, tint: Color.white.opacity(0.26), stroke: Color.white.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 24)
+        .padding(.bottom, 30)
+    }
+
+    private func introRow(title: String, subtitle: String, systemImage: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.accentDeep)
+                .frame(width: 36, height: 36)
+                .background(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(KabuyomiTheme.accentMist.opacity(0.88))
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                Text(subtitle)
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 58)
+    }
+
+    private var introDivider: some View {
+        Divider()
+            .overlay(KabuyomiTheme.accentSoft.opacity(0.34))
+            .padding(.leading, 62)
+            .padding(.trailing, 14)
     }
 
     private var entryHeader: some View {

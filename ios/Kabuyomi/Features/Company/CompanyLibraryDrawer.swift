@@ -17,29 +17,25 @@ struct ConversationLibraryDrawer: View {
     let selectTicker: (String, String) -> Void
     let saveSearchResult: (SearchItem) -> Void
     let openSearchResult: (SearchItem) -> Void
+    let openSearch: () -> Void
     let openSettings: () -> Void
     let close: () -> Void
     let cancelPendingOpen: () -> Void
 
-    private var isSearching: Bool {
-        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 14) {
             header
-            searchField
             pendingOpenBanner
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 16) {
                     contentSections
                 }
-                .padding(.top, 4)
-                .padding(.bottom, 24)
+                .padding(.top, 2)
+                .padding(.bottom, 16)
             }
 
-            settingsButton
+            footerDock
         }
         .padding(18)
         .frame(maxHeight: .infinity, alignment: .top)
@@ -81,43 +77,39 @@ struct ConversationLibraryDrawer: View {
 
     @ViewBuilder
     private var contentSections: some View {
-        if isSearching {
-            searchSection
-        } else {
-            recentSection
-            savedSection
-            starterSection
-        }
+        quickActionSection
+        savedSection
+        starterSection
     }
 
-    @ViewBuilder
-    private var recentSection: some View {
-        if !recentCompanies.isEmpty {
-            DrawerSection(
-                title: "最近の会話",
-                subtitle: "いま見ている流れに戻る",
-                priority: .primary
-            ) {
-                ForEach(recentCompanies) { company in
-                    DrawerCompanyRow(
-                        ticker: company.ticker,
-                        companyName: company.companyName,
-                        subtitle: drawerSubtitle(for: company),
-                        isCurrent: company.ticker == currentTicker,
-                        prominence: .primary,
-                        action: { selectTicker(company.ticker, company.companyName) }
-                    )
-                }
-            }
+    private var quickActionSection: some View {
+        VStack(spacing: 0) {
+            DrawerQuickActionRow(
+                title: "Ask",
+                subtitle: "いまの資料に戻る",
+                systemImage: "bubble.left",
+                action: { selectTicker(currentTicker, currentTicker) }
+            )
+
+            DrawerDivider()
+
+            DrawerQuickActionRow(
+                title: "Search",
+                subtitle: "検索画面を開く",
+                systemImage: "magnifyingglass",
+                action: openSearch
+            )
         }
+        .padding(.vertical, 8)
+        .kabuyomiCard(.primary, radius: 18)
     }
 
     @ViewBuilder
     private var savedSection: some View {
         if !savedCompanies.isEmpty {
             DrawerSection(
-                title: "保存した銘柄",
-                subtitle: "いつでも開ける保存銘柄",
+                title: "Watchlist",
+                subtitle: "保存した銘柄",
                 priority: .standard
             ) {
                 ForEach(savedCompanies) { company in
@@ -131,6 +123,8 @@ struct ConversationLibraryDrawer: View {
                     )
                 }
             }
+        } else {
+            DrawerEmptyWatchlistHint(openSearch: openSearch)
         }
     }
 
@@ -138,11 +132,11 @@ struct ConversationLibraryDrawer: View {
     private var starterSection: some View {
         if !starterCompanies.isEmpty {
             DrawerSection(
-                title: "スターター銘柄",
-                subtitle: "まず試すときの候補",
+                title: "まず試す",
+                subtitle: "保存前に開けるサンプル銘柄",
                 priority: .subdued
             ) {
-                ForEach(starterCompanies) { company in
+                ForEach(Array(starterCompanies.prefix(3))) { company in
                     DrawerCompanyRow(
                         ticker: company.ticker,
                         companyName: company.companyName,
@@ -166,78 +160,53 @@ struct ConversationLibraryDrawer: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text("会話を切り替える")
-                    .font(.system(.title3, design: .rounded, weight: .bold))
+                Text("Kabuyomi")
+                    .font(.system(.title, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.ink)
-                Text("左から引き出すか、この一覧から銘柄を切り替えます。")
-                    .font(.system(.footnote, design: .rounded))
+                Text("米国株リサーチと会話する")
+                    .font(.system(.footnote, design: .rounded, weight: .semibold))
                     .foregroundStyle(KabuyomiTheme.inkMuted)
             }
 
             Spacer()
 
             Button(action: close) {
-                Image(systemName: "xmark")
+                Image(systemName: "chevron.left")
                     .font(.system(size: 15, weight: .bold))
                     .frame(width: 36, height: 36)
                     .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .kabuyomiCard(.secondary, radius: 18)
+                    .kabuyomiGlass(radius: 18, interactive: true)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("一覧を閉じる")
         }
     }
 
-    private var searchField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(KabuyomiTheme.inkMuted)
-            TextField("ティッカー / 企業名で検索", text: $query)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-            if !query.isEmpty {
-                Button {
-                    query = ""
-                    Task { await appModel.search(query: "") }
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
+    private var footerDock: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                DrawerDockButton(
+                    title: "Credits",
+                    subtitle: creditSubtitle,
+                    systemImage: "creditcard",
+                    action: openSettings
+                )
+
+                DrawerDockButton(
+                    title: "Settings",
+                    subtitle: "プランと設定",
+                    systemImage: "gearshape",
+                    action: openSettings
+                )
             }
         }
-        .padding(14)
-        .kabuyomiCard(.input, radius: 18)
     }
 
-    private var settingsButton: some View {
-        Button(action: openSettings) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("設定")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                    Text("表示・AI・利用状況・法務")
-                        .font(.system(.footnote, design: .rounded))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
-
-                Spacer()
-
-                Label("開く", systemImage: "chevron.right")
-                    .font(.system(.subheadline, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .labelStyle(.titleAndIcon)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .kabuyomiCard(.secondary, radius: 22)
+    private var creditSubtitle: String {
+        if let credits = appModel.creditUsage {
+            return "\(credits.totalRemaining) credits"
         }
-        .buttonStyle(.plain)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("設定を開く")
-        .accessibilityHint("表示、AI、利用状況、法務を確認します")
-        .accessibilityIdentifier("library.settingsButton")
+        return "確認中"
     }
 
     @ViewBuilder
@@ -293,6 +262,136 @@ private struct DrawerSearchErrorState: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .kabuyomiCard(.muted, radius: 18)
+    }
+}
+
+private struct DrawerQuickActionRow: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .frame(width: 34, height: 34)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(KabuyomiTheme.accentMist.opacity(0.88))
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Text(subtitle)
+                        .font(.system(.caption2, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.72))
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct DrawerDivider: View {
+    var body: some View {
+        Divider()
+            .overlay(KabuyomiTheme.accentSoft.opacity(0.34))
+            .padding(.leading, 58)
+            .padding(.trailing, 12)
+    }
+}
+
+private struct DrawerEmptyWatchlistHint: View {
+    let openSearch: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: "bookmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(KabuyomiTheme.accentMist.opacity(0.9)))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Watchlistはまだ空です")
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Text("保存した銘柄がここに並びます。")
+                        .font(.system(.caption, design: .rounded, weight: .medium))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                }
+            }
+
+            Button(action: openSearch) {
+                Label("銘柄を探す", systemImage: "magnifyingglass")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .padding(.horizontal, 12)
+                    .frame(height: 34)
+                    .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.72)))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .kabuyomiCard(.muted, radius: 18)
+    }
+}
+
+private struct DrawerDockButton: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(KabuyomiTheme.accentMist.opacity(0.9)))
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Text(subtitle)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                }
+
+                Spacer(minLength: 2)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.66))
+            }
+            .padding(.horizontal, 11)
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .kabuyomiCard(.primary, radius: 17)
+        }
+        .buttonStyle(.plain)
     }
 }
 

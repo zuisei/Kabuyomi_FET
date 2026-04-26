@@ -7,6 +7,14 @@ struct SearchView: View {
     @State private var searchTask: Task<Void, Never>?
     @FocusState private var isSearchFieldFocused: Bool
 
+    private var recentCompanies: [WatchlistCard] {
+        Array(appModel.recentCompanyCards(limit: 6, includeSaved: true))
+    }
+
+    private var isBlankQuery: Bool {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -27,6 +35,12 @@ struct SearchView: View {
                         SearchErrorState(message: searchErrorMessage) {
                             searchNow(query)
                         }
+                        .frame(maxHeight: .infinity)
+                    } else if appModel.searchResults.isEmpty && isBlankQuery {
+                        SearchHomeState(
+                            recentCompanies: recentCompanies,
+                            openCompany: openRecentCompany
+                        )
                         .frame(maxHeight: .infinity)
                     } else if appModel.searchResults.isEmpty {
                         SearchEmptyState()
@@ -96,6 +110,11 @@ struct SearchView: View {
         }
 
         appModel.openConversation(for: item.ticker)
+        dismiss()
+    }
+
+    private func openRecentCompany(_ company: WatchlistCard) {
+        appModel.openConversation(for: company.ticker)
         dismiss()
     }
 
@@ -206,6 +225,75 @@ private struct SearchEmptyState: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 56)
         .kabuyomiGlass(radius: 28, tint: Color.white.opacity(0.18), stroke: Color.white.opacity(0.58))
+    }
+}
+
+private struct SearchHomeState: View {
+    let recentCompanies: [WatchlistCard]
+    let openCompany: (WatchlistCard) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if recentCompanies.isEmpty {
+                    SearchEmptyState()
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Recent Research")
+                            .font(.system(.headline, design: .rounded, weight: .bold))
+                            .foregroundStyle(KabuyomiTheme.accentDeep)
+                            .padding(.horizontal, 4)
+
+                        VStack(spacing: 0) {
+                            ForEach(Array(recentCompanies.enumerated()), id: \.element.id) { index, company in
+                                Button {
+                                    openCompany(company)
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: "clock")
+                                            .font(.system(size: 13, weight: .bold))
+                                            .foregroundStyle(KabuyomiTheme.inkMuted)
+                                            .frame(width: 30, height: 30)
+                                            .background(Circle().fill(KabuyomiTheme.accentMist.opacity(0.82)))
+
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(company.ticker)
+                                                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                                                .foregroundStyle(KabuyomiTheme.ink)
+                                            Text(company.companyName)
+                                                .font(.system(.caption, design: .rounded, weight: .semibold))
+                                                .foregroundStyle(KabuyomiTheme.inkMuted)
+                                                .lineLimit(1)
+                                        }
+
+                                        Spacer()
+
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.7))
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .frame(height: 54)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+
+                                if index < recentCompanies.count - 1 {
+                                    Divider()
+                                        .overlay(KabuyomiTheme.accentSoft.opacity(0.34))
+                                        .padding(.leading, 54)
+                                        .padding(.trailing, 12)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 6)
+                        .kabuyomiCard(.primary, radius: 18)
+                    }
+                }
+            }
+            .padding(.bottom, 20)
+        }
+        .scrollDismissesKeyboard(.interactively)
     }
 }
 

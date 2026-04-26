@@ -235,8 +235,13 @@ func sourceDocumentSearchTerms(for source: LocalMessageSourceRef, in company: Co
         return xbrlSearchTerms(for: matchedChunk, source: source, in: company)
     }
 
+    let sourceText = [matchedChunk?.text, source.excerpt, source.sourceLabelSnapshot]
+        .compactMap { $0 }
+        .joined(separator: " ")
     let candidates: [String?] =
-        searchSnippets(from: matchedChunk?.text).map(Optional.some)
+        inferredEnglishSearchAnchors(from: sourceText).map(Optional.some)
+        + inferredNumericSearchAnchors(from: sourceText).map(Optional.some)
+        + searchSnippets(from: matchedChunk?.text).map(Optional.some)
         + searchSnippets(from: source.excerpt).map(Optional.some)
         + [
             matchedChunk?.sectionTitle,
@@ -257,6 +262,10 @@ func sourceDocumentSearchTerms(for source: LocalMessageSourceRef, in company: Co
         if seen.insert(key).inserted {
             deduped.append(trimmed)
         }
+
+        if deduped.count >= 8 {
+            break
+        }
     }
 
     return deduped
@@ -276,16 +285,15 @@ private func searchSnippets(from text: String?) -> [String] {
 
     guard !trimmed.isEmpty else { return [] }
 
-    if trimmed.count <= 140 {
+    if trimmed.count <= 96 {
         return [trimmed]
     }
 
     var snippets: [String] = []
-    let maxLength = 160
-    let step = 120
+    let maxLength = 96
     var startIndex = trimmed.startIndex
 
-    while startIndex < trimmed.endIndex && snippets.count < 2 {
+    while startIndex < trimmed.endIndex && snippets.count < 1 {
         let endIndex = trimmed.index(startIndex, offsetBy: maxLength, limitedBy: trimmed.endIndex) ?? trimmed.endIndex
         let snippet = String(trimmed[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
         if snippet.count >= 24 {
@@ -293,10 +301,71 @@ private func searchSnippets(from text: String?) -> [String] {
         }
 
         guard endIndex < trimmed.endIndex else { break }
-        startIndex = trimmed.index(startIndex, offsetBy: step, limitedBy: trimmed.endIndex) ?? trimmed.endIndex
+        startIndex = endIndex
     }
 
     return snippets
+}
+
+private func inferredEnglishSearchAnchors(from text: String) -> [String] {
+    let lowered = text.lowercased()
+    var anchors: [String] = []
+
+    if lowered.contains("売上") || lowered.contains("revenue") || lowered.contains("sales") {
+        anchors += ["net sales", "revenue", "total net sales"]
+    }
+    if lowered.contains("営業利益") || lowered.contains("operating income") || lowered.contains("operations") {
+        anchors += ["income from operations", "operating income", "operating income (loss)"]
+    }
+    if lowered.contains("純利益") || lowered.contains("net income") || lowered.contains("net earnings") {
+        anchors += ["net income", "net earnings", "net income (loss)"]
+    }
+    if lowered.contains("キャッシュ") || lowered.contains("cash flow") || lowered.contains("operating activities") {
+        anchors += ["net cash provided by operating activities", "statements of cash flows"]
+    }
+    if lowered.contains("eps") || lowered.contains("1株") || lowered.contains("per share") {
+        anchors += ["earnings per share", "basic earnings per share"]
+    }
+
+    return anchors
+}
+
+private func inferredNumericSearchAnchors(from text: String) -> [String] {
+    let pattern = #"[-+]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|[-+]?\d+(?:\.\d+)?"#
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+
+    let nsText = text as NSString
+    let matches = regex.matches(
+        in: text,
+        range: NSRange(location: 0, length: nsText.length)
+    )
+    guard !matches.isEmpty else { return [] }
+
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.maximumFractionDigits = 0
+    formatter.locale = Locale(identifier: "en_US")
+    formatter.usesGroupingSeparator = true
+
+    var anchors: [String] = []
+    let containsOkuDollars = text.contains("億ドル")
+
+    for match in matches.prefix(4) {
+        let raw = nsText.substring(with: match.range)
+        let normalized = raw.replacingOccurrences(of: ",", with: "")
+        guard let value = Double(normalized), value.isFinite else { continue }
+
+        anchors.append(raw)
+
+        if containsOkuDollars {
+            let millions = (value * 100).rounded()
+            if let grouped = formatter.string(from: NSNumber(value: millions)) {
+                anchors.append(grouped)
+            }
+        }
+    }
+
+    return anchors
 }
 
 private func xbrlSearchTerms(for chunk: SourceChunkPayload, source: LocalMessageSourceRef, in company: CompanyPayload) -> [String] {

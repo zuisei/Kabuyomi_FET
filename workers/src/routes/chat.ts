@@ -1,5 +1,6 @@
 import { resolveGeminiModel } from "../clients/gemini/request";
 import { ChatRequestSchema } from "../lib/contracts";
+import { formatChatAnswerForDisplay } from "../lib/chat/answer-format";
 import { resolveContextualQuestion } from "../lib/chat/context";
 import { enqueueContentUpgrade, isMetricsOnlyRecord, upgradeMetricsOnlyRecord } from "../lib/filings/content-upgrade";
 import { isCurrentCacheRecord, loadFilingByKey } from "../lib/filings/cache";
@@ -94,7 +95,7 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
     });
 
     return json({
-      answer: answer.answer,
+      answer: formatChatAnswerForDisplay(answer.answer),
       sources: answer.sources,
       responsePath: answer.responsePath,
       modelName: answer.responsePath === "gemini" ? resolveGeminiModel(env) : null,

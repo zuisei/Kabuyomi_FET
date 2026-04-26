@@ -57,6 +57,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     static let activeConversationTickerKey = "kabuyomi.activeConversationTicker"
     static let showStarterCompaniesKey = "kabuyomi.showStarterCompanies"
     static let hasCompletedInitialEntryKey = "kabuyomi.hasCompletedInitialEntry"
+    static let hasSeenEntryIntroKey = "kabuyomi.hasSeenEntryIntro"
     static let pendingConversationTickerKey = "kabuyomi.pendingConversationTicker"
     static let pendingConversationQuestionKey = "kabuyomi.pendingConversationQuestion"
     static let appLaunchCountKey = "kabuyomi.appLaunchCount"
@@ -740,6 +741,7 @@ credit残高と購読状態に使う端末識別情報は維持されます。
             UserDefaults.standard.removeObject(forKey: Self.lastViewedTickerKey)
             UserDefaults.standard.removeObject(forKey: Self.activeConversationTickerKey)
             UserDefaults.standard.removeObject(forKey: Self.hasCompletedInitialEntryKey)
+            UserDefaults.standard.removeObject(forKey: Self.hasSeenEntryIntroKey)
             UserDefaults.standard.removeObject(forKey: Self.appLaunchCountKey)
             UserDefaults.standard.removeObject(forKey: Self.starterCompaniesAutoHiddenKey)
             UserDefaults.standard.removeObject(forKey: Self.aiConsentKey)

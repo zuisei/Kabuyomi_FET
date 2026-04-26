@@ -35,6 +35,7 @@ struct CompanyView: View {
     @State private var activePanel: CompanySidePanel?
     @State private var librarySearchTask: Task<Void, Never>?
     @State private var settingsPresented = false
+    @State private var searchPresented = false
     @State private var selectedSource: LocalMessageSourceRef?
     @State private var libraryPanelID = UUID()
     @State private var summaryPanelID = UUID()
@@ -172,6 +173,7 @@ struct CompanyView: View {
                             selectTicker: openDrawerTicker,
                             saveSearchResult: saveSearchResult,
                             openSearchResult: openSearchResult,
+                            openSearch: openSearchScreen,
                             openSettings: openSettingsScreen,
                             close: closePanels,
                             cancelPendingOpen: cancelPendingDrawerOpen
@@ -259,6 +261,10 @@ struct CompanyView: View {
         }
         .sheet(isPresented: $settingsPresented) {
             SettingsView()
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $searchPresented) {
+            SearchView()
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $selectedSource) { source in
@@ -437,6 +443,18 @@ struct CompanyView: View {
         Task {
             try? await Task.sleep(for: .milliseconds(180))
             settingsPresented = true
+        }
+    }
+
+    private func openSearchScreen() {
+        dismissKeyboard()
+        libraryQuery = ""
+        librarySearchTask?.cancel()
+        Task { await appModel.search(query: "") }
+        closePanels()
+        Task {
+            try? await Task.sleep(for: .milliseconds(180))
+            searchPresented = true
         }
     }
 
@@ -1289,16 +1307,20 @@ private struct SourceDocumentViewerSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if !visibleHints.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(visibleHints, id: \.self) { hint in
-                            Text(hint)
-                                .font(.system(.caption, design: .rounded, weight: .semibold))
-                                .foregroundStyle(KabuyomiTheme.accentDeep)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.62)))
-                        }
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(visibleHints, id: \.self) { hint in
+                        Text(hint)
+                            .font(.system(.caption, design: .rounded, weight: .semibold))
+                            .foregroundStyle(KabuyomiTheme.accentDeep)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(KabuyomiTheme.accentSoft.opacity(0.62))
+                            )
                     }
                 }
             }
@@ -1344,10 +1366,13 @@ private struct SourceDocumentWebView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
+        private static let searchTimeoutNanoseconds: UInt64 = 2_000_000_000
+
         var parent: SourceDocumentWebView
         var loadedURL: URL?
         var lastSearchTerms: [String] = []
         var lastSearchMode: SourceDocumentSearchMode
+        private var activeSearchID = 0
 
         init(parent: SourceDocumentWebView) {
             self.parent = parent
@@ -1358,6 +1383,7 @@ private struct SourceDocumentWebView: UIViewRepresentable {
             loadedURL = url
             lastSearchTerms = parent.searchTerms
             lastSearchMode = parent.searchMode
+            activeSearchID += 1
             parent.searchStatus = .loading
             webView.load(URLRequest(url: url))
         }
@@ -1385,6 +1411,16 @@ private struct SourceDocumentWebView: UIViewRepresentable {
                 return
             }
 
+            activeSearchID += 1
+            let searchID = activeSearchID
+            parent.searchStatus = .loading
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: Self.searchTimeoutNanoseconds)
+                guard let self, self.activeSearchID == searchID else { return }
+                self.activeSearchID += 1
+                self.parent.searchStatus = .failed(searchTerms.first)
+            }
+
             let jsonData = (try? JSONSerialization.data(withJSONObject: searchTerms)) ?? Data("[]".utf8)
             let encodedTerms = String(decoding: jsonData, as: UTF8.self)
             let searchMode = parent.searchMode.rawValue
@@ -1393,21 +1429,32 @@ private struct SourceDocumentWebView: UIViewRepresentable {
               const terms = \(encodedTerms);
               const searchMode = "\(searchMode)";
               const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim().toLowerCase();
+              const exactTerms = terms
+                .map((term) => normalize(term))
+                .filter((term) => term.length >= 3)
+                .slice(0, 6);
+              const fallbackTerms = exactTerms
+                .filter((term) => term.length <= 80)
+                .slice(0, 3);
               const textFor = (element) => normalize(element.innerText || element.textContent || "");
               const selectors =
                 searchMode === "tabular"
                   ? "table,tr,td,th,h1,h2,h3,h4,h5,h6,p,li"
-                  : "h1,h2,h3,h4,h5,h6,p,li,div,td,th,strong,b";
+                  : "h1,h2,h3,h4,h5,h6,p,li,td,th,strong,b";
 
               const hasTableOfContentsContext = (element) => {
                 let node = element;
                 let depth = 0;
                 while (node && depth < 5) {
                   const label = normalize(
-                    (node.getAttribute && (node.getAttribute("aria-label") || node.getAttribute("title"))) || ""
+                    (node.getAttribute &&
+                      (node.getAttribute("aria-label") ||
+                        node.getAttribute("title") ||
+                        node.getAttribute("id") ||
+                        node.getAttribute("class"))) ||
+                      ""
                   );
-                  const text = textFor(node).slice(0, 800);
-                  if (label.includes("table of contents") || text.includes("table of contents")) {
+                  if (label.includes("table of contents")) {
                     return true;
                   }
                   node = node.parentElement;
@@ -1525,6 +1572,41 @@ private struct SourceDocumentWebView: UIViewRepresentable {
                 };
               };
 
+              const focusSelectionFallback = (term) => {
+                if (!window.find) return null;
+                clearHighlight();
+                const found = window.find(term, false, false, true, false, true, false);
+                if (!found) return null;
+
+                const selection = window.getSelection && window.getSelection();
+                if (!selection || selection.rangeCount === 0) {
+                  return { matched: term, preview: term };
+                }
+
+                const range = selection.getRangeAt(0);
+                let element = range.startContainer && range.startContainer.nodeType === Node.ELEMENT_NODE
+                  ? range.startContainer
+                  : range.startContainer && range.startContainer.parentElement;
+
+                while (element && !["P", "LI", "TR", "TD", "TH", "DIV", "SPAN"].includes((element.tagName || "").toUpperCase())) {
+                  element = element.parentElement;
+                }
+
+                if (element && element.scrollIntoView) {
+                  element.setAttribute("data-kabuyomi-highlight", "1");
+                  element.style.outline = "3px solid rgba(176, 106, 42, 0.95)";
+                  element.style.background = "rgba(255, 226, 179, 0.55)";
+                  element.style.borderRadius = "8px";
+                  element.style.scrollMarginTop = "120px";
+                  element.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
+                }
+
+                return {
+                  matched: term,
+                  preview: element ? (element.innerText || element.textContent || "").trim().slice(0, 280) : term
+                };
+              };
+
               const scoreEntry = (entry, partial) => {
                 if (searchMode === "tabular") {
                   let score = partial ? 520 : 1080;
@@ -1563,8 +1645,7 @@ private struct SourceDocumentWebView: UIViewRepresentable {
                 return score;
               };
 
-              for (const rawTerm of terms) {
-                const term = normalize(rawTerm);
+              for (const term of exactTerms) {
                 if (!term) continue;
 
                 const variants = [{ value: term, partial: false }];
@@ -1600,7 +1681,16 @@ private struct SourceDocumentWebView: UIViewRepresentable {
                 }
 
                 if (bestMatch) {
-                  return focusEntry(bestMatch.entry, rawTerm);
+                  return focusEntry(bestMatch.entry, term);
+                }
+              }
+
+              for (const term of fallbackTerms) {
+                if (!term || term.length < 3) continue;
+
+                const directMatch = focusSelectionFallback(term);
+                if (directMatch) {
+                  return { matched: term, preview: directMatch.preview };
                 }
               }
 
@@ -1610,6 +1700,8 @@ private struct SourceDocumentWebView: UIViewRepresentable {
 
             webView.evaluateJavaScript(script) { [weak self] value, _ in
                 guard let self else { return }
+                guard self.activeSearchID == searchID else { return }
+                self.activeSearchID += 1
 
                 if let result = value as? [String: Any],
                    let matched = result["matched"] as? String,
