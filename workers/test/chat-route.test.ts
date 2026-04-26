@@ -72,6 +72,10 @@ describe("handleChatRoute", () => {
     plan: "free",
     identityKind: "local_device"
   } as const;
+  const legacyQuotaConfig = {
+    ...DEFAULT_REMOTE_CONFIG,
+    creditBillingEnabled: false
+  };
   const usage = {
     plan: "free",
     dateJST: "2026-04-18",
@@ -141,7 +145,7 @@ describe("handleChatRoute", () => {
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
       env,
-      config: DEFAULT_REMOTE_CONFIG,
+      config: legacyQuotaConfig,
       ctx
     });
 
@@ -189,7 +193,7 @@ describe("handleChatRoute", () => {
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
       env,
-      config: DEFAULT_REMOTE_CONFIG,
+      config: legacyQuotaConfig,
       ctx
     });
 
@@ -239,7 +243,7 @@ describe("handleChatRoute", () => {
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
       env,
-      config: DEFAULT_REMOTE_CONFIG,
+      config: legacyQuotaConfig,
       ctx
     });
 
@@ -336,7 +340,7 @@ describe("handleChatRoute", () => {
         }),
         url: new URL("https://kabuyomi.test/v1/chat"),
         env,
-        config: DEFAULT_REMOTE_CONFIG,
+        config: legacyQuotaConfig,
         ctx
       })
     ).rejects.toThrow("Gemini unavailable");
@@ -424,7 +428,7 @@ describe("handleChatRoute", () => {
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
       env,
-      config: DEFAULT_REMOTE_CONFIG,
+      config: legacyQuotaConfig,
       ctx
     });
 

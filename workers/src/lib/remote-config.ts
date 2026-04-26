@@ -53,7 +53,7 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   adsEnabled: true,
   chatEnabled: true,
   webSupplementEnabled: false,
-  creditBillingEnabled: false,
+  creditBillingEnabled: true,
   planCredits: {
     free: 30,
     lite: 150,

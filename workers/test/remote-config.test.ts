@@ -24,7 +24,7 @@ describe("remote config", () => {
     expect(config.trackedTickers).toHaveLength(30);
     expect(config.dailyRefreshEnabled).toBe(false);
     expect(config.webSupplementEnabled).toBe(false);
-    expect(config.creditBillingEnabled).toBe(false);
+    expect(config.creditBillingEnabled).toBe(true);
     expect(config.planCredits).toEqual({
       free: 30,
       lite: 150,
@@ -83,10 +83,15 @@ describe("remote config", () => {
     });
   });
 
-  it("enables credit billing for detached dev access without turning it on globally", () => {
-    expect(isCreditBillingEnabledForIdentity(DEFAULT_REMOTE_CONFIG, {})).toBe(false);
+  it("enables credit billing for detached dev access when the global credit flag is off", () => {
+    const creditOffConfig = {
+      ...DEFAULT_REMOTE_CONFIG,
+      creditBillingEnabled: false
+    };
+
+    expect(isCreditBillingEnabledForIdentity(creditOffConfig, {})).toBe(false);
     expect(
-      isCreditBillingEnabledForIdentity(DEFAULT_REMOTE_CONFIG, {
+      isCreditBillingEnabledForIdentity(creditOffConfig, {
         accessMode: "dev_unlimited"
       })
     ).toBe(true);
