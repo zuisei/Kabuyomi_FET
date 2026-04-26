@@ -337,7 +337,8 @@ function buildHistoricalDegradeResponse(
 
   return {
     answer: answerParts.join(" ").trim(),
-    sources: latestSnapshot.sources
+    sources: latestSnapshot.sources,
+    chargeable: false
   };
 }
 

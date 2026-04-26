@@ -48,7 +48,7 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
     requestedFiling = await prepareFilingForChat(requestedFiling, env, ctx);
     const creditOperationId = payload.operationId ?? crypto.randomUUID();
     const creditBillingEnabled = isCreditBillingEnabledForIdentity(config, identity);
-    const chatCharge = await chargeChat({
+    let chatCharge = await chargeChat({
       identity,
       env,
       config,
@@ -84,6 +84,33 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
         throw error;
       }
     })();
+
+    if (answer.chargeable === false) {
+      try {
+        const refund = await refundChat({
+          identity,
+          env,
+          config,
+          creditBillingEnabled,
+          chatCharge,
+          creditOperationId,
+          filingKey: requestedFiling.filingKey
+        });
+        chatCharge = chatChargeAfterRefund(refund, creditBillingEnabled);
+        logEvent("chat_non_chargeable_refunded", {
+          filingKey: requestedFiling.filingKey,
+          quotaSubject: identity.quotaSubject,
+          responsePath: answer.responsePath ?? "fallback",
+          creditBillingEnabled
+        });
+      } catch (refundError) {
+        logErrorEvent("chat_non_chargeable_refund_failed", {
+          filingKey: requestedFiling.filingKey,
+          quotaSubject: identity.quotaSubject,
+          reason: refundError instanceof Error ? refundError.message : String(refundError)
+        });
+      }
+    }
 
     logEvent("chat_request", {
       filingKey: requestedFiling.filingKey,
@@ -126,6 +153,7 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
 
 interface ChatChargeResult {
   usage: Awaited<ReturnType<typeof consumeChatQuota>>;
+  didMutate?: boolean;
   creditsCharged?: number;
   creditsRemaining?: number;
 }
@@ -147,7 +175,8 @@ async function chargeChat({
 }): Promise<ChatChargeResult> {
   if (!creditBillingEnabled) {
     return {
-      usage: await consumeChatQuota(identity, env, config)
+      usage: await consumeChatQuota(identity, env, config),
+      didMutate: true
     };
   }
 
@@ -161,6 +190,7 @@ async function chargeChat({
   });
   return {
     usage: credit.usage,
+    didMutate: credit.didMutate,
     creditsCharged: credit.creditsCharged ?? 0,
     creditsRemaining: credit.creditsRemaining
   };
@@ -187,15 +217,46 @@ async function refundChat({
     return refundChatQuota(identity, env, config);
   }
 
+  const creditsCharged = chatCharge.creditsCharged ?? 0;
+  if (creditsCharged <= 0) {
+    return {
+      usage: chatCharge.usage,
+      didMutate: false,
+      operationId: `refund:${creditOperationId}`,
+      creditsRefunded: 0,
+      creditsRemaining: chatCharge.creditsRemaining ?? chatCharge.usage.credits?.totalRemaining ?? 0
+    };
+  }
+
   return refundCredit(identity, env, config, {
     originalOperationId: creditOperationId,
     refundOperationId: `refund:${creditOperationId}`,
-    credits: chatCharge.creditsCharged ?? CHAT_CREDIT_COST,
+    credits: creditsCharged,
     reference: {
       type: "chat",
       id: filingKey
     }
   });
+}
+
+function chatChargeAfterRefund(
+  refund: CreditMutationResult | Awaited<ReturnType<typeof refundChatQuota>>,
+  creditBillingEnabled: boolean
+): ChatChargeResult {
+  if (!creditBillingEnabled) {
+    return {
+      usage: refund as Awaited<ReturnType<typeof refundChatQuota>>,
+      didMutate: true
+    };
+  }
+
+  const creditRefund = refund as CreditMutationResult;
+  return {
+    usage: creditRefund.usage,
+    didMutate: creditRefund.didMutate,
+    creditsCharged: 0,
+    creditsRemaining: creditRefund.creditsRemaining
+  };
 }
 
 async function prepareFilingForChat(

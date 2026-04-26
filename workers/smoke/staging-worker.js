@@ -194,10 +194,7 @@ async function checkChat(filingKey, previousUsage) {
   }
   assertUsagePayload(payload?.usage, "/v1/chat");
   assertChatMetadata(payload, "/v1/chat");
-  assertUsageDelta(payload.usage, {
-    chatsUsed: previousUsage.chatsUsed + 1,
-    stocksUsed: previousUsage.stocksUsed
-  }, "/v1/chat");
+  assertChatChargeDelta(payload, previousUsage, "/v1/chat", { allowFree: false });
 
   return payload.usage;
 }
@@ -229,10 +226,7 @@ async function checkHistoricalChat(filingKey, previousUsage) {
   }
   assertUsagePayload(payload?.usage, "/v1/chat historical");
   assertChatMetadata(payload, "/v1/chat historical");
-  assertUsageDelta(payload.usage, {
-    chatsUsed: previousUsage.chatsUsed + 1,
-    stocksUsed: previousUsage.stocksUsed
-  }, "/v1/chat historical");
+  assertChatChargeDelta(payload, previousUsage, "/v1/chat historical", { allowFree: true });
 
   return payload.usage;
 }
@@ -289,6 +283,53 @@ function assertUsageDelta(currentUsage, expectedUsage, label) {
   }
 }
 
+function assertChatChargeDelta(payload, previousUsage, label, { allowFree }) {
+  if (payload.usage.stocksUsed !== previousUsage.stocksUsed) {
+    throw new Error(
+      `${label} changed stocksUsed unexpectedly (got stocks=${payload.usage.stocksUsed}, expected ${previousUsage.stocksUsed})`
+    );
+  }
+
+  if (payload.usage.creditBillingEnabled) {
+    if (payload.usage.chatsUsed !== previousUsage.chatsUsed) {
+      throw new Error(
+        `${label} changed chatsUsed while credit billing is enabled (got chats=${payload.usage.chatsUsed}, expected ${previousUsage.chatsUsed})`
+      );
+    }
+
+    if (typeof payload.creditsCharged !== "number" || typeof payload.creditsRemaining !== "number") {
+      throw new Error(`${label} returned an unexpected credit charge payload`);
+    }
+
+    const previousCredits = previousUsage.credits?.totalRemaining;
+    const currentCredits = payload.usage.credits?.totalRemaining;
+    if (typeof previousCredits !== "number" || typeof currentCredits !== "number") {
+      throw new Error(`${label} returned an unexpected credit usage payload`);
+    }
+
+    const expectedCredits = previousCredits - payload.creditsCharged;
+    if (currentCredits !== expectedCredits || payload.creditsRemaining !== currentCredits) {
+      throw new Error(
+        `${label} returned unexpected credit delta (got charged=${payload.creditsCharged}, remaining=${currentCredits}, expected remaining=${expectedCredits})`
+      );
+    }
+
+    if (!allowFree && payload.creditsCharged <= 0) {
+      throw new Error(`${label} should charge credits`);
+    }
+
+    return;
+  }
+
+  const chatDelta = payload.usage.chatsUsed - previousUsage.chatsUsed;
+  const expectedDeltas = allowFree ? [0, 1] : [1];
+  if (!expectedDeltas.includes(chatDelta)) {
+    throw new Error(
+      `${label} returned unexpected chat quota delta (got delta=${chatDelta}, expected ${expectedDeltas.join(" or ")})`
+    );
+  }
+}
+
 async function checkBillingSync() {
   const activeClaimResponse = await fetch(`${baseURL}/v1/billing/sync`, {
     method: "POST",
@@ -302,12 +343,12 @@ async function checkBillingSync() {
     })
   });
 
-  if (activeClaimResponse.status !== 403) {
-    throw new Error(`/v1/billing/sync active claim expected 403, received ${activeClaimResponse.status}`);
+  if (activeClaimResponse.status !== 400) {
+    throw new Error(`/v1/billing/sync active claim expected 400, received ${activeClaimResponse.status}`);
   }
 
   const activeClaimPayload = await activeClaimResponse.json();
-  if (activeClaimPayload?.error !== "Billing verification is required") {
+  if (activeClaimPayload?.error !== "Subscription transaction id is required") {
     throw new Error("/v1/billing/sync active claim returned an unexpected error payload");
   }
 

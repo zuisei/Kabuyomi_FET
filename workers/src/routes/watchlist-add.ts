@@ -68,6 +68,16 @@ export const handleWatchlistAddRoute: RouteHandler = async ({ request, url, env,
             ticker: tickerRecord.ticker,
             reason: error instanceof Error ? error.message : String(error)
           });
+          if (stockQuota.didMutate) {
+            return refundStockQuota(identity, tickerRecord.ticker, env, config, { relatedTickers }).catch((refundError) => {
+              logErrorEvent("watchlist_add_async_quota_refund_failed", {
+                ticker: tickerRecord.ticker,
+                quotaSubject: identity.quotaSubject,
+                reason: refundError instanceof Error ? refundError.message : String(refundError)
+              });
+            });
+          }
+          return undefined;
         })
     );
 

@@ -19,6 +19,7 @@ export interface ChatResponsePayload {
   answer: string;
   sources: ChatEvidenceSource[];
   responsePath?: ChatResponsePath;
+  chargeable?: boolean;
 }
 
 export const CONTEXT_UNAVAILABLE_ANSWER = "この決算資料の範囲では確認できません。";
