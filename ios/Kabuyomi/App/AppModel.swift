@@ -187,6 +187,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         currentBillingTier.plan != BillingCatalog.free.plan
     }
 
+    var shouldShowBannerAds: Bool {
+        currentBillingTier.plan == BillingCatalog.free.plan
+    }
+
     var currentPlanBadgeTitle: String {
         usage?.displayPlanLabel ?? currentBillingTier.badgeTitle
     }

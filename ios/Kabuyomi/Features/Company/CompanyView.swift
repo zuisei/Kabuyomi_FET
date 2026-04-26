@@ -480,7 +480,8 @@ struct CompanyView: View {
                     .gesture(panelSwipeGesture(screenWidth: screenWidth))
             }
         }
-        .ignoresSafeArea()
+        .padding(.top, panelEdgeSwipeTopExclusionHeight)
+        .ignoresSafeArea(edges: [.leading, .trailing, .bottom])
         .accessibilityHidden(true)
     }
 
@@ -561,6 +562,10 @@ struct CompanyView: View {
 
     private func panelCloseHandleWidth(screenWidth: CGFloat) -> CGFloat {
         min(max(screenWidth * 0.12, 44), 56)
+    }
+
+    private var panelEdgeSwipeTopExclusionHeight: CGFloat {
+        isAccessibilityLayout ? 132 : 96
     }
 
     private func openPanel(_ panel: CompanySidePanel) {

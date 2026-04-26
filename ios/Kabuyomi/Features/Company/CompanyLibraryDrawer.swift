@@ -35,6 +35,7 @@ struct ConversationLibraryDrawer: View {
                 .padding(.bottom, 16)
             }
 
+            freePlanBanner
             footerDock
         }
         .padding(18)
@@ -199,6 +200,14 @@ struct ConversationLibraryDrawer: View {
                     action: openSettings
                 )
             }
+        }
+    }
+
+    @ViewBuilder
+    private var freePlanBanner: some View {
+        if appModel.shouldShowBannerAds {
+            AdMobBannerView(placement: .watchlist, horizontalPadding: 0)
+                .padding(.vertical, 2)
         }
     }
 

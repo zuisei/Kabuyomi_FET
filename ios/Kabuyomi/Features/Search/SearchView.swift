@@ -28,40 +28,7 @@ struct SearchView: View {
                 VStack(spacing: 16) {
                     searchBar
 
-                    if appModel.searchIsLoading {
-                        ProgressView("検索中...")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    } else if let searchErrorMessage = appModel.searchErrorMessage {
-                        SearchErrorState(message: searchErrorMessage) {
-                            searchNow(query)
-                        }
-                        .frame(maxHeight: .infinity)
-                    } else if appModel.searchResults.isEmpty && isBlankQuery {
-                        SearchHomeState(
-                            recentCompanies: recentCompanies,
-                            openCompany: openRecentCompany
-                        )
-                        .frame(maxHeight: .infinity)
-                    } else if appModel.searchResults.isEmpty {
-                        SearchEmptyState()
-                            .frame(maxHeight: .infinity)
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: 12) {
-                                ForEach(appModel.searchResults) { item in
-                                    SearchResultCard(
-                                        item: item,
-                                        isAdding: appModel.isAddingTicker(item.ticker),
-                                        isAdded: appModel.isTickerInWatchlist(item.ticker, cik: item.cik),
-                                        saveAction: { saveSearchResult(item) },
-                                        openAction: { openSearchResult(item) }
-                                    )
-                                }
-                            }
-                            .padding(.bottom, 20)
-                        }
-                        .scrollDismissesKeyboard(.interactively)
-                    }
+                    searchContent
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -90,6 +57,44 @@ struct SearchView: View {
         .onDisappear {
             searchTask?.cancel()
             isSearchFieldFocused = false
+        }
+    }
+
+    @ViewBuilder
+    private var searchContent: some View {
+        if appModel.searchIsLoading {
+            ProgressView("検索中...")
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        } else if let searchErrorMessage = appModel.searchErrorMessage {
+            SearchErrorState(message: searchErrorMessage) {
+                searchNow(query)
+            }
+            .frame(maxHeight: .infinity)
+        } else if appModel.searchResults.isEmpty && isBlankQuery {
+            SearchHomeState(
+                recentCompanies: recentCompanies,
+                openCompany: openRecentCompany
+            )
+            .frame(maxHeight: .infinity)
+        } else if appModel.searchResults.isEmpty {
+            SearchEmptyState()
+                .frame(maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(appModel.searchResults) { item in
+                        SearchResultCard(
+                            item: item,
+                            isAdding: appModel.isAddingTicker(item.ticker),
+                            isAdded: appModel.isTickerInWatchlist(item.ticker, cik: item.cik),
+                            saveAction: { saveSearchResult(item) },
+                            openAction: { openSearchResult(item) }
+                        )
+                    }
+                }
+                .padding(.bottom, 20)
+            }
+            .scrollDismissesKeyboard(.interactively)
         }
     }
 

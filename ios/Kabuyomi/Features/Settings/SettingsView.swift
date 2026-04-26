@@ -363,7 +363,7 @@ struct SettingsView: View {
         [
             LegalSection(
                 title: "収集する情報",
-                body: "Kabuyomi は、匿名の device key、利用回数、購読状態の最小情報、エラー診断の最小ログを扱います。氏名、メールアドレス、証券口座情報、保有資産情報は前提にしていません。"
+                body: "Kabuyomi は、匿名の device key、利用回数、購読状態の最小情報、エラー診断の最小ログを扱います。無料プランでは広告表示のため、Google AdMob SDK が広告識別子などの情報を扱う場合があります。氏名、メールアドレス、証券口座情報、保有資産情報は前提にしていません。"
             ),
             LegalSection(
                 title: "AI 利用時に送信する情報",
@@ -371,7 +371,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "第三者サービス",
-                body: "API と利用制限管理には Cloudflare、SEC の決算資料取得には SEC と sec-fetcher、AI 応答には外部 AI モデルを利用します。一部の技術ログはサービス品質確認のために記録されます。"
+                body: "API と利用制限管理には Cloudflare、SEC の決算資料取得には SEC と sec-fetcher、AI 応答には外部 AI モデル、無料プランの広告表示には Google AdMob を利用します。一部の技術ログはサービス品質確認のために記録されます。"
             ),
             LegalSection(
                 title: "保存期間",
@@ -405,7 +405,7 @@ struct SettingsView: View {
         [
             LegalSection(
                 title: "問い合わせ方法",
-                body: "不具合や改善要望がある場合は、スクリーンショット、対象ティッカー、再現手順を添えて報告してください。"
+                body: "不具合や改善要望は、メール kabuyomi.support@gmail.com または X（Twitter）@0xt4dano へ連絡してください。"
             ),
             LegalSection(
                 title: "報告してほしい内容",
@@ -413,7 +413,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "正式サポート",
-                body: "プライバシーポリシー、利用条件、サポート窓口はアプリ内およびApp Store Connectに登録されたサポートURLで案内します。"
+                body: "サポート窓口: kabuyomi.support@gmail.com / X（Twitter）: @0xt4dano"
             )
         ]
     }

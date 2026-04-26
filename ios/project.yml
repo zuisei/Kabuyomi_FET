@@ -17,6 +17,10 @@ settings:
     ENABLE_CODE_COVERAGE: NO
     CLANG_COVERAGE_MAPPING: NO
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+packages:
+  GoogleMobileAds:
+    url: https://github.com/googleads/swift-package-manager-google-mobile-ads.git
+    from: 13.0.0
 schemes:
   Kabuyomi:
     build:
@@ -44,14 +48,29 @@ targets:
     platform: iOS
     sources:
       - path: Kabuyomi
+    dependencies:
+      - package: GoogleMobileAds
+        product: GoogleMobileAds
+    info:
+      path: Kabuyomi/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDisplayName: Kabuyomi
+        UILaunchScreen:
+          UIColorName: ""
+          UIImageName: ""
+        UIApplicationSupportsIndirectInputEvents: true
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationCategoryType: public.app-category.finance
+        GADApplicationIdentifier: ca-app-pub-1248492954379402~7909080109
+        SKAdNetworkItems:
+          - SKAdNetworkIdentifier: cstr6suwn9.skadnetwork
     settings:
       base:
-        INFOPLIST_KEY_CFBundleDisplayName: Kabuyomi
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
-        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: NO
-        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
-        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.finance
+        GENERATE_INFOPLIST_FILE: NO
         PRODUCT_NAME: Kabuyomi
         TARGETED_DEVICE_FAMILY: "1"
   KabuyomiTests:
