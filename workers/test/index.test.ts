@@ -23,6 +23,40 @@ describe("worker routing", () => {
     passThroughOnException: vi.fn()
   } as never;
 
+  it("serves the public privacy policy without app authentication", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/legal/privacy"),
+      {
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    const body = await response.text();
+    expect(body).toContain("Kabuyomi プライバシーポリシー");
+    expect(body).toContain("kabuyomi.support@gmail.com");
+    expect(body).toContain("Google AdMob");
+  });
+
+  it("serves legal pages even while maintenance mode is enabled", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/legal/terms"),
+      {
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(JSON.stringify({ maintenanceMode: true }))
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("Kabuyomi 利用条件");
+  });
+
   it("does not mint pro from an unverifiable client-reported billing sync claim", async () => {
     const fetch = vi.fn();
     const response = await worker.fetch(

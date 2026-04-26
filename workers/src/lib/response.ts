@@ -9,6 +9,17 @@ export function json(data: unknown, init: ResponseInit = {}): Response {
   });
 }
 
+export function html(body: string, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  headers.set("content-type", "text/html; charset=utf-8");
+  headers.set("cache-control", "public, max-age=300");
+  headers.set("x-content-type-options", "nosniff");
+  return new Response(body, {
+    ...init,
+    headers
+  });
+}
+
 export function notFound(message = "Not found"): Response {
   return json({ error: message }, { status: 404 });
 }

@@ -16,6 +16,7 @@ import { handleCreditPurchaseGrantRoute } from "./routes/credit-purchase-grant";
 import { handleInternalBackfillHistoryRoute } from "./routes/internal-backfill-history";
 import { handleInternalCleanupFilingsRoute } from "./routes/internal-cleanup-filings";
 import { handleInternalCreditPurchaseGrantRoute } from "./routes/internal-credit-purchase-grant";
+import { handleLegalRoute } from "./routes/legal";
 import { handleSearchRoute } from "./routes/search";
 import { handleTranslateQuoteRoute } from "./routes/translate-quote";
 import type { RouteHandler } from "./routes/types";
@@ -26,6 +27,7 @@ import { handleWatchlistRemoveRoute } from "./routes/watchlist-remove";
 export { EntitlementDO, FilingLockDO, SecRateLimiterDO, UserQuotaDO };
 
 const preMaintenanceRoutes: RouteHandler[] = [
+  handleLegalRoute,
   handleInternalBackfillHistoryRoute,
   handleInternalCleanupFilingsRoute,
   handleInternalCreditPurchaseGrantRoute
