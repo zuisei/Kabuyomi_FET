@@ -8,7 +8,10 @@ struct ComposerBar: View {
     let isEnabled: Bool
     let placeholder: String
     let aiConsentGranted: Bool
+    let creditStatusText: String
+    let hasEnoughCredits: Bool
     let applyPrompt: (String) -> Void
+    let openCreditOptions: () -> Void
     let sendAction: () -> Void
 
     var body: some View {
@@ -17,6 +20,7 @@ struct ComposerBar: View {
                 consentStatusLine
             }
 
+            creditStatusLine
             inputControls
         }
         .padding(.horizontal, 16)
@@ -111,7 +115,7 @@ struct ComposerBar: View {
     }
 
     private var sendDisabled: Bool {
-        trimmedQuestion.isEmpty || isSending || !isEnabled
+        trimmedQuestion.isEmpty || isSending || !isEnabled || !hasEnoughCredits
     }
 
     private var sendButtonBackground: some View {
@@ -136,5 +140,32 @@ struct ComposerBar: View {
         .font(.system(.caption2, design: .rounded, weight: .semibold))
         .foregroundStyle(KabuyomiTheme.accentDeep)
         .padding(.horizontal, 4)
+        .dynamicTypeSize(.xSmall ... .accessibility2)
+    }
+
+    private var creditStatusLine: some View {
+        HStack(spacing: 8) {
+            Image(systemName: hasEnoughCredits ? "bolt.circle.fill" : "exclamationmark.circle.fill")
+                .font(.system(size: 12, weight: .bold))
+
+            Text(hasEnoughCredits ? creditStatusText : "\(creditStatusText) / credit不足")
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+
+            if !hasEnoughCredits {
+                Button("Credit") {
+                    openCreditOptions()
+                }
+                .font(.system(.caption2, design: .rounded, weight: .bold))
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+        }
+        .font(.system(.caption2, design: .rounded, weight: .semibold))
+        .foregroundStyle(hasEnoughCredits ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative)
+        .padding(.horizontal, 4)
+        .dynamicTypeSize(.xSmall ... .accessibility2)
     }
 }

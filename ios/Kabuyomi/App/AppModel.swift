@@ -202,6 +202,29 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         apiClient.baseURLDisplayString
     }
 
+    var chatCreditCost: Int {
+        1
+    }
+
+    var creditUsage: CreditUsagePayload? {
+        usage?.credits
+    }
+
+    var chatCreditStatusText: String {
+        guard let credits = usage?.credits else {
+            return "1 credit"
+        }
+        return "1 credit / 残り \(credits.totalRemaining)"
+    }
+
+    var hasChatCreditAvailable: Bool {
+        guard usage?.creditBillingEnabled == true,
+              let credits = usage?.credits else {
+            return true
+        }
+        return credits.totalRemaining >= chatCreditCost
+    }
+
     var currentDeviceKeyDisplay: String {
         deviceIdentity.deviceKey()
     }
@@ -396,6 +419,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             activeAlert = AppAlertState(message: "企業データを先に読み込んでください。", kind: .dismissOnly)
             return false
         }
+        guard hasChatCreditAvailable else {
+            requestCreditOptions()
+            return false
+        }
 
         let pendingStartedAt = Date()
         pendingChats[normalized] = PendingChatState(ticker: normalized, question: trimmed)
@@ -579,6 +606,13 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 端末識別情報は再生成され、最初からやり直す状態に戻ります。
 """,
             kind: .resetConfirmation
+        )
+    }
+
+    func requestCreditOptions() {
+        activeAlert = AppAlertState(
+            message: "creditが不足しています。設定のCredit画面から追加credit購入または広告視聴の導線を確認してください。",
+            kind: .dismissOnly
         )
     }
 
@@ -1038,6 +1072,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             return "本日のチャット上限に達しました。日付が変わってから再度お試しください。"
         }
 
+        if rawMessage.contains("insufficient_credits") || rawMessage.contains("creditが不足") {
+            return "creditが不足しています。設定のCredit画面から追加購入または広告視聴の導線を確認してください。"
+        }
+
         if rawMessage.contains("Watchlist limit exceeded") {
             return "現在の保存銘柄上限に達しました。"
         }
@@ -1096,6 +1134,8 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 return "レスポンスを解釈できませんでした。"
             case .server(let message):
                 return message
+            case .insufficientCredits(let required, let remaining):
+                return "insufficient_credits required=\(required) remaining=\(remaining)"
             }
         }
 
@@ -1132,7 +1172,9 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             stockLimit: usage.stockLimit,
             dateJST: usage.dateJST,
             savedTickers: mergedTickers,
-            accessMode: usage.accessMode
+            accessMode: usage.accessMode,
+            credits: usage.credits,
+            creditBillingEnabled: usage.creditBillingEnabled
         )
     }
 

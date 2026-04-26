@@ -118,7 +118,15 @@ enum TestFixtures {
             stockLimit: 3,
             dateJST: "2026-04-17",
             savedTickers: ["AAPL"],
-            accessMode: nil
+            accessMode: nil,
+            credits: CreditUsagePayload(
+                monthlyRemaining: 30,
+                monthlyLimit: 30,
+                purchasedRemaining: 0,
+                totalRemaining: 30,
+                resetsAt: "2026-05-01T00:00:00+09:00"
+            ),
+            creditBillingEnabled: false
         )
     }
 
@@ -137,7 +145,9 @@ enum TestFixtures {
             ],
             responsePath: .gemini,
             modelName: AIModelName.remoteFallback,
-            usage: usagePayload()
+            usage: usagePayload(),
+            creditsCharged: 1,
+            creditsRemaining: 29
         )
     }
 

@@ -94,7 +94,7 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
       sources: answer.sources,
       responsePath: answer.responsePath,
       modelName: answer.responsePath === "gemini" ? resolveGeminiModel(env) : null,
-      usage: chatCharge.usage,
+      usage: { ...chatCharge.usage, creditBillingEnabled: config.creditBillingEnabled },
       creditsCharged: chatCharge.creditsCharged,
       creditsRemaining: chatCharge.creditsRemaining
     });

@@ -325,7 +325,10 @@ struct CompanyView: View {
                 isEnabled: companyCanChat,
                 placeholder: composerPlaceholder,
                 aiConsentGranted: appModel.aiConsentGranted,
+                creditStatusText: appModel.chatCreditStatusText,
+                hasEnoughCredits: appModel.hasChatCreditAvailable,
                 applyPrompt: { question = $0 },
+                openCreditOptions: openSettingsScreen,
                 sendAction: sendCurrentQuestion
             )
         }

@@ -12,6 +12,7 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(spacing: 16) {
                         planCard
+                        creditCard
                         #if DEBUG
                         devCard
                         #endif
@@ -31,6 +32,67 @@ struct SettingsView: View {
                     }
                     .font(.system(.body, design: .rounded, weight: .semibold))
                     .foregroundStyle(KabuyomiTheme.accentDeep)
+                }
+            }
+        }
+    }
+
+    private var creditCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 10) {
+                    Image(systemName: "creditcard.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                    Text("Credit")
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Spacer()
+                }
+
+                if let credits = appModel.usage?.credits {
+                    VStack(spacing: 10) {
+                        CreditMetricRow(title: "残高", value: "\(credits.totalRemaining) credits")
+                        CreditMetricRow(title: "月間", value: "\(credits.monthlyRemaining) / \(credits.monthlyLimit)")
+                        CreditMetricRow(title: "購入分", value: "\(credits.purchasedRemaining)")
+                    }
+
+                    Text("月間creditは \(credits.resetsAt) にリセットされます。通常チャットは1回あたり1 creditです。")
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                } else if appModel.isUsageSynchronizing {
+                    Text("credit残高を同期中です。")
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                } else {
+                    Text("credit残高は次回の利用状況同期で表示されます。")
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                }
+
+                HStack(spacing: 10) {
+                    Button {
+                        appModel.activeAlert = AppAlertState(
+                            message: "追加credit購入は次の実装でStoreKitに接続します。現時点ではまだ購入処理は行いません。",
+                            kind: .dismissOnly
+                        )
+                    } label: {
+                        Label("追加購入", systemImage: "plus.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(KabuyomiTheme.accentDeep)
+
+                    Button {
+                        appModel.activeAlert = AppAlertState(
+                            message: "広告視聴でcreditを増やす導線は次の実装で接続します。現時点ではまだ広告SDKは使いません。",
+                            kind: .dismissOnly
+                        )
+                    } label: {
+                        Label("広告で増やす", systemImage: "play.rectangle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
         }
@@ -380,6 +442,29 @@ private struct BillingTierRow: View {
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(KabuyomiTheme.fill(for: isCurrent ? .secondary : .muted))
+        )
+    }
+}
+
+private struct CreditMetricRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+            Spacer()
+            Text(value)
+                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.ink)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(KabuyomiTheme.fill(for: .muted))
         )
     }
 }

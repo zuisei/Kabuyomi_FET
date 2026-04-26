@@ -143,7 +143,8 @@ struct APIClient {
             body: ChatRequest(
                 filingKey: filingKey,
                 question: question,
-                conversationContext: conversationContext
+                conversationContext: conversationContext,
+                operationId: UUID().uuidString
             )
         )
     }
@@ -245,6 +246,12 @@ struct APIClient {
         }
         guard 200..<300 ~= httpResponse.statusCode else {
             let payload = try? JSONDecoder().decode(APIErrorPayload.self, from: data)
+            if httpResponse.statusCode == 402, payload?.error == "insufficient_credits" {
+                throw APIError.insufficientCredits(
+                    required: payload?.creditsRequired ?? 1,
+                    remaining: payload?.creditsRemaining ?? 0
+                )
+            }
             throw APIError.server(payload?.error ?? "HTTP \(httpResponse.statusCode)")
         }
 
@@ -264,11 +271,14 @@ struct APIClient {
 
 private struct APIErrorPayload: Decodable {
     let error: String
+    let creditsRequired: Int?
+    let creditsRemaining: Int?
 }
 
 enum APIError: LocalizedError, Equatable {
     case invalidResponse
     case server(String)
+    case insufficientCredits(required: Int, remaining: Int)
 
     var errorDescription: String? {
         switch self {
@@ -276,6 +286,8 @@ enum APIError: LocalizedError, Equatable {
             "レスポンスを解釈できませんでした。"
         case .server(let message):
             message
+        case .insufficientCredits(let required, let remaining):
+            "creditが不足しています。必要: \(required)、残り: \(remaining)"
         }
     }
 }

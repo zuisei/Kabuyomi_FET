@@ -310,6 +310,8 @@ struct ChatResponse: Decodable {
     let responsePath: ChatResponsePath?
     let modelName: String?
     let usage: UsagePayload
+    let creditsCharged: Int?
+    let creditsRemaining: Int?
 }
 
 struct QuoteTranslationResponse: Decodable {
@@ -382,6 +384,8 @@ struct UsagePayload: Decodable, Hashable {
     let dateJST: String
     let savedTickers: [String]?
     let accessMode: String?
+    let credits: CreditUsagePayload?
+    let creditBillingEnabled: Bool?
 
     var detachedAccessMode: DetachedAccessMode? {
         guard let accessMode else { return nil }
@@ -414,6 +418,18 @@ struct UsagePayload: Decodable, Hashable {
     }
 }
 
+struct CreditUsagePayload: Decodable, Hashable {
+    let monthlyRemaining: Int
+    let monthlyLimit: Int
+    let purchasedRemaining: Int
+    let totalRemaining: Int
+    let resetsAt: String
+
+    var hasChatCredit: Bool {
+        totalRemaining >= 1
+    }
+}
+
 struct BillingSyncRequest: Encodable {
     let originalTransactionId: String
     let productId: String?
@@ -429,6 +445,7 @@ struct ChatRequest: Encodable {
     let filingKey: String
     let question: String
     let conversationContext: [ChatContextMessage]
+    let operationId: String
 }
 
 struct BillingSyncResponse: Decodable {

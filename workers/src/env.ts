@@ -111,6 +111,7 @@ export interface UsageState {
   dateJST: string;
   savedTickers?: string[];
   credits?: CreditUsageState;
+  creditBillingEnabled?: boolean;
 }
 
 export interface CreditUsageState {

@@ -60,7 +60,9 @@ final class PersistenceControllerTests: XCTestCase {
                 ],
                 responsePath: nil,
                 modelName: "gemini-2.5-flash",
-                usage: TestFixtures.usagePayload()
+                usage: TestFixtures.usagePayload(),
+                creditsCharged: nil,
+                creditsRemaining: nil
             ),
             for: company
         )
@@ -128,7 +130,9 @@ final class PersistenceControllerTests: XCTestCase {
                 ],
                 responsePath: nil,
                 modelName: nil,
-                usage: TestFixtures.usagePayload()
+                usage: TestFixtures.usagePayload(),
+                creditsCharged: nil,
+                creditsRemaining: nil
             ),
             for: company
         )
@@ -158,7 +162,9 @@ final class PersistenceControllerTests: XCTestCase {
                 ],
                 responsePath: .deterministic,
                 modelName: nil,
-                usage: TestFixtures.usagePayload()
+                usage: TestFixtures.usagePayload(),
+                creditsCharged: nil,
+                creditsRemaining: nil
             ),
             for: company
         )

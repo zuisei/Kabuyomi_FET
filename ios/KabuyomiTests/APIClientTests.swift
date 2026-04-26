@@ -316,6 +316,7 @@ final class APIClientTests: XCTestCase {
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             XCTAssertEqual(json["filingKey"] as? String, "v1:AAPL:0000320193-24-000001")
             XCTAssertEqual(json["question"] as? String, "なぜ？")
+            XCTAssertNotNil(json["operationId"] as? String)
             let context = try XCTUnwrap(json["conversationContext"] as? [[String: String]])
             XCTAssertEqual(context, [
                 ["role": "user", "content": "営業CF"],

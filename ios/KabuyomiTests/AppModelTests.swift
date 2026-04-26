@@ -277,7 +277,9 @@ final class AppModelTests: XCTestCase {
             stockLimit: 3,
             dateJST: "2026-04-23",
             savedTickers: [],
-            accessMode: nil
+            accessMode: nil,
+            credits: nil,
+            creditBillingEnabled: nil
         )
 
         MockAppModelURLProtocol.requestHandler = { request in
@@ -297,6 +299,43 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.aiConsentGranted)
         XCTAssertNil(model.activeAlert)
         XCTAssertEqual(model.usage?.chatsUsed, 0)
+    }
+
+    func testSendChatBlocksLocallyWhenCreditBalanceIsZero() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let company = TestFixtures.companyPayload()
+        try persistence.saveCompany(company, searchItem: nil)
+
+        let model = makeAppModel(persistence: persistence)
+        model.setAIConsent(true)
+        model.usage = UsagePayload(
+            plan: "free",
+            chatsUsed: 0,
+            chatLimit: 10,
+            stocksUsed: 1,
+            stockLimit: 3,
+            dateJST: "2026-04-26",
+            savedTickers: ["AAPL"],
+            accessMode: nil,
+            credits: CreditUsagePayload(
+                monthlyRemaining: 0,
+                monthlyLimit: 30,
+                purchasedRemaining: 0,
+                totalRemaining: 0,
+                resetsAt: "2026-05-01T00:00:00+09:00"
+            ),
+            creditBillingEnabled: true
+        )
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            XCTFail("Unexpected network request: \(request.url?.path ?? "")")
+            throw URLError(.badServerResponse)
+        }
+
+        let didSend = await model.sendChat(question: "売上高は？", ticker: "AAPL")
+
+        XCTAssertFalse(didSend)
+        XCTAssertEqual(model.activeAlert?.message, "creditが不足しています。設定のCredit画面から追加credit購入または広告視聴の導線を確認してください。")
     }
 
     func testResetLocalDataClearsRecentStateAndRotatesDeviceIdentity() async throws {
@@ -694,7 +733,9 @@ final class AppModelTests: XCTestCase {
                 sources: [],
                 responsePath: .deterministic,
                 modelName: nil,
-                usage: TestFixtures.usagePayload()
+                usage: TestFixtures.usagePayload(),
+                creditsCharged: nil,
+                creditsRemaining: nil
             ),
             for: company
         )
