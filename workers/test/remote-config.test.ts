@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_REMOTE_CONFIG, loadRemoteConfig, resetRemoteConfigMemoryCache } from "../src/lib/remote-config";
+import {
+  DEFAULT_REMOTE_CONFIG,
+  isCreditBillingEnabledForIdentity,
+  loadRemoteConfig,
+  resetRemoteConfigMemoryCache
+} from "../src/lib/remote-config";
 
 describe("remote config", () => {
   afterEach(() => {
@@ -69,6 +74,15 @@ describe("remote config", () => {
       lite: 120,
       pro: 450
     });
+  });
+
+  it("enables credit billing for detached dev access without turning it on globally", () => {
+    expect(isCreditBillingEnabledForIdentity(DEFAULT_REMOTE_CONFIG, {})).toBe(false);
+    expect(
+      isCreditBillingEnabledForIdentity(DEFAULT_REMOTE_CONFIG, {
+        accessMode: "dev_unlimited"
+      })
+    ).toBe(true);
   });
 
   it("normalizes tracked tickers and caps the beta warm set at 30 tickers", async () => {

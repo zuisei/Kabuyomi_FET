@@ -484,7 +484,7 @@ describe("worker routing", () => {
       stockLimit: Number.MAX_SAFE_INTEGER,
       savedTickers: [],
       dateJST: "2026-04-20",
-      creditBillingEnabled: false
+      creditBillingEnabled: true
     });
   });
 

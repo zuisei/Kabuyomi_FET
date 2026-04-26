@@ -395,6 +395,51 @@ describe("handleChatRoute", () => {
     });
   });
 
+  it("uses credit billing for detached dev access without the global credit flag", async () => {
+    mockReadQuotaIdentity.mockResolvedValue({
+      ...identity,
+      plan: "pro",
+      identityKind: "detached_device",
+      accessMode: "dev_unlimited"
+    } as never);
+    mockBuildChatResponse.mockResolvedValue({
+      answer: "Detached credit answer",
+      sources: [],
+      responsePath: "gemini"
+    });
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123",
+          "x-kabuyomi-detached-access": "dev_unlimited"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "ガイダンスの見方は？",
+          operationId: "chat-op-1"
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env,
+      config: DEFAULT_REMOTE_CONFIG,
+      ctx
+    });
+
+    expect(response?.status).toBe(200);
+    expect(mockConsumeChatQuota).not.toHaveBeenCalled();
+    expect(mockConsumeCredit).toHaveBeenCalled();
+    await expect(response?.json()).resolves.toMatchObject({
+      usage: {
+        creditBillingEnabled: true
+      },
+      creditsCharged: 1,
+      creditsRemaining: 29
+    });
+  });
+
   it("refunds credit when chat generation fails after credit consumption", async () => {
     mockBuildChatResponse.mockRejectedValue(new Error("Gemini unavailable"));
 

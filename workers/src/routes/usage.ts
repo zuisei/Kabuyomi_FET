@@ -1,5 +1,6 @@
 import { loadUsage } from "../lib/pipeline";
 import { readQuotaIdentity } from "../lib/quota";
+import { isCreditBillingEnabledForIdentity } from "../lib/remote-config";
 import { json } from "../lib/response";
 import type { RouteHandler } from "./types";
 
@@ -10,5 +11,5 @@ export const handleUsageRoute: RouteHandler = async ({ request, url, env, config
 
   const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
   const usage = await loadUsage(identity, env, config);
-  return json({ ...usage, creditBillingEnabled: config.creditBillingEnabled });
+  return json({ ...usage, creditBillingEnabled: isCreditBillingEnabledForIdentity(config, identity) });
 };

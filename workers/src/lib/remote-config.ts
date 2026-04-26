@@ -30,6 +30,10 @@ export interface RemoteConfig {
   trackedTickers: string[];
 }
 
+interface CreditBillingIdentity {
+  accessMode?: string;
+}
+
 const CURRENT_EXTRACTOR_VERSION = "v6";
 const REMOTE_CONFIG_MEMORY_TTL_MS = 60 * 1000;
 
@@ -143,6 +147,13 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
 
 export function resetRemoteConfigMemoryCache(): void {
   remoteConfigMemoryCaches = new WeakMap<KVNamespace, RemoteConfigMemoryCache>();
+}
+
+export function isCreditBillingEnabledForIdentity(
+  config: Pick<RemoteConfig, "creditBillingEnabled">,
+  identity: CreditBillingIdentity
+): boolean {
+  return config.creditBillingEnabled || identity.accessMode === "dev_unlimited";
 }
 
 function normalizeExtractorVersion(rawValue: unknown): string {

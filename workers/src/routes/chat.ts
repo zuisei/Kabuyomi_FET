@@ -15,6 +15,7 @@ import {
 } from "../lib/quota";
 import { parseJsonBody } from "../lib/request";
 import { logErrorEvent, logEvent } from "../lib/logging";
+import { isCreditBillingEnabledForIdentity } from "../lib/remote-config";
 import { json, notFound, unavailable } from "../lib/response";
 import type { RouteHandler } from "./types";
 
@@ -44,10 +45,12 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
     const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
     requestedFiling = await prepareFilingForChat(requestedFiling, env, ctx);
     const creditOperationId = payload.operationId ?? crypto.randomUUID();
+    const creditBillingEnabled = isCreditBillingEnabledForIdentity(config, identity);
     const chatCharge = await chargeChat({
       identity,
       env,
       config,
+      creditBillingEnabled,
       creditOperationId,
       filingKey: requestedFiling.filingKey
     });
@@ -64,6 +67,7 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
             identity,
             env,
             config,
+            creditBillingEnabled,
             chatCharge,
             creditOperationId,
             filingKey: requestedFiling.filingKey
@@ -94,7 +98,7 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
       sources: answer.sources,
       responsePath: answer.responsePath,
       modelName: answer.responsePath === "gemini" ? resolveGeminiModel(env) : null,
-      usage: { ...chatCharge.usage, creditBillingEnabled: config.creditBillingEnabled },
+      usage: { ...chatCharge.usage, creditBillingEnabled },
       creditsCharged: chatCharge.creditsCharged,
       creditsRemaining: chatCharge.creditsRemaining
     });
@@ -128,16 +132,18 @@ async function chargeChat({
   identity,
   env,
   config,
+  creditBillingEnabled,
   creditOperationId,
   filingKey
 }: {
   identity: Awaited<ReturnType<typeof readQuotaIdentity>>;
   env: Parameters<typeof consumeChatQuota>[1];
   config: Parameters<typeof consumeChatQuota>[2];
+  creditBillingEnabled: boolean;
   creditOperationId: string;
   filingKey: string;
 }): Promise<ChatChargeResult> {
-  if (!config.creditBillingEnabled) {
+  if (!creditBillingEnabled) {
     return {
       usage: await consumeChatQuota(identity, env, config)
     };
@@ -162,6 +168,7 @@ async function refundChat({
   identity,
   env,
   config,
+  creditBillingEnabled,
   chatCharge,
   creditOperationId,
   filingKey
@@ -169,11 +176,12 @@ async function refundChat({
   identity: Awaited<ReturnType<typeof readQuotaIdentity>>;
   env: Parameters<typeof consumeChatQuota>[1];
   config: Parameters<typeof consumeChatQuota>[2];
+  creditBillingEnabled: boolean;
   chatCharge: ChatChargeResult;
   creditOperationId: string;
   filingKey: string;
 }): Promise<CreditMutationResult | Awaited<ReturnType<typeof refundChatQuota>>> {
-  if (!config.creditBillingEnabled) {
+  if (!creditBillingEnabled) {
     return refundChatQuota(identity, env, config);
   }
 
