@@ -19,7 +19,14 @@ When recording an evaluation run, write one JSON object per answer:
 {
   "evalSetVersion": "chat-quality-v1",
   "runId": "2026-04-26-baseline",
+  "evalMode": "full",
+  "runStartedAt": "2026-04-26T11:00:00.000Z",
+  "rowStartedAt": "2026-04-26T11:00:03.000Z",
+  "baseURL": "https://kabuyomi-api.example.workers.dev",
+  "deviceKey": "eval-chat-quality-v1",
+  "appVersion": "8a832f9",
   "ticker": "AAPL",
+  "filingKey": "v6:0000320193:000032019326000006",
   "questionId": "AAPL-01",
   "question": "何の会社？",
   "answer": "...",
@@ -28,6 +35,9 @@ When recording an evaluation run, write one JSON object per answer:
   "promptTokenCount": 1200,
   "sourceCount": 2,
   "latencyMs": 900,
+  "creditBillingEnabled": true,
+  "creditsCharged": 2,
+  "creditsRemaining": 498,
   "answerRating": 4,
   "failureLabelsObserved": ["good"],
   "notes": ""
@@ -64,3 +74,13 @@ KABUYOMI_EVAL_BASE_URL=https://kabuyomi-api.example.workers.dev npm run eval:cha
 ```
 
 Output is written to `eval/runs/<runId>.jsonl`. Live runs consume chat credits.
+
+For a full run:
+
+```bash
+KABUYOMI_EVAL_BASE_URL=https://kabuyomi-api.example.workers.dev \
+KABUYOMI_EVAL_DEVICE_KEY=eval-chat-quality-v1 \
+KABUYOMI_EVAL_MODE=full \
+KABUYOMI_EVAL_LIMIT=50 \
+npm run eval:chat:pilot
+```

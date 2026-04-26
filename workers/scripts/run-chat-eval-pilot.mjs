@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { execFileSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const datasetPath = join(__dirname, "../eval/chat-quality-v1.jsonl");
@@ -10,6 +11,8 @@ const baseURL = process.env.KABUYOMI_EVAL_BASE_URL?.trim();
 const runId = process.env.KABUYOMI_EVAL_RUN_ID?.trim() || buildRunId();
 const deviceKey = process.env.KABUYOMI_EVAL_DEVICE_KEY?.trim() || `eval-pilot-${runId}`;
 const maxQuestions = Number.parseInt(process.env.KABUYOMI_EVAL_LIMIT ?? "5", 10);
+const evalMode = process.env.KABUYOMI_EVAL_MODE?.trim() || "pilot";
+const appVersion = process.env.KABUYOMI_EVAL_APP_VERSION?.trim() || gitRevision();
 
 if (!baseURL) {
   console.error(
@@ -19,13 +22,15 @@ if (!baseURL) {
 }
 
 const dataset = await loadDataset();
-const rows = firstQuestionPerTicker(dataset).slice(0, maxQuestions);
+const rows = selectRows(dataset);
 const outputPath = join(runsDir, `${runId}.jsonl`);
 const results = [];
 const filingKeyByTicker = new Map();
+const runStartedAt = new Date().toISOString();
 
 for (const row of rows) {
   const startedAt = Date.now();
+  const rowStartedAt = new Date(startedAt).toISOString();
   const filingKey = await resolveFilingKey(row.ticker);
   const response = await fetch(`${baseURL}/v1/chat`, {
     method: "POST",
@@ -48,7 +53,14 @@ for (const row of rows) {
   const result = {
     evalSetVersion: row.evalSetVersion,
     runId,
+    evalMode,
+    runStartedAt,
+    rowStartedAt,
+    baseURL,
+    deviceKey,
+    appVersion,
     ticker: row.ticker,
+    filingKey,
     questionId: row.questionId,
     question: row.question,
     intent: row.intent,
@@ -63,6 +75,8 @@ for (const row of rows) {
     latencyMs: Date.now() - startedAt,
     creditsCharged: payload.creditsCharged ?? null,
     creditsRemaining: payload.creditsRemaining ?? payload.usage?.credits?.totalRemaining ?? null,
+    creditBillingEnabled: payload.usage?.creditBillingEnabled ?? null,
+    usageCredits: payload.usage?.credits ?? null,
     answerRating: null,
     failureLabelsObserved: [],
     notes: ""
@@ -98,6 +112,18 @@ function firstQuestionPerTicker(rows) {
   return selected;
 }
 
+function selectRows(rows) {
+  if (evalMode === "full") {
+    return rows.slice(0, maxQuestions);
+  }
+
+  if (evalMode !== "pilot") {
+    throw new Error(`Unknown KABUYOMI_EVAL_MODE: ${evalMode}`);
+  }
+
+  return firstQuestionPerTicker(rows).slice(0, maxQuestions);
+}
+
 async function resolveFilingKey(ticker) {
   const cached = filingKeyByTicker.get(ticker);
   if (cached) {
@@ -124,4 +150,15 @@ async function resolveFilingKey(ticker) {
 
 function buildRunId() {
   return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+function gitRevision() {
+  try {
+    return execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+      cwd: join(__dirname, "../.."),
+      encoding: "utf8"
+    }).trim();
+  } catch {
+    return null;
+  }
 }
