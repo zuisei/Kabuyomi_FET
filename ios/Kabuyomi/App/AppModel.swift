@@ -325,7 +325,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         guard !billingActionInFlight else { return }
         guard isCreditBillingEnabled else {
             activeAlert = AppAlertState(
-                message: "クレジット購入は現在準備中です。通常チャットはこれまで通り利用できます。",
+                message: "追加credit購入は現在利用できません。月額プランから利用してください。",
                 kind: .dismissOnly
             )
             return

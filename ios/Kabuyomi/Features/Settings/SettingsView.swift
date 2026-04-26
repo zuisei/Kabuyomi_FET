@@ -44,7 +44,7 @@ struct SettingsView: View {
                     Image(systemName: "creditcard.fill")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.accentDeep)
-                    Text("Credit")
+                    Text("クレジット")
                         .font(.system(.headline, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.ink)
                     Spacer()
@@ -53,11 +53,13 @@ struct SettingsView: View {
                 if let credits = appModel.usage?.credits {
                     VStack(spacing: 10) {
                         CreditMetricRow(title: "残高", value: "\(credits.totalRemaining) credits")
-                        CreditMetricRow(title: "月間", value: "\(credits.monthlyRemaining) / \(credits.monthlyLimit)")
-                        CreditMetricRow(title: "追加分", value: "\(credits.purchasedRemaining)")
+                        CreditMetricRow(title: "月間プラン", value: "\(credits.monthlyRemaining) / \(credits.monthlyLimit)")
+                        if credits.purchasedRemaining > 0 {
+                            CreditMetricRow(title: "購入分", value: "\(credits.purchasedRemaining)")
+                        }
                     }
 
-                    Text("通常チャットは1回あたり1 creditです。月間creditは \(credits.resetsAt) にリセットされます。")
+                    Text("AIチャットは1回あたり1 creditです。月間creditは \(formattedResetDate(credits.resetsAt)) にリセットされます。")
                         .font(.footnote)
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 } else if appModel.isUsageSynchronizing {
@@ -70,18 +72,26 @@ struct SettingsView: View {
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
-                if appModel.isCreditBillingEnabled {
-                    Label("月額プランのcreditから消費されます", systemImage: "checkmark.seal.fill")
-                        .font(.system(.footnote, design: .rounded, weight: .semibold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
-                } else {
-                    Label("credit消費は現在無効です", systemImage: "lock.fill")
-                        .font(.system(.footnote, design: .rounded, weight: .semibold))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                Label("月額プランのcreditでAIチャットを利用できます", systemImage: "checkmark.seal.fill")
+                    .font(.system(.footnote, design: .rounded, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
             }
         }
+    }
+
+    private func formattedResetDate(_ rawValue: String) -> String {
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withColonSeparatorInTimeZone]
+
+        guard let date = isoFormatter.date(from: rawValue) else {
+            return rawValue
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.timeZone = TimeZone(identifier: "Asia/Tokyo")
+        formatter.setLocalizedDateFormatFromTemplate("M月d日")
+        return formatter.string(from: date)
     }
 
     private var planCard: some View {
@@ -101,27 +111,23 @@ struct SettingsView: View {
                     Spacer()
                 }
 
-                Text("月間credit付きプランに登録すると、通常チャットで使えるcreditが毎月付与されます。")
+                Text("月間credit付きプランに登録すると、AIチャットで使えるcreditが毎月付与されます。")
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
 
-                if let usage = appModel.usage {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("今日のチャット: \(usage.chatsUsed) / \(appModel.displayChatLimit(for: usage))")
-                        Text("保存銘柄: \(usage.stocksUsed) / \(appModel.displayStockLimit(for: usage))")
-                    }
-                    .font(.system(.body, design: .rounded, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                } else if appModel.isUsageSynchronizing {
+                if appModel.usage == nil && appModel.isUsageSynchronizing {
                     Text("利用状況を同期中です。")
                         .foregroundStyle(KabuyomiTheme.inkMuted)
-                } else {
+                } else if appModel.usage == nil {
                     Text("利用状況を読み込み中です。")
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
                 VStack(spacing: 10) {
-                    BillingTierRow(tier: BillingCatalog.free, isCurrent: appModel.currentBillingTier.plan == BillingCatalog.free.plan)
+                    BillingTierRow(
+                        tier: BillingCatalog.free,
+                        isCurrent: appModel.currentBillingTier.plan == BillingCatalog.free.plan
+                    )
                     ForEach(appModel.subscriptionProducts) { product in
                         Button {
                             Task {
@@ -139,6 +145,7 @@ struct SettingsView: View {
                                 || appModel.currentBillingTier.plan == product.tier.plan
                                 || !product.isAvailable
                         )
+                        .opacity(product.isAvailable ? 1 : 0.72)
                     }
                 }
 
@@ -280,7 +287,7 @@ struct SettingsView: View {
                 NavigationLink {
                     LegalDocumentView(
                         title: "プライバシーポリシー",
-                        subtitle: "beta 期間中の最小開示",
+                        subtitle: "データの取り扱い",
                         sections: privacySections
                     )
                 } label: {
@@ -294,13 +301,13 @@ struct SettingsView: View {
                 NavigationLink {
                     LegalDocumentView(
                         title: "利用条件",
-                        subtitle: "Kabuyomi beta の前提",
+                        subtitle: "Kabuyomi の利用条件",
                         sections: termsSections
                     )
                 } label: {
                     SettingsLinkRow(
                         title: "利用条件",
-                        subtitle: "投資助言ではないこと / beta 利用条件"
+                        subtitle: "投資助言ではないこと / 利用条件"
                     )
                 }
                 .buttonStyle(.plain)
@@ -308,13 +315,13 @@ struct SettingsView: View {
                 NavigationLink {
                     LegalDocumentView(
                         title: "サポート",
-                        subtitle: "beta フィードバック窓口",
+                        subtitle: "問い合わせと不具合報告",
                         sections: supportSections
                     )
                 } label: {
                     SettingsLinkRow(
                         title: "サポート",
-                        subtitle: "TestFlight からのフィードバック案内"
+                        subtitle: "問い合わせに必要な情報"
                     )
                 }
                 .buttonStyle(.plain)
@@ -348,7 +355,7 @@ struct SettingsView: View {
         [
             LegalSection(
                 title: "収集する情報",
-                body: "Kabuyomi beta は、匿名の device key、利用回数、購読状態の最小情報、エラー診断の最小ログを扱います。氏名、メールアドレス、証券口座情報、保有資産情報は前提にしていません。"
+                body: "Kabuyomi は、匿名の device key、利用回数、購読状態の最小情報、エラー診断の最小ログを扱います。氏名、メールアドレス、証券口座情報、保有資産情報は前提にしていません。"
             ),
             LegalSection(
                 title: "AI 利用時に送信する情報",
@@ -356,7 +363,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "第三者サービス",
-                body: "API と利用制限管理には Cloudflare、SEC の決算資料取得には SEC と sec-fetcher、AI 応答には外部 AI モデルを利用します。beta 環境では一部の技術ログがサービス品質確認のために記録されます。"
+                body: "API と利用制限管理には Cloudflare、SEC の決算資料取得には SEC と sec-fetcher、AI 応答には外部 AI モデルを利用します。一部の技術ログはサービス品質確認のために記録されます。"
             ),
             LegalSection(
                 title: "保存期間",
@@ -372,8 +379,8 @@ struct SettingsView: View {
                 body: "Kabuyomi は SEC EDGAR の公開提出書類を日本語で読みやすくするための情報提供アプリです。投資助言、売買推奨、株価予測、アナリスト予想比較は提供しません。"
             ),
             LegalSection(
-                title: "beta 利用の前提",
-                body: "beta 版では仕様、UI、利用制限、出力品質が予告なく変更されることがあります。要約やチャットには誤りや省略が含まれる可能性があるため、必ず原文も確認してください。"
+                title: "利用の前提",
+                body: "仕様、UI、利用制限、出力品質は改善のため変更されることがあります。要約やチャットには誤りや省略が含まれる可能性があるため、必ず原文も確認してください。"
             ),
             LegalSection(
                 title: "禁止事項",
@@ -381,7 +388,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "免責",
-                body: "Kabuyomi の情報を用いた投資判断は利用者自身の責任で行ってください。beta 版の不具合や停止によって生じる損失について、現段階では補償を前提としていません。"
+                body: "Kabuyomi の情報を用いた投資判断は利用者自身の責任で行ってください。アプリの不具合や停止によって生じる損失について、補償を前提としていません。"
             )
         ]
     }
@@ -389,8 +396,8 @@ struct SettingsView: View {
     private var supportSections: [LegalSection] {
         [
             LegalSection(
-                title: "beta フィードバック方法",
-                body: "TestFlight で配布された beta は、TestFlight アプリの「Send Beta Feedback」から報告してください。スクリーンショット、対象ティッカー、再現手順があると確認しやすくなります。"
+                title: "問い合わせ方法",
+                body: "不具合や改善要望がある場合は、スクリーンショット、対象ティッカー、再現手順を添えて報告してください。"
             ),
             LegalSection(
                 title: "報告してほしい内容",
@@ -398,7 +405,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "正式サポート",
-                body: "正式公開前にプライバシーポリシー / 利用条件 / サポートの外部 URL と連絡先を設置予定です。beta 中はアプリ内案内と TestFlight フィードバックを窓口とします。"
+                body: "プライバシーポリシー、利用条件、サポート窓口はアプリ内およびApp Store Connectに登録されたサポートURLで案内します。"
             )
         ]
     }
@@ -465,7 +472,7 @@ private struct SubscriptionPlanRow: View {
                         .font(.system(.subheadline, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.accentDeep)
                 } else {
-                    Text("準備中")
+                    Text("App Store確認中")
                         .font(.system(.caption, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
