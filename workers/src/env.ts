@@ -12,6 +12,11 @@ export interface Env {
   SEC_FETCHER_TIMEOUT_MS?: string;
   BACKFILL_SHARED_SECRET?: string;
   DEV_DETACHED_ACCESS_DEVICE_KEYS?: string;
+  APPLE_APP_STORE_ISSUER_ID?: string;
+  APPLE_APP_STORE_KEY_ID?: string;
+  APPLE_APP_STORE_PRIVATE_KEY?: string;
+  APPLE_BUNDLE_ID?: string;
+  APPLE_APP_STORE_SERVER_ENVIRONMENT?: string;
   KABUYOMI_CACHE: KVNamespace;
   DB: D1Database;
   FILINGS_BUCKET: R2Bucket;

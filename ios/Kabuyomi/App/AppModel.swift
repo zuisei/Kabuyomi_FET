@@ -89,6 +89,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var companyIsLoading = false
     var chatIsSending = false
     var billingActionInFlight = false
+    var creditPackProducts: [CreditPackProduct] = []
     var activeAlert: AppAlertState?
     var aiConsentGranted = UserDefaults.standard.bool(forKey: "kabuyomi.aiConsentGranted")
     var showStarterCompanies = UserDefaults.standard.object(forKey: "kabuyomi.showStarterCompanies") as? Bool ?? true
@@ -243,6 +244,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             if !Self.isRunningTests {
                 await self.subscriptionStore.refreshEntitlements(reason: "bootstrap")
                 await self.syncBillingState(showErrors: false)
+                await self.loadCreditPackProducts(showErrors: false)
             }
             await self.refreshUsage()
         }
@@ -279,6 +281,37 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                     kind: .dismissOnly
                 )
             }
+        } catch {
+            handle(error)
+        }
+    }
+
+    func loadCreditPackProducts(showErrors: Bool = true) async {
+        do {
+            creditPackProducts = try await subscriptionStore.creditPackProducts()
+        } catch {
+            if showErrors {
+                handle(error)
+            }
+        }
+    }
+
+    func purchaseCreditPack(productId: String) async {
+        guard !billingActionInFlight else { return }
+        billingActionInFlight = true
+        defer { billingActionInFlight = false }
+
+        do {
+            guard let purchase = try await subscriptionStore.purchaseCreditPack(productId: productId) else {
+                return
+            }
+            let response = try await apiClient.grantCreditPurchase(purchase.grantRequest)
+            storeUsage(response.usage, source: .refresh)
+            await purchase.finish()
+            activeAlert = AppAlertState(
+                message: "\(response.creditsGranted) creditsを追加しました。残高は \(response.creditsRemaining) creditsです。",
+                kind: .dismissOnly
+            )
         } catch {
             handle(error)
         }
@@ -1074,6 +1107,14 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
         if rawMessage.contains("insufficient_credits") || rawMessage.contains("creditが不足") {
             return "creditが不足しています。設定のCredit画面から追加購入または広告視聴の導線を確認してください。"
+        }
+
+        if rawMessage.contains("Apple transaction verification") || rawMessage.contains("Apple transaction could not be verified") {
+            return "購入の検証に失敗しました。時間をおいてから、購入の復元または再同期を試してください。"
+        }
+
+        if rawMessage.contains("Purchase transaction") {
+            return "購入情報を確認できませんでした。時間をおいてから、もう一度お試しください。"
         }
 
         if rawMessage.contains("Watchlist limit exceeded") {

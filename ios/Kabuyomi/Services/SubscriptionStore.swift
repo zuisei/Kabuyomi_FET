@@ -11,6 +11,7 @@ final class SubscriptionStore {
     static let shared = SubscriptionStore()
 
     static let proMonthlyProductID = "app.kabuyomi.pro.monthly"
+    static let creditPackProductIDs = ["credit_pack_100", "credit_pack_300", "credit_pack_700"]
 
     private let quotaSubjectKey = "kabuyomi.quotaSubject"
     private let planKey = "kabuyomi.plan"
@@ -26,6 +27,7 @@ final class SubscriptionStore {
 
     private var updatesTask: Task<Void, Never>?
     private var cachedProducts: [Product] = []
+    private var cachedCreditPackProducts: [Product] = []
 
     var quotaSubject: String? {
         defaults.string(forKey: quotaSubjectKey)
@@ -86,6 +88,58 @@ final class SubscriptionStore {
         try await AppStore.sync()
         await refreshEntitlements(reason: "restore")
         logger.notice("restore_result=completed active=\(self.isSubscriptionActive, privacy: .public)")
+    }
+
+    func creditPackProducts() async throws -> [CreditPackProduct] {
+        let products = try await loadCreditPackProducts()
+        return Self.creditPackProductIDs.map { productId in
+            if let product = products.first(where: { $0.id == productId }) {
+                return CreditPackProduct(
+                    id: product.id,
+                    credits: Self.credits(for: product.id),
+                    displayPrice: product.displayPrice,
+                    isAvailable: true
+                )
+            }
+
+            return CreditPackProduct(
+                id: productId,
+                credits: Self.credits(for: productId),
+                displayPrice: nil,
+                isAvailable: false
+            )
+        }
+    }
+
+    func purchaseCreditPack(productId: String) async throws -> PendingCreditPurchase? {
+        startObservingTransactionsIfNeeded()
+        let product = try await creditPackProduct(id: productId)
+        let result = try await product.purchase()
+
+        switch result {
+        case .success(let verification):
+            guard case .verified(let transaction) = verification else {
+                logger.error("credit_purchase_result=unverified product_id=\(productId, privacy: .public)")
+                return nil
+            }
+
+            logger.notice(
+                "credit_purchase_result=success product_id=\(transaction.productID, privacy: .public) transaction_id=\(String(transaction.id), privacy: .public)"
+            )
+            return PendingCreditPurchase(transaction: transaction, signedTransactionInfo: verification.jwsRepresentation)
+
+        case .userCancelled:
+            logger.notice("credit_purchase_result=cancelled product_id=\(productId, privacy: .public)")
+            return nil
+
+        case .pending:
+            logger.notice("credit_purchase_result=pending product_id=\(productId, privacy: .public)")
+            return nil
+
+        @unknown default:
+            logger.error("credit_purchase_result=unknown product_id=\(productId, privacy: .public)")
+            return nil
+        }
     }
 
     func refreshEntitlements(reason: String) async {
@@ -206,6 +260,30 @@ final class SubscriptionStore {
         return product
     }
 
+    private func creditPackProduct(id productId: String) async throws -> Product {
+        guard Self.creditPackProductIDs.contains(productId) else {
+            throw SubscriptionStoreError.productNotFound
+        }
+
+        let products = try await loadCreditPackProducts()
+        guard let product = products.first(where: { $0.id == productId }) else {
+            logger.error("credit_purchase_result=product_not_found product_id=\(productId, privacy: .public)")
+            throw SubscriptionStoreError.productNotFound
+        }
+
+        return product
+    }
+
+    private func loadCreditPackProducts() async throws -> [Product] {
+        if !cachedCreditPackProducts.isEmpty {
+            return cachedCreditPackProducts
+        }
+
+        let products = try await Product.products(for: Self.creditPackProductIDs)
+        cachedCreditPackProducts = products
+        return products
+    }
+
     private func storeSubscriptionState(productId: String?, originalTransactionId: String, active: Bool) {
         set(productId, forKey: productIdKey)
         set(originalTransactionId, forKey: originalTransactionIdKey)
@@ -254,6 +332,51 @@ final class SubscriptionStore {
         } else {
             defaults.removeObject(forKey: key)
         }
+    }
+
+    private static func credits(for productId: String) -> Int {
+        switch productId {
+        case "credit_pack_100":
+            return 100
+        case "credit_pack_300":
+            return 300
+        case "credit_pack_700":
+            return 700
+        default:
+            return 0
+        }
+    }
+}
+
+struct CreditPackProduct: Identifiable, Hashable {
+    let id: String
+    let credits: Int
+    let displayPrice: String?
+    let isAvailable: Bool
+}
+
+struct PendingCreditPurchase {
+    let transaction: Transaction
+    let signedTransactionInfo: String
+
+    var grantRequest: CreditPurchaseGrantRequest {
+        CreditPurchaseGrantRequest(
+            productId: transaction.productID,
+            transactionId: String(transaction.id),
+            originalTransactionId: String(transaction.originalID),
+            purchasedAt: Self.iso8601String(from: transaction.purchaseDate),
+            signedTransactionInfo: signedTransactionInfo
+        )
+    }
+
+    func finish() async {
+        await transaction.finish()
+    }
+
+    private static func iso8601String(from date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 }
 

@@ -182,6 +182,15 @@ struct APIClient {
         try await sendRequest(path: "/v1/billing/sync", method: "POST", body: request)
     }
 
+    func grantCreditPurchase(_ request: CreditPurchaseGrantRequest) async throws -> CreditPurchaseGrantResponse {
+        try await sendRequest(
+            path: "/v1/credits/purchase-grant",
+            method: "POST",
+            headers: requestHeaders(),
+            body: request
+        )
+    }
+
     private func requestHeaders() -> [String: String] {
         let deviceKey = requestContext?.deviceKey ?? deviceIdentity?.deviceKey() ?? ""
         let originalTransactionId =

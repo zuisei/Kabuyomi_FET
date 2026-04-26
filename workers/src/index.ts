@@ -12,6 +12,7 @@ import { json, notFound, serverError, unavailable } from "./lib/response";
 import { handleBillingSyncRoute } from "./routes/billing-sync";
 import { handleChatRoute } from "./routes/chat";
 import { handleCompanyRoute } from "./routes/company";
+import { handleCreditPurchaseGrantRoute } from "./routes/credit-purchase-grant";
 import { handleInternalBackfillHistoryRoute } from "./routes/internal-backfill-history";
 import { handleInternalCleanupFilingsRoute } from "./routes/internal-cleanup-filings";
 import { handleInternalCreditPurchaseGrantRoute } from "./routes/internal-credit-purchase-grant";
@@ -35,6 +36,7 @@ const apiRoutes: RouteHandler[] = [
   handleWatchlistRemoveRoute,
   handleCompanyRoute,
   handleChatRoute,
+  handleCreditPurchaseGrantRoute,
   handleTranslateQuoteRoute,
   handleUsageRoute,
   handleBillingSyncRoute

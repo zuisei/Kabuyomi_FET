@@ -71,17 +71,24 @@ struct SettingsView: View {
                 }
 
                 HStack(spacing: 10) {
-                    Button {
-                        appModel.activeAlert = AppAlertState(
-                            message: "追加credit購入は次の実装でStoreKitに接続します。現時点ではまだ購入処理は行いません。",
-                            kind: .dismissOnly
-                        )
+                    Menu {
+                        ForEach(displayCreditPacks) { pack in
+                            Button {
+                                Task {
+                                    await appModel.purchaseCreditPack(productId: pack.id)
+                                }
+                            } label: {
+                                Text(creditPackTitle(pack))
+                            }
+                            .disabled(appModel.billingActionInFlight || !pack.isAvailable)
+                        }
                     } label: {
-                        Label("追加購入", systemImage: "plus.circle.fill")
+                        Label(appModel.billingActionInFlight ? "処理中" : "追加購入", systemImage: "plus.circle.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(KabuyomiTheme.accentDeep)
+                    .disabled(appModel.billingActionInFlight)
 
                     Button {
                         appModel.activeAlert = AppAlertState(
@@ -96,6 +103,28 @@ struct SettingsView: View {
                 }
             }
         }
+        .task {
+            await appModel.loadCreditPackProducts(showErrors: false)
+        }
+    }
+
+    private var displayCreditPacks: [CreditPackProduct] {
+        if !appModel.creditPackProducts.isEmpty {
+            return appModel.creditPackProducts
+        }
+
+        return [
+            CreditPackProduct(id: "credit_pack_100", credits: 100, displayPrice: nil, isAvailable: false),
+            CreditPackProduct(id: "credit_pack_300", credits: 300, displayPrice: nil, isAvailable: false),
+            CreditPackProduct(id: "credit_pack_700", credits: 700, displayPrice: nil, isAvailable: false)
+        ]
+    }
+
+    private func creditPackTitle(_ pack: CreditPackProduct) -> String {
+        if let displayPrice = pack.displayPrice {
+            return "\(pack.credits) credits - \(displayPrice)"
+        }
+        return "\(pack.credits) credits"
     }
 
     private var planCard: some View {

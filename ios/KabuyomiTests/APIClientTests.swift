@@ -394,6 +394,64 @@ final class APIClientTests: XCTestCase {
         XCTAssertNil(response.modelName)
     }
 
+    func testGrantCreditPurchaseSendsDeviceHeaderAndStoreKitTransaction() async throws {
+        let client = makeClient(context: standardContext) { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/credits/purchase-grant")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+            XCTAssertNil(request.value(forHTTPHeaderField: "x-internal-token"))
+
+            let body = try XCTUnwrap(Self.requestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+            XCTAssertEqual(json["productId"], "credit_pack_100")
+            XCTAssertEqual(json["transactionId"], "tx-100")
+            XCTAssertEqual(json["originalTransactionId"], "orig-tx-100")
+            XCTAssertEqual(json["signedTransactionInfo"], "signed-jws")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "transactionId": "tx-100",
+                    "productId": "credit_pack_100",
+                    "creditsGranted": 100,
+                    "creditsRemaining": 130,
+                    "transactionStatus": "granted",
+                    "didMutate": true,
+                    "usage": [
+                        "plan": "free",
+                        "chatsUsed": 0,
+                        "chatLimit": 10,
+                        "stocksUsed": 0,
+                        "stockLimit": 3,
+                        "dateJST": "2026-04-26",
+                        "credits": [
+                            "monthlyRemaining": 30,
+                            "monthlyLimit": 30,
+                            "purchasedRemaining": 100,
+                            "totalRemaining": 130,
+                            "resetsAt": "2026-05-01T00:00:00+09:00"
+                        ],
+                        "creditBillingEnabled": false
+                    ]
+                ])
+            )
+        }
+
+        let response = try await client.grantCreditPurchase(
+            CreditPurchaseGrantRequest(
+                productId: "credit_pack_100",
+                transactionId: "tx-100",
+                originalTransactionId: "orig-tx-100",
+                purchasedAt: "2026-04-26T00:00:00.000Z",
+                signedTransactionInfo: "signed-jws"
+            )
+        )
+
+        XCTAssertEqual(response.creditsGranted, 100)
+        XCTAssertEqual(response.creditsRemaining, 130)
+        XCTAssertEqual(response.usage.credits?.purchasedRemaining, 100)
+    }
+
     func testTranslateQuoteSendsDeviceHeaderAndDecodesResponse() async throws {
         let client = makeClient(context: standardContext) { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/translate-quote")

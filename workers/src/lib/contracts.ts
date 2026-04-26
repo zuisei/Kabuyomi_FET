@@ -63,6 +63,10 @@ export const InternalCreditPurchaseGrantRequestSchema = z.object({
   purchasedAt: z.string().trim().min(1).max(64).optional()
 });
 
+export const CreditPurchaseGrantRequestSchema = InternalCreditPurchaseGrantRequestSchema.extend({
+  signedTransactionInfo: z.string().trim().min(1).max(16_384).optional()
+});
+
 export const QuotaRequestSchema = z.object({
   action: z.enum([
     "state",

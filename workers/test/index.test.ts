@@ -281,6 +281,33 @@ describe("worker routing", () => {
     });
   });
 
+  it("does not require the internal token on the public StoreKit credit grant route", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/credits/purchase-grant", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          productId: "credit_pack_100",
+          transactionId: "tx-100"
+        })
+      }),
+      {
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Apple transaction verification is not configured"
+    });
+  });
+
   it("returns 400 for invalid internal credit purchase JSON instead of bubbling a 500", async () => {
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/v1/internal/credits/purchase-grant", {

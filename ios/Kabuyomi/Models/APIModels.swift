@@ -436,6 +436,24 @@ struct BillingSyncRequest: Encodable {
     let active: Bool
 }
 
+struct CreditPurchaseGrantRequest: Encodable {
+    let productId: String
+    let transactionId: String
+    let originalTransactionId: String?
+    let purchasedAt: String?
+    let signedTransactionInfo: String?
+}
+
+struct CreditPurchaseGrantResponse: Decodable {
+    let transactionId: String
+    let productId: String
+    let creditsGranted: Int
+    let creditsRemaining: Int
+    let transactionStatus: String
+    let didMutate: Bool
+    let usage: UsagePayload
+}
+
 struct ChatContextMessage: Encodable, Equatable {
     let role: String
     let content: String
