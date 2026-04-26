@@ -158,11 +158,17 @@ export function buildChatContextPack(
     }
   }
 
-  const expandedChunks = expandSelectedSourceChunks(
+  removeRiskDistractorSources(selected, questionIntent);
+
+  const expandedChunks = filterExpandedRiskDistractorSources(
     filing,
-    orderSelectedSources([...selected.values()], questionIntent).slice(0, profile.maxSources),
     questionIntent,
-    profile
+    expandSelectedSourceChunks(
+      filing,
+      orderSelectedSources([...selected.values()], questionIntent).slice(0, profile.maxSources),
+      questionIntent,
+      profile
+    )
   );
   const selectedChunks = trimToBudget(expandedChunks, profile.tokenBudget);
   const sourceSelectionStrategy = strategyParts.join(":");
@@ -178,6 +184,35 @@ export function buildChatContextPack(
     sourceSelectionStrategy,
     selectionDiagnostics
   };
+}
+
+function removeRiskDistractorSources(selected: Map<string, SourceChunkRecord>, questionIntent: QuestionIntent): void {
+  if (questionIntent !== "risk_factors") {
+    return;
+  }
+
+  for (const [sourceId, source] of selected) {
+    if (source.sectionType === "md_a" && isAccountingEstimateRiskDistractor(`${source.sectionTitle} ${source.sourceLabel} ${source.text}`)) {
+      selected.delete(sourceId);
+    }
+  }
+}
+
+function filterExpandedRiskDistractorSources(
+  filing: FilingCacheRecord,
+  questionIntent: QuestionIntent,
+  sourceChunks: SourceChunkRecord[]
+): SourceChunkRecord[] {
+  if (questionIntent !== "risk_factors") {
+    return sourceChunks;
+  }
+
+  return sourceChunks.filter((source) => {
+    const original = filing.sourceChunks.find((chunk) => chunk.sourceId === source.sourceId);
+    return !isAccountingEstimateRiskDistractor(
+      `${source.sectionTitle} ${source.sourceLabel} ${original?.text ?? ""} ${source.text}`
+    );
+  });
 }
 
 export function buildChatFactualPack(
@@ -640,6 +675,17 @@ function businessProductDefinitions(ticker: string): Array<{ label: string; patt
     ];
   }
 
+  if (upperTicker === "NVDA") {
+    return [
+      { label: "Compute & Networking", patterns: [/compute (?:&|and) networking|computing and networking/i] },
+      { label: "Graphics", patterns: [/graphics/i] },
+      { label: "Data Center", patterns: [/data center/i] },
+      { label: "Gaming", patterns: [/gaming/i] },
+      { label: "Professional Visualization", patterns: [/professional visualization/i] },
+      { label: "Automotive", patterns: [/automotive/i] }
+    ];
+  }
+
   if (upperTicker === "AMZN") {
     return [
       { label: "Online stores", patterns: [/online stores?/i] },
@@ -667,6 +713,12 @@ function reportableSegmentDefinitions(ticker: string): Array<{ label: string; pa
       { label: "Google Services", patterns: [/google services/i] },
       { label: "Google Cloud", patterns: [/google cloud/i] },
       { label: "Other Bets", patterns: [/other bets/i] }
+    ];
+  }
+  if (upperTicker === "NVDA") {
+    return [
+      { label: "Compute & Networking", patterns: [/compute (?:&|and) networking|computing and networking/i] },
+      { label: "Graphics", patterns: [/graphics/i] }
     ];
   }
   if (upperTicker === "AAPL") {
@@ -733,6 +785,16 @@ function revenueFactDefinitions(ticker: string): Array<{ label: string; kind: Re
       { label: "Subscription services", kind: "product_service", patterns: [/subscription services?/i] }
     ];
   }
+  if (upperTicker === "NVDA") {
+    return [
+      { label: "Compute & Networking", kind: "segment", patterns: [/compute (?:&|and) networking|computing and networking/i] },
+      { label: "Graphics", kind: "segment", patterns: [/graphics/i] },
+      { label: "Data Center", kind: "product_service", patterns: [/data center/i] },
+      { label: "Gaming", kind: "product_service", patterns: [/gaming/i] },
+      { label: "Professional Visualization", kind: "product_service", patterns: [/professional visualization/i] },
+      { label: "Automotive", kind: "product_service", patterns: [/automotive/i] }
+    ];
+  }
   return [
     { label: "product revenue", kind: "product_service", patterns: [/product revenue/i] },
     { label: "service revenue", kind: "product_service", patterns: [/service revenue/i] },
@@ -756,6 +818,10 @@ function seedKnownTickerLabels(
       products_services: ["Office・Microsoft 365", "Azure・クラウド", "Windows", "LinkedIn", "Gaming"],
       reportable_segments: ["Productivity and Business Processes", "Intelligent Cloud", "More Personal Computing"]
     },
+    NVDA: {
+      products_services: ["Data Center", "Gaming", "Professional Visualization", "Automotive"],
+      reportable_segments: ["Compute & Networking", "Graphics"]
+    },
     AMZN: {
       products_services: ["Online stores", "Third-party seller services", "Advertising services", "Subscription services", "AWS"],
       reportable_segments: ["North America", "International", "AWS"]
@@ -774,7 +840,7 @@ function seedKnownTickerLabels(
 
 function seedKnownTickerRevenueFacts(filing: FilingCacheRecord, facts: RevenueFact[]): RevenueFact[] {
   const upperTicker = filing.ticker.toUpperCase();
-  if (!["AAPL", "MSFT", "AMZN", "GOOGL", "GOOG"].includes(upperTicker)) {
+  if (!["AAPL", "MSFT", "AMZN", "GOOGL", "GOOG", "NVDA"].includes(upperTicker)) {
     return facts;
   }
 
@@ -836,6 +902,18 @@ function riskDefinitions(ticker: string): Array<{ label: string; patterns: RegEx
       definitions[5]!
     ];
   }
+  if (upperTicker === "MSFT") {
+    return [
+      { label: "競争激化", patterns: [/competition|competitive|compete|cloud competition|platform competition/i] },
+      { label: "サイバーセキュリティ", patterns: [/cybersecurity|security vulnerabilities|cyber attack|data breach|security incident/i] },
+      { label: "クラウドサービス障害", patterns: [/cloud services?|azure|service outage|infrastructure|datacenter|data center/i] },
+      { label: "AI・技術転換", patterns: [/artificial intelligence|\bai\b|technology transition|technological change|responsible ai/i] },
+      { label: "プライバシー・データ保護", patterns: [/privacy|data protection|data security|personal data/i] },
+      { label: "規制・独禁法", patterns: [/regulation|regulatory|antitrust|competition law|legal proceedings/i] },
+      { label: "サードパーティ依存", patterns: [/third-party|third party|suppliers?|partners?|open source|infrastructure/i] },
+      { label: "企業顧客・デバイス・ゲーム需要", patterns: [/enterprise customers?|devices?|gaming|xbox|windows|pc market/i] }
+    ];
+  }
 
   return definitions;
 }
@@ -880,6 +958,9 @@ function isUsableFactualSource(
   if (isLowSignalBoilerplate(text)) {
     return false;
   }
+  if (options.questionIntent === "risk_factors" && isAccountingEstimateRiskDistractor(`${source.sectionTitle} ${source.sourceLabel} ${text}`)) {
+    return false;
+  }
 
   if (!options.questionIntent) {
     return true;
@@ -894,6 +975,9 @@ function factualSourceScore(source: SourceChunkRecord, options: { preferRiskSour
   if (options.preferRiskSources && /item\s+1a|risk factors?|business and industry risks|company risks|legal and regulatory risks/.test(haystack)) {
     score += 2_000;
   }
+  if (options.preferRiskSources && isAccountingEstimateRiskDistractor(haystack)) {
+    score -= 2_500;
+  }
   if (/forward-looking statements|available information|trademarks/i.test(haystack)) {
     score -= 1_000;
   }
@@ -905,6 +989,13 @@ function labelPattern(label: string): RegExp {
   const aliases: Record<string, string> = {
     "Azure・クラウド": "azure|cloud|intelligent cloud|server products and cloud services",
     "Office・Microsoft 365": "office|microsoft 365|productivity and business processes",
+    "Compute & Networking": "compute (?:&|and) networking|computing and networking|compute",
+    "Data Center": "data center",
+    "Professional Visualization": "professional visualization",
+    "サイバーセキュリティ": "cybersecurity|security vulnerabilities|cyber attack|data breach|security incident",
+    "クラウドサービス障害": "cloud services?|azure|service outage|infrastructure|datacenter|data center",
+    "サードパーティ依存": "third-party|third party|suppliers?|partners?|open source|infrastructure",
+    "企業顧客・デバイス・ゲーム需要": "enterprise customers?|devices?|gaming|xbox|windows|pc market",
     "規制・独禁法": "regulation|regulatory|antitrust|competition law|legal",
     "プライバシー・データ保護": "privacy|data protection|data security|cybersecurity",
     "AI・技術転換": "artificial intelligence|\\bai\\b|technology|technological",
@@ -1018,6 +1109,9 @@ function intentSourceScore(source: SourceChunkRecord, questionIntent: QuestionIn
         [/cash flow|liquidity|capital resources|operating activities|free cash flow|repurchase|dividend|capital allocation/i, 80]
       ]);
     case "risk_factors":
+      if (isAccountingEstimateRiskDistractor(haystack)) {
+        return 0;
+      }
       return scoreMatches(haystack, [
         [/item\s+1a|risk factors?/i, 100],
         [riskContextPattern(), 80]
@@ -1135,6 +1229,10 @@ function buildIntentTextWindows(
   const usable: string[] = [];
   for (const window of windows) {
     diagnostics.candidateSourceCount += 1;
+    if (questionIntent === "risk_factors" && isAccountingEstimateRiskDistractor(window)) {
+      diagnostics.rejectedLowTextQualityCount += 1;
+      continue;
+    }
     const quality = assessNarrativeQuality(window);
     if (shouldRejectNarrativeSource(questionIntent, quality)) {
       recordRejectedNarrative(diagnostics, quality);
@@ -1151,7 +1249,7 @@ function supplementalPattern(questionIntent: QuestionIntent): RegExp {
     case "business_overview":
       return /item\s+1\.\s*business|business overview|overview|our business|we are|we provide|we offer|products?|services?|customers?|end markets?|reportable segments?|revenue by segment|geograph|accelerated computing|artificial intelligence|\bai\b|gpu|graphics|compute|semiconductor|data center|gaming|professional visualization|networking|automotive|cloud service providers?|consumer internet|enterprise|oem/gi;
     case "risk_factors":
-      return /item\s+1a|risk factors?|\brisks?\b|uncertain|uncertainty|adverse|depend|competition|supply|supplier|regulation|regulatory|volatility|tariff|macro|export controls?|customer concentration|demand|inventory|geopolitical|manufacturing|semiconductor|artificial intelligence|\bai\b/gi;
+      return /item\s+1a|risk factors?|\brisks?\b|uncertain|uncertainty|adverse|depend|competition|competitive|cybersecurity|security vulnerabilities|data breach|privacy|data protection|cloud services?|service outage|third-?party|supply|supplier|regulation|regulatory|antitrust|volatility|tariff|macro|export controls?|customer concentration|demand|inventory|geopolitical|manufacturing|semiconductor|artificial intelligence|\bai\b/gi;
     case "segment_analysis":
     case "revenue_breakdown":
       return /reportable segments?|operating segments?|segment revenue|segment income|revenue by segment|disaggregation|geograph|region|products?|services?/gi;
@@ -1439,7 +1537,17 @@ function businessContextPattern(): RegExp {
 }
 
 function riskContextPattern(): RegExp {
-  return /item\s+1a|risk factors?|\brisks?\b|uncertain|uncertainty|adverse|depend|competition|supply|supplier|regulation|regulatory|volatility|tariff|macro|export controls?|customer concentration|demand|inventory|geopolitical|manufacturing|semiconductor|artificial intelligence|\bai\b/i;
+  return /item\s+1a|risk factors?|\brisks?\b|uncertain|uncertainty|adverse|depend|competition|competitive|cybersecurity|security vulnerabilities|data breach|privacy|data protection|cloud services?|service outage|third-?party|supply|supplier|regulation|regulatory|antitrust|volatility|tariff|macro|export controls?|customer concentration|demand|inventory|geopolitical|manufacturing|semiconductor|artificial intelligence|\bai\b/i;
+}
+
+function isAccountingEstimateRiskDistractor(text: string): boolean {
+  const haystack = text.toLowerCase();
+  const accountingSignal =
+    /goodwill|impairment|fair value|reporting units?|intangible assets?|annual basis|reassign|carrying value|valuation allowance|future cash flows?|long-term rate of growth|useful lif(?:e|ves)|impairment testing|material adverse effect on fair value/.test(
+      haystack
+    );
+  const realRiskSection = /item\s+1a|risk factors?|business and industry risks|company risks|legal and regulatory risks/.test(haystack);
+  return accountingSignal && !realRiskSection;
 }
 
 function assessNarrativeQuality(text: string): NarrativeQuality {

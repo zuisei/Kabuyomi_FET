@@ -97,6 +97,76 @@ describe("chat Q3-lite factual packs", () => {
     expect(contextPack.sourceChunks.map((source) => source.sourceId)).toContain("R1");
   });
 
+  it("prefers MSFT risk sources over goodwill accounting notes", () => {
+    const filing = makeFactualPackFiling({
+      ticker: "MSFT",
+      companyName: "Microsoft Corp",
+      text:
+        "Goodwill We allocate goodwill to reporting units and evaluate reporting units on an annual basis. Changes in business conditions, legal factors, or competition may require impairment testing of reporting units and fair value estimates.",
+      extraSources: [
+        {
+          sourceId: "R1",
+          sectionType: "md_a",
+          sectionTitle: "Item 1A. Risk Factors",
+          sourceLabel: "10-K Item 1A Risk Factors",
+          text:
+            "Our cloud services, software platforms, devices, and gaming businesses face intense competition. Cybersecurity incidents, data breaches, privacy and data protection rules, artificial intelligence services, antitrust and other regulation, reliance on third-party infrastructure, and enterprise customer demand could materially affect revenue, margins, operations, and our ability to grow across Azure, Microsoft 365, Windows, LinkedIn, and Gaming.",
+          startOffset: 0,
+          endOffset: 430,
+          sortOrder: 2
+        }
+      ]
+    });
+
+    const contextPack = buildChatContextPack(filing, "risk_factors");
+
+    expect(contextPack.factualPack?.riskCategories).toEqual([
+      "競争激化",
+      "サイバーセキュリティ",
+      "クラウドサービス障害",
+      "AI・技術転換",
+      "プライバシー・データ保護",
+      "規制・独禁法",
+      "サードパーティ依存",
+      "企業顧客・デバイス・ゲーム需要"
+    ]);
+    expect(contextPack.factualPack?.sourceIds).toContain("R1");
+    expect(contextPack.sourceChunks[0]?.sourceId).toBe("R1");
+    expect(contextPack.sourceChunks.map((source) => source.sourceId)).not.toContain("S1");
+  });
+
+  it("does not keep MSFT goodwill estimate notes as the only risk source", () => {
+    const filing = makeFactualPackFiling({
+      ticker: "MSFT",
+      companyName: "Microsoft Corp",
+      text:
+        "This analysis requires significant judgments, including estimation of future cash flows, estimation of the long-term rate of growth for our business, and estimation of useful lives. Competition and legal factors may affect fair value estimates."
+    });
+
+    const contextPack = buildChatContextPack(filing, "risk_factors");
+
+    expect(contextPack.sourceChunks.map((source) => source.sourceId)).not.toContain("S1");
+    expect(contextPack.factualPack?.missingFields).toContain("risk_source_ids");
+  });
+
+  it("builds an NVDA revenue pack with concrete segment and product categories", () => {
+    const filing = makeFactualPackFiling({
+      ticker: "NVDA",
+      companyName: "NVIDIA Corp",
+      text:
+        "Revenue by reportable segment includes Compute & Networking and Graphics. Revenue from Data Center computing grew due to demand for accelerated computing platforms. Gaming, Professional Visualization, and Automotive are also product market platforms described in the filing."
+    });
+
+    const contextPack = buildChatContextPack(filing, "revenue_breakdown");
+    const categories = contextPack.factualPack?.revenueCategories ?? [];
+
+    expect(categories.slice(0, 2).map((category) => category.label)).toEqual(["Compute & Networking", "Graphics"]);
+    expect(categories.map((category) => category.label)).toEqual(
+      expect.arrayContaining(["Data Center", "Gaming", "Professional Visualization", "Automotive"])
+    );
+    expect(categories.every((category) => category.label !== "segment revenue" && category.label !== "geography revenue")).toBe(true);
+  });
+
   it("puts the factual pack and source guard instructions into the chat prompt", () => {
     const filing = makeFactualPackFiling({
       ticker: "MSFT",

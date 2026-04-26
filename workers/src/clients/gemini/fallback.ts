@@ -98,6 +98,17 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
     }
   }
 
+  if (profile.asksRisk) {
+    if (narrative) {
+      return buildNarrativeFallbackAnswer(narrative, profile);
+    }
+
+    return {
+      answer: "この決算資料の範囲では確認できません。",
+      sourceIds: []
+    };
+  }
+
   if (metric && metricSourceId) {
     return buildMetricFallbackAnswer(metric, metricSourceId, narrative, profile);
   }

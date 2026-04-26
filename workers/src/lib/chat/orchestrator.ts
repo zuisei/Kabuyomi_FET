@@ -627,6 +627,13 @@ async function buildFallbackResponse(
   const approvedSourceIds = fallback.sourceIds.filter((sourceId) => validSourceIds.has(sourceId));
 
   if (approvedSourceIds.length === 0) {
+    if (fallback.answer === CONTEXT_UNAVAILABLE_ANSWER) {
+      return {
+        answer: fallback.answer,
+        sources: []
+      };
+    }
+
     return null;
   }
 
