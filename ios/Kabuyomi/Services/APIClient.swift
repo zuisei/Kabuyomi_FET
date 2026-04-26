@@ -180,7 +180,12 @@ struct APIClient {
     }
 
     func syncBilling(_ request: BillingSyncRequest) async throws -> BillingSyncResponse {
-        try await sendRequest(path: "/v1/billing/sync", method: "POST", body: request)
+        try await sendRequest(
+            path: "/v1/billing/sync",
+            method: "POST",
+            headers: requestHeaders(),
+            body: request
+        )
     }
 
     func grantCreditPurchase(_ request: CreditPurchaseGrantRequest) async throws -> CreditPurchaseGrantResponse {

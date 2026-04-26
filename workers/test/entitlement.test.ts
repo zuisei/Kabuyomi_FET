@@ -46,7 +46,7 @@ describe("EntitlementDO", () => {
     const response = await entitlement.fetch(
       new Request("https://do/entitlement", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-kabuyomi-device-binding": "device-hash-1" },
         body: JSON.stringify({
           originalTransactionId: "tx-123",
           active: true,
@@ -60,7 +60,37 @@ describe("EntitlementDO", () => {
     await expect(response.json()).resolves.toMatchObject({
       plan: "pro",
       quotaSubject: expect.stringMatching(/^pro:[a-f0-9]{64}$/),
-      productId: "app.kabuyomi.pro.monthly"
+      productId: "app.kabuyomi.pro.monthly",
+      boundDeviceHash: "device-hash-1"
+    });
+  });
+
+  it("rejects lookups when the stored device binding does not match", async () => {
+    const entitlement = new EntitlementDO(createState() as never);
+
+    await entitlement.fetch(
+      new Request("https://do/entitlement", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-kabuyomi-device-binding": "device-hash-1" },
+        body: JSON.stringify({
+          originalTransactionId: "tx-123",
+          active: true,
+          productId: "app.kabuyomi.pro.monthly",
+          serverVerified: true
+        })
+      })
+    );
+
+    const response = await entitlement.fetch(
+      new Request("https://do/entitlement", {
+        method: "GET",
+        headers: { "x-kabuyomi-device-binding": "device-hash-2" }
+      })
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Entitlement device binding mismatch"
     });
   });
 

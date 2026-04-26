@@ -3,7 +3,7 @@ import { isAppError } from "../lib/errors";
 import { logEvent } from "../lib/logging";
 import { parseJsonBody } from "../lib/request";
 import { json } from "../lib/response";
-import { syncBillingEntitlement } from "../lib/entitlements";
+import { resolveDeviceBindingHashFromRequest, syncBillingEntitlement } from "../lib/entitlements";
 import type { RouteHandler } from "./types";
 
 const BILLING_SYNC_PAYLOAD_MAX_BYTES = 20_000;
@@ -27,7 +27,17 @@ export const handleBillingSyncRoute: RouteHandler = async ({ request, url, env }
     return json({ error: error.publicMessage }, { status: error.status });
   }
 
-  const payload = await syncBillingEntitlement(env, body);
+  let deviceBindingHash;
+  try {
+    deviceBindingHash = await resolveDeviceBindingHashFromRequest(request);
+  } catch (error) {
+    if (!isAppError(error)) {
+      throw error;
+    }
+    return json({ error: error.publicMessage }, { status: error.status });
+  }
+
+  const payload = await syncBillingEntitlement(env, deviceBindingHash, body);
   logEvent("billing_sync_succeeded", {
     path: url.pathname,
     plan: payload.plan,

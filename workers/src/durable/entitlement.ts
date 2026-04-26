@@ -1,7 +1,7 @@
 import type { DurableObjectState } from "@cloudflare/workers-types";
 import { EntitlementRequestSchema } from "../lib/contracts";
 import { isAppError } from "../lib/errors";
-import { buildSyncedEntitlement } from "../lib/entitlements";
+import { buildSyncedEntitlement, readDeviceBindingHash, type SyncedEntitlement } from "../lib/entitlements";
 import { parseJsonBody } from "../lib/request";
 
 const ENTITLEMENT_PAYLOAD_MAX_BYTES = 2_048;
@@ -12,9 +12,13 @@ export class EntitlementDO {
 
   async fetch(request: Request): Promise<Response> {
     if (request.method === "GET") {
-      const current = await this.state.storage.get(CURRENT_ENTITLEMENT_KEY);
+      const current = await this.state.storage.get<SyncedEntitlement>(CURRENT_ENTITLEMENT_KEY);
       if (!current) {
         return this.reply({ error: "Entitlement not found" }, 404);
+      }
+      const suppliedDeviceHash = readDeviceBindingHash(request);
+      if (current.boundDeviceHash && suppliedDeviceHash !== current.boundDeviceHash) {
+        return this.reply({ error: "Entitlement device binding mismatch" }, 403);
       }
       return this.reply(current, 200);
     }
@@ -34,7 +38,8 @@ export class EntitlementDO {
     }
 
     const payload = await buildSyncedEntitlement(body.originalTransactionId, body.productId, body.active, {
-      serverVerified: body.serverVerified
+      serverVerified: body.serverVerified,
+      boundDeviceHash: body.boundDeviceHash ?? readDeviceBindingHash(request) ?? undefined
     });
     await this.state.storage.put(CURRENT_ENTITLEMENT_KEY, payload);
     return this.reply(payload, 200);

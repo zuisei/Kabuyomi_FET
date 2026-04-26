@@ -56,7 +56,8 @@ export const BillingSyncRequestSchema = z.object({
 });
 
 export const EntitlementRequestSchema = BillingSyncRequestSchema.extend({
-  serverVerified: z.boolean().default(false)
+  serverVerified: z.boolean().default(false),
+  boundDeviceHash: z.string().trim().min(1).max(128).optional()
 });
 
 const CreditPurchaseGrantBaseRequestSchema = z.object({

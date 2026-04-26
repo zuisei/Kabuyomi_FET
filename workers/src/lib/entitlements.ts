@@ -11,12 +11,15 @@ export interface SyncedEntitlement {
   quotaSubject: string;
   productId: string | null;
   syncedAt: string;
+  boundDeviceHash?: string;
 }
 
 const ENTITLEMENT_DO_URL = "https://do/entitlement";
+const DEVICE_BINDING_HEADER = "x-kabuyomi-device-binding";
 
 export async function syncBillingEntitlement(
   env: Env,
+  deviceBindingHash: string,
   request: {
     originalTransactionId: string;
     transactionId?: string;
@@ -25,7 +28,13 @@ export async function syncBillingEntitlement(
     signedTransactionInfo?: string;
   }
 ): Promise<SyncedEntitlement> {
-  let verifiedRequest = {
+  let verifiedRequest: {
+    originalTransactionId: string;
+    productId?: string;
+    active: boolean;
+    serverVerified: boolean;
+    boundDeviceHash?: string;
+  } = {
     originalTransactionId: request.originalTransactionId,
     productId: request.productId,
     active: request.active,
@@ -38,7 +47,8 @@ export async function syncBillingEntitlement(
       originalTransactionId: verified.originalTransactionId,
       productId: verified.productId ?? undefined,
       active: verified.active,
-      serverVerified: true
+      serverVerified: true,
+      boundDeviceHash: deviceBindingHash
     };
   }
 
@@ -47,8 +57,14 @@ export async function syncBillingEntitlement(
     verifiedRequest.originalTransactionId,
     new Request(ENTITLEMENT_DO_URL, {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(verifiedRequest)
+      headers: {
+        "content-type": "application/json",
+        [DEVICE_BINDING_HEADER]: deviceBindingHash
+      },
+      body: JSON.stringify({
+        ...verifiedRequest,
+        boundDeviceHash: deviceBindingHash
+      })
     }),
     "billing_sync_failed"
   );
@@ -59,12 +75,18 @@ export async function loadActiveEntitlementFromRequest(request: Request, env: En
   if (!originalTransactionId) {
     return null;
   }
+  const deviceBindingHash = await resolveDeviceBindingHashFromRequest(request);
 
   try {
     const payload = await fetchEntitlementRecord(
       env,
       originalTransactionId,
-      new Request(ENTITLEMENT_DO_URL, { method: "GET" }),
+      new Request(ENTITLEMENT_DO_URL, {
+        method: "GET",
+        headers: {
+          [DEVICE_BINDING_HEADER]: deviceBindingHash
+        }
+      }),
       "entitlement_lookup_failed"
     );
     return payload.plan === "free" ? null : payload;
@@ -80,7 +102,7 @@ export async function buildSyncedEntitlement(
   originalTransactionId: string,
   productId: string | null | undefined,
   active: boolean,
-  options: { serverVerified?: boolean } = {}
+  options: { serverVerified?: boolean; boundDeviceHash?: string } = {}
 ): Promise<SyncedEntitlement> {
   const serverVerified = options.serverVerified === true;
   const trustedActive = serverVerified ? active : false;
@@ -93,8 +115,27 @@ export async function buildSyncedEntitlement(
     plan,
     quotaSubject: `${plan}:${hex}`,
     productId: trustedProductId ?? null,
-    syncedAt: new Date().toISOString()
+    syncedAt: new Date().toISOString(),
+    boundDeviceHash: options.boundDeviceHash
   };
+}
+
+export async function resolveDeviceBindingHashFromRequest(request: Request): Promise<string> {
+  const deviceKey = request.headers.get("x-device-key")?.trim();
+  if (!deviceKey) {
+    throw new AppError(400, "Device key is required");
+  }
+
+  return sha256Hex(`entitlement-device:${deviceKey}`);
+}
+
+export function readDeviceBindingHash(request: Request): string | null {
+  return request.headers.get(DEVICE_BINDING_HEADER)?.trim() || null;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function fetchEntitlementRecord(

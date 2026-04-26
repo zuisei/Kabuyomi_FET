@@ -62,7 +62,7 @@ describe("worker routing", () => {
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/v1/billing/sync", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-device-key": "device-123" },
         body: JSON.stringify({
           originalTransactionId: "tx-1",
           productId: "app.kabuyomi.pro.monthly",
@@ -89,12 +89,36 @@ describe("worker routing", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("requires a device key before syncing billing state", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/billing/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          originalTransactionId: "tx-1",
+          active: false
+        })
+      }),
+      {
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Device key is required"
+    });
+  });
+
   it("syncs inactive billing state as free without minting pro", async () => {
     const entitlement = new EntitlementDO(createEntitlementState() as never);
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/v1/billing/sync", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-device-key": "device-123" },
         body: JSON.stringify({
           originalTransactionId: "tx-1",
           productId: "app.kabuyomi.pro.monthly",

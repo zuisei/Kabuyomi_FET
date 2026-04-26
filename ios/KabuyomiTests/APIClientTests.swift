@@ -236,6 +236,46 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(usage.stockLimit, 20)
     }
 
+    func testSyncBillingSendsDeviceBindingHeaders() async throws {
+        let client = makeClient(context: proContext) { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/billing/sync")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-original-transaction-id"), "tx-123")
+
+            let body = try XCTUnwrap(Self.requestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(json["originalTransactionId"] as? String, "orig-tx-123")
+            XCTAssertEqual(json["transactionId"] as? String, "tx-123")
+            XCTAssertEqual(json["productId"] as? String, "app.kabuyomi.pro.monthly")
+            XCTAssertEqual(json["active"] as? Bool, true)
+            XCTAssertEqual(json["signedTransactionInfo"] as? String, "signed-jws")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "plan": "pro",
+                    "quotaSubject": "pro:abcdef",
+                    "productId": "app.kabuyomi.pro.monthly",
+                    "syncedAt": "2026-04-26T00:00:00.000Z"
+                ])
+            )
+        }
+
+        let response = try await client.syncBilling(
+            BillingSyncRequest(
+                originalTransactionId: "orig-tx-123",
+                transactionId: "tx-123",
+                productId: "app.kabuyomi.pro.monthly",
+                active: true,
+                signedTransactionInfo: "signed-jws"
+            )
+        )
+
+        XCTAssertEqual(response.plan, "pro")
+        XCTAssertEqual(response.quotaSubject, "pro:abcdef")
+    }
+
     func testFetchUsageIncludesDetachedAccessHeaderWhenPresent() async throws {
         let client = makeClient(context: devContext) { request in
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")

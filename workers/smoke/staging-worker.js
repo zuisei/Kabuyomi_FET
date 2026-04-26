@@ -334,7 +334,8 @@ async function checkBillingSync() {
   const activeClaimResponse = await fetch(`${baseURL}/v1/billing/sync`, {
     method: "POST",
     headers: {
-      "content-type": "application/json"
+      "content-type": "application/json",
+      "x-device-key": deviceKey
     },
     body: JSON.stringify({
       originalTransactionId: "smoke-tx",
@@ -355,7 +356,8 @@ async function checkBillingSync() {
   const inactiveResponse = await fetch(`${baseURL}/v1/billing/sync`, {
     method: "POST",
     headers: {
-      "content-type": "application/json"
+      "content-type": "application/json",
+      "x-device-key": deviceKey
     },
     body: JSON.stringify({
       originalTransactionId: "smoke-tx-inactive",
