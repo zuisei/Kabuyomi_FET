@@ -56,14 +56,18 @@ export const EntitlementRequestSchema = BillingSyncRequestSchema.extend({
   serverVerified: z.boolean().default(false)
 });
 
-export const InternalCreditPurchaseGrantRequestSchema = z.object({
+const CreditPurchaseGrantBaseRequestSchema = z.object({
   productId: z.string().trim().min(1).max(128),
   transactionId: z.string().trim().min(1).max(256),
   originalTransactionId: z.string().trim().min(1).max(256).optional(),
   purchasedAt: z.string().trim().min(1).max(64).optional()
 });
 
-export const CreditPurchaseGrantRequestSchema = InternalCreditPurchaseGrantRequestSchema.extend({
+export const InternalCreditPurchaseGrantRequestSchema = CreditPurchaseGrantBaseRequestSchema.extend({
+  quotaSubject: z.string().trim().min(1).max(256).optional()
+});
+
+export const CreditPurchaseGrantRequestSchema = CreditPurchaseGrantBaseRequestSchema.extend({
   signedTransactionInfo: z.string().trim().min(1).max(16_384).optional()
 });
 

@@ -70,40 +70,48 @@ struct SettingsView: View {
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
-                HStack(spacing: 10) {
-                    Menu {
-                        ForEach(displayCreditPacks) { pack in
-                            Button {
-                                Task {
-                                    await appModel.purchaseCreditPack(productId: pack.id)
+                if appModel.isCreditBillingEnabled {
+                    HStack(spacing: 10) {
+                        Menu {
+                            ForEach(displayCreditPacks) { pack in
+                                Button {
+                                    Task {
+                                        await appModel.purchaseCreditPack(productId: pack.id)
+                                    }
+                                } label: {
+                                    Text(creditPackTitle(pack))
                                 }
-                            } label: {
-                                Text(creditPackTitle(pack))
+                                .disabled(appModel.billingActionInFlight || !pack.isAvailable)
                             }
-                            .disabled(appModel.billingActionInFlight || !pack.isAvailable)
+                        } label: {
+                            Label(appModel.billingActionInFlight ? "処理中" : "追加購入", systemImage: "plus.circle.fill")
+                                .frame(maxWidth: .infinity)
                         }
-                    } label: {
-                        Label(appModel.billingActionInFlight ? "処理中" : "追加購入", systemImage: "plus.circle.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(KabuyomiTheme.accentDeep)
-                    .disabled(appModel.billingActionInFlight)
+                        .buttonStyle(.borderedProminent)
+                        .tint(KabuyomiTheme.accentDeep)
+                        .disabled(appModel.billingActionInFlight)
 
-                    Button {
-                        appModel.activeAlert = AppAlertState(
-                            message: "広告視聴でcreditを増やす導線は次の実装で接続します。現時点ではまだ広告SDKは使いません。",
-                            kind: .dismissOnly
-                        )
-                    } label: {
-                        Label("広告で増やす", systemImage: "play.rectangle.fill")
-                            .frame(maxWidth: .infinity)
+                        Button {
+                            appModel.activeAlert = AppAlertState(
+                                message: "広告視聴でcreditを増やす導線は次の実装で接続します。現時点ではまだ広告SDKは使いません。",
+                                kind: .dismissOnly
+                            )
+                        } label: {
+                            Label("広告で増やす", systemImage: "play.rectangle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.bordered)
+                } else {
+                    Label("クレジット購入は準備中", systemImage: "lock.fill")
+                        .font(.system(.footnote, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
-        .task {
+        .task(id: appModel.isCreditBillingEnabled) {
+            guard appModel.isCreditBillingEnabled else { return }
             await appModel.loadCreditPackProducts(showErrors: false)
         }
     }

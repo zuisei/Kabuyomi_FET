@@ -338,6 +338,38 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.activeAlert?.message, "creditが不足しています。設定のCredit画面から追加credit購入または広告視聴の導線を確認してください。")
     }
 
+    func testPurchaseCreditPackBlocksWhenCreditBillingIsDisabled() async {
+        let model = makeAppModel()
+        model.usage = UsagePayload(
+            plan: "free",
+            chatsUsed: 0,
+            chatLimit: 10,
+            stocksUsed: 0,
+            stockLimit: 3,
+            dateJST: "2026-04-26",
+            savedTickers: [],
+            accessMode: nil,
+            credits: CreditUsagePayload(
+                monthlyRemaining: 30,
+                monthlyLimit: 30,
+                purchasedRemaining: 0,
+                totalRemaining: 30,
+                resetsAt: "2026-05-01T00:00:00+09:00"
+            ),
+            creditBillingEnabled: false
+        )
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            XCTFail("Unexpected network request: \(request.url?.path ?? "")")
+            throw URLError(.badServerResponse)
+        }
+
+        await model.purchaseCreditPack(productId: "credit_pack_100")
+
+        XCTAssertEqual(model.activeAlert?.message, "クレジット購入は現在準備中です。通常チャットはこれまで通り利用できます。")
+        XCTAssertFalse(model.billingActionInFlight)
+    }
+
     func testResetLocalDataClearsRecentStateAndRotatesDeviceIdentity() async throws {
         let persistence = PersistenceController(inMemory: true)
         let company = TestFixtures.companyPayload()

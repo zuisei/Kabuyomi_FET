@@ -334,6 +334,35 @@ describe("worker routing", () => {
     });
   });
 
+  it("allows internal credit purchase grants to target a quota subject without a client device key", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/internal/credits/purchase-grant", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-internal-token": "secret"
+        },
+        body: JSON.stringify({
+          productId: "unsupported_pack",
+          transactionId: "tx-recovery-1",
+          quotaSubject: "free:device:recovery-target"
+        })
+      }),
+      {
+        BACKFILL_SHARED_SECRET: "secret",
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unsupported credit product"
+    });
+  });
+
   it("returns 415 for quote translation requests without a JSON content type", async () => {
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/v1/translate-quote", {

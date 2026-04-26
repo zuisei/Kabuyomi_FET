@@ -109,6 +109,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     private var watchlistMutationInFlight = false
     private var watchlistMutationWaiters: [CheckedContinuation<Void, Never>] = []
     private var usageMutationGeneration = 0
+    private var creditGrantRecoveryInFlight = false
     private var subscriptionStateObserver: NSObjectProtocol?
     private var savedTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.savedTickers") ?? [])
     private var recentTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.recentTickers") ?? [])
@@ -134,6 +135,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.syncBillingState(showErrors: false)
+                await self.recoverUnfinishedCreditPurchases(showErrors: false)
                 await self.refreshUsage()
             }
         }
@@ -226,6 +228,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         return credits.totalRemaining >= chatCreditCost
     }
 
+    var isCreditBillingEnabled: Bool {
+        usage?.creditBillingEnabled == true
+    }
+
     var currentDeviceKeyDisplay: String {
         deviceIdentity.deviceKey()
     }
@@ -245,6 +251,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 await self.subscriptionStore.refreshEntitlements(reason: "bootstrap")
                 await self.syncBillingState(showErrors: false)
                 await self.loadCreditPackProducts(showErrors: false)
+                await self.recoverUnfinishedCreditPurchases(showErrors: false)
             }
             await self.refreshUsage()
         }
@@ -298,6 +305,14 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     func purchaseCreditPack(productId: String) async {
         guard !billingActionInFlight else { return }
+        guard isCreditBillingEnabled else {
+            activeAlert = AppAlertState(
+                message: "クレジット購入は現在準備中です。通常チャットはこれまで通り利用できます。",
+                kind: .dismissOnly
+            )
+            return
+        }
+
         billingActionInFlight = true
         defer { billingActionInFlight = false }
 
@@ -314,6 +329,27 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             )
         } catch {
             handle(error)
+        }
+    }
+
+    func recoverUnfinishedCreditPurchases(showErrors: Bool = true) async {
+        guard !creditGrantRecoveryInFlight else { return }
+        creditGrantRecoveryInFlight = true
+        defer { creditGrantRecoveryInFlight = false }
+
+        let purchases = await subscriptionStore.unfinishedCreditPurchases()
+        guard !purchases.isEmpty else { return }
+
+        for purchase in purchases {
+            do {
+                let response = try await apiClient.grantCreditPurchase(purchase.grantRequest)
+                storeUsage(response.usage, source: .refresh)
+                await purchase.finish()
+            } catch {
+                if showErrors {
+                    handle(error)
+                }
+            }
         }
     }
 

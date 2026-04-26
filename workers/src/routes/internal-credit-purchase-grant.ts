@@ -1,6 +1,6 @@
 import { InternalCreditPurchaseGrantRequestSchema } from "../lib/contracts";
 import { isAuthorizedInternalRequest } from "../lib/internal-auth";
-import { grantPurchasedCredits, readQuotaIdentity } from "../lib/quota";
+import { grantPurchasedCredits, readQuotaIdentity, type QuotaIdentity } from "../lib/quota";
 import { parseJsonBody } from "../lib/request";
 import { json } from "../lib/response";
 import type { RouteHandler } from "./types";
@@ -21,7 +21,9 @@ export const handleInternalCreditPurchaseGrantRoute: RouteHandler = async ({ req
     maxBytes: INTERNAL_CREDIT_PURCHASE_GRANT_PAYLOAD_MAX_BYTES,
     tooLargeMessage: "Credit purchase payload is too large"
   });
-  const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
+  const identity = payload.quotaSubject
+    ? identityFromQuotaSubject(payload.quotaSubject)
+    : await readQuotaIdentity(request, env, { requireDeviceKey: true });
   const result = await grantPurchasedCredits(identity, env, config, payload);
 
   return json({
@@ -34,3 +36,17 @@ export const handleInternalCreditPurchaseGrantRoute: RouteHandler = async ({ req
     usage: result.usage
   });
 };
+
+function identityFromQuotaSubject(quotaSubject: string): QuotaIdentity {
+  const plan = quotaSubject.startsWith("pro:")
+    ? "pro"
+    : quotaSubject.startsWith("lite:")
+      ? "lite"
+      : "free";
+
+  return {
+    quotaSubject,
+    plan,
+    identityKind: "entitlement"
+  };
+}

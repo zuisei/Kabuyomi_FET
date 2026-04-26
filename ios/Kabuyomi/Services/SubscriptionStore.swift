@@ -142,6 +142,28 @@ final class SubscriptionStore {
         }
     }
 
+    func unfinishedCreditPurchases() async -> [PendingCreditPurchase] {
+        startObservingTransactionsIfNeeded()
+
+        var purchases: [PendingCreditPurchase] = []
+        for await verification in Transaction.unfinished {
+            switch verification {
+            case .verified(let transaction):
+                guard Self.isCreditPackProduct(transaction.productID) else {
+                    continue
+                }
+                logger.notice(
+                    "credit_purchase_recovery=found product_id=\(transaction.productID, privacy: .public) transaction_id=\(String(transaction.id), privacy: .public)"
+                )
+                purchases.append(PendingCreditPurchase(transaction: transaction, signedTransactionInfo: verification.jwsRepresentation))
+
+            case .unverified(_, let error):
+                logger.error("credit_purchase_recovery=unverified error=\(error.localizedDescription, privacy: .public)")
+            }
+        }
+        return purchases
+    }
+
     func refreshEntitlements(reason: String) async {
         startObservingTransactionsIfNeeded()
 
@@ -233,6 +255,14 @@ final class SubscriptionStore {
                     self.logger.notice(
                         "transaction_update product_id=\(transaction.productID, privacy: .public) original_transaction_id=\(String(transaction.originalID), privacy: .public)"
                     )
+                    if Self.isCreditPackProduct(transaction.productID) {
+                        self.logger.notice(
+                            "transaction_update=credit_pack_pending_server_grant product_id=\(transaction.productID, privacy: .public) transaction_id=\(String(transaction.id), privacy: .public)"
+                        )
+                        NotificationCenter.default.post(name: .kabuyomiSubscriptionStateDidChange, object: nil)
+                        continue
+                    }
+
                     await self.refreshEntitlements(reason: "transaction_update")
                     await transaction.finish()
                     NotificationCenter.default.post(name: .kabuyomiSubscriptionStateDidChange, object: nil)
@@ -345,6 +375,10 @@ final class SubscriptionStore {
         default:
             return 0
         }
+    }
+
+    private static func isCreditPackProduct(_ productId: String) -> Bool {
+        creditPackProductIDs.contains(productId)
     }
 }
 
