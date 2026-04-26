@@ -7,6 +7,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "cleanup:filings": "node ./scripts/cleanup-filings.mjs",
+    "eval:chat:pilot": "node ./scripts/run-chat-eval-pilot.mjs",
+    "eval:chat:validate": "node ./scripts/validate-chat-eval.mjs",
     "smoke:staging": "node ./smoke/staging-worker.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
