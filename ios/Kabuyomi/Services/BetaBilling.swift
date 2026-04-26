@@ -1,17 +1,19 @@
 import Foundation
 
-struct BillingTier: Equatable {
+struct BillingTier: Equatable, Hashable {
     let plan: String
     let title: String
     let stockLimit: Int
     let chatLimit: Int
+    let monthlyCredits: Int
+    let productID: String?
 
     var badgeTitle: String {
         title.uppercased()
     }
 
     var summary: String {
-        "\(stockLimit)銘柄 / 1日\(chatLimit)会話"
+        "\(monthlyCredits) credits/月"
     }
 }
 
@@ -27,8 +29,39 @@ enum DetachedAccessMode: String {
 }
 
 enum BillingCatalog {
-    static let free = BillingTier(plan: "free", title: "無料", stockLimit: 3, chatLimit: 10)
-    static let pro = BillingTier(plan: "pro", title: "Pro", stockLimit: 20, chatLimit: 50)
+    static let free = BillingTier(
+        plan: "free",
+        title: "無料",
+        stockLimit: 3,
+        chatLimit: 10,
+        monthlyCredits: 30,
+        productID: nil
+    )
+    static let lite = BillingTier(
+        plan: "lite",
+        title: "Lite",
+        stockLimit: 3,
+        chatLimit: 10,
+        monthlyCredits: 150,
+        productID: "app.kabuyomi.lite.monthly"
+    )
+    static let pro = BillingTier(
+        plan: "pro",
+        title: "Pro",
+        stockLimit: 20,
+        chatLimit: 50,
+        monthlyCredits: 500,
+        productID: "app.kabuyomi.pro.monthly"
+    )
+    static let proMax = BillingTier(
+        plan: "pro_max",
+        title: "Pro Max",
+        stockLimit: 20,
+        chatLimit: 50,
+        monthlyCredits: 1200,
+        productID: "app.kabuyomi.pro_max.monthly"
+    )
+    static let subscriptionTiers = [lite, pro, proMax]
 
     // Keep detachable offers outside the standard free/pro ladder.
     // If an unlimited SKU returns later, isolate it here instead of widening the
@@ -37,19 +70,31 @@ enum BillingCatalog {
 
     static func tier(for plan: String) -> BillingTier {
         switch plan.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case lite.plan:
+            lite
         case pro.plan:
             pro
+        case proMax.plan:
+            proMax
         default:
             free
         }
+    }
+
+    static func tier(forProductID productID: String) -> BillingTier? {
+        subscriptionTiers.first { $0.productID == productID }
     }
 
     static func displayLabel(for plan: String) -> String {
         switch plan.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case free.plan:
             free.badgeTitle
+        case lite.plan:
+            lite.badgeTitle
         case pro.plan:
             pro.badgeTitle
+        case proMax.plan:
+            proMax.badgeTitle
         default:
             plan.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         }

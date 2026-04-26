@@ -23,7 +23,7 @@ describe("worker routing", () => {
     passThroughOnException: vi.fn()
   } as never;
 
-  it("does not mint pro from a client-reported billing sync claim", async () => {
+  it("does not mint pro from an unverifiable client-reported billing sync claim", async () => {
     const fetch = vi.fn();
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/v1/billing/sync", {
@@ -48,9 +48,9 @@ describe("worker routing", () => {
       executionContext
     );
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "Billing verification is required"
+      error: "Subscription transaction id is required"
     });
     expect(fetch).not.toHaveBeenCalled();
   });

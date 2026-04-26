@@ -89,6 +89,9 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var companyIsLoading = false
     var chatIsSending = false
     var billingActionInFlight = false
+    var subscriptionProducts: [SubscriptionProduct] = BillingCatalog.subscriptionTiers.map {
+        SubscriptionProduct(tier: $0, displayPrice: nil, isAvailable: false)
+    }
     var creditPackProducts: [CreditPackProduct] = []
     var activeAlert: AppAlertState?
     var aiConsentGranted = UserDefaults.standard.bool(forKey: "kabuyomi.aiConsentGranted")
@@ -174,12 +177,12 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     var currentBillingTier: BillingTier {
-        let resolvedPlan = usage?.plan ?? (subscriptionStore.isSubscriptionActive ? BillingCatalog.pro.plan : BillingCatalog.free.plan)
+        let resolvedPlan = usage?.plan ?? subscriptionStore.plan
         return BillingCatalog.tier(for: resolvedPlan)
     }
 
     var isProPlanActive: Bool {
-        currentBillingTier.plan == BillingCatalog.pro.plan
+        currentBillingTier.plan != BillingCatalog.free.plan
     }
 
     var currentPlanBadgeTitle: String {
@@ -250,26 +253,31 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             if !Self.isRunningTests {
                 await self.subscriptionStore.refreshEntitlements(reason: "bootstrap")
                 await self.syncBillingState(showErrors: false)
-                await self.loadCreditPackProducts(showErrors: false)
+                await self.loadSubscriptionProducts(showErrors: false)
                 await self.recoverUnfinishedCreditPurchases(showErrors: false)
             }
             await self.refreshUsage()
         }
     }
 
-    func purchasePro() async {
+    func purchaseSubscription(productId: String) async {
         guard !billingActionInFlight else { return }
         billingActionInFlight = true
         defer { billingActionInFlight = false }
 
         do {
-            let isActive = try await subscriptionStore.purchasePro()
+            let isActive = try await subscriptionStore.purchaseSubscription(productId: productId)
             guard isActive else { return }
             await syncBillingState(showErrors: true)
             await refreshUsage()
         } catch {
             handle(error)
         }
+    }
+
+    func purchasePro() async {
+        guard let productID = BillingCatalog.pro.productID else { return }
+        await purchaseSubscription(productId: productID)
     }
 
     func restorePurchases() async {
@@ -284,12 +292,22 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
             if !subscriptionStore.isSubscriptionActive {
                 activeAlert = AppAlertState(
-                    message: "復元できる Pro 購読は見つかりませんでした。",
+                    message: "復元できる購読は見つかりませんでした。",
                     kind: .dismissOnly
                 )
             }
         } catch {
             handle(error)
+        }
+    }
+
+    func loadSubscriptionProducts(showErrors: Bool = true) async {
+        do {
+            subscriptionProducts = try await subscriptionStore.subscriptionProducts()
+        } catch {
+            if showErrors {
+                handle(error)
+            }
         }
     }
 

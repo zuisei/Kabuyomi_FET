@@ -28,11 +28,13 @@ describe("remote config", () => {
     expect(config.planCredits).toEqual({
       free: 30,
       lite: 150,
-      pro: 500
+      pro: 500,
+      pro_max: 1200
     });
     expect(config.freeMonthlyCreditLimit).toBe(30);
     expect(config.liteMonthlyCreditLimit).toBe(150);
     expect(config.proMonthlyCreditLimit).toBe(500);
+    expect(config.proMaxMonthlyCreditLimit).toBe(1200);
   });
 
   it("normalizes plan credit limits from the compact planCredits map", async () => {
@@ -42,7 +44,8 @@ describe("remote config", () => {
           planCredits: {
             free: 25,
             lite: 175,
-            pro: 600
+            pro: 600,
+            pro_max: 1500
           }
         })
       }
@@ -51,11 +54,13 @@ describe("remote config", () => {
     expect(config.planCredits).toEqual({
       free: 25,
       lite: 175,
-      pro: 600
+      pro: 600,
+      pro_max: 1500
     });
     expect(config.freeMonthlyCreditLimit).toBe(25);
     expect(config.liteMonthlyCreditLimit).toBe(175);
     expect(config.proMonthlyCreditLimit).toBe(600);
+    expect(config.proMaxMonthlyCreditLimit).toBe(1500);
   });
 
   it("keeps legacy monthly credit config fields as fallbacks", async () => {
@@ -64,7 +69,8 @@ describe("remote config", () => {
         get: async () => ({
           freeMonthlyCreditLimit: 20,
           liteMonthlyCreditLimit: 120,
-          proMonthlyCreditLimit: 450
+          proMonthlyCreditLimit: 450,
+          proMaxMonthlyCreditLimit: 900
         })
       }
     } as never);
@@ -72,7 +78,8 @@ describe("remote config", () => {
     expect(config.planCredits).toEqual({
       free: 20,
       lite: 120,
-      pro: 450
+      pro: 450,
+      pro_max: 900
     });
   });
 

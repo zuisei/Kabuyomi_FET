@@ -64,6 +64,30 @@ describe("EntitlementDO", () => {
     });
   });
 
+  it("stores a pro max entitlement for an internally server-verified mutation", async () => {
+    const entitlement = new EntitlementDO(createState() as never);
+
+    const response = await entitlement.fetch(
+      new Request("https://do/entitlement", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          originalTransactionId: "tx-123",
+          active: true,
+          productId: "app.kabuyomi.pro_max.monthly",
+          serverVerified: true
+        })
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      plan: "pro_max",
+      quotaSubject: expect.stringMatching(/^pro_max:[a-f0-9]{64}$/),
+      productId: "app.kabuyomi.pro_max.monthly"
+    });
+  });
+
   it("returns 400 when the payload is not valid JSON", async () => {
     const entitlement = new EntitlementDO(createState() as never);
 

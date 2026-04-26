@@ -38,11 +38,13 @@ export const handleInternalCreditPurchaseGrantRoute: RouteHandler = async ({ req
 };
 
 function identityFromQuotaSubject(quotaSubject: string): QuotaIdentity {
-  const plan = quotaSubject.startsWith("pro:")
-    ? "pro"
-    : quotaSubject.startsWith("lite:")
-      ? "lite"
-      : "free";
+  const plan = quotaSubject.startsWith("pro_max:")
+    ? "pro_max"
+    : quotaSubject.startsWith("pro:")
+      ? "pro"
+      : quotaSubject.startsWith("lite:")
+        ? "lite"
+        : "free";
 
   return {
     quotaSubject,

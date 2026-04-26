@@ -1,5 +1,5 @@
 import type { Env } from "../env";
-import { resolveCreditPackCredits } from "./billing-catalog";
+import { isSubscriptionProductId, resolveCreditPackCredits } from "./billing-catalog";
 import { AppError } from "./errors";
 import { logEvent, logWarnEvent } from "./logging";
 
@@ -7,6 +7,14 @@ interface CreditPurchaseVerificationRequest {
   productId: string;
   transactionId: string;
   originalTransactionId?: string;
+  signedTransactionInfo?: string;
+}
+
+interface SubscriptionVerificationRequest {
+  productId?: string;
+  transactionId?: string;
+  originalTransactionId: string;
+  active: boolean;
   signedTransactionInfo?: string;
 }
 
@@ -20,6 +28,7 @@ interface DecodedTransactionPayload {
   productId?: string;
   bundleId?: string;
   revocationDate?: number;
+  expiresDate?: number | string;
 }
 
 type AppStoreServerEnvironment = "production" | "sandbox" | "auto";
@@ -51,6 +60,51 @@ export async function verifyCreditPurchaseWithApple(
   return {
     transactionId: applePayload.transactionId ?? request.transactionId,
     originalTransactionId: applePayload.originalTransactionId ?? request.originalTransactionId
+  };
+}
+
+export async function verifySubscriptionWithApple(
+  env: Env,
+  request: SubscriptionVerificationRequest
+): Promise<{ originalTransactionId: string; productId: string | null; active: boolean }> {
+  if (!request.active) {
+    return {
+      originalTransactionId: request.originalTransactionId,
+      productId: request.productId ?? null,
+      active: false
+    };
+  }
+
+  if (!isSubscriptionProductId(request.productId)) {
+    throw new AppError(400, "Unsupported subscription product");
+  }
+
+  let transactionId = request.transactionId?.trim();
+  if (request.signedTransactionInfo) {
+    const clientPayload = decodeJWSPayload(request.signedTransactionInfo);
+    ensureTransactionMatches(
+      "client",
+      { ...request, transactionId: transactionId ?? clientPayload.transactionId ?? "" },
+      clientPayload,
+      env.APPLE_BUNDLE_ID
+    );
+    ensureSubscriptionIsActive(clientPayload);
+    transactionId = transactionId || clientPayload.transactionId;
+  }
+
+  if (!transactionId) {
+    throw new AppError(400, "Subscription transaction id is required");
+  }
+
+  const signedTransactionInfo = await fetchSignedTransactionInfo(env, transactionId);
+  const applePayload = decodeJWSPayload(signedTransactionInfo);
+  ensureTransactionMatches("apple", { ...request, transactionId }, applePayload, env.APPLE_BUNDLE_ID);
+  ensureSubscriptionIsActive(applePayload);
+
+  return {
+    originalTransactionId: applePayload.originalTransactionId ?? request.originalTransactionId,
+    productId: applePayload.productId ?? request.productId ?? null,
+    active: true
   };
 }
 
@@ -145,7 +199,7 @@ async function buildAppStoreServerToken(env: Env): Promise<string> {
 
 function ensureTransactionMatches(
   source: "client" | "apple",
-  request: CreditPurchaseVerificationRequest,
+  request: CreditPurchaseVerificationRequest | (SubscriptionVerificationRequest & { transactionId: string }),
   payload: DecodedTransactionPayload,
   expectedBundleId?: string
 ): void {
@@ -160,6 +214,18 @@ function ensureTransactionMatches(
   }
   if (expectedBundleId?.trim() && payload.bundleId !== expectedBundleId.trim()) {
     throw new AppError(400, "Purchase transaction bundle mismatch", `${source} bundleId mismatch`);
+  }
+}
+
+function ensureSubscriptionIsActive(payload: DecodedTransactionPayload): void {
+  if (payload.revocationDate) {
+    throw new AppError(409, "Subscription transaction has been revoked");
+  }
+
+  const expiresAt =
+    typeof payload.expiresDate === "string" ? Number.parseInt(payload.expiresDate, 10) : payload.expiresDate;
+  if (expiresAt !== undefined && Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+    throw new AppError(409, "Subscription transaction has expired");
   }
 }
 

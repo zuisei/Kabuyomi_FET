@@ -10,16 +10,19 @@ extension Notification.Name {
 final class SubscriptionStore {
     static let shared = SubscriptionStore()
 
-    static let proMonthlyProductID = "app.kabuyomi.pro.monthly"
+    static let subscriptionProductIDs = BillingCatalog.subscriptionTiers.compactMap(\.productID)
     static let creditPackProductIDs = ["credit_pack_100", "credit_pack_300", "credit_pack_700"]
 
     private let quotaSubjectKey = "kabuyomi.quotaSubject"
     private let planKey = "kabuyomi.plan"
     private let productIdKey = "kabuyomi.subscription.productId"
+    private let transactionIdKey = "kabuyomi.subscription.transactionId"
     private let originalTransactionIdKey = "kabuyomi.subscription.originalTransactionId"
+    private let signedTransactionInfoKey = "kabuyomi.subscription.signedTransactionInfo"
     private let activeKey = "kabuyomi.subscription.active"
     private let lastSyncedOriginalTransactionIdKey = "kabuyomi.subscription.lastSynced.originalTransactionId"
     private let lastSyncedProductIdKey = "kabuyomi.subscription.lastSynced.productId"
+    private let lastSyncedTransactionIdKey = "kabuyomi.subscription.lastSynced.transactionId"
     private let lastSyncedActiveKey = "kabuyomi.subscription.lastSynced.active"
 
     private let defaults = UserDefaults.standard
@@ -50,9 +53,24 @@ final class SubscriptionStore {
         return defaults.string(forKey: originalTransactionIdKey)
     }
 
-    func purchasePro() async throws -> Bool {
+    func subscriptionProducts() async throws -> [SubscriptionProduct] {
+        let products = try await loadSubscriptionProducts()
+        return BillingCatalog.subscriptionTiers.map { tier in
+            guard let productID = tier.productID else {
+                return SubscriptionProduct(tier: tier, displayPrice: nil, isAvailable: false)
+            }
+            let product = products.first(where: { $0.id == productID })
+            return SubscriptionProduct(
+                tier: tier,
+                displayPrice: product?.displayPrice,
+                isAvailable: product != nil
+            )
+        }
+    }
+
+    func purchaseSubscription(productId: String) async throws -> Bool {
         startObservingTransactionsIfNeeded()
-        let product = try await proProduct()
+        let product = try await subscriptionProduct(id: productId)
         let result = try await product.purchase()
 
         switch result {
@@ -81,6 +99,10 @@ final class SubscriptionStore {
             logger.error("purchase_result=unknown")
             return false
         }
+    }
+
+    func purchasePro() async throws -> Bool {
+        try await purchaseSubscription(productId: BillingCatalog.pro.productID ?? "")
     }
 
     func restorePurchases() async throws {
@@ -167,26 +189,31 @@ final class SubscriptionStore {
     func refreshEntitlements(reason: String) async {
         startObservingTransactionsIfNeeded()
 
-        var latestActiveSubscription: Transaction?
+        var latestActiveSubscription: (transaction: Transaction, signedTransactionInfo: String)?
         for await entitlement in Transaction.currentEntitlements {
             guard case .verified(let transaction) = entitlement else {
                 logger.error("refresh_entitlements_result=unverified reason=\(reason, privacy: .public)")
                 continue
             }
 
-            guard transaction.productID == Self.proMonthlyProductID else {
+            guard Self.isSubscriptionProduct(transaction.productID) else {
                 continue
             }
 
             if isActive(transaction) {
-                latestActiveSubscription = transaction
+                if latestActiveSubscription == nil || planPriority(transaction.productID) > planPriority(latestActiveSubscription?.transaction.productID) {
+                    latestActiveSubscription = (transaction, entitlement.jwsRepresentation)
+                }
             }
         }
 
-        if let transaction = latestActiveSubscription {
+        if let latestActiveSubscription {
+            let transaction = latestActiveSubscription.transaction
             storeSubscriptionState(
                 productId: transaction.productID,
+                transactionId: String(transaction.id),
                 originalTransactionId: String(transaction.originalID),
+                signedTransactionInfo: latestActiveSubscription.signedTransactionInfo,
                 active: true
             )
             logger.notice(
@@ -195,7 +222,9 @@ final class SubscriptionStore {
         } else if let previousOriginalTransactionId = defaults.string(forKey: originalTransactionIdKey) {
             storeSubscriptionState(
                 productId: defaults.string(forKey: productIdKey),
+                transactionId: nil,
                 originalTransactionId: previousOriginalTransactionId,
+                signedTransactionInfo: nil,
                 active: false
             )
             logger.notice(
@@ -224,8 +253,10 @@ final class SubscriptionStore {
 
         return BillingSyncRequest(
             originalTransactionId: originalTransactionId,
+            transactionId: snapshot.transactionId,
             productId: snapshot.productId,
-            active: snapshot.active
+            active: snapshot.active,
+            signedTransactionInfo: snapshot.signedTransactionInfo
         )
     }
 
@@ -236,6 +267,7 @@ final class SubscriptionStore {
         let snapshot = currentSnapshot()
         set(snapshot.originalTransactionId, forKey: lastSyncedOriginalTransactionIdKey)
         set(snapshot.productId, forKey: lastSyncedProductIdKey)
+        set(snapshot.transactionId, forKey: lastSyncedTransactionIdKey)
         defaults.set(snapshot.active, forKey: lastSyncedActiveKey)
 
         logger.notice(
@@ -274,20 +306,33 @@ final class SubscriptionStore {
         }
     }
 
-    private func proProduct() async throws -> Product {
-        if let cachedProduct = cachedProducts.first(where: { $0.id == Self.proMonthlyProductID }) {
+    private func subscriptionProduct(id productId: String) async throws -> Product {
+        guard Self.isSubscriptionProduct(productId) else {
+            throw SubscriptionStoreError.productNotFound
+        }
+
+        if let cachedProduct = cachedProducts.first(where: { $0.id == productId }) {
             return cachedProduct
         }
 
-        let products = try await Product.products(for: [Self.proMonthlyProductID])
-        cachedProducts = products
+        let products = try await loadSubscriptionProducts()
 
-        guard let product = products.first(where: { $0.id == Self.proMonthlyProductID }) else {
-            logger.error("purchase_result=product_not_found product_id=\(Self.proMonthlyProductID, privacy: .public)")
+        guard let product = products.first(where: { $0.id == productId }) else {
+            logger.error("purchase_result=product_not_found product_id=\(productId, privacy: .public)")
             throw SubscriptionStoreError.productNotFound
         }
 
         return product
+    }
+
+    private func loadSubscriptionProducts() async throws -> [Product] {
+        if !cachedProducts.isEmpty {
+            return cachedProducts
+        }
+
+        let products = try await Product.products(for: Self.subscriptionProductIDs)
+        cachedProducts = products
+        return products
     }
 
     private func creditPackProduct(id productId: String) async throws -> Product {
@@ -314,9 +359,17 @@ final class SubscriptionStore {
         return products
     }
 
-    private func storeSubscriptionState(productId: String?, originalTransactionId: String, active: Bool) {
+    private func storeSubscriptionState(
+        productId: String?,
+        transactionId: String?,
+        originalTransactionId: String,
+        signedTransactionInfo: String?,
+        active: Bool
+    ) {
         set(productId, forKey: productIdKey)
+        set(transactionId, forKey: transactionIdKey)
         set(originalTransactionId, forKey: originalTransactionIdKey)
+        set(signedTransactionInfo, forKey: signedTransactionInfoKey)
         defaults.set(active, forKey: activeKey)
     }
 
@@ -324,14 +377,18 @@ final class SubscriptionStore {
         defaults.removeObject(forKey: quotaSubjectKey)
         defaults.set("free", forKey: planKey)
         defaults.removeObject(forKey: productIdKey)
+        defaults.removeObject(forKey: transactionIdKey)
         defaults.removeObject(forKey: originalTransactionIdKey)
+        defaults.removeObject(forKey: signedTransactionInfoKey)
         defaults.set(false, forKey: activeKey)
     }
 
     private func syncedSnapshot() -> BillingSyncSnapshot {
         BillingSyncSnapshot(
             productId: defaults.string(forKey: lastSyncedProductIdKey),
+            transactionId: defaults.string(forKey: lastSyncedTransactionIdKey),
             originalTransactionId: defaults.string(forKey: lastSyncedOriginalTransactionIdKey),
+            signedTransactionInfo: nil,
             active: defaults.bool(forKey: lastSyncedActiveKey)
         )
     }
@@ -339,7 +396,9 @@ final class SubscriptionStore {
     private func currentSnapshot() -> BillingSyncSnapshot {
         BillingSyncSnapshot(
             productId: defaults.string(forKey: productIdKey),
+            transactionId: defaults.string(forKey: transactionIdKey),
             originalTransactionId: defaults.string(forKey: originalTransactionIdKey),
+            signedTransactionInfo: defaults.string(forKey: signedTransactionInfoKey),
             active: defaults.bool(forKey: activeKey)
         )
     }
@@ -380,6 +439,38 @@ final class SubscriptionStore {
     private static func isCreditPackProduct(_ productId: String) -> Bool {
         creditPackProductIDs.contains(productId)
     }
+
+    private static func isSubscriptionProduct(_ productId: String) -> Bool {
+        subscriptionProductIDs.contains(productId)
+    }
+
+    private func planPriority(_ productId: String?) -> Int {
+        guard let productId,
+              let tier = BillingCatalog.tier(forProductID: productId) else {
+            return 0
+        }
+
+        switch tier.plan {
+        case BillingCatalog.proMax.plan:
+            return 3
+        case BillingCatalog.pro.plan:
+            return 2
+        case BillingCatalog.lite.plan:
+            return 1
+        default:
+            return 0
+        }
+    }
+}
+
+struct SubscriptionProduct: Identifiable, Hashable {
+    let tier: BillingTier
+    let displayPrice: String?
+    let isAvailable: Bool
+
+    var id: String {
+        tier.productID ?? tier.plan
+    }
 }
 
 struct CreditPackProduct: Identifiable, Hashable {
@@ -416,8 +507,17 @@ struct PendingCreditPurchase {
 
 private struct BillingSyncSnapshot: Equatable {
     let productId: String?
+    let transactionId: String?
     let originalTransactionId: String?
+    let signedTransactionInfo: String?
     let active: Bool
+
+    static func == (lhs: BillingSyncSnapshot, rhs: BillingSyncSnapshot) -> Bool {
+        lhs.productId == rhs.productId
+            && lhs.transactionId == rhs.transactionId
+            && lhs.originalTransactionId == rhs.originalTransactionId
+            && lhs.active == rhs.active
+    }
 }
 
 enum SubscriptionStoreError: LocalizedError {
@@ -426,7 +526,7 @@ enum SubscriptionStoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .productNotFound:
-            "Pro 商品を取得できませんでした。時間をおいて再度お試しください。"
+            "商品情報を取得できませんでした。App Store Connectの設定反映後に再度お試しください。"
         }
     }
 }

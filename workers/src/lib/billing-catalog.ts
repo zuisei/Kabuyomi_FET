@@ -1,6 +1,6 @@
 import type { RemoteConfig } from "./remote-config";
 
-export type AccessPlan = "free" | "lite" | "pro";
+export type AccessPlan = "free" | "lite" | "pro" | "pro_max";
 export type CreditPlan = AccessPlan;
 
 export interface PlanLimits {
@@ -10,6 +10,7 @@ export interface PlanLimits {
 
 export const LITE_PRODUCT_IDS = new Set(["app.kabuyomi.lite.monthly"]);
 export const PRO_PRODUCT_IDS = new Set(["app.kabuyomi.pro.monthly"]);
+export const PRO_MAX_PRODUCT_IDS = new Set(["app.kabuyomi.pro_max.monthly"]);
 
 export const CREDIT_PACK_PRODUCTS = {
   credit_pack_100: 100,
@@ -32,7 +33,18 @@ export function resolvePlanFromBilling(productId: string | null | undefined, act
     return "pro";
   }
 
+  if (productId && PRO_MAX_PRODUCT_IDS.has(productId)) {
+    return "pro_max";
+  }
+
   return "free";
+}
+
+export function isSubscriptionProductId(productId: string | null | undefined): boolean {
+  return Boolean(
+    productId &&
+      (LITE_PRODUCT_IDS.has(productId) || PRO_PRODUCT_IDS.has(productId) || PRO_MAX_PRODUCT_IDS.has(productId))
+  );
 }
 
 export function resolveCreditPackCredits(productId: string): number | null {
@@ -44,7 +56,7 @@ export function resolveMonthlyCreditLimit(plan: AccessPlan, config: RemoteConfig
 }
 
 export function resolvePlanLimits(plan: AccessPlan, config: RemoteConfig): PlanLimits {
-  if (plan === "pro") {
+  if (plan === "pro" || plan === "pro_max") {
     return {
       chatLimit: config.proDailyChatLimit,
       stockLimit: config.proStockLimit

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { verifyCreditPurchaseWithApple } from "../src/lib/apple-store-server";
+import { verifyCreditPurchaseWithApple, verifySubscriptionWithApple } from "../src/lib/apple-store-server";
 
 describe("apple store server verification", () => {
   afterEach(() => {
@@ -99,6 +99,49 @@ describe("apple store server verification", () => {
       status: 503,
       publicMessage: "Apple transaction verification is not configured"
     });
+  });
+
+  it("verifies an active subscription through Apple transaction info", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "sub-tx-100",
+      originalTransactionId: "orig-sub-tx-100",
+      productId: "app.kabuyomi.pro_max.monthly",
+      bundleId: "app.kabuyomi.ios",
+      expiresDate: Date.now() + 30 * 24 * 60 * 60 * 1000
+    });
+    const fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ signedTransactionInfo }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const result = await verifySubscriptionWithApple(
+      {
+        APPLE_APP_STORE_ISSUER_ID: "issuer-id",
+        APPLE_APP_STORE_KEY_ID: "key-id",
+        APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+        APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+        APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
+      } as never,
+      {
+        productId: "app.kabuyomi.pro_max.monthly",
+        transactionId: "sub-tx-100",
+        originalTransactionId: "orig-sub-tx-100",
+        active: true,
+        signedTransactionInfo
+      }
+    );
+
+    expect(result).toEqual({
+      originalTransactionId: "orig-sub-tx-100",
+      productId: "app.kabuyomi.pro_max.monthly",
+      active: true
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(fetch.mock.calls[0][0])).toContain("api.storekit-sandbox.itunes.apple.com/inApps/v1/transactions/sub-tx-100");
   });
 });
 

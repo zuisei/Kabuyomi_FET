@@ -6,7 +6,7 @@ import { json } from "../lib/response";
 import { syncBillingEntitlement } from "../lib/entitlements";
 import type { RouteHandler } from "./types";
 
-const BILLING_SYNC_PAYLOAD_MAX_BYTES = 2_048;
+const BILLING_SYNC_PAYLOAD_MAX_BYTES = 20_000;
 
 export const handleBillingSyncRoute: RouteHandler = async ({ request, url, env }) => {
   if (!(request.method === "POST" && url.pathname === "/v1/billing/sync")) {

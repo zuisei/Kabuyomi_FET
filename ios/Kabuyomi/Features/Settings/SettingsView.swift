@@ -71,55 +71,24 @@ struct SettingsView: View {
                 }
 
                 if appModel.isCreditBillingEnabled {
-                    HStack(spacing: 10) {
-                        if availableCreditPacks.isEmpty {
-                            Button {
-                                Task {
-                                    await appModel.loadCreditPackProducts(showErrors: true)
-                                }
-                            } label: {
-                                Label("商品設定を確認中", systemImage: "exclamationmark.circle.fill")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(appModel.billingActionInFlight)
-                        } else {
-                            Menu {
-                                ForEach(availableCreditPacks) { pack in
-                                    Button {
-                                        Task {
-                                            await appModel.purchaseCreditPack(productId: pack.id)
-                                        }
-                                    } label: {
-                                        Text(creditPackTitle(pack))
-                                    }
-                                }
-                            } label: {
-                                Label(appModel.billingActionInFlight ? "処理中" : "追加購入", systemImage: "plus.circle.fill")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(KabuyomiTheme.accentDeep)
-                            .disabled(appModel.billingActionInFlight)
-                        }
+                    Label("追加credit購入は初期リリースでは停止中", systemImage: "pause.circle.fill")
+                        .font(.system(.footnote, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
 
-                        Button {
-                            appModel.activeAlert = AppAlertState(
-                                message: "広告視聴でcreditを増やす導線は次の実装で接続します。現時点ではまだ広告SDKは使いません。",
-                                kind: .dismissOnly
-                            )
-                        } label: {
-                            Label("広告で増やす", systemImage: "play.rectangle.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
+                    Button {
+                        appModel.activeAlert = AppAlertState(
+                            message: "広告視聴でcreditを増やす導線は次の実装で接続します。現時点ではまだ広告SDKは使いません。",
+                            kind: .dismissOnly
+                        )
+                    } label: {
+                        Label("広告で増やす", systemImage: "play.rectangle.fill")
+                            .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(.bordered)
 
-                    if availableCreditPacks.isEmpty {
-                        Text("App Store Connectで価格が未設定、または商品情報がまだSandboxに反映されていない可能性があります。")
-                            .font(.footnote)
-                            .foregroundStyle(KabuyomiTheme.inkMuted)
-                    }
+                    Text("まず月間credit付きプランを提供します。追加creditパックはApp Store審査と運用が固まってから再開します。")
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 } else {
                     Label("クレジット購入は準備中", systemImage: "lock.fill")
                         .font(.system(.footnote, design: .rounded, weight: .semibold))
@@ -128,21 +97,6 @@ struct SettingsView: View {
                 }
             }
         }
-        .task(id: appModel.isCreditBillingEnabled) {
-            guard appModel.isCreditBillingEnabled else { return }
-            await appModel.loadCreditPackProducts(showErrors: false)
-        }
-    }
-
-    private var availableCreditPacks: [CreditPackProduct] {
-        appModel.creditPackProducts.filter(\.isAvailable)
-    }
-
-    private func creditPackTitle(_ pack: CreditPackProduct) -> String {
-        if let displayPrice = pack.displayPrice {
-            return "\(pack.credits) credits - \(displayPrice)"
-        }
-        return "\(pack.credits) credits"
     }
 
     private var planCard: some View {
@@ -179,28 +133,27 @@ struct SettingsView: View {
 
                 VStack(spacing: 10) {
                     BillingTierRow(tier: BillingCatalog.free, isCurrent: appModel.currentBillingTier.plan == BillingCatalog.free.plan)
-                    BillingTierRow(tier: BillingCatalog.pro, isCurrent: appModel.currentBillingTier.plan == BillingCatalog.pro.plan)
+                    ForEach(appModel.subscriptionProducts) { product in
+                        Button {
+                            Task {
+                                await appModel.purchaseSubscription(productId: product.id)
+                            }
+                        } label: {
+                            SubscriptionPlanRow(
+                                product: product,
+                                isCurrent: appModel.currentBillingTier.plan == product.tier.plan
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(
+                            appModel.billingActionInFlight
+                                || appModel.currentBillingTier.plan == product.tier.plan
+                                || !product.isAvailable
+                        )
+                    }
                 }
 
                 HStack(spacing: 10) {
-                    Button {
-                        Task {
-                            await appModel.purchasePro()
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            if appModel.billingActionInFlight {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                            Text(appModel.isProPlanActive ? "Pro 利用中" : "Pro を購入")
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(KabuyomiTheme.accentDeep)
-                    .disabled(appModel.billingActionInFlight || appModel.isProPlanActive)
-
                     Button {
                         Task {
                             await appModel.restorePurchases()
@@ -213,10 +166,13 @@ struct SettingsView: View {
                     .disabled(appModel.billingActionInFlight)
                 }
 
-                Text("StoreKit の購読状態を同期し、同じ API のまま free / pro の quota だけを切り替えます。")
+                Text("月額プランは毎月creditを付与します。追加creditパックは初期リリースでは停止中です。")
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
             }
+        }
+        .task {
+            await appModel.loadSubscriptionProducts(showErrors: false)
         }
     }
 
@@ -483,6 +439,51 @@ private struct BillingTierRow: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(KabuyomiTheme.fill(for: isCurrent ? .secondary : .muted))
+        )
+    }
+}
+
+private struct SubscriptionPlanRow: View {
+    let product: SubscriptionProduct
+    let isCurrent: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(product.tier.title)
+                    .font(.system(.body, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                Text(product.tier.summary)
+                    .font(.footnote)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 5) {
+                if isCurrent {
+                    Text("現在")
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                } else if let displayPrice = product.displayPrice {
+                    Text(displayPrice)
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                } else {
+                    Text("設定中")
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                }
+
+                Image(systemName: isCurrent ? "checkmark.circle.fill" : "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isCurrent ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
             }
         }
         .padding(12)

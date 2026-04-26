@@ -432,8 +432,10 @@ struct CreditUsagePayload: Decodable, Hashable {
 
 struct BillingSyncRequest: Encodable {
     let originalTransactionId: String
+    let transactionId: String?
     let productId: String?
     let active: Bool
+    let signedTransactionInfo: String?
 }
 
 struct CreditPurchaseGrantRequest: Encodable {

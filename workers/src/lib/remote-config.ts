@@ -21,6 +21,7 @@ export interface RemoteConfig {
   freeMonthlyCreditLimit: number;
   liteMonthlyCreditLimit: number;
   proMonthlyCreditLimit: number;
+  proMaxMonthlyCreditLimit: number;
   maintenanceMode: boolean;
   extractorVersion: string;
   promptVersion: string;
@@ -56,11 +57,13 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   planCredits: {
     free: 30,
     lite: 150,
-    pro: 500
+    pro: 500,
+    pro_max: 1200
   },
   freeMonthlyCreditLimit: 30,
   liteMonthlyCreditLimit: 150,
   proMonthlyCreditLimit: 500,
+  proMaxMonthlyCreditLimit: 1200,
   maintenanceMode: false,
   extractorVersion: CURRENT_EXTRACTOR_VERSION,
   promptVersion: "v1",
@@ -106,7 +109,11 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
   const planCredits = normalizePlanCredits(payload.planCredits, {
     free: normalizeNonNegativeInteger(payload.freeMonthlyCreditLimit, DEFAULT_REMOTE_CONFIG.freeMonthlyCreditLimit),
     lite: normalizeNonNegativeInteger(payload.liteMonthlyCreditLimit, DEFAULT_REMOTE_CONFIG.liteMonthlyCreditLimit),
-    pro: normalizeNonNegativeInteger(payload.proMonthlyCreditLimit, DEFAULT_REMOTE_CONFIG.proMonthlyCreditLimit)
+    pro: normalizeNonNegativeInteger(payload.proMonthlyCreditLimit, DEFAULT_REMOTE_CONFIG.proMonthlyCreditLimit),
+    pro_max: normalizeNonNegativeInteger(
+      payload.proMaxMonthlyCreditLimit,
+      DEFAULT_REMOTE_CONFIG.proMaxMonthlyCreditLimit
+    )
   });
 
   const config = {
@@ -129,6 +136,7 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
     freeMonthlyCreditLimit: planCredits.free,
     liteMonthlyCreditLimit: planCredits.lite,
     proMonthlyCreditLimit: planCredits.pro,
+    proMaxMonthlyCreditLimit: planCredits.pro_max,
     dailyRefreshBatchSize: resolveDailyRefreshBatchSize(
       payload.dailyRefreshBatchSize,
       DEFAULT_REMOTE_CONFIG.dailyRefreshBatchSize
@@ -189,6 +197,7 @@ function normalizePlanCredits(
   return {
     free: normalizeNonNegativeInteger(rawPlanCredits.free, fallback.free),
     lite: normalizeNonNegativeInteger(rawPlanCredits.lite, fallback.lite),
-    pro: normalizeNonNegativeInteger(rawPlanCredits.pro, fallback.pro)
+    pro: normalizeNonNegativeInteger(rawPlanCredits.pro, fallback.pro),
+    pro_max: normalizeNonNegativeInteger(rawPlanCredits.pro_max, fallback.pro_max)
   };
 }

@@ -48,8 +48,10 @@ export const CleanupFilingsRequestSchema = z.object({
 
 export const BillingSyncRequestSchema = z.object({
   originalTransactionId: z.string().trim().min(1),
+  transactionId: z.string().trim().min(1).max(256).optional(),
   productId: z.string().trim().min(1).optional(),
-  active: z.boolean().default(false)
+  active: z.boolean().default(false),
+  signedTransactionInfo: z.string().trim().min(1).max(16_384).optional()
 });
 
 export const EntitlementRequestSchema = BillingSyncRequestSchema.extend({
@@ -89,7 +91,7 @@ export const QuotaRequestSchema = z.object({
     "grantPurchasedCredit"
   ]),
   quotaSubject: z.string().trim().min(1),
-  plan: z.enum(["free", "lite", "pro"]),
+  plan: z.enum(["free", "lite", "pro", "pro_max"]),
   accessMode: z.string().trim().min(1).optional(),
   dateJST: z.string().trim().min(1),
   ticker: z.string().trim().min(1).max(16).optional(),

@@ -1,6 +1,7 @@
 import type { Env } from "../env";
+import { verifySubscriptionWithApple } from "./apple-store-server";
 import { AppError } from "./errors";
-import { logErrorEvent, logWarnEvent } from "./logging";
+import { logErrorEvent } from "./logging";
 import { resolvePlanFromBilling, type AccessPlan } from "./billing-catalog";
 
 export const ORIGINAL_TRANSACTION_ID_HEADER = "x-kabuyomi-original-transaction-id";
@@ -16,25 +17,38 @@ const ENTITLEMENT_DO_URL = "https://do/entitlement";
 
 export async function syncBillingEntitlement(
   env: Env,
-  request: { originalTransactionId: string; productId?: string; active: boolean }
+  request: {
+    originalTransactionId: string;
+    transactionId?: string;
+    productId?: string;
+    active: boolean;
+    signedTransactionInfo?: string;
+  }
 ): Promise<SyncedEntitlement> {
+  let verifiedRequest = {
+    originalTransactionId: request.originalTransactionId,
+    productId: request.productId,
+    active: request.active,
+    serverVerified: false
+  };
+
   if (request.active) {
-    logWarnEvent("billing_sync_unverified_active_claim_rejected", {
-      productId: request.productId ?? "nil"
-    });
-    throw new AppError(403, "Billing verification is required");
+    const verified = await verifySubscriptionWithApple(env, request);
+    verifiedRequest = {
+      originalTransactionId: verified.originalTransactionId,
+      productId: verified.productId ?? undefined,
+      active: verified.active,
+      serverVerified: true
+    };
   }
 
   return fetchEntitlementRecord(
     env,
-    request.originalTransactionId,
+    verifiedRequest.originalTransactionId,
     new Request(ENTITLEMENT_DO_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        ...request,
-        serverVerified: false
-      })
+      body: JSON.stringify(verifiedRequest)
     }),
     "billing_sync_failed"
   );

@@ -11,13 +11,15 @@ describe("billing catalog", () => {
   it("maps active subscription products to credit plans", () => {
     expect(resolvePlanFromBilling("app.kabuyomi.lite.monthly", true)).toBe("lite");
     expect(resolvePlanFromBilling("app.kabuyomi.pro.monthly", true)).toBe("pro");
+    expect(resolvePlanFromBilling("app.kabuyomi.pro_max.monthly", true)).toBe("pro_max");
     expect(resolvePlanFromBilling("app.kabuyomi.pro.monthly", false)).toBe("free");
   });
 
-  it("resolves monthly credit limits for Free, Lite, and Pro", () => {
+  it("resolves monthly credit limits for Free, Lite, Pro, and Pro Max", () => {
     expect(resolveMonthlyCreditLimit("free", DEFAULT_REMOTE_CONFIG)).toBe(30);
     expect(resolveMonthlyCreditLimit("lite", DEFAULT_REMOTE_CONFIG)).toBe(150);
     expect(resolveMonthlyCreditLimit("pro", DEFAULT_REMOTE_CONFIG)).toBe(500);
+    expect(resolveMonthlyCreditLimit("pro_max", DEFAULT_REMOTE_CONFIG)).toBe(1200);
   });
 
   it("keeps Lite on free legacy quota limits until credit billing is enabled", () => {
