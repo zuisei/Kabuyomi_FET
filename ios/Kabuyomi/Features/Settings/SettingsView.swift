@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
+    @State private var presentedLegalDocument: LegalDocumentKind?
 
     var body: some View {
         ZStack {
@@ -296,12 +297,8 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
 
-                NavigationLink {
-                    LegalDocumentView(
-                        title: "プライバシーポリシー",
-                        subtitle: "データの取り扱い",
-                        sections: privacySections
-                    )
+                Button {
+                    presentedLegalDocument = .privacy
                 } label: {
                     SettingsLinkRow(
                         title: "プライバシーポリシー",
@@ -310,12 +307,8 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
 
-                NavigationLink {
-                    LegalDocumentView(
-                        title: "利用条件",
-                        subtitle: "Kabuyomi の利用条件",
-                        sections: termsSections
-                    )
+                Button {
+                    presentedLegalDocument = .terms
                 } label: {
                     SettingsLinkRow(
                         title: "利用条件",
@@ -324,12 +317,8 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
 
-                NavigationLink {
-                    LegalDocumentView(
-                        title: "サポート",
-                        subtitle: "問い合わせと不具合報告",
-                        sections: supportSections
-                    )
+                Button {
+                    presentedLegalDocument = .support
                 } label: {
                     SettingsLinkRow(
                         title: "サポート",
@@ -338,6 +327,13 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+        .fullScreenCover(item: $presentedLegalDocument) { document in
+            LegalDocumentView(
+                title: document.title,
+                subtitle: document.subtitle,
+                sections: legalSections(for: document)
+            )
         }
     }
 
@@ -420,6 +416,47 @@ struct SettingsView: View {
                 body: "プライバシーポリシー、利用条件、サポート窓口はアプリ内およびApp Store Connectに登録されたサポートURLで案内します。"
             )
         ]
+    }
+
+    private func legalSections(for document: LegalDocumentKind) -> [LegalSection] {
+        switch document {
+        case .privacy:
+            privacySections
+        case .terms:
+            termsSections
+        case .support:
+            supportSections
+        }
+    }
+}
+
+private enum LegalDocumentKind: String, Identifiable {
+    case privacy
+    case terms
+    case support
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .privacy:
+            "プライバシーポリシー"
+        case .terms:
+            "利用条件"
+        case .support:
+            "サポート"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .privacy:
+            "データの取り扱い"
+        case .terms:
+            "Kabuyomi の利用条件"
+        case .support:
+            "問い合わせと不具合報告"
+        }
     }
 }
 
@@ -553,6 +590,8 @@ private struct SettingsLinkRow: View {
 }
 
 private struct LegalDocumentView: View {
+    @Environment(\.dismiss) private var dismiss
+
     let title: String
     let subtitle: String
     let sections: [LegalSection]
@@ -563,6 +602,19 @@ private struct LegalDocumentView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        Spacer()
+
+                        Button("閉じる") {
+                            dismiss()
+                        }
+                        .font(.system(.body, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 12)
+                        .kabuyomiCard(.secondary, radius: 22)
+                    }
+
                     VStack(alignment: .leading, spacing: 8) {
                         Text("アプリポリシー")
                             .font(.system(.caption, design: .rounded, weight: .bold))
@@ -605,8 +657,6 @@ private struct LegalDocumentView: View {
                 .padding(20)
             }
         }
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

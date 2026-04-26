@@ -8,6 +8,70 @@ private enum CompanySidePanel {
     case summary
 }
 
+private enum CompanyPanelGestureAxis {
+    case horizontal
+    case vertical
+}
+
+private struct CompanyPanelDrag {
+    let panel: CompanySidePanel
+    let progress: CGFloat
+}
+
+private struct CompanyDrawerPanelShape: Shape {
+    let panel: CompanySidePanel
+
+    func path(in rect: CGRect) -> Path {
+        let corners: UIRectCorner = switch panel {
+        case .library:
+            [.topRight, .bottomRight]
+        case .summary:
+            [.topLeft, .bottomLeft]
+        }
+
+        return Path(
+            UIBezierPath(
+                roundedRect: rect,
+                byRoundingCorners: corners,
+                cornerRadii: CGSize(width: 28, height: 28)
+            ).cgPath
+        )
+    }
+}
+
+private struct CompanyPanelGrabRail: View {
+    let panel: CompanySidePanel
+
+    var body: some View {
+        HStack {
+            if panel == .library {
+                Spacer(minLength: 0)
+            }
+
+            Capsule(style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            KabuyomiTheme.accentDeep.opacity(0.28),
+                            KabuyomiTheme.accent.opacity(0.12)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 58)
+                .shadow(color: Color.white.opacity(0.38), radius: 8, x: 0, y: 0)
+                .padding(.horizontal, 7)
+
+            if panel == .summary {
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .opacity(0.7)
+    }
+}
+
 private struct PendingDrawerTickerOpen: Equatable {
     let ticker: String
     let companyName: String
@@ -37,6 +101,9 @@ struct CompanyView: View {
     @State private var settingsPresented = false
     @State private var searchPresented = false
     @State private var selectedSource: LocalMessageSourceRef?
+    @State private var panelDrag: CompanyPanelDrag?
+    @State private var panelGestureAxis: CompanyPanelGestureAxis?
+    @State private var pendingPanelRemovalTask: Task<Void, Never>?
     @State private var libraryPanelID = UUID()
     @State private var summaryPanelID = UUID()
     @State private var pendingDrawerTickerOpen: PendingDrawerTickerOpen?
@@ -148,15 +215,19 @@ struct CompanyView: View {
                 KabuyomiTheme.background.ignoresSafeArea()
 
                 mainContent
-                    .blur(radius: activePanel == nil ? 0 : 10)
-                    .disabled(activePanel != nil)
+                    .blur(radius: panelAtmosphereProgress(screenWidth: proxy.size.width) * 9)
+                    .disabled(panelVisibilityProgress(screenWidth: proxy.size.width) > 0.01)
                     .accessibilityHidden(activePanel != nil)
 
-                if activePanel != nil {
-                    overlayBackdrop
+                if panelVisibilityProgress(screenWidth: proxy.size.width) > 0.01 {
+                    overlayBackdrop(screenWidth: proxy.size.width)
                 }
 
-                if activePanel == .library {
+                if activePanel == nil {
+                    panelEdgeSwipeLayer(screenWidth: proxy.size.width)
+                }
+
+                if shouldRenderPanel(.library) {
                     ZStack(alignment: .leading) {
                         ConversationLibraryDrawer(
                             query: $libraryQuery,
@@ -179,17 +250,29 @@ struct CompanyView: View {
                             cancelPendingOpen: cancelPendingDrawerOpen
                         )
                         .id(libraryPanelID)
-                        .frame(maxWidth: libraryDrawerMaxWidth, maxHeight: .infinity)
+                        .frame(width: drawerWidth(for: .library, screenWidth: proxy.size.width))
+                        .frame(maxHeight: .infinity)
                         .accessibilityElement(children: .contain)
                         .accessibilitySortPriority(2)
 
                         CompanyDrawerEdgeBlendLayer(style: .library)
                     }
+                    .overlay(alignment: .trailing) {
+                        panelCloseSwipeHandle(panel: .library, screenWidth: proxy.size.width)
+                    }
+                    .clipShape(CompanyDrawerPanelShape(panel: .library))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .offset(x: panelOffset(for: .library, screenWidth: proxy.size.width))
+                    .shadow(
+                        color: Color.black.opacity(panelAtmosphereProgress(for: .library, screenWidth: proxy.size.width) * 0.12),
+                        radius: 24,
+                        x: 10,
+                        y: 0
+                    )
                     .transition(.move(edge: .leading).combined(with: .opacity))
                 }
 
-                if activePanel == .summary, let company {
+                if shouldRenderPanel(.summary), let company {
                     ZStack(alignment: .trailing) {
                         SummaryDrawer(
                             company: company,
@@ -201,17 +284,28 @@ struct CompanyView: View {
                             close: closePanels
                         )
                         .id(summaryPanelID)
-                        .frame(maxWidth: summaryDrawerMaxWidth, maxHeight: .infinity)
+                        .frame(width: drawerWidth(for: .summary, screenWidth: proxy.size.width))
+                        .frame(maxHeight: .infinity)
                         .accessibilityElement(children: .contain)
                         .accessibilitySortPriority(2)
 
                         CompanyDrawerEdgeBlendLayer(style: .summary)
                     }
+                    .overlay(alignment: .leading) {
+                        panelCloseSwipeHandle(panel: .summary, screenWidth: proxy.size.width)
+                    }
+                    .clipShape(CompanyDrawerPanelShape(panel: .summary))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .offset(x: panelOffset(for: .summary, screenWidth: proxy.size.width))
+                    .shadow(
+                        color: Color.black.opacity(panelAtmosphereProgress(for: .summary, screenWidth: proxy.size.width) * 0.12),
+                        radius: 24,
+                        x: -10,
+                        y: 0
+                    )
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            .simultaneousGesture(panelSwipeGesture(screenWidth: proxy.size.width))
         }
         .toolbar(.hidden, for: .navigationBar)
         .task(id: currentTicker) {
@@ -360,17 +454,119 @@ struct CompanyView: View {
         return "この決算で気になる点を聞く"
     }
 
-    private var overlayBackdrop: some View {
-        Color.black.opacity(0.22)
+    private func overlayBackdrop(screenWidth: CGFloat) -> some View {
+        Color.black.opacity(0.2)
             .ignoresSafeArea()
+            .opacity(panelAtmosphereProgress(screenWidth: screenWidth))
             .contentShape(Rectangle())
             .onTapGesture {
                 closePanels()
             }
     }
 
+    private func panelEdgeSwipeLayer(screenWidth: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: libraryGestureEdgeWidth(screenWidth: screenWidth))
+                .contentShape(Rectangle())
+                .gesture(panelSwipeGesture(screenWidth: screenWidth))
+
+            Spacer(minLength: 0)
+
+            if company != nil {
+                Color.clear
+                    .frame(width: summaryGestureEdgeWidth(screenWidth: screenWidth))
+                    .contentShape(Rectangle())
+                    .gesture(panelSwipeGesture(screenWidth: screenWidth))
+            }
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
+    }
+
+    private func panelCloseSwipeHandle(panel: CompanySidePanel, screenWidth: CGFloat) -> some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.clear)
+
+            CompanyPanelGrabRail(panel: panel)
+                .allowsHitTesting(false)
+        }
+        .frame(width: panelCloseHandleWidth(screenWidth: screenWidth))
+        .frame(maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .gesture(panelSwipeGesture(screenWidth: screenWidth))
+        .accessibilityHidden(true)
+    }
+
+    private func drawerWidth(for panel: CompanySidePanel, screenWidth: CGFloat) -> CGFloat {
+        let maxWidth = switch panel {
+        case .library:
+            libraryDrawerMaxWidth
+        case .summary:
+            summaryDrawerMaxWidth
+        }
+
+        guard maxWidth.isFinite else { return screenWidth }
+        return min(maxWidth, screenWidth)
+    }
+
+    private func panelVisibilityProgress(screenWidth: CGFloat) -> CGFloat {
+        if let panelDrag {
+            return panelDrag.progress
+        }
+
+        return activePanel == nil ? 0 : 1
+    }
+
+    private func panelAtmosphereProgress(screenWidth: CGFloat) -> CGFloat {
+        easedAtmosphereProgress(panelVisibilityProgress(screenWidth: screenWidth))
+    }
+
+    private func panelAtmosphereProgress(for panel: CompanySidePanel, screenWidth: CGFloat) -> CGFloat {
+        easedAtmosphereProgress(panelVisibilityProgress(for: panel, screenWidth: screenWidth))
+    }
+
+    private func panelOffset(for panel: CompanySidePanel, screenWidth: CGFloat) -> CGFloat {
+        let width = drawerWidth(for: panel, screenWidth: screenWidth)
+        let progress = panelVisibilityProgress(for: panel, screenWidth: screenWidth)
+
+        switch panel {
+        case .library:
+            return -width * (1 - progress)
+        case .summary:
+            return width * (1 - progress)
+        }
+    }
+
+    private func panelVisibilityProgress(for panel: CompanySidePanel, screenWidth: CGFloat) -> CGFloat {
+        if panelDrag?.panel == panel {
+            return panelDrag?.progress ?? 0
+        }
+
+        return activePanel == panel ? 1 : 0
+    }
+
+    private func shouldRenderPanel(_ panel: CompanySidePanel) -> Bool {
+        activePanel == panel || panelDrag?.panel == panel
+    }
+
+    private func libraryGestureEdgeWidth(screenWidth: CGFloat) -> CGFloat {
+        min(max(screenWidth * 0.18, 64), 84)
+    }
+
+    private func summaryGestureEdgeWidth(screenWidth: CGFloat) -> CGFloat {
+        min(max(screenWidth * 0.08, 28), 40)
+    }
+
+    private func panelCloseHandleWidth(screenWidth: CGFloat) -> CGFloat {
+        min(max(screenWidth * 0.12, 44), 56)
+    }
+
     private func openPanel(_ panel: CompanySidePanel) {
         dismissKeyboard()
+        pendingPanelRemovalTask?.cancel()
+        pendingPanelRemovalTask = nil
 
         switch panel {
         case .library:
@@ -380,48 +576,188 @@ struct CompanyView: View {
         }
 
         withAnimation(.spring(response: 0.3, dampingFraction: 0.88)) {
+            panelDrag = nil
             activePanel = panel
         }
     }
 
     private func panelSwipeGesture(screenWidth: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 14, coordinateSpace: .global)
+            .onChanged { value in
+                updatePanelDrag(value, screenWidth: screenWidth)
+            }
             .onEnded { value in
                 handlePanelSwipe(value, screenWidth: screenWidth)
+                panelGestureAxis = nil
             }
     }
 
-    private func handlePanelSwipe(_ value: DragGesture.Value, screenWidth: CGFloat) {
+    private func updatePanelDrag(_ value: DragGesture.Value, screenWidth: CGFloat) {
         let translation = value.translation
         let predicted = value.predictedEndTranslation
-        guard isHorizontalPanelSwipe(translation: translation, predicted: predicted) else { return }
+
+        switch lockedPanelGestureAxis(translation: translation, predicted: predicted) {
+        case .vertical:
+            panelGestureAxis = .vertical
+            panelDrag = nil
+            return
+        case .horizontal:
+            panelGestureAxis = .horizontal
+        case nil:
+            return
+        }
 
         if let activePanel {
             switch activePanel {
-            case .library where translation.width < -38 || predicted.width < -72:
-                closePanels()
-            case .summary where translation.width > 38 || predicted.width > 72:
-                closePanels()
+            case .library where translation.width < 0:
+                let width = drawerWidth(for: .library, screenWidth: screenWidth)
+                panelDrag = CompanyPanelDrag(
+                    panel: .library,
+                    progress: clamp(1 + translation.width / width)
+                )
+            case .summary where translation.width > 0:
+                let width = drawerWidth(for: .summary, screenWidth: screenWidth)
+                panelDrag = CompanyPanelDrag(
+                    panel: .summary,
+                    progress: clamp(1 - translation.width / width)
+                )
             default:
-                break
+                panelDrag = nil
             }
             return
         }
 
         let startX = value.startLocation.x
-        let edgeWidth = min(max(screenWidth * 0.18, 64), 84)
+        let libraryEdgeWidth = libraryGestureEdgeWidth(screenWidth: screenWidth)
+        let summaryEdgeWidth = summaryGestureEdgeWidth(screenWidth: screenWidth)
 
-        if startX <= edgeWidth,
-           translation.width > 34 || predicted.width > 74 {
+        if startX <= libraryEdgeWidth, translation.width > 0 {
+            let width = drawerWidth(for: .library, screenWidth: screenWidth)
+            panelDrag = CompanyPanelDrag(
+                panel: .library,
+                progress: clamp(translation.width / width)
+            )
+            return
+        }
+
+        if startX >= screenWidth - summaryEdgeWidth, company != nil, translation.width < 0 {
+            let width = drawerWidth(for: .summary, screenWidth: screenWidth)
+            panelDrag = CompanyPanelDrag(
+                panel: .summary,
+                progress: clamp(-translation.width / width)
+            )
+            return
+        }
+
+        panelDrag = nil
+    }
+
+    private func handlePanelSwipe(_ value: DragGesture.Value, screenWidth: CGFloat) {
+        let translation = value.translation
+        let predicted = value.predictedEndTranslation
+
+        guard panelGestureAxis != .vertical,
+              isHorizontalPanelSwipe(translation: translation, predicted: predicted) else {
+            settlePanelDrag()
+            return
+        }
+
+        if let activePanel {
+            switch activePanel {
+            case .library where shouldClosePanel(.library, translation: translation, predicted: predicted, screenWidth: screenWidth):
+                closePanels()
+            case .summary where shouldClosePanel(.summary, translation: translation, predicted: predicted, screenWidth: screenWidth):
+                closePanels()
+            default:
+                settlePanelDrag()
+            }
+            return
+        }
+
+        let startX = value.startLocation.x
+        let libraryEdgeWidth = libraryGestureEdgeWidth(screenWidth: screenWidth)
+        let summaryEdgeWidth = summaryGestureEdgeWidth(screenWidth: screenWidth)
+
+        if startX <= libraryEdgeWidth,
+           shouldOpenPanel(.library, translation: translation, predicted: predicted, screenWidth: screenWidth) {
             openPanel(.library)
             return
         }
 
-        if startX >= screenWidth - edgeWidth,
+        if startX >= screenWidth - summaryEdgeWidth,
            company != nil,
-           translation.width < -34 || predicted.width < -74 {
+           shouldOpenPanel(.summary, translation: translation, predicted: predicted, screenWidth: screenWidth) {
             openPanel(.summary)
+        } else {
+            settlePanelDrag()
         }
+    }
+
+    private func shouldOpenPanel(
+        _ panel: CompanySidePanel,
+        translation: CGSize,
+        predicted: CGSize,
+        screenWidth: CGFloat
+    ) -> Bool {
+        let width = drawerWidth(for: panel, screenWidth: screenWidth)
+
+        switch panel {
+        case .library:
+            return translation.width > width * 0.3 || predicted.width > width * 0.48
+        case .summary:
+            return translation.width < -width * 0.34 || predicted.width < -width * 0.56
+        }
+    }
+
+    private func shouldClosePanel(
+        _ panel: CompanySidePanel,
+        translation: CGSize,
+        predicted: CGSize,
+        screenWidth: CGFloat
+    ) -> Bool {
+        let width = drawerWidth(for: panel, screenWidth: screenWidth)
+
+        switch panel {
+        case .library:
+            return translation.width < -width * 0.24 || predicted.width < -width * 0.42
+        case .summary:
+            return translation.width > width * 0.24 || predicted.width > width * 0.42
+        }
+    }
+
+    private func settlePanelDrag() {
+        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.88, blendDuration: 0.08)) {
+            panelDrag = nil
+        }
+    }
+
+    private func clamp(_ value: CGFloat, lower: CGFloat = 0, upper: CGFloat = 1) -> CGFloat {
+        min(max(value, lower), upper)
+    }
+
+    private func easedAtmosphereProgress(_ progress: CGFloat) -> CGFloat {
+        let x = clamp(progress)
+        return x * x * (3 - 2 * x)
+    }
+
+    private func lockedPanelGestureAxis(translation: CGSize, predicted: CGSize) -> CompanyPanelGestureAxis? {
+        if let panelGestureAxis {
+            return panelGestureAxis
+        }
+
+        let horizontal = max(abs(translation.width), abs(predicted.width) * 0.35)
+        let vertical = max(abs(translation.height), abs(predicted.height) * 0.28)
+        guard max(horizontal, vertical) >= 12 else { return nil }
+
+        if vertical > horizontal * 1.12 {
+            return .vertical
+        }
+
+        if horizontal > vertical * 1.18 {
+            return .horizontal
+        }
+
+        return nil
     }
 
     private func isHorizontalPanelSwipe(translation: CGSize, predicted: CGSize) -> Bool {
@@ -432,8 +768,28 @@ struct CompanyView: View {
 
     private func closePanels() {
         cancelPendingDrawerOpen()
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+
+        guard let panel = activePanel ?? panelDrag?.panel else {
+            settlePanelDrag()
+            return
+        }
+
+        pendingPanelRemovalTask?.cancel()
+
+        withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.08)) {
+            panelDrag = CompanyPanelDrag(panel: panel, progress: 0)
             activePanel = nil
+        }
+
+        pendingPanelRemovalTask = Task {
+            try? await Task.sleep(for: .milliseconds(260))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                if activePanel == nil, panelDrag?.panel == panel {
+                    panelDrag = nil
+                }
+                pendingPanelRemovalTask = nil
+            }
         }
     }
 
@@ -869,36 +1225,14 @@ private struct SourceEvidenceSheet: View {
 
     private var quotePreviewSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 10) {
-                Label("引用", systemImage: "quote.opening")
-                    .font(.system(.caption, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-
-                Text(previewModeLabel)
-                    .font(.system(.caption2, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.white.opacity(0.58))
-                    )
-
-                Spacer(minLength: 0)
-
-                if offersPreviewTranslation {
-                    previewModeControl
-                }
-            }
-
             quotePreviewCard
         }
     }
 
     private var previewModeControl: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 3) {
             previewModeButton("原文", mode: .original)
-            previewModeButton("訳", mode: .translated)
+            previewModeButton("訳 1 credit", mode: .translated)
         }
         .padding(3)
         .background(
@@ -932,7 +1266,29 @@ private struct SourceEvidenceSheet: View {
     }
 
     private var quotePreviewCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
+                Label("引用", systemImage: "quote.opening")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+
+                Text(previewModeLabel)
+                    .font(.system(.caption2, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(KabuyomiTheme.fill(for: .secondary))
+                    )
+
+                Spacer(minLength: 0)
+
+                if offersPreviewTranslation {
+                    previewModeControl
+                }
+            }
+
             if isPreviewTranslationPending {
                 previewTranslationLoadingBanner
             }
@@ -950,7 +1306,7 @@ private struct SourceEvidenceSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .opacity(isPreviewTranslationPending ? 0.82 : 1)
         }
-        .padding(14)
+        .padding(16)
         .padding(.leading, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(

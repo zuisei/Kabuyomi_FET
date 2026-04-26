@@ -37,7 +37,7 @@ struct ConversationMessageRow: View {
                     messageMetaLine
 
                     messageBubbleContent
-                        .padding(16)
+                        .padding(message.role == "user" ? 16 : 15)
                         .background(message.role == "user" ? AnyView(userBubble) : AnyView(assistantBubble))
 
                     if showsSuggestionStrip {
@@ -411,12 +411,31 @@ private struct AssistantNaturalText: View {
     }
 
     var body: some View {
-        Text(localizedAssistantDisplayText(text))
-            .font(.system(.body, design: .rounded, weight: .medium))
-            .foregroundStyle(KabuyomiTheme.ink)
-            .lineSpacing(4)
-            .fixedSize(horizontal: false, vertical: true)
-            .textSelection(.enabled)
+        let structure = structureAssistantMessage(text)
+
+        VStack(alignment: .leading, spacing: 12) {
+            Text(structure.conclusion)
+                .font(.system(.callout, design: .rounded, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.ink)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+
+            if !structure.evidence.isEmpty {
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(Array(structure.evidence.prefix(5).enumerated()), id: \.offset) { _, sentence in
+                        AssistantSentenceRow(text: sentence)
+                    }
+                }
+            }
+
+            if !structure.limitations.isEmpty {
+                AssistantInlineNotice(
+                    title: "注意点",
+                    message: structure.limitations.prefix(2).joined(separator: " ")
+                )
+            }
+        }
     }
 }
 
@@ -478,7 +497,7 @@ private struct AssistantSentenceRow: View {
                 .padding(.top, 7)
 
             Text(localizedAssistantDisplayText(text))
-                .font(.system(.footnote, design: .rounded, weight: .medium))
+                .font(.system(.footnote, design: .rounded, weight: .semibold))
                 .foregroundStyle(KabuyomiTheme.inkSoft)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
