@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { EntitlementDO } from "../src/durable/entitlement";
+import { UserQuotaDO } from "../src/durable/user-quota";
 import worker from "../src/index";
 
 function createEntitlementState() {
@@ -13,6 +14,65 @@ function createEntitlementState() {
       async put(key: string, value: unknown) {
         storage.set(key, value);
       }
+    }
+  };
+}
+
+function createQuotaState() {
+  const storage = new Map<string, unknown>();
+
+  return {
+    storage: {
+      async get<T>(key: string) {
+        return storage.get(key) as T | undefined;
+      },
+      async put(key: string, value: unknown) {
+        storage.set(key, value);
+      },
+      async delete(key: string) {
+        storage.delete(key);
+      },
+      async list<T>({
+        prefix,
+        reverse,
+        limit
+      }: {
+        prefix?: string;
+        reverse?: boolean;
+        limit?: number;
+      } = {}) {
+        const entries = [...storage.entries()]
+          .filter(([key]) => (prefix ? key.startsWith(prefix) : true))
+          .sort(([left], [right]) => left.localeCompare(right));
+        if (reverse) {
+          entries.reverse();
+        }
+        return new Map(entries.slice(0, limit ?? entries.length)) as Map<string, T>;
+      }
+    },
+    async blockConcurrencyWhile<T>(callback: () => Promise<T>) {
+      return callback();
+    }
+  };
+}
+
+function createEvalGrantEnv() {
+  const quota = new UserQuotaDO(createQuotaState() as never);
+  const dbRun = vi.fn().mockResolvedValue({});
+  const dbBind = vi.fn().mockReturnValue({ run: dbRun });
+
+  return {
+    KABUYOMI_CACHE: {
+      get: vi.fn().mockResolvedValue(null)
+    },
+    EVAL_SHARED_SECRET: "eval-secret",
+    USER_QUOTA: {
+      getByName: vi.fn().mockReturnValue({
+        fetch: (input: RequestInfo | URL, init?: RequestInit) => quota.fetch(new Request(input, init))
+      })
+    },
+    DB: {
+      prepare: vi.fn().mockReturnValue({ bind: dbBind })
     }
   };
 }
@@ -418,6 +478,156 @@ describe("worker routing", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Unsupported credit product"
+    });
+  });
+
+  it("requires the eval token for eval credit grants", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/internal/eval/credits/grant", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          deviceKey: "eval-chat-quality-v1",
+          credits: 500,
+          referenceId: "chat-quality-v1-20260426"
+        })
+      }),
+      createEvalGrantEnv() as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized"
+    });
+  });
+
+  it("rejects the wrong eval token for eval credit grants", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/internal/eval/credits/grant", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-eval-token": "wrong-secret"
+        },
+        body: JSON.stringify({
+          deviceKey: "eval-chat-quality-v1",
+          credits: 500,
+          referenceId: "chat-quality-v1-20260426"
+        })
+      }),
+      createEvalGrantEnv() as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized"
+    });
+  });
+
+  it("rejects non-eval device keys for eval credit grants", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/internal/eval/credits/grant", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-eval-token": "eval-secret"
+        },
+        body: JSON.stringify({
+          deviceKey: "device-123",
+          credits: 500,
+          referenceId: "chat-quality-v1-20260426"
+        })
+      }),
+      createEvalGrantEnv() as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Eval device key is required"
+    });
+  });
+
+  it("rejects eval credit grants above the capped amount", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/internal/eval/credits/grant", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-eval-token": "eval-secret"
+        },
+        body: JSON.stringify({
+          deviceKey: "eval-chat-quality-v1",
+          credits: 1001,
+          referenceId: "chat-quality-v1-20260426"
+        })
+      }),
+      createEvalGrantEnv() as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid eval credit grant payload"
+    });
+  });
+
+  it("grants eval credits idempotently and exposes the increased balance through usage", async () => {
+    const env = createEvalGrantEnv();
+    const request = new Request("https://kabuyomi.test/v1/internal/eval/credits/grant", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-eval-token": "eval-secret"
+      },
+      body: JSON.stringify({
+        deviceKey: "eval-chat-quality-v1",
+        credits: 500,
+        referenceId: "chat-quality-v1-20260426"
+      })
+    });
+
+    const first = await worker.fetch(request.clone() as Request, env as never, executionContext);
+    const second = await worker.fetch(request.clone() as Request, env as never, executionContext);
+    const usage = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/usage", {
+        headers: { "x-device-key": "eval-chat-quality-v1" }
+      }),
+      env as never,
+      executionContext
+    );
+
+    expect(first.status).toBe(200);
+    await expect(first.json()).resolves.toMatchObject({
+      operationId: "eval-grant:chat-quality-v1-20260426:eval-chat-quality-v1",
+      referenceId: "chat-quality-v1-20260426",
+      deviceKey: "eval-chat-quality-v1",
+      creditsGranted: 500,
+      creditsRemaining: 530,
+      didMutate: true,
+      usage: {
+        credits: {
+          monthlyRemaining: 30,
+          purchasedRemaining: 500,
+          totalRemaining: 530
+        }
+      }
+    });
+    expect(second.status).toBe(200);
+    await expect(second.json()).resolves.toMatchObject({
+      creditsGranted: 500,
+      creditsRemaining: 530,
+      didMutate: false
+    });
+    expect(usage.status).toBe(200);
+    await expect(usage.json()).resolves.toMatchObject({
+      credits: {
+        monthlyRemaining: 30,
+        purchasedRemaining: 500,
+        totalRemaining: 530
+      }
     });
   });
 

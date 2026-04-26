@@ -78,6 +78,15 @@ export interface PurchaseCreditGrantResult {
   transactionStatus: "pending" | "granted";
 }
 
+export interface EvalCreditGrantResult {
+  usage: UsageState;
+  didMutate: boolean;
+  operationId: string;
+  referenceId: string;
+  creditsGranted: number;
+  creditsRemaining: number;
+}
+
 export class InsufficientCreditsError extends AppError {
   constructor(
     readonly creditsRequired: number,
@@ -89,7 +98,7 @@ export class InsufficientCreditsError extends AppError {
 
 interface CreditOperationResult {
   operationId: string;
-  type: "consume" | "refund" | "monthly_grant" | "purchase_grant";
+  type: "consume" | "refund" | "monthly_grant" | "purchase_grant" | "eval_grant";
   status: "applied" | "insufficient" | "noop";
   delta: number;
   balanceAfter: number;
@@ -332,6 +341,33 @@ export async function grantPurchasedCredits(
     creditsGranted,
     creditsRemaining: result.creditsRemaining,
     transactionStatus: "granted"
+  };
+}
+
+export async function grantEvalCredits(
+  identity: QuotaIdentity,
+  env: Env,
+  config: RemoteConfig,
+  options: {
+    deviceKey: string;
+    credits: number;
+    referenceId: string;
+  }
+): Promise<EvalCreditGrantResult> {
+  const operationId = buildEvalGrantOperationId(options.referenceId, options.deviceKey);
+  const result = await mutateEvalCreditGrant(identity, env, config, {
+    operationId,
+    credits: options.credits,
+    referenceId: options.referenceId
+  });
+
+  return {
+    usage: result.usage,
+    didMutate: result.didMutate,
+    operationId,
+    referenceId: options.referenceId,
+    creditsGranted: options.credits,
+    creditsRemaining: result.creditsRemaining
   };
 }
 
@@ -691,6 +727,79 @@ async function mutatePurchaseCreditGrant(
   };
 }
 
+async function mutateEvalCreditGrant(
+  identity: QuotaIdentity,
+  env: Env,
+  config: RemoteConfig,
+  options: {
+    operationId: string;
+    credits: number;
+    referenceId: string;
+  }
+): Promise<
+  QuotaMutationResult & {
+    creditOperation?: CreditOperationResult;
+    creditsRemaining: number;
+  }
+> {
+  const stub = env.USER_QUOTA.getByName(identity.quotaSubject);
+  const dateJST = buildQuotaDateJST();
+  const limits = resolveIdentityLimits(identity, config);
+  const response = await stub.fetch("https://do/quota", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      action: "grantEvalCredit",
+      quotaSubject: identity.quotaSubject,
+      plan: identity.plan,
+      accessMode: identity.accessMode,
+      dateJST,
+      chatLimit: limits.chatLimit,
+      stockLimit: limits.stockLimit,
+      monthlyCreditLimit: limits.monthlyCreditLimit,
+      operationId: options.operationId,
+      credits: options.credits,
+      referenceType: "eval_grant",
+      referenceId: options.referenceId
+    })
+  });
+
+  const payload = (await response.json()) as UsageEnvelope & { error?: string };
+  if (!response.ok || !payload.usage) {
+    logEvent("quota_denial", {
+      action: "grantEvalCredit",
+      quotaSubject: identity.quotaSubject,
+      plan: identity.plan,
+      reason: payload.error ?? "Eval credit grant failed"
+    });
+    throw new AppError(response.status, payload.error ?? "Eval credit grant failed");
+  }
+
+  if (payload.monthlyGrant) {
+    await persistMonthlyGrant(env, identity, payload.monthlyGrant);
+  }
+  if (payload.creditOperation && payload.creditOperation.delta !== 0) {
+    await persistCreditLedgerEntry(env, identity, payload.creditOperation);
+  }
+
+  const creditsRemaining = payload.creditsRemaining ?? payload.usage.credits?.totalRemaining ?? 0;
+  logEvent("credit_eval_grant", {
+    userId: identity.quotaSubject,
+    operationId: options.operationId,
+    referenceId: options.referenceId,
+    status: payload.creditOperation?.status ?? "unknown",
+    delta: payload.creditOperation?.delta ?? 0,
+    creditsRemaining
+  });
+
+  return {
+    usage: payload.usage,
+    didMutate: payload.didMutate === true,
+    creditOperation: payload.creditOperation,
+    creditsRemaining
+  };
+}
+
 async function ensurePurchaseTransactionRow(
   identity: QuotaIdentity,
   env: Env,
@@ -878,6 +987,10 @@ function buildQuotaDateJST(): string {
 
 function buildPurchaseOperationId(transactionId: string): string {
   return `purchase:${transactionId}`;
+}
+
+function buildEvalGrantOperationId(referenceId: string, deviceKey: string): string {
+  return `eval-grant:${referenceId}:${deviceKey}`;
 }
 
 function normalizePreviewTickers(values: readonly string[]): string[] {

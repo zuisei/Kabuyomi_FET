@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   consumeCredit,
+  grantEvalCredits,
   grantPurchasedCredits,
   InsufficientCreditsError,
   loadUsage,
@@ -145,6 +146,70 @@ describe("credit quota bridge", () => {
       "tx-100",
       expect.stringContaining('"status":"applied"'),
       "2026-04-25T00:00:01.000Z"
+    );
+  });
+
+  it("records eval credit grants in the ledger without purchase transactions", async () => {
+    const db = createDb();
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          usage: usagePayload(500),
+          didMutate: true,
+          creditsRemaining: 530,
+          creditOperation: {
+            operationId: "eval-grant:chat-quality-v1-20260426:eval-chat-quality-v1",
+            type: "eval_grant",
+            status: "applied",
+            delta: 500,
+            balanceAfter: 530,
+            monthlyBalanceAfter: 30,
+            purchasedBalanceAfter: 500,
+            referenceType: "eval_grant",
+            referenceId: "chat-quality-v1-20260426",
+            createdAt: "2026-04-26T00:00:01.000Z"
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    const result = await grantEvalCredits(
+      identity,
+      {
+        DB: db.db,
+        USER_QUOTA: {
+          getByName: vi.fn().mockReturnValue({ fetch })
+        }
+      } as never,
+      DEFAULT_REMOTE_CONFIG,
+      {
+        deviceKey: "eval-chat-quality-v1",
+        credits: 500,
+        referenceId: "chat-quality-v1-20260426"
+      }
+    );
+
+    expect(result.didMutate).toBe(true);
+    expect(result.operationId).toBe("eval-grant:chat-quality-v1-20260426:eval-chat-quality-v1");
+    expect(result.creditsGranted).toBe(500);
+    expect(result.creditsRemaining).toBe(530);
+    expect(db.db.prepare).not.toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE INTO purchase_transactions"));
+    expect(db.db.prepare).toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE INTO credit_ledger"));
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(db.bind).toHaveBeenCalledWith(
+      expect.any(String),
+      identity.quotaSubject,
+      "eval-grant:chat-quality-v1-20260426:eval-chat-quality-v1",
+      "eval_grant",
+      500,
+      530,
+      30,
+      500,
+      "eval_grant",
+      "chat-quality-v1-20260426",
+      expect.stringContaining('"status":"applied"'),
+      "2026-04-26T00:00:01.000Z"
     );
   });
 

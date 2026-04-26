@@ -35,7 +35,7 @@ interface CreditStateRecord {
 
 interface CreditOperationRecord {
   operationId: string;
-  type: "consume" | "refund" | "purchase_grant";
+  type: "consume" | "refund" | "purchase_grant" | "eval_grant";
   status: "applied" | "insufficient" | "noop";
   delta: number;
   balanceAfter: number;
@@ -205,6 +205,38 @@ export class UserQuotaDO {
           originalTransactionId: body.originalTransactionId,
           purchasedAt: body.purchasedAt,
           purchaseCredits
+        });
+        if (monthlyGrant) {
+          await this.saveMonthlyGrant(monthlyGrant);
+        }
+        return {
+          status: 200,
+          payload: {
+            usage: currentUsage(),
+            didMutate: creditResult.didMutate,
+            creditOperation: creditResult.operation,
+            monthlyGrant,
+            creditsRemaining: creditState.monthlyRemaining + creditState.purchasedRemaining
+          }
+        };
+      }
+
+      if (body.action === "grantEvalCredit") {
+        const operationId = body.operationId;
+        const credits = body.credits;
+        const referenceId = body.referenceId;
+        if (!operationId || !credits || !referenceId) {
+          return {
+            status: 400,
+            payload: { error: "Invalid quota payload", usage: currentUsage(), didMutate }
+          };
+        }
+
+        const creditResult = await this.grantEvalCredit({
+          creditState,
+          operationId,
+          credits,
+          referenceId
         });
         if (monthlyGrant) {
           await this.saveMonthlyGrant(monthlyGrant);
@@ -604,6 +636,43 @@ export class UserQuotaDO {
     return { didMutate: true, operation };
   }
 
+  private async grantEvalCredit({
+    creditState,
+    operationId,
+    credits,
+    referenceId
+  }: {
+    creditState: CreditStateRecord;
+    operationId: string;
+    credits: number;
+    referenceId: string;
+  }): Promise<{ didMutate: boolean; operation: CreditOperationRecord }> {
+    const existing = await this.loadCreditOperation(operationId);
+    if (existing) {
+      return { didMutate: false, operation: existing };
+    }
+
+    const now = new Date().toISOString();
+    creditState.purchasedRemaining += credits;
+    creditState.updatedAt = now;
+    const operation = buildCreditOperation({
+      operationId,
+      type: "eval_grant",
+      status: "applied",
+      delta: credits,
+      creditState,
+      referenceType: "eval_grant",
+      referenceId,
+      createdAt: now
+    });
+    await Promise.all([
+      this.state.storage.put(CREDIT_STATE_KEY, creditState),
+      this.saveCreditOperation(operation)
+    ]);
+    await this.pruneOldCreditOperations(now);
+    return { didMutate: true, operation };
+  }
+
   private async loadCreditOperation(operationId: string): Promise<CreditOperationRecord | undefined> {
     return (await this.state.storage.get<CreditOperationRecord>(buildCreditOperationKey(operationId))) as
       | CreditOperationRecord
@@ -819,7 +888,7 @@ function buildCreditOperation({
   createdAt
 }: {
   operationId: string;
-  type: "consume" | "refund" | "purchase_grant";
+  type: "consume" | "refund" | "purchase_grant" | "eval_grant";
   status: "applied" | "insufficient" | "noop";
   delta: number;
   creditState: CreditStateRecord;

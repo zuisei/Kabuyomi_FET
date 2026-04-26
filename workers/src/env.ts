@@ -11,6 +11,7 @@ export interface Env {
   SEC_FETCHER_SHARED_SECRET?: string;
   SEC_FETCHER_TIMEOUT_MS?: string;
   BACKFILL_SHARED_SECRET?: string;
+  EVAL_SHARED_SECRET?: string;
   DEV_DETACHED_ACCESS_DEVICE_KEYS?: string;
   APPLE_APP_STORE_ISSUER_ID?: string;
   APPLE_APP_STORE_KEY_ID?: string;

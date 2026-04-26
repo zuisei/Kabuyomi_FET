@@ -75,6 +75,12 @@ export const CreditPurchaseGrantRequestSchema = CreditPurchaseGrantBaseRequestSc
   signedTransactionInfo: z.string().trim().min(1).max(16_384).optional()
 });
 
+export const EvalCreditGrantRequestSchema = z.object({
+  deviceKey: z.string().trim().min(1).max(48),
+  credits: z.number().int().min(1).max(1_000),
+  referenceId: z.string().trim().min(1).max(64)
+});
+
 export const QuotaRequestSchema = z.object({
   action: z.enum([
     "state",
@@ -90,7 +96,8 @@ export const QuotaRequestSchema = z.object({
     "ensureMonthlyCreditGrant",
     "consumeCredit",
     "refundCredit",
-    "grantPurchasedCredit"
+    "grantPurchasedCredit",
+    "grantEvalCredit"
   ]),
   quotaSubject: z.string().trim().min(1),
   plan: z.enum(["free", "lite", "pro", "pro_max"]),
@@ -103,7 +110,7 @@ export const QuotaRequestSchema = z.object({
   operationId: z.string().trim().min(1).max(128).optional(),
   originalOperationId: z.string().trim().min(1).max(128).optional(),
   creditsRequired: z.number().int().min(1).max(100).optional(),
-  credits: z.number().int().min(1).max(100).optional(),
+  credits: z.number().int().min(1).max(1_000).optional(),
   purchaseCredits: z.number().int().min(1).max(10_000).optional(),
   productId: z.string().trim().min(1).max(128).optional(),
   transactionId: z.string().trim().min(1).max(256).optional(),
