@@ -239,10 +239,10 @@ func sourceDocumentSearchTerms(for source: LocalMessageSourceRef, in company: Co
         .compactMap { $0 }
         .joined(separator: " ")
     let candidates: [String?] =
-        inferredEnglishSearchAnchors(from: sourceText).map(Optional.some)
-        + inferredNumericSearchAnchors(from: sourceText).map(Optional.some)
-        + searchSnippets(from: matchedChunk?.text).map(Optional.some)
+        searchSnippets(from: matchedChunk?.text).map(Optional.some)
         + searchSnippets(from: source.excerpt).map(Optional.some)
+        + inferredEnglishSearchAnchors(from: sourceText).map(Optional.some)
+        + inferredNumericSearchAnchors(from: sourceText).map(Optional.some)
         + [
             matchedChunk?.sectionTitle,
             matchedChunk?.sourceLabel,

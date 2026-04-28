@@ -33,6 +33,14 @@ enum UsageLoadState {
     case failed
 }
 
+enum SubscriptionProductLoadState {
+    case idle
+    case loading
+    case loaded
+    case unavailable
+    case failed
+}
+
 private enum UsageUpdateSource {
     case refresh
     case chat
@@ -91,6 +99,8 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var companyIsLoading = false
     var chatIsSending = false
     var billingActionInFlight = false
+    var subscriptionProductLoadState: SubscriptionProductLoadState = .idle
+    var subscriptionProductLoadErrorMessage: String?
     var subscriptionProducts: [SubscriptionProduct] = BillingCatalog.subscriptionTiers.map {
         SubscriptionProduct(tier: $0, displayPrice: nil, isAvailable: false)
     }
@@ -313,12 +323,41 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     func loadSubscriptionProducts(showErrors: Bool = true) async {
-        do {
-            subscriptionProducts = try await subscriptionStore.subscriptionProducts()
-        } catch {
-            if showErrors {
-                handle(error)
+        guard subscriptionProductLoadState != .loading else { return }
+
+        subscriptionProductLoadState = .loading
+        subscriptionProductLoadErrorMessage = nil
+
+        var lastError: Error?
+        let retryDelays: [UInt64] = [0, 800_000_000, 2_000_000_000]
+
+        for delay in retryDelays {
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: delay)
             }
+
+            do {
+                let products = try await subscriptionStore.subscriptionProducts()
+                subscriptionProducts = products
+
+                if products.allSatisfy(\.isAvailable) {
+                    subscriptionProductLoadState = .loaded
+                    return
+                }
+            } catch {
+                lastError = error
+            }
+        }
+
+        if let lastError {
+            subscriptionProductLoadState = .failed
+            subscriptionProductLoadErrorMessage = lastError.localizedDescription
+            if showErrors {
+                handle(lastError)
+            }
+        } else {
+            subscriptionProductLoadState = .unavailable
+            subscriptionProductLoadErrorMessage = "App Storeの商品情報を取得できませんでした。通信状況を確認して再読み込みしてください。"
         }
     }
 

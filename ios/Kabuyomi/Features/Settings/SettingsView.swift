@@ -128,6 +128,21 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
 
+                if subscriptionsAreUnavailable {
+                    SubscriptionUnavailableNotice(
+                        message: appModel.subscriptionProductLoadErrorMessage,
+                        retry: {
+                            Task {
+                                await appModel.loadSubscriptionProducts(showErrors: true)
+                            }
+                        }
+                    )
+                } else if appModel.subscriptionProductLoadState == .loading {
+                    Text("月額プランをApp Storeから確認中です。")
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                }
+
                 if appModel.usage == nil && appModel.isUsageSynchronizing {
                     Text("利用状況を同期中です。")
                         .foregroundStyle(KabuyomiTheme.inkMuted)
@@ -149,7 +164,8 @@ struct SettingsView: View {
                         } label: {
                             SubscriptionPlanRow(
                                 product: product,
-                                isCurrent: appModel.currentBillingTier.plan == product.tier.plan
+                                isCurrent: appModel.currentBillingTier.plan == product.tier.plan,
+                                isLoadingProducts: appModel.subscriptionProductLoadState == .loading
                             )
                         }
                         .buttonStyle(.plain)
@@ -183,6 +199,11 @@ struct SettingsView: View {
         .task {
             await appModel.loadSubscriptionProducts(showErrors: false)
         }
+    }
+
+    private var subscriptionsAreUnavailable: Bool {
+        appModel.subscriptionProductLoadState == .unavailable
+            || appModel.subscriptionProductLoadState == .failed
     }
 
     #if DEBUG
@@ -497,6 +518,7 @@ private struct BillingTierRow: View {
 private struct SubscriptionPlanRow: View {
     let product: SubscriptionProduct
     let isCurrent: Bool
+    let isLoadingProducts: Bool
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -520,21 +542,79 @@ private struct SubscriptionPlanRow: View {
                     Text(displayPrice)
                         .font(.system(.subheadline, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.accentDeep)
+                } else if isLoadingProducts {
+                    Text("App Store確認中")
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                } else if !product.isAvailable {
+                    Text("再読込待ち")
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.negative)
                 } else {
                     Text("App Store確認中")
                         .font(.system(.caption, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
-                Image(systemName: isCurrent ? "checkmark.circle.fill" : "chevron.right")
+                Image(systemName: rowIconName)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isCurrent ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
+                    .foregroundStyle(rowIconColor)
             }
         }
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(KabuyomiTheme.fill(for: isCurrent ? .secondary : .muted))
+        )
+    }
+
+    private var rowIconName: String {
+        if isCurrent {
+            return "checkmark.circle.fill"
+        }
+        return product.isAvailable ? "chevron.right" : "arrow.clockwise"
+    }
+
+    private var rowIconColor: Color {
+        if isCurrent {
+            return KabuyomiTheme.accentDeep
+        }
+        return product.isAvailable ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative
+    }
+}
+
+private struct SubscriptionUnavailableNotice: View {
+    let message: String?
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.negative)
+                    .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("月額プランを読み込めませんでした")
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Text(message ?? "App Storeの商品情報を取得できないため、この画面から月額プランへ登録できません。通信状況を確認して再読み込みしてください。")
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                }
+            }
+
+            Button(action: retry) {
+                Label("再読み込み", systemImage: "arrow.clockwise")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(KabuyomiTheme.negative.opacity(0.10))
         )
     }
 }
