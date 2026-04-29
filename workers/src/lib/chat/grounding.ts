@@ -20,6 +20,32 @@ export interface ChatResponsePayload {
   sources: ChatEvidenceSource[];
   responsePath?: ChatResponsePath;
   chargeable?: boolean;
+  debug?: ChatResponseDebug;
+}
+
+export interface ChatResponseDebug {
+  questionIntent?: string;
+  responsePath?: ChatResponsePath;
+  fallbackReason?: string | null;
+  sourceCount?: number;
+  sourceIds?: string[];
+  sourceIdsValid?: boolean;
+  contextApplied?: boolean;
+  modelName?: string | null;
+  contentMode?: "full" | "metrics_only";
+  geminiCalled?: boolean;
+  geminiSucceeded?: boolean;
+  schemaValid?: boolean;
+  retryAttempt?: number;
+  retryReason?: string | null;
+  contextTokenBudget?: number | null;
+  selectedSourceCount?: number | null;
+  selectedSourceCharCount?: number | null;
+  estimatedContextTokens?: number | null;
+  sourceSelectionStrategy?: string | null;
+  selectedSourceIds?: string[];
+  selectedSourceLabels?: string[];
+  answerQualityFlags?: string[];
 }
 
 export const CONTEXT_UNAVAILABLE_ANSWER = "この決算資料の範囲では確認できません。";
@@ -70,6 +96,7 @@ export function attachCurrentFilingSourceUrls(
 export function ensureFilingGroundedResponse(response: ChatResponsePayload): ChatResponsePayload {
   if (response.answer === CONTEXT_UNAVAILABLE_ANSWER) {
     return {
+      ...response,
       answer: response.answer,
       sources: []
     };

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_REMOTE_CONFIG } from "../src/lib/remote-config";
 
-vi.mock("../src/lib/pipeline", () => ({
+vi.mock("../src/lib/chat/orchestrator", () => ({
   buildChatResponse: vi.fn()
 }));
 
@@ -44,7 +44,7 @@ vi.mock("../src/clients/gemini/request", () => ({
 import { handleChatRoute } from "../src/routes/chat";
 import { loadFilingByKey, isCurrentCacheRecord } from "../src/lib/filings/cache";
 import { upgradeMetricsOnlyRecord } from "../src/lib/filings/content-upgrade";
-import { buildChatResponse } from "../src/lib/pipeline";
+import { buildChatResponse } from "../src/lib/chat/orchestrator";
 import {
   consumeChatQuota,
   consumeCredit,
@@ -168,6 +168,54 @@ describe("handleChatRoute", () => {
     expect(mockConsumeCredit).not.toHaveBeenCalled();
   });
 
+  it("includes chat debug metadata only for the test worker environment", async () => {
+    mockBuildChatResponse.mockResolvedValue({
+      answer: "Debug answer",
+      sources: [{ sourceId: "S1", sourceKind: "sec_filing", sourceStrength: "filing_primary", sectionType: "md_a", sourceLabel: "10-Q", excerpt: "source" }],
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "business_overview",
+        responsePath: "fallback",
+        fallbackReason: "schema_invalid",
+        sourceIdsValid: false,
+        retryReason: "schema_invalid"
+      }
+    });
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "何の会社？"
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env: { KABUYOMI_ENV: "test" } as never,
+      config: legacyQuotaConfig,
+      ctx
+    });
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({
+      debug: {
+        questionIntent: "business_overview",
+        responsePath: "fallback",
+        fallbackReason: "schema_invalid",
+        sourceCount: 1,
+        sourceIds: ["S1"],
+        sourceIdsValid: false,
+        contextApplied: false,
+        modelName: null,
+        retryReason: "schema_invalid"
+      }
+    });
+  });
+
   it("anchors short follow-up questions to recent chat context", async () => {
     mockBuildChatResponse.mockResolvedValue({
       answer: "営業CF answer",
@@ -204,6 +252,96 @@ describe("handleChatRoute", () => {
       expect.anything(),
       expect.anything(),
       { executionContext: ctx }
+    );
+  });
+
+  it("logs chat quality pipeline fields for diagnosability", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockBuildChatResponse.mockResolvedValue({
+      answer: "Debug answer",
+      sources: [
+        {
+          sourceId: "S1",
+          sourceKind: "sec_filing",
+          sourceStrength: "filing_primary",
+          sectionType: "md_a",
+          sourceLabel: "10-Q Part I Item 2",
+          excerpt: "source"
+        }
+      ],
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "mda_summary",
+        responsePath: "fallback",
+        fallbackReason: "weak_grounding",
+        sourceIdsValid: false,
+        selectedSourceCount: 2,
+        selectedSourceCharCount: 1234,
+        estimatedContextTokens: 309,
+        selectedSourceIds: ["S1", "S2"],
+        selectedSourceLabels: ["10-Q Part I Item 2", "10-Q XBRL 売上高"],
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        retryAttempt: 1,
+        retryReason: "weak_grounding"
+      }
+    });
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "なぜ？",
+          conversationContext: [
+            { role: "user", content: "売上高は？" },
+            { role: "assistant", content: "売上高は前年同期比で増加しました。" }
+          ]
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env,
+      config: legacyQuotaConfig,
+      ctx
+    });
+
+    expect(response?.status).toBe(200);
+    const qualityLog = logSpy.mock.calls
+      .map(([line]) => (typeof line === "string" ? JSON.parse(line) as Record<string, unknown> : null))
+      .find((entry): entry is Record<string, unknown> => entry?.event === "chat_quality_pipeline");
+
+    expect(qualityLog).toMatchObject({
+      ticker: "ORCL",
+      filingKey: "filing-1",
+      originalQuestion: "なぜ？",
+      rewrittenQuestion: "売上高が変化した理由は？",
+      questionIntent: "mda_summary",
+      responsePath: "fallback",
+      fallbackReason: "weak_grounding",
+      selectedSourceCount: 2,
+      selectedSourceCharCount: 1234,
+      estimatedContextTokens: 309,
+      modelName: "gemini-2.5-flash",
+      selectedSourceIds: ["S1", "S2"],
+      selectedSourceLabels: ["10-Q Part I Item 2", "10-Q XBRL 売上高"],
+      sourceIdsValid: false,
+      geminiCalled: true,
+      geminiSucceeded: true,
+      schemaValid: true,
+      retryAttempt: 1,
+      retryReason: "weak_grounding",
+      contextApplied: true,
+      contextMessageCount: 2,
+      finalSourceIds: ["S1"],
+      finalSourceLabels: ["10-Q Part I Item 2"]
+    });
+    expect(qualityLog?.answerQualityFlags).toEqual(
+      expect.arrayContaining(["context_rewritten", "fallback_path", "fallback:weak_grounding", "invalid_source_ids", "model_retry_used"])
     );
   });
 

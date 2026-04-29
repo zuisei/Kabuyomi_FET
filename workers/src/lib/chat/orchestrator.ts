@@ -2,21 +2,27 @@ import type { Env, FilingCacheRecord } from "../../env";
 import { generateChatAnswer } from "../../clients/gemini";
 import type { ChatFallbackReason, GeminiChatAnswer, GeminiInvocationUsage } from "../../clients/gemini/types";
 import { AppError } from "../errors";
-import { logLlmUsage } from "../llm-usage";
 import { logErrorEvent, logEvent, logWarnEvent } from "../logging";
 import { DEFAULT_REMOTE_CONFIG, type RemoteConfig } from "../remote-config";
 import { buildChatContextPack, type ChatContextPack, resolveContentMode } from "./context-pack";
+import { buildContextDebugFields } from "./diagnostics";
+import { logChatContextSelection, logChatLlmUsage, logChatPathDecision } from "./decision-log";
 import { buildDeterministicMetricAnswer, shouldRecoverFromWeakModelSources } from "./deterministic";
 import {
   attachCurrentFilingSourceUrls,
-  buildSecFilingSource,
-  type ChatResponsePath,
+  type ChatResponseDebug,
   CONTEXT_UNAVAILABLE_ANSWER,
   ensureFilingGroundedResponse,
   type ChatResponsePayload
 } from "./grounding";
 import { maybeBuildHistoricalChatResponseWithHydration } from "./historical";
 import { classifyQuestionIntent, type QuestionIntent } from "./intent";
+import {
+  buildFallbackValidSourceIds,
+  buildSourceLookup,
+  mapSourceIdsToSecFilingSources,
+  validateModelSources
+} from "./source-validation";
 import { maybeAppendWebSupplement } from "./web-supplement";
 
 export async function buildChatResponse(
@@ -67,10 +73,22 @@ export async function buildChatResponse(
       sourceCount: responseWithUrls.sources.length,
       contentMode
     });
-    return {
-      ...responseWithUrls,
-      responsePath
-    };
+    return attachChatDebug(
+      {
+        ...responseWithUrls,
+        responsePath
+      },
+      {
+        questionIntent,
+        responsePath,
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode,
+        geminiCalled: false,
+        geminiSucceeded: false,
+        schemaValid: true
+      }
+    );
   }
 
   const deterministic = buildDeterministicMetricAnswer(filing, question);
@@ -102,10 +120,22 @@ export async function buildChatResponse(
       sourceCount: responseWithUrls.sources.length,
       contentMode
     });
-    return {
-      ...responseWithUrls,
-      responsePath: "deterministic"
-    };
+    return attachChatDebug(
+      {
+        ...responseWithUrls,
+        responsePath: "deterministic"
+      },
+      {
+        questionIntent,
+        responsePath: "deterministic",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode,
+        geminiCalled: false,
+        geminiSucceeded: false,
+        schemaValid: true
+      }
+    );
   }
 
   let contextPack = buildChatContextPack(filing, questionIntent);
@@ -126,10 +156,7 @@ export async function buildChatResponse(
     modelResponse = retryResult.modelResponse;
     sourceValidation = validateModelSources(modelResponse, contextPack);
   }
-  const fallbackValidSourceIds = new Set([
-    ...filing.sourceChunks.map((chunk) => chunk.sourceId),
-    ...contextPack.sourceChunks.map((chunk) => chunk.sourceId)
-  ]);
+  const fallbackValidSourceIds = buildFallbackValidSourceIds(filing, contextPack);
   const sourceById = buildSourceLookup(filing, contextPack);
   const approvedSourceIds = sourceValidation.approvedSourceIds;
   const modelSourceIdsValid = sourceValidation.modelSourceIdsValid;
@@ -175,10 +202,25 @@ export async function buildChatResponse(
       retryReason: modelResponse.retryReason ?? null,
       llmUsage: modelResponse.llmUsage
     });
-    return {
-      ...responseWithUrls,
-      responsePath: "deterministic"
-    };
+    return attachChatDebug(
+      {
+        ...responseWithUrls,
+        responsePath: "deterministic"
+      },
+      {
+        questionIntent,
+        responsePath: "deterministic",
+        fallbackReason: modelResponse.fallbackReason ?? "deterministic_repair",
+        sourceIdsValid: modelSourceIdsValid,
+        contentMode,
+        geminiCalled: modelResponse.geminiCalled ?? true,
+        geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+        schemaValid: modelResponse.schemaValid ?? true,
+        retryAttempt: modelResponse.retryAttempt ?? 0,
+        retryReason: modelResponse.retryReason ?? null,
+        ...buildContextDebugFields(contextPack)
+      }
+    );
   }
 
   if (approvedSourceIds.length !== modelResponse.sourceIds.length) {
@@ -230,10 +272,25 @@ export async function buildChatResponse(
         retryReason: modelResponse.retryReason ?? null,
         llmUsage: modelResponse.llmUsage
       });
-      return {
-        ...responseWithUrls,
-        responsePath: "fallback"
-      };
+      return attachChatDebug(
+        {
+          ...responseWithUrls,
+          responsePath: "fallback"
+        },
+        {
+          questionIntent,
+          responsePath: "fallback",
+          fallbackReason: fallbackReasonForNoSources(modelResponse, contentMode),
+          sourceIdsValid: false,
+          contentMode,
+          geminiCalled: modelResponse.geminiCalled ?? true,
+          geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+          schemaValid: modelResponse.schemaValid ?? true,
+          retryAttempt: modelResponse.retryAttempt ?? 0,
+          retryReason: modelResponse.retryReason ?? null,
+          ...buildContextDebugFields(contextPack)
+        }
+      );
     }
 
     logWarnEvent("chat_unsupported_due_to_source_gap", {
@@ -259,11 +316,26 @@ export async function buildChatResponse(
       retryReason: modelResponse.retryReason ?? null,
       llmUsage: modelResponse.llmUsage
     });
-    return {
-      answer: modelResponse.answer,
-      sources: [],
-      responsePath
-    };
+    return attachChatDebug(
+      {
+        answer: modelResponse.answer,
+        sources: [],
+        responsePath
+      },
+      {
+        questionIntent,
+        responsePath,
+        fallbackReason: fallbackReasonForNoSources(modelResponse, contentMode),
+        sourceIdsValid: false,
+        contentMode,
+        geminiCalled: modelResponse.geminiCalled ?? true,
+        geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+        schemaValid: modelResponse.schemaValid ?? true,
+        retryAttempt: modelResponse.retryAttempt ?? 0,
+        retryReason: modelResponse.retryReason ?? null,
+        ...buildContextDebugFields(contextPack)
+      }
+    );
   }
 
   if (approvedSourceIds.length === 0) {
@@ -306,10 +378,25 @@ export async function buildChatResponse(
         retryReason: modelResponse.retryReason ?? null,
         llmUsage: modelResponse.llmUsage
       });
-      return {
-        ...responseWithUrls,
-        responsePath: "fallback"
-      };
+      return attachChatDebug(
+        {
+          ...responseWithUrls,
+          responsePath: "fallback"
+        },
+        {
+          questionIntent,
+          responsePath: "fallback",
+          fallbackReason: fallbackReasonForMissingValidSourceIds(modelResponse, contentMode),
+          sourceIdsValid: false,
+          contentMode,
+          geminiCalled: modelResponse.geminiCalled ?? true,
+          geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+          schemaValid: modelResponse.schemaValid ?? true,
+          retryAttempt: modelResponse.retryAttempt ?? 0,
+          retryReason: modelResponse.retryReason ?? null,
+          ...buildContextDebugFields(contextPack)
+        }
+      );
     }
 
     logChatPathDecision({
@@ -371,10 +458,25 @@ export async function buildChatResponse(
         retryReason: modelResponse.retryReason ?? null,
         llmUsage: modelResponse.llmUsage
       });
-      return {
-        ...responseWithUrls,
-        responsePath: "fallback"
-      };
+      return attachChatDebug(
+        {
+          ...responseWithUrls,
+          responsePath: "fallback"
+        },
+        {
+          questionIntent,
+          responsePath: "fallback",
+          fallbackReason: "weak_grounding",
+          sourceIdsValid: modelSourceIdsValid,
+          contentMode,
+          geminiCalled: modelResponse.geminiCalled ?? true,
+          geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+          schemaValid: modelResponse.schemaValid ?? true,
+          retryAttempt: modelResponse.retryAttempt ?? 0,
+          retryReason: modelResponse.retryReason ?? null,
+          ...buildContextDebugFields(contextPack)
+        }
+      );
     }
   }
 
@@ -393,10 +495,7 @@ export async function buildChatResponse(
     question,
     ensureFilingGroundedResponse({
       answer: modelResponse.answer,
-      sources: approvedSourceIds.map((sourceId) => {
-        const source = sourceById.get(sourceId)!;
-        return buildSecFilingSource(source);
-      })
+      sources: mapSourceIdsToSecFilingSources(approvedSourceIds, sourceById)
     }),
     env,
     resolvedConfig
@@ -418,22 +517,25 @@ export async function buildChatResponse(
     retryReason: modelResponse.retryReason ?? null,
     llmUsage: modelResponse.llmUsage
   });
-  return {
-    ...responseWithUrls,
-    responsePath
-  };
-}
-
-function validateModelSources(
-  modelResponse: GeminiChatAnswer,
-  contextPack: ChatContextPack
-): { approvedSourceIds: string[]; modelSourceIdsValid: boolean } {
-  const validSourceIds = new Set(contextPack.sourceChunks.map((chunk) => chunk.sourceId));
-  const approvedSourceIds = modelResponse.sourceIds.filter((sourceId) => validSourceIds.has(sourceId));
-  return {
-    approvedSourceIds,
-    modelSourceIdsValid: modelResponse.sourceIds.length > 0 && approvedSourceIds.length === modelResponse.sourceIds.length
-  };
+  return attachChatDebug(
+    {
+      ...responseWithUrls,
+      responsePath
+    },
+    {
+      questionIntent,
+      responsePath,
+      fallbackReason: modelResponse.fallbackReason ?? null,
+      sourceIdsValid: modelSourceIdsValid,
+      contentMode,
+      geminiCalled: modelResponse.geminiCalled ?? true,
+      geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+      schemaValid: modelResponse.schemaValid ?? true,
+      retryAttempt: modelResponse.retryAttempt ?? 0,
+      retryReason: modelResponse.retryReason ?? null,
+      ...buildContextDebugFields(contextPack)
+    }
+  );
 }
 
 function chooseRetryReason(
@@ -507,7 +609,11 @@ async function retryModelAnswer({
     retryReason,
     contextTokenBudget: contextPack.contextTokenBudget,
     selectedSourceCount: contextPack.selectedSourceCount,
-    sourceSelectionStrategy: contextPack.sourceSelectionStrategy
+    selectedSourceCharCount: contextPack.selectionDiagnostics.selectedSourceCharCount,
+    estimatedContextTokens: contextPack.selectionDiagnostics.estimatedContextTokens,
+    sourceSelectionStrategy: contextPack.sourceSelectionStrategy,
+    selectedSourceIds: contextPack.sourceChunks.map((source) => source.sourceId),
+    selectedSourceLabels: contextPack.sourceChunks.map((source) => source.sourceLabel)
   });
   const modelResponse = await generateChatAnswer(env, {
     filing,
@@ -529,34 +635,6 @@ async function retryModelAnswer({
       retryReason: modelResponse.retryReason ?? retryReason
     }
   };
-}
-
-function logChatContextSelection(
-  filing: FilingCacheRecord,
-  contextPack: ChatContextPack,
-  retry?: { retryAttempt: number; retryReason: ChatFallbackReason }
-): void {
-  const diagnostics = contextPack.selectionDiagnostics;
-  logEvent("chat_context_selection", {
-    ticker: filing.ticker,
-    filingKey: filing.filingKey,
-    questionIntent: contextPack.questionIntent,
-    candidateSourceCount: diagnostics.candidateSourceCount,
-    selectedSourceCount: diagnostics.selectedSourceCount,
-    selectedSourceCharCount: diagnostics.selectedSourceCharCount,
-    avgSelectedSourceChars: diagnostics.avgSelectedSourceChars,
-    contextTokenBudget: diagnostics.contextTokenBudget,
-    estimatedContextTokens: diagnostics.estimatedContextTokens,
-    sourceSelectionStrategy: diagnostics.sourceSelectionStrategy,
-    rejectedShortCount: diagnostics.rejectedShortCount,
-    rejectedTableFragmentCount: diagnostics.rejectedTableFragmentCount,
-    rejectedLowTextQualityCount: diagnostics.rejectedLowTextQualityCount,
-    sectionHitCountBusiness: diagnostics.sectionHitCountBusiness,
-    sectionHitCountRisk: diagnostics.sectionHitCountRisk,
-    sectionHitCountMda: diagnostics.sectionHitCountMda,
-    retryAttempt: retry?.retryAttempt ?? 0,
-    retryReason: retry?.retryReason ?? null
-  });
 }
 
 function combineLlmUsage(
@@ -583,20 +661,6 @@ function retryContextMode(retryReason: ChatFallbackReason): "standard" | "expand
     case "metrics_only_insufficient":
       return "compact";
   }
-}
-
-function buildSourceLookup(
-  filing: FilingCacheRecord,
-  contextPack: ChatContextPack | undefined
-): Map<string, FilingCacheRecord["sourceChunks"][number]> {
-  const sourceById = new Map<string, FilingCacheRecord["sourceChunks"][number]>();
-  for (const source of filing.sourceChunks) {
-    sourceById.set(source.sourceId, source);
-  }
-  for (const source of contextPack?.sourceChunks ?? []) {
-    sourceById.set(source.sourceId, source);
-  }
-  return sourceById;
 }
 
 function shouldPreferDeterministicBusinessOverview(answer: string, usedRemoteModel: boolean): boolean {
@@ -640,110 +704,19 @@ async function buildFallbackResponse(
   const sourceById = buildSourceLookup(filing, contextPack);
   return {
     answer: fallback.answer,
-    sources: approvedSourceIds.map((sourceId) => {
-      const source = sourceById.get(sourceId)!;
-      return buildSecFilingSource(source);
-    })
+    sources: mapSourceIdsToSecFilingSources(approvedSourceIds, sourceById)
   };
 }
 
-function logChatLlmUsage(
-  modelResponse: GeminiChatAnswer,
-  filing: FilingCacheRecord,
-  responsePath: ChatResponsePath
-): void {
-  logLlmUsage(modelResponse.llmUsage, {
-    aiTask: "chat",
-    route: "/v1/chat",
-    ticker: filing.ticker,
-    filingKey: filing.filingKey,
-    responsePath
-  });
-}
-
-function logChatPathDecision({
-  filing,
-  questionIntent,
-  responsePath,
-  geminiCalled,
-  geminiSucceeded,
-  fallbackReason,
-  schemaValid,
-  sourceIdsValid,
-  sourceCount,
-  contentMode,
-  contextPack,
-  retryAttempt,
-  retryReason,
-  llmUsage
-}: {
-  filing: FilingCacheRecord;
-  questionIntent: QuestionIntent;
-  responsePath: ChatResponsePath;
-  geminiCalled: boolean;
-  geminiSucceeded: boolean;
-  fallbackReason: ChatFallbackReason | null;
-  schemaValid: boolean;
-  sourceIdsValid: boolean;
-  sourceCount: number;
-  contentMode: "full" | "metrics_only";
-  contextPack?: ChatContextPack;
-  retryAttempt?: number;
-  retryReason?: ChatFallbackReason | null;
-  llmUsage?: GeminiInvocationUsage[];
-}): void {
-  const usage = summarizeLlmUsage(llmUsage);
-  logEvent("chat_path_decision", {
-    ticker: filing.ticker,
-    filingKey: filing.filingKey,
-    questionIntent,
-    responsePath,
-    geminiCalled,
-    geminiSucceeded,
-    fallbackReason,
-    schemaValid,
-    sourceIdsValid,
-    sourceCount,
-    promptTokenCount: usage.promptTokenCount,
-    candidatesTokenCount: usage.candidatesTokenCount,
-    totalTokenCount: usage.totalTokenCount,
-    latencyMs: usage.latencyMs,
-    contentMode,
-    retryAttempt: retryAttempt ?? 0,
-    retryReason: retryReason ?? null,
-    finalFallbackReason: fallbackReason,
-    contextTokenBudget: contextPack?.contextTokenBudget ?? null,
-    selectedSourceCount: contextPack?.selectedSourceCount ?? null,
-    sourceSelectionStrategy: contextPack?.sourceSelectionStrategy ?? null
-  });
-}
-
-function summarizeLlmUsage(llmUsage: GeminiInvocationUsage[] | undefined): {
-  promptTokenCount: number | null;
-  candidatesTokenCount: number | null;
-  totalTokenCount: number | null;
-  latencyMs: number | null;
-} {
-  if (!llmUsage || llmUsage.length === 0) {
-    return {
-      promptTokenCount: null,
-      candidatesTokenCount: null,
-      totalTokenCount: null,
-      latencyMs: null
-    };
-  }
-
+function attachChatDebug(response: ChatResponsePayload, debug: Omit<ChatResponseDebug, "sourceCount" | "sourceIds">): ChatResponsePayload {
   return {
-    promptTokenCount: sumNullableCounts(llmUsage.map((usage) => usage.promptTokenCount)),
-    candidatesTokenCount: sumNullableCounts(llmUsage.map((usage) => usage.candidatesTokenCount)),
-    totalTokenCount: sumNullableCounts(llmUsage.map((usage) => usage.totalTokenCount)),
-    latencyMs: llmUsage.reduce((sum, usage) => sum + usage.latencyMs, 0)
+    ...response,
+    debug: {
+      ...debug,
+      sourceCount: response.sources.length,
+      sourceIds: response.sources.map((source) => source.sourceId)
+    }
   };
-}
-
-function sumNullableCounts(values: Array<number | null>): number | null {
-  const numbers = values.filter((value): value is number => typeof value === "number");
-  return numbers.length > 0 ? numbers.reduce((sum, value) => sum + value, 0) : null;
 }
 
 function fallbackReasonForNoSources(
