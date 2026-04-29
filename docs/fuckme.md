@@ -138,6 +138,12 @@ workers/src/clients/gemini/fallback-question.ts
 
 workers/src/lib/chat/context-patterns.ts
   context-pack の intent pattern / risk distractor 判定
+
+workers/src/lib/history-store.ts
+  重複していた metric 表示整形を workers/src/lib/metrics.ts に集約
+
+workers/src/clients/sec-ticker-alias.ts
+  sec.ts から ticker alias / class ticker / compact ticker 正規化を分離
 ```
 
 まだ無理にやらないもの:
@@ -147,6 +153,7 @@ fallback.ts の文面生成ロジック分割
 context-pack.ts の scoring / selection 本体分割
 filing latest / ingest / content-upgrade の実行経路分割
 quota / credit / billing の money path 分割
+sec.ts の SEC fetch / ticker search / metric extraction の大分割
 ```
 
 理由:

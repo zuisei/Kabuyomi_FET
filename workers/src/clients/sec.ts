@@ -7,6 +7,15 @@ import {
   fetchSubmissionsFromFetcher,
   fetchTickerSnapshotFromFetcher
 } from "./sec-fetcher";
+import {
+  matchesClassTickerAlias,
+  matchesCompactTickerAlias,
+  normalizeClassTickerAlias,
+  normalizeCompactTicker,
+  normalizeTickerInput,
+  parseTickerAliasInput,
+  resolveBaseTickerFallback
+} from "./sec-ticker-alias";
 import { logWarnEvent } from "../lib/logging";
 import { loadSearchFormTypeCache, upsertSearchFormTypeCache } from "../lib/search-form-type-cache";
 
@@ -928,64 +937,4 @@ function buildTickerSearchIndex(items: TickerRecord[]): TickerSearchIndexEntry[]
       compactTicker: normalizeCompactTicker(tickerInput)
     };
   });
-}
-
-function normalizeTickerInput(value: string): string {
-  return value.trim().toUpperCase().replace(/\s+/g, " ");
-}
-
-function normalizeClassTickerAlias(value: string): string | null {
-  const parsed = parseTickerAliasInput(value);
-  if (!parsed) {
-    return null;
-  }
-
-  return `${parsed.baseTicker}.${parsed.suffix}`;
-}
-
-function matchesClassTickerAlias(input: string, candidateTicker: string): boolean {
-  const inputAlias = normalizeClassTickerAlias(input);
-  const candidateAlias = normalizeClassTickerAlias(candidateTicker);
-  return Boolean(inputAlias && candidateAlias && inputAlias === candidateAlias);
-}
-
-function matchesCompactTickerAlias(input: string, candidateTicker: string): boolean {
-  const parsed = parseTickerAliasInput(input);
-  if (!parsed) {
-    return false;
-  }
-
-  return normalizeCompactTicker(candidateTicker) === parsed.compactTicker;
-}
-
-function resolveBaseTickerFallback(input: string, items: TickerRecord[]): TickerRecord | null {
-  const baseTicker = normalizeSeriesBaseTickerFallback(input);
-  if (!baseTicker) {
-    return null;
-  }
-
-  return items.find((item) => normalizeTickerInput(item.ticker) === baseTicker) ?? null;
-}
-
-function normalizeSeriesBaseTickerFallback(value: string): string | null {
-  const parsed = parseTickerAliasInput(value);
-  return parsed?.baseTicker ?? null;
-}
-
-function normalizeCompactTicker(value: string): string {
-  return normalizeTickerInput(value).replace(/[.\-\s]+/g, "");
-}
-
-function parseTickerAliasInput(value: string): { baseTicker: string; suffix: string; compactTicker: string } | null {
-  const normalized = normalizeTickerInput(value);
-  const match = normalized.match(/^([A-Z0-9]+)[.\-\s]+([A-Z0-9]+)$/);
-  if (!match?.[1] || !match[2]) {
-    return null;
-  }
-
-  return {
-    baseTicker: match[1],
-    suffix: match[2],
-    compactTicker: `${match[1]}${match[2]}`
-  };
 }
