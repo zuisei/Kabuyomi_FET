@@ -262,6 +262,62 @@ test("fetchMetrics preserves fulfilled concept fallbacks when a sibling tag fail
   }
 });
 
+test("fetchPreparedFiling returns extracted MD&A without returning filing HTML", async () => {
+  const originalFetch = global.fetch;
+  const narrative = Array.from(
+    { length: 80 },
+    () => "We generated revenue from products and services during the quarter. Our results reflected demand and operating discipline."
+  ).join(" ");
+  const html = `<html><body><h1>Part I Item 2 Management's Discussion and Analysis</h1><p>${narrative}</p><h1>Item 3 Quantitative and Qualitative Disclosures About Market Risk</h1></body></html>`;
+
+  global.fetch = async (url) => {
+    const target = String(url);
+    if (target.includes("/Archives/edgar/data/")) {
+      return new Response(html, { status: 200 });
+    }
+    if (target.includes("/companyfacts/")) {
+      return new Response(
+        JSON.stringify({
+          facts: {
+            "us-gaap": {
+              Revenues: { units: { USD: [{ val: 1, form: "10-Q", end: "2026-03-31" }] } }
+            }
+          }
+        }),
+        { status: 200 }
+      );
+    }
+    throw new Error(`Unexpected fetch: ${target}`);
+  };
+
+  try {
+    const service = createSecService({
+      internalToken: "",
+      userAgent: "Kabuyomi admin@kabuyomi.app",
+      rateLimitPerSecond: 8,
+      retryCount: 0,
+      initialBackoffMs: 1,
+      requestTimeoutMs: 10
+    });
+    const payload = await service.fetchPreparedFiling({
+      cik: "0000320193",
+      accessionNumber: "0000320193-26-000057",
+      primaryDocument: "a10q.htm",
+      formType: "10-Q",
+      tags: ["Revenues"]
+    });
+
+    assert.equal(payload.html, undefined);
+    assert.equal(payload.primaryDocumentUrl, "https://www.sec.gov/Archives/edgar/data/320193/000032019326000057/a10q.htm");
+    assert.match(payload.mdaText, /Management's Discussion and Analysis/);
+    assert.ok(payload.mdaTokenCount > 0);
+    assert.equal(payload.concepts.Revenues.units.USD[0].val, 1);
+    assert.equal(payload.diagnostics.inputHtmlChars, html.length);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test("fetchSubmissions serves cached data when the upstream later fails", async () => {
   const originalFetch = global.fetch;
   const originalNow = Date.now;

@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { prepareFilingText } from "./prepared-filing.mjs";
 
 const DEFAULT_USER_AGENT = "Kabuyomi admin@kabuyomi.app";
 const MAX_RESPONSE_CACHE_ENTRIES = 512;
@@ -109,6 +110,25 @@ export function createSecService(config = readConfig()) {
       return {
         html: filing.html,
         primaryDocumentUrl: filing.primaryDocumentUrl,
+        concepts: metrics.concepts,
+        companyFacts: metrics.companyFacts
+      };
+    },
+
+    async fetchPreparedFiling({ cik, accessionNumber, primaryDocument, formType, tags }) {
+      const [filing, metrics] = await Promise.all([
+        this.fetchFiling({ cik, accessionNumber, primaryDocument }),
+        this.fetchMetrics({ cik, tags })
+      ]);
+      const prepared = prepareFilingText(filing.html, formType);
+      if (!prepared.result) {
+        throw new Error("Failed to extract MD&A section");
+      }
+
+      return {
+        primaryDocumentUrl: filing.primaryDocumentUrl,
+        ...prepared.result,
+        diagnostics: prepared.diagnostics,
         concepts: metrics.concepts,
         companyFacts: metrics.companyFacts
       };

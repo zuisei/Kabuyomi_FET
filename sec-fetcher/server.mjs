@@ -77,6 +77,21 @@ const server = http.createServer(async (request, response) => {
       return respondJson(response, 200, payload);
     }
 
+    if (request.url === "/internal/sec/prepared-filing") {
+      const cik = String(body?.cik ?? "").trim();
+      const accessionNumber = String(body?.accessionNumber ?? "").trim();
+      const primaryDocument = String(body?.primaryDocument ?? "").trim();
+      const formType = String(body?.formType ?? "").trim();
+      const tags = Array.isArray(body?.tags) ? body.tags.map((tag) => String(tag)) : [];
+      if (!cik || !accessionNumber || !primaryDocument || (formType !== "10-K" && formType !== "10-Q")) {
+        return respondJson(response, 400, {
+          error: "cik, accessionNumber, primaryDocument, and supported formType are required"
+        });
+      }
+      const payload = await service.fetchPreparedFiling({ cik, accessionNumber, primaryDocument, formType, tags });
+      return respondJson(response, 200, payload);
+    }
+
     return respondJson(response, 404, { error: "Not found" });
   } catch (error) {
     if (error instanceof RequestBodyError) {
