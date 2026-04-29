@@ -1,28 +1,27 @@
 import type { Env, FilingCacheRecord } from "../../env";
 import { generateChatAnswer } from "../../clients/gemini";
-import type { ChatFallbackReason, GeminiChatAnswer } from "../../clients/gemini/types";
 import { AppError } from "../errors";
 import { logErrorEvent, logEvent, logWarnEvent } from "../logging";
 import { DEFAULT_REMOTE_CONFIG, type RemoteConfig } from "../remote-config";
-import { buildChatContextPack, type ChatContextPack, resolveContentMode } from "./context-pack";
+import { buildChatContextPack, resolveContentMode } from "./context-pack";
 import { buildContextDebugFields } from "./diagnostics";
 import { logChatContextSelection, logChatLlmUsage, logChatPathDecision } from "./decision-log";
 import { buildDeterministicMetricAnswer, shouldRecoverFromWeakModelSources } from "./deterministic";
+import { buildLocalFallbackResponse } from "./fallback-response";
 import {
   attachCurrentFilingSourceUrls,
-  type ChatResponseDebug,
   CONTEXT_UNAVAILABLE_ANSWER,
   ensureFilingGroundedResponse,
   type ChatResponsePayload
 } from "./grounding";
 import { maybeBuildHistoricalChatResponseWithHydration } from "./historical";
-import { classifyQuestionIntent, type QuestionIntent } from "./intent";
+import { classifyQuestionIntent } from "./intent";
+import { retryModelAnswer } from "./model-retry";
+import { attachChatDebug } from "./response-payload";
 import {
   chooseRetryReason,
-  combineLlmUsage,
   fallbackReasonForMissingValidSourceIds,
   fallbackReasonForNoSources,
-  retryContextMode,
   shouldLetModelTryBeforeDeterministic,
   shouldPreferDeterministicBusinessOverview,
   shouldRetryModelAnswer
@@ -248,7 +247,13 @@ export async function buildChatResponse(
   }
 
   if (approvedSourceIds.length === 0 && modelResponse.answer === CONTEXT_UNAVAILABLE_ANSWER) {
-    const recovered = await buildFallbackResponse(filing, question, env, fallbackValidSourceIds, contextPack);
+    const recovered = await buildLocalFallbackResponse({
+      filing,
+      question,
+      env,
+      validSourceIds: fallbackValidSourceIds,
+      contextPack
+    });
     if (recovered) {
       logWarnEvent("chat_grounding_repair_used", {
         filingKey: filing.filingKey,
@@ -354,7 +359,13 @@ export async function buildChatResponse(
   }
 
   if (approvedSourceIds.length === 0) {
-    const recovered = await buildFallbackResponse(filing, question, env, fallbackValidSourceIds, contextPack);
+    const recovered = await buildLocalFallbackResponse({
+      filing,
+      question,
+      env,
+      validSourceIds: fallbackValidSourceIds,
+      contextPack
+    });
     if (recovered) {
       logWarnEvent("chat_grounding_repair_used", {
         filingKey: filing.filingKey,
@@ -434,7 +445,13 @@ export async function buildChatResponse(
   }
 
   if (shouldRecoverFromWeakModelSources(filing, question, approvedSourceIds)) {
-    const recovered = await buildFallbackResponse(filing, question, env, fallbackValidSourceIds, contextPack);
+    const recovered = await buildLocalFallbackResponse({
+      filing,
+      question,
+      env,
+      validSourceIds: fallbackValidSourceIds,
+      contextPack
+    });
     if (recovered) {
       logWarnEvent("chat_grounding_repair_used", {
         filingKey: filing.filingKey,
@@ -551,105 +568,4 @@ export async function buildChatResponse(
       ...buildContextDebugFields(contextPack)
     }
   );
-}
-
-async function retryModelAnswer({
-  filing,
-  question,
-  env,
-  questionIntent,
-  retryReason,
-  previousModelResponse
-}: {
-  filing: FilingCacheRecord;
-  question: string;
-  env: Env;
-  questionIntent: QuestionIntent;
-  retryReason: ChatFallbackReason;
-  previousModelResponse: GeminiChatAnswer;
-}): Promise<{ contextPack: ChatContextPack; modelResponse: GeminiChatAnswer }> {
-  const contextPack = buildChatContextPack(filing, questionIntent, {
-    mode: retryContextMode(retryReason),
-    retryReason
-  });
-  logChatContextSelection(filing, contextPack, {
-    retryAttempt: 1,
-    retryReason
-  });
-  logEvent("chat_model_retry", {
-    ticker: filing.ticker,
-    filingKey: filing.filingKey,
-    questionIntent,
-    retryAttempt: 1,
-    retryReason,
-    contextTokenBudget: contextPack.contextTokenBudget,
-    selectedSourceCount: contextPack.selectedSourceCount,
-    selectedSourceCharCount: contextPack.selectionDiagnostics.selectedSourceCharCount,
-    estimatedContextTokens: contextPack.selectionDiagnostics.estimatedContextTokens,
-    sourceSelectionStrategy: contextPack.sourceSelectionStrategy,
-    selectedSourceIds: contextPack.sourceChunks.map((source) => source.sourceId),
-    selectedSourceLabels: contextPack.sourceChunks.map((source) => source.sourceLabel)
-  });
-  const modelResponse = await generateChatAnswer(env, {
-    filing,
-    question,
-    questionIntent,
-    contextPack,
-    retryInstruction: {
-      attempt: 1,
-      reason: retryReason
-    }
-  });
-
-  return {
-    contextPack,
-    modelResponse: {
-      ...modelResponse,
-      llmUsage: combineLlmUsage(previousModelResponse.llmUsage, modelResponse.llmUsage),
-      retryAttempt: modelResponse.retryAttempt ?? 1,
-      retryReason: modelResponse.retryReason ?? retryReason
-    }
-  };
-}
-
-async function buildFallbackResponse(
-  filing: FilingCacheRecord,
-  question: string,
-  env: Env,
-  validSourceIds: Set<string>,
-  contextPack?: ChatContextPack
-): Promise<ChatResponsePayload | null> {
-  const fallback = await generateChatAnswer(
-    { ...env, GEMINI_API_KEY: undefined } as Env,
-    { filing, question, questionIntent: contextPack?.questionIntent, contextPack }
-  );
-  const approvedSourceIds = fallback.sourceIds.filter((sourceId) => validSourceIds.has(sourceId));
-
-  if (approvedSourceIds.length === 0) {
-    if (fallback.answer === CONTEXT_UNAVAILABLE_ANSWER) {
-      return {
-        answer: fallback.answer,
-        sources: []
-      };
-    }
-
-    return null;
-  }
-
-  const sourceById = buildSourceLookup(filing, contextPack);
-  return {
-    answer: fallback.answer,
-    sources: mapSourceIdsToSecFilingSources(approvedSourceIds, sourceById)
-  };
-}
-
-function attachChatDebug(response: ChatResponsePayload, debug: Omit<ChatResponseDebug, "sourceCount" | "sourceIds">): ChatResponsePayload {
-  return {
-    ...response,
-    debug: {
-      ...debug,
-      sourceCount: response.sources.length,
-      sourceIds: response.sources.map((source) => source.sourceId)
-    }
-  };
 }

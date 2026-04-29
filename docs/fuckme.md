@@ -121,6 +121,41 @@ answer quality tuning はしない
 5. quota / billing は money path なので読むだけから始める
 ```
 
+追加で分離したもの:
+
+```text
+workers/src/lib/chat/model-retry.ts
+  Gemini retry 実行と retry attempt metadata の責任
+
+workers/src/lib/chat/fallback-response.ts
+  orchestrator から呼ぶ local fallback response 生成の責任
+
+workers/src/lib/chat/response-payload.ts
+  final response に debug source fields を付ける責任
+
+workers/src/clients/gemini/fallback-question.ts
+  Gemini fallback 用の質問プロフィール分類
+
+workers/src/lib/chat/context-patterns.ts
+  context-pack の intent pattern / risk distractor 判定
+```
+
+まだ無理にやらないもの:
+
+```text
+fallback.ts の文面生成ロジック分割
+context-pack.ts の scoring / selection 本体分割
+filing latest / ingest / content-upgrade の実行経路分割
+quota / credit / billing の money path 分割
+```
+
+理由:
+
+```text
+上の4つは回答品質、filing取得、課金に直撃する。
+分けるなら先に golden test / fixture を増やしてから別スライスでやる。
+```
+
 ## 触らなくてよさそうな場所
 
 ### `workers/src/index.ts`
