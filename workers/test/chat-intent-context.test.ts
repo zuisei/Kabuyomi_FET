@@ -24,6 +24,33 @@ describe("chat question intent and context packing", () => {
     expect(context.sourceChunks.slice(0, 3).map((chunk) => chunk.sourceId)).toEqual(["S9", "S10", "S11"]);
   });
 
+  it("keeps numeric metric context for previous-filing comparison questions", () => {
+    const filing = makeIntentFiling();
+    const intent = classifyQuestionIntent("前回決算との違いは？");
+    const context = buildChatContextPack(filing, intent);
+
+    expect(intent).toBe("historical_comparison");
+    expect(context.metrics.map((metric) => metric.logicalName)).toEqual(["revenue", "operatingIncome", "netIncome"]);
+    expect(context.sourceChunks.slice(0, 3).map((chunk) => chunk.sourceId)).toEqual(["S9", "S10", "S11"]);
+  });
+
+  it("classifies short cause and durability follow-ups as MD&A-style context requests", () => {
+    const filing = makeIntentFiling();
+
+    expect(classifyQuestionIntent("なぜ？")).toBe("mda_summary");
+    expect(classifyQuestionIntent("その要因は一時的？")).toBe("mda_summary");
+    expect(classifyQuestionIntent("売上高はなぜ伸びた？")).toBe("yoy_change");
+    expect(classifyQuestionIntent("売上高が変化した理由は？")).toBe("yoy_change");
+
+    const context = buildChatContextPack(filing, classifyQuestionIntent("その要因は一時的？"));
+    expect(context.sourceSelectionStrategy).toContain("mda_summary");
+    expect(context.contextTokenBudget).toBeGreaterThanOrEqual(9_000);
+    expect(context.sourceChunks.some((chunk) => chunk.sectionType === "md_a")).toBe(true);
+
+    expect(classifyQuestionIntent("営業CFが変化した理由は？")).toBe("cash_flow");
+    expect(classifyQuestionIntent("利益率が悪化した理由は？")).toBe("margin_profitability");
+  });
+
   it("prioritizes meaningful business narrative over numeric-only chunks", () => {
     const filing = {
       ...makeIntentFiling(),
@@ -209,6 +236,52 @@ describe("chat question intent and context packing", () => {
     expect(context.sourceChunks[0]?.sourceId).toMatch(/^CTX/);
     expect(context.sourceChunks[0]?.text).toContain("risks and uncertainties");
     expect(context.contextTokenBudget).toBeGreaterThanOrEqual(10_000);
+  });
+
+  it("prioritizes MD&A driver context before metrics for YoY follow-up questions", () => {
+    const driverText =
+      "Net sales increased compared with the prior year primarily due to comparable store sales growth, new store openings, and stronger customer traffic. The improvement was partially offset by higher tariff costs and freight expense, so this paragraph explains the revenue driver rather than only repeating the XBRL revenue number.";
+    const filing = {
+      ...makeIntentFiling(),
+      mdaText: [
+        "The following table sets forth selected financial data and percentages of revenue.",
+        driverText,
+        "Operating income changed because merchandise margin and occupancy costs moved in different directions."
+      ].join(" "),
+      sourceChunks: [
+        {
+          sourceId: "S1",
+          sectionType: "md_a" as const,
+          sectionTitle: "Part I, Item 2",
+          sourceLabel: "10-Q Part I Item 2",
+          text: "The following table sets forth selected financial data and percentages of revenue.",
+          startOffset: 0,
+          endOffset: 78,
+          sortOrder: 1
+        },
+        {
+          sourceId: "S2",
+          sectionType: "md_a" as const,
+          sectionTitle: "Part I, Item 2",
+          sourceLabel: "10-Q Part I Item 2",
+          text: driverText,
+          startOffset: 79,
+          endOffset: 79 + driverText.length,
+          sortOrder: 2
+        },
+        ...makeIntentFiling().sourceChunks.filter((chunk) => chunk.sectionType === "xbrl_metric")
+      ]
+    };
+
+    const context = buildChatContextPack(filing, "yoy_change");
+
+    expect(context.contextTokenBudget).toBeGreaterThanOrEqual(8_000);
+    expect(context.sourceChunks[0]?.sourceId).toBe("S2");
+    expect(context.sourceChunks[0]?.text).toContain("primarily due to comparable store sales growth");
+    expect(context.sourceChunks.findIndex((chunk) => chunk.sourceId === "S2")).toBeLessThan(
+      context.sourceChunks.findIndex((chunk) => chunk.sourceId === "S9")
+    );
+    expect(context.selectionDiagnostics.selectedSourceCharCount).toBeGreaterThan(driverText.length);
   });
 
   it("classifies investor-style pros and cons prompts as investment_view", () => {

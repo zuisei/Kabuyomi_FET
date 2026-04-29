@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1050" viewBox="0 0 1500 1050" role="img" aria-labelledby="title desc">
+  <title id="title">Kabuyomi Worker chat refactor map</title>
+  <desc id="desc">Simplified explanation of current chat pipeline pain points and cleaner target architecture.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f6f7f9; }
+      .panel { fill: #fff; stroke: #d5dbe5; stroke-width: 2; rx: 12; }
+      .bad { fill: #fff0ee; stroke: #bb4b3f; stroke-width: 2.4; rx: 10; }
+      .good { fill: #eaf7ef; stroke: #2e8b57; stroke-width: 2.4; rx: 10; }
+      .neutral { fill: #edf3ff; stroke: #2f66b1; stroke-width: 2.2; rx: 10; }
+      .warn { fill: #fff6dd; stroke: #b77a1d; stroke-width: 2.2; rx: 10; }
+      .model { fill: #f0ecff; stroke: #6b4cc2; stroke-width: 2.2; rx: 10; }
+      .text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17212b; }
+      .title { font-size: 34px; font-weight: 760; }
+      .h2 { font-size: 25px; font-weight: 760; }
+      .h3 { font-size: 20px; font-weight: 740; }
+      .body { font-size: 17px; font-weight: 520; fill: #344255; }
+      .small { font-size: 15px; font-weight: 500; fill: #4b596b; }
+      .tiny { font-size: 13px; font-weight: 500; fill: #5d6977; }
+      .arrow { stroke: #26384c; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .badarrow { stroke: #bb4b3f; stroke-width: 2.7; fill: none; marker-end: url(#arrowBad); }
+      .goodarrow { stroke: #2e8b57; stroke-width: 2.7; fill: none; marker-end: url(#arrowGood); }
+      .dash { stroke-dasharray: 7 6; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#26384c"/>
+    </marker>
+    <marker id="arrowBad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#bb4b3f"/>
+    </marker>
+    <marker id="arrowGood" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#2e8b57"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1500" height="1050"/>
+  <text x="60" y="70" class="text title">Worker の返答改善: 何が無駄で、どう分けると分かりやすいか</text>
+  <text x="62" y="105" class="text body">結論: Gemini の前後で頑張るより、質問分類・文脈選択・回答戦略を先に分ける</text>
+
+  <rect x="50" y="145" width="660" height="535" class="panel"/>
+  <text x="80" y="190" class="text h2">今の見え方</text>
+  <text x="80" y="222" class="text body">1本の太い流れに、判断と修復が詰まっている</text>
+
+  <rect x="100" y="270" width="250" height="70" class="neutral"/>
+  <text x="125" y="300" class="text h3">ユーザー質問</text>
+  <text x="125" y="323" class="text small">なぜ？ / 何の会社？ / CFは？</text>
+
+  <rect x="225" y="385" width="260" height="165" class="bad"/>
+  <text x="250" y="420" class="text h3">orchestrator.ts</text>
+  <text x="250" y="448" class="text small">intent 判定</text>
+  <text x="250" y="470" class="text small">context 作成</text>
+  <text x="250" y="492" class="text small">Gemini / retry</text>
+  <text x="250" y="514" class="text small">source 検証 / fallback</text>
+  <text x="250" y="536" class="text small">ログ出力</text>
+
+  <rect x="90" y="595" width="540" height="55" class="warn"/>
+  <text x="115" y="628" class="text h3">結果: どこを直すと品質が上がるか分かりにくい</text>
+
+  <path class="badarrow" d="M225 340 C225 365 265 365 300 385"/>
+  <path class="badarrow" d="M360 550 C360 575 360 575 360 595"/>
+
+  <rect x="790" y="145" width="660" height="535" class="panel"/>
+  <text x="820" y="190" class="text h2">変えたい見え方</text>
+  <text x="820" y="222" class="text body">役割を段階に分けて、品質を測れるようにする</text>
+
+  <rect x="835" y="265" width="230" height="62" class="neutral"/>
+  <text x="860" y="291" class="text h3">1. 質問を整える</text>
+  <text x="860" y="313" class="text small">follow-up を補完</text>
+
+  <rect x="1125" y="265" width="230" height="62" class="neutral"/>
+  <text x="1150" y="291" class="text h3">2. intent 判定</text>
+  <text x="1150" y="313" class="text small">何を聞かれたか</text>
+
+  <rect x="835" y="375" width="230" height="72" class="good"/>
+  <text x="860" y="403" class="text h3">3. 回答戦略</text>
+  <text x="860" y="425" class="text small">LLM / 定型 / 履歴</text>
+
+  <rect x="1125" y="375" width="230" height="72" class="good"/>
+  <text x="1150" y="403" class="text h3">4. context 選択</text>
+  <text x="1150" y="425" class="text small">何を渡すか</text>
+
+  <rect x="835" y="495" width="230" height="72" class="model"/>
+  <text x="860" y="523" class="text h3">5. 返答生成</text>
+  <text x="860" y="545" class="text small">Gemini or deterministic</text>
+
+  <rect x="1125" y="495" width="230" height="72" class="good"/>
+  <text x="1150" y="523" class="text h3">6. 根拠検証</text>
+  <text x="1150" y="545" class="text small">sourceIds / weak grounding</text>
+
+  <rect x="980" y="600" width="250" height="50" class="good"/>
+  <text x="1005" y="632" class="text h3">7. ログで改善確認</text>
+
+  <path class="goodarrow" d="M1065 296 H1125"/>
+  <path class="goodarrow" d="M1240 327 C1240 355 960 345 950 375"/>
+  <path class="goodarrow" d="M1065 411 H1125"/>
+  <path class="goodarrow" d="M1240 447 C1240 475 955 465 950 495"/>
+  <path class="goodarrow" d="M1065 531 H1125"/>
+  <path class="goodarrow" d="M1240 567 C1240 592 1140 588 1105 600"/>
+
+  <rect x="50" y="725" width="1400" height="265" class="panel"/>
+  <text x="80" y="770" class="text h2">無駄の正体を、もっと短く言うと</text>
+
+  <rect x="85" y="810" width="300" height="115" class="bad"/>
+  <text x="110" y="842" class="text h3">無駄 1</text>
+  <text x="110" y="870" class="text body">弱い context を渡してから</text>
+  <text x="110" y="895" class="text body">後段で修復している</text>
+
+  <rect x="420" y="810" width="300" height="115" class="bad"/>
+  <text x="445" y="842" class="text h3">無駄 2</text>
+  <text x="445" y="870" class="text body">prompt にルールを足して</text>
+  <text x="445" y="895" class="text body">構造問題を隠している</text>
+
+  <rect x="755" y="810" width="300" height="115" class="bad"/>
+  <text x="780" y="842" class="text h3">無駄 3</text>
+  <text x="780" y="870" class="text body">fallback を失敗扱いして</text>
+  <text x="780" y="895" class="text body">戦略として使えていない</text>
+
+  <rect x="1090" y="810" width="300" height="115" class="bad"/>
+  <text x="1115" y="842" class="text h3">無駄 4</text>
+  <text x="1115" y="870" class="text body">ログの軸が近くて</text>
+  <text x="1115" y="895" class="text body">改善判断が散る</text>
+
+  <text x="85" y="965" class="text body">先に直す順番: context 選択 → 回答戦略 → grounding 判定 → prompt 整理</text>
+  <text x="85" y="1000" class="text tiny">Generated for Kabuyomi Worker chat quality discussion. Current focal files: routes/chat.ts, lib/chat/orchestrator.ts, lib/chat/context-pack.ts, clients/gemini/prompts.ts</text>
+</svg>

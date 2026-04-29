@@ -1,9 +1,10 @@
 import { generateQuoteTranslation } from "../clients/gemini";
 import { TranslateQuoteRequestSchema } from "../lib/contracts";
+import { consumeBillableCredits, refundBillableCredits, type CreditChargeResult } from "../lib/credit-operation";
 import { logLlmUsage } from "../lib/llm-usage";
 import { logErrorEvent, logEvent } from "../lib/logging";
 import { isCreditBillingEnabledForIdentity } from "../lib/remote-config";
-import { consumeCredit, InsufficientCreditsError, readQuotaIdentity, refundCredit } from "../lib/quota";
+import { InsufficientCreditsError, readQuotaIdentity } from "../lib/quota";
 import { parseJsonBody } from "../lib/request";
 import { json, unavailable } from "../lib/response";
 import type { RouteHandler } from "./types";
@@ -30,13 +31,14 @@ export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, en
   const startedAt = Date.now();
   const creditBillingEnabled = isCreditBillingEnabledForIdentity(config, identity);
   const operationId = payload.operationId || crypto.randomUUID();
-  let creditsCharged = 0;
-  let creditsRemaining: number | undefined;
-  let usageAfterCharge: Awaited<ReturnType<typeof consumeCredit>>["usage"] | undefined;
+  let creditCharge: CreditChargeResult | undefined;
 
   if (creditBillingEnabled) {
     try {
-      const credit = await consumeCredit(identity, env, config, {
+      creditCharge = await consumeBillableCredits({
+        identity,
+        env,
+        config,
         operationId,
         creditsRequired: QUOTE_TRANSLATION_CREDIT_COST,
         reference: {
@@ -44,9 +46,6 @@ export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, en
           id: "source_preview"
         }
       });
-      creditsCharged = credit.creditsCharged ?? 0;
-      creditsRemaining = credit.creditsRemaining;
-      usageAfterCharge = credit.usage;
     } catch (error) {
       if (error instanceof InsufficientCreditsError) {
         return json(
@@ -81,17 +80,18 @@ export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, en
     return json({
       translatedText: translation.translatedText,
       modelName: translation.modelName,
-      usage: usageAfterCharge,
-      creditsCharged,
-      creditsRemaining
+      usage: creditCharge?.usage,
+      creditsCharged: creditCharge?.creditsCharged ?? 0,
+      creditsRemaining: creditCharge?.creditsRemaining
     });
   } catch (error) {
-    if (creditBillingEnabled && creditsCharged > 0) {
+    if (creditBillingEnabled && creditCharge) {
       try {
-        await refundCredit(identity, env, config, {
-          originalOperationId: operationId,
-          refundOperationId: `refund:${operationId}`,
-          credits: creditsCharged,
+        await refundBillableCredits({
+          identity,
+          env,
+          config,
+          charge: creditCharge,
           reference: {
             type: "quote_translation",
             id: "source_preview"

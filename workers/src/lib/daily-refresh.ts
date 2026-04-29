@@ -1,5 +1,5 @@
 import type { Env } from "../env";
-import { ensureLatestFiling } from "./pipeline";
+import { ensureLatestFiling } from "./filings/latest";
 import { logErrorEvent, logEvent, logWarnEvent } from "./logging";
 import type { RemoteConfig } from "./remote-config";
 import { resolveDailyRefreshConcurrency, resolveTrackedTickersForExecution } from "./tracked-tickers";

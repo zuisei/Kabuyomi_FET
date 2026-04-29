@@ -19,6 +19,28 @@ export interface FilingAssetsFetcherResponse extends MetricsFetcherResponse {
   primaryDocumentUrl: string;
 }
 
+export interface PreparedFilingFetcherResponse extends MetricsFetcherResponse {
+  primaryDocumentUrl: string;
+  mdaText: string;
+  mdaTokenCount: number;
+  usedStartPattern: string;
+  usedEndPattern: string;
+  diagnostics: {
+    inputHtmlChars: number;
+    normalizedChars: number;
+    startMatchesCount: number;
+    endMatchesCount: number;
+    sanitizeMs: number;
+    domParseMs: number;
+    textReadMs: number;
+    cleanupMs: number;
+    normalizeMs: number;
+    boundaryScanMs: number;
+    selectionMs: number;
+    totalMs: number;
+  };
+}
+
 export interface FetchSubmissionsOptions {
   includeHistory?: boolean;
 }
@@ -92,6 +114,33 @@ export async function fetchFilingAssetsFromFetcher(
       concepts: metricsResponse.concepts,
       companyFacts: metricsResponse.companyFacts
     };
+  }
+}
+
+export async function fetchPreparedFilingFromFetcher(
+  filing: FilingReference,
+  tags: string[],
+  env: Env
+): Promise<PreparedFilingFetcherResponse | null> {
+  const payload = {
+    cik: filing.cik,
+    accessionNumber: filing.accessionNumber,
+    primaryDocument: filing.primaryDocument,
+    formType: filing.formType,
+    tags
+  };
+
+  try {
+    return await fetcherRequest(env, "/internal/sec/prepared-filing", payload);
+  } catch (error) {
+    if (
+      error instanceof AppError &&
+      error.status === 502 &&
+      /failed \(404\) for \/internal\/sec\/prepared-filing/i.test(error.message)
+    ) {
+      return null;
+    }
+    throw error;
   }
 }
 
@@ -201,7 +250,7 @@ async function waitForSecRateLimit(env: Env, path: string): Promise<void> {
     return;
   }
 
-  const tokens = path === "/internal/sec/filing-assets" ? 2 : 1;
+  const tokens = path === "/internal/sec/filing-assets" || path === "/internal/sec/prepared-filing" ? 2 : 1;
   const response = await env.SEC_RATE_LIMITER.getByName(SEC_RATE_LIMITER_NAME).fetch(
     `https://do/sec-rate-limit?tokens=${tokens}`
   );

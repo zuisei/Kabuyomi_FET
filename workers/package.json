@@ -6,9 +6,15 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "check:test-config": "node ./scripts/assert-test-config-ready.mjs",
+    "deploy:test": "npm run check:test-config && wrangler deploy --config wrangler.test.toml",
+    "dryrun:test": "npm run check:test-config && wrangler deploy --config wrangler.test.toml --dry-run",
+    "d1:migrate:test": "npm run check:test-config && wrangler d1 migrations apply DB --config wrangler.test.toml --remote",
+    "smoke:test": "KABUYOMI_SMOKE_BASE_URL=${KABUYOMI_TEST_BASE_URL:-https://kabuyomi-api-test.dznqjmctk7.workers.dev} node ./smoke/staging-worker.js",
     "cleanup:filings": "node ./scripts/cleanup-filings.mjs",
     "eval:chat:pilot": "node ./scripts/run-chat-eval-pilot.mjs",
     "eval:chat:validate": "node ./scripts/validate-chat-eval.mjs",
+    "eval:chat:validate-run": "node ./scripts/validate-chat-run.mjs",
     "smoke:staging": "node ./smoke/staging-worker.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

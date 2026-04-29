@@ -260,7 +260,9 @@ function selectRelevantNarrative(
 
   const findNarrative = (pattern: RegExp) => narratives.find((chunk) => pattern.test(chunk.text.toLowerCase()));
   const driverNarrative =
-    findNarrative(/iphone|services|cloud|ads|americas|china|japan|asia|higher net sales|demand/) ?? narratives[0];
+    findNarrative(revenueDriverNarrativePattern()) ??
+    findNarrative(/iphone|services|cloud|ads|americas|china|japan|asia|higher net sales|demand/) ??
+    narratives[0];
   const profitNarrative = findNarrative(
     /net loss|net income|loss due to|loss was primarily due to|fair value|impairment|digital asset|bitcoin|interest expense|operating expenses|selling, general and administrative|research and development|income tax|valuation allowance/
   );
@@ -315,7 +317,9 @@ function selectRelevantNarrative(
   }
 
   if (profile.asksRevenue || profile.asksCause || profile.asksRegion || profile.asksProductMix) {
-    return driverNarrative;
+    return profile.asksRevenue && profile.asksCause
+      ? findNarrative(revenueDriverNarrativePattern()) ?? findNarrative(/revenue|net sales|sales|segment|region|geograph/)
+      : driverNarrative;
   }
 
   if (
@@ -336,15 +340,24 @@ function buildMetricFallbackAnswer(
   narrative: SourceChunkRecord | undefined,
   profile: QuestionProfile
 ): GeminiChatAnswer {
-  const sourceIds = [metricSourceId];
-  const parts = [buildMetricObservation(metric)];
-
-  if (narrative) {
-    sourceIds.push(narrative.sourceId);
-    parts.push(buildNarrativeContext(narrative, profile));
+  if (metric.logicalName === "revenue" && profile.asksRevenue && profile.asksCause) {
+    return buildRevenueDriverFallbackAnswer(metric, metricSourceId, narrative);
   }
 
-  const nextStep = buildMetricNextStep(profile, Boolean(narrative));
+  const sourceIds = [metricSourceId];
+  const parts = [buildMetricObservation(metric)];
+  let includedNarrative = false;
+
+  if (narrative) {
+    const narrativeContext = buildNarrativeContext(narrative, profile);
+    if (!isWeakNarrativeContext(narrativeContext)) {
+      sourceIds.push(narrative.sourceId);
+      parts.push(narrativeContext);
+      includedNarrative = true;
+    }
+  }
+
+  const nextStep = buildMetricNextStep(profile, includedNarrative);
   if (nextStep) {
     parts.push(nextStep);
   }
@@ -352,6 +365,32 @@ function buildMetricFallbackAnswer(
   return {
     answer: parts.join(" "),
     sourceIds
+  };
+}
+
+function buildRevenueDriverFallbackAnswer(
+  metric: MetricSnapshot,
+  metricSourceId: string,
+  narrative: SourceChunkRecord | undefined
+): GeminiChatAnswer {
+  const sourceIds = [metricSourceId];
+  const parts = [buildMetricObservation(metric)];
+  const driverSentence = narrative ? summarizeRevenueDriverNarrative(narrative) : null;
+
+  if (driverSentence) {
+    sourceIds.push(narrative!.sourceId);
+    parts.push(driverSentence);
+  } else {
+    parts.push("ただし、この提出資料の範囲では、売上変化の直接要因は明示されていません。");
+    if (narrative && isRevenueAdjacentNarrative(narrative)) {
+      sourceIds.push(narrative.sourceId);
+      parts.push("近い材料としては、売上区分や地域・セグメントの説明はありますが、どれが増減の主因かまでは切り分けられません。");
+    }
+  }
+
+  return {
+    answer: parts.join(" "),
+    sourceIds: Array.from(new Set(sourceIds))
   };
 }
 
@@ -779,7 +818,7 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
       lowered
     )
   ) {
-    return "提出資料の一般的な注意書きや案内文が中心で、材料としては弱めです。";
+    return "この提出資料の範囲では、この論点を直接説明する本文は見つかりません。";
   }
 
   if (/(digital asset|bitcoin)/.test(lowered) && /(fair value|impairment|loss)/.test(lowered)) {
@@ -809,6 +848,11 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
     if (match?.[1]) {
       return `本文では、${candidate.region}で ${translateDriverList(match[1])} の売上増が主因と説明しています。`;
     }
+  }
+
+  const pricingDriver = summarizePricingDriver(trimmed);
+  if (pricingDriver) {
+    return pricingDriver;
   }
 
   const generalDriverMatch = trimmed.match(/(?:primarily due to|driven by|helped by|powered by)\s+([^.]+)\./i);
@@ -842,6 +886,116 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
   return excerpt.match(/[。！？]$/) ? excerpt : `${excerpt}。`;
 }
 
+function summarizeRevenueDriverNarrative(source: SourceChunkRecord): string | null {
+  const text = source.text.trim();
+  const lowered = text.toLowerCase();
+  if (!text || isProfitOnlyNarrative(source)) {
+    return null;
+  }
+
+  const regionalDrivers = [
+    { region: "米州", pattern: /americas[\s\S]*?(?:net sales|revenue) increased[\s\S]*?primarily due to higher (?:net )?sales of ([^.]+)\./i },
+    { region: "中国", pattern: /greater china[\s\S]*?(?:net sales|revenue) increased[\s\S]*?primarily due to higher (?:net )?sales of ([^.]+)\./i },
+    { region: "日本", pattern: /japan[\s\S]*?(?:net sales|revenue) increased[\s\S]*?primarily due to higher (?:net )?sales of ([^.]+)\./i },
+    { region: "アジア太平洋", pattern: /rest of asia pacific[\s\S]*?(?:net sales|revenue) increased[\s\S]*?primarily due to higher (?:net )?sales of ([^.]+)\./i }
+  ];
+  for (const candidate of regionalDrivers) {
+    const match = text.match(candidate.pattern);
+    if (match?.[1]) {
+      return `本文では、${candidate.region}の売上増は ${translateDriverList(match[1])} が主因と説明されています。`;
+    }
+  }
+
+  const pricingDriver = summarizePricingDriver(text);
+  if (pricingDriver) {
+    return pricingDriver;
+  }
+
+  const directPatterns = [
+    /(?:net sales|revenue|sales) (?:increased|decreased|grew|declined)[^.]{0,180}?(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from)\s+([^.]+)\./i,
+    /(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from)\s+([^.]{0,220}?(?:demand|volume|pricing|traffic|ticket|occupancy|leasing|renewal|new stores?|same-store|comparable store|foreign exchange|currency|customer|sales|revenue)[^.]*?)\./i
+  ];
+  for (const pattern of directPatterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      return `本文では、${translateDriverList(match[1])} が売上変化の要因として説明されています。`;
+    }
+  }
+
+  if (/(comparable store sales|same-store sales|traffic|ticket)/i.test(text)) {
+    return "本文では、既存店売上、客数、客単価など小売の売上ドライバーに関する説明があります。";
+  }
+
+  if (/demand/.test(lowered) && /(strong|resilient|healthy|higher|increase|growth|rebound)/.test(lowered)) {
+    return "本文では、需要の強さや回復が売上を支えた可能性のある材料として示されています。";
+  }
+
+  return null;
+}
+
+function revenueDriverNarrativePattern(): RegExp {
+  return /(?:net sales|revenue|sales).{0,160}(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from|demand|volume|pricing|traffic|ticket|comparable store|same-store|occupancy|leasing|renewal|new stores?|foreign exchange|currency)|(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from).{0,180}(?:net sales|revenue|sales|demand|volume|pricing|traffic|ticket|comparable store|same-store|occupancy|leasing|renewal|new stores?|foreign exchange|currency)/i;
+}
+
+function summarizePricingDriver(text: string): string | null {
+  const match = text.match(/net selling price increases? of\s+([0-9]+(?:\.[0-9]+)?%?)/i);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  const offsetText = summarizeOffsetDrivers(text);
+  const lead = `本文では、販売価格の引き上げ（${formatPercentText(match[1])}）が売上成長の主因と説明されています。`;
+
+  return offsetText ? `${lead} ただし、${offsetText}が一部相殺しました。` : lead;
+}
+
+function summarizeOffsetDrivers(text: string): string | null {
+  if (!/partially offset by/i.test(text)) {
+    return null;
+  }
+
+  const offsets: string[] = [];
+  const volumeMatch =
+    text.match(/(?:organic\s+)?volume declines? of\s+([0-9]+(?:\.[0-9]+)?%?)/i) ??
+    text.match(/lower (?:organic\s+)?volume(?: of)?\s+([0-9]+(?:\.[0-9]+)?%?)/i);
+  if (volumeMatch?.[1]) {
+    offsets.push(`販売数量の減少（${formatPercentText(volumeMatch[1])}）`);
+  } else if (/lower organic volume|organic volume decline|volume decline/i.test(text)) {
+    offsets.push("販売数量の減少");
+  }
+
+  const fxMatch =
+    text.match(/negative foreign exchange(?: impact)? of\s+([0-9]+(?:\.[0-9]+)?%?)/i) ??
+    text.match(/foreign exchange(?: impact)?(?: of)?\s+([0-9]+(?:\.[0-9]+)?%?)/i);
+  if (fxMatch?.[1]) {
+    offsets.push(`為替のマイナス影響（${formatPercentText(fxMatch[1])}）`);
+  } else if (/negative foreign exchange|foreign exchange headwind|currency headwind/i.test(text)) {
+    offsets.push("為替のマイナス影響");
+  }
+
+  return offsets.length > 0 ? offsets.join("と") : null;
+}
+
+function formatPercentText(rawValue: string): string {
+  const trimmed = rawValue.trim();
+  return trimmed.endsWith("%") ? trimmed : `${trimmed}%`;
+}
+
+function isRevenueAdjacentNarrative(source: SourceChunkRecord): boolean {
+  return /(revenue|net sales|sales|segment|region|geograph|customer|demand|volume|pricing|traffic|ticket|store|occupancy|leasing)/i.test(
+    source.text
+  ) && !isProfitOnlyNarrative(source);
+}
+
+function isProfitOnlyNarrative(source: SourceChunkRecord): boolean {
+  const text = source.text.toLowerCase();
+  const profitSignals = /interest expense|debt|income tax|tax expense|valuation allowance|net income|net loss|operating income|selling, general and administrative|research and development|operating expenses|fair value|impairment/.test(
+    text
+  );
+  const revenueSignals = /(revenue|net sales|sales|demand|volume|pricing|traffic|ticket|store|occupancy|leasing|customer)/.test(text);
+  return profitSignals && !revenueSignals;
+}
+
 function selectFallbackAnchorSource(sourceChunks: SourceChunkRecord[]): SourceChunkRecord | undefined {
   const substantiveNarrative = sourceChunks.find(
     (chunk) => chunk.sectionType === "md_a" && chunk.text.trim() && !isLowSignalNarrative(chunk)
@@ -860,6 +1014,35 @@ function selectFallbackAnchorSource(sourceChunks: SourceChunkRecord[]): SourceCh
 
 function translateDriverList(raw: string): string {
   return raw
+    .replace(/this digital transformation which is contributing to the explosive growth of data/gi, "データ量の急増を伴うデジタル化")
+    .replace(/rapid growth of cloud adoption/gi, "クラウド利用の急拡大")
+    .replace(/greater demand for IT outsourcing/gi, "ITアウトソーシング需要の拡大")
+    .replace(/the strength of our vehicle portfolio/gi, "車種構成の強さ")
+    .replace(/including high margin full-size pickup trucks?/gi, "高採算の大型ピックアップトラック")
+    .replace(/\bSUVs\b/g, "SUV")
+    .replace(/strong consumer demand for our products/gi, "製品への強い消費者需要")
+    .replace(/the execution of our core business strategy/gi, "中核事業戦略の実行")
+    .replace(/comparable store sales growth/gi, "既存店売上の伸び")
+    .replace(/same-store sales growth/gi, "既存店売上の伸び")
+    .replace(/new store openings?/gi, "新規出店")
+    .replace(/stronger customer traffic/gi, "来店客数の増加")
+    .replace(/higher customer traffic/gi, "来店客数の増加")
+    .replace(/higher average ticket/gi, "客単価の上昇")
+    .replace(/(?:organic\s+)?volume declines? of\s+([0-9]+(?:\.[0-9]+)?%?)/gi, (_, value: string) => `販売数量の減少（${formatPercentText(value)}）`)
+    .replace(/customer traffic/gi, "来店客数")
+    .replace(/average ticket/gi, "客単価")
+    .replace(/negative foreign exchange(?: impact)? of\s+([0-9]+(?:\.[0-9]+)?%?)/gi, (_, value: string) => `為替のマイナス影響（${formatPercentText(value)}）`)
+    .replace(/negative foreign exchange/gi, "為替のマイナス影響")
+    .replace(/foreign exchange|currency/gi, "為替")
+    .replace(/lower organic volume/gi, "オーガニック販売数量の減少")
+    .replace(/a decrease in organic volume/gi, "オーガニック販売数量の減少")
+    .replace(/organic volume/gi, "オーガニック販売数量")
+    .replace(/\bvolume\b/gi, "販売数量")
+    .replace(/\bpricing\b/gi, "価格")
+    .replace(/\bdemand\b/gi, "需要")
+    .replace(/\bleasing\b/gi, "リース")
+    .replace(/\boccupancy\b/gi, "稼働率")
+    .replace(/\brenewal\b/gi, "契約更新")
     .replace(/\bServices\b/g, "サービス")
     .replace(/\bService\b/g, "サービス")
     .replace(/\biPhone\b/g, "iPhone")
@@ -867,9 +1050,17 @@ function translateDriverList(raw: string): string {
     .replace(/\biPad\b/g, "iPad")
     .replace(/\bWearables,\s*Home and Accessories\b/g, "ウェアラブル・ホーム関連")
     .replace(/\band\b/gi, "と")
+    .replace(/\bincluding\b/gi, "、")
     .replace(/,\s*/g, "、")
     .replace(/\s+/g, " ")
+    .replace(/\s+と\s+/g, "と")
+    .replace(/、\s*と\s*/g, "と")
+    .replace(/、{2,}/g, "、")
     .trim();
+}
+
+function isWeakNarrativeContext(context: string): boolean {
+  return /直接説明する本文は見つかりません|一般的な注意書き|案内文|材料としては弱め/.test(context);
 }
 
 function fallbackSourceChunks(input: ChatPromptInput): SourceChunkRecord[] {
@@ -877,7 +1068,33 @@ function fallbackSourceChunks(input: ChatPromptInput): SourceChunkRecord[] {
 }
 
 function findMetricSourceId(sourceChunks: SourceChunkRecord[], metric: MetricSnapshot): string | undefined {
-  return sourceChunks.find((chunk) => chunk.sectionType === "xbrl_metric" && chunk.tagName === metric.tagUsed)?.sourceId;
+  const exact = sourceChunks.find((chunk) => chunk.sectionType === "xbrl_metric" && chunk.tagName === metric.tagUsed)?.sourceId;
+  if (exact) {
+    return exact;
+  }
+
+  const label = metricLabel(metric.logicalName);
+  return sourceChunks.find((chunk) => {
+    if (chunk.sectionType !== "xbrl_metric") {
+      return false;
+    }
+
+    const haystack = `${chunk.sectionTitle ?? ""} ${chunk.sourceLabel ?? ""} ${chunk.text ?? ""}`.toLowerCase();
+    if (metric.logicalName === "revenue") {
+      return /売上高|収益|revenue|revenues|net sales|sales/.test(haystack);
+    }
+    if (metric.logicalName === "netIncome") {
+      return /純利益|net income|net loss|netincomeloss/.test(haystack);
+    }
+    if (metric.logicalName === "operatingIncome") {
+      return /営業利益|operating income|operatingincomeloss/.test(haystack);
+    }
+    if (metric.logicalName === "operatingCashFlow") {
+      return /営業cf|営業キャッシュフロー|operating cash flow|net cash provided/.test(haystack);
+    }
+
+    return haystack.includes(label.toLowerCase());
+  })?.sourceId;
 }
 
 function isLowSignalNarrative(chunk: SourceChunkRecord): boolean {

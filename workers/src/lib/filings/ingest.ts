@@ -1,6 +1,6 @@
 import type { Env, FilingCacheRecord, FilingReference, MetricSnapshot, SourceChunkRecord } from "../../env";
 import { generateSummary } from "../../clients/gemini";
-import { buildPrimaryDocumentUrl, fetchFilingAssets, fetchMetricSnapshots } from "../../clients/sec";
+import { buildPrimaryDocumentUrl, fetchFilingAssets, fetchMetricSnapshots, fetchPreparedFiling } from "../../clients/sec";
 import { extractMDASectionWithDiagnostics } from "../../extractors/mda";
 import { AppError } from "../errors";
 import { extractCompanyWebsiteUrl } from "./company-website";
@@ -55,16 +55,29 @@ export async function ingestFiling(
       contentMode
     });
   } else {
-    const fetched = await fetchFilingAssets(filing, comparisonFiling, env);
-    html = fetched.html;
-    primaryDocumentUrl = fetched.primaryDocumentUrl;
-    companyWebsiteUrl = extractCompanyWebsiteUrl(html, {
-      companyName: filing.companyName,
-      primaryDocumentUrl
-    });
-    metrics = fetched.metrics;
+    const prepared = await fetchPreparedFiling(filing, comparisonFiling, env);
+    const fetched = prepared ? null : await fetchFilingAssets(filing, comparisonFiling, env);
+    html = fetched?.html ?? "";
+    primaryDocumentUrl = prepared?.primaryDocumentUrl ?? fetched!.primaryDocumentUrl;
+    if (fetched) {
+      companyWebsiteUrl = extractCompanyWebsiteUrl(html, {
+        companyName: filing.companyName,
+        primaryDocumentUrl
+      });
+    }
+    metrics = prepared?.metrics ?? fetched!.metrics;
     const fetchedAt = Date.now();
-    const { result: extracted, diagnostics } = extractMDASectionWithDiagnostics(html, filing.formType);
+    const { result: extracted, diagnostics } = prepared
+      ? {
+          result: {
+            text: prepared.mdaText,
+            tokenCount: prepared.mdaTokenCount,
+            usedStartPattern: prepared.usedStartPattern,
+            usedEndPattern: prepared.usedEndPattern
+          },
+          diagnostics: prepared.diagnostics
+        }
+      : extractMDASectionWithDiagnostics(html, filing.formType);
     if (!extracted) {
       logEvent("extraction_failed", {
         ticker: filing.ticker,
@@ -73,6 +86,7 @@ export async function ingestFiling(
         accessionNumber: filing.accessionNumber,
         summaryMode,
         contentMode,
+        preparedByFetcher: Boolean(prepared),
         fetchMs: fetchedAt - fetchStartedAt,
         ...diagnostics
       });
@@ -93,6 +107,7 @@ export async function ingestFiling(
       tokenCount: extracted.tokenCount,
       summaryMode,
       contentMode,
+      preparedByFetcher: Boolean(prepared),
       fetchMs: fetchedAt - fetchStartedAt,
       ...diagnostics
     });
@@ -133,6 +148,7 @@ export async function ingestFiling(
     summaryProvider: generatedSummary.provider,
     totalMs: finishedAt - startedAt,
     htmlChars: html.length,
+    preparedByFetcher: html.length === 0 && extractedText.length > 0,
     metricsCount: metrics.length,
     sourceChunkCount: sourceChunks.length,
     mdaChars: extractedText.length,

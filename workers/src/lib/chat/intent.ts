@@ -72,6 +72,13 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
   }
 
   if (
+    /(売上|収益|sales|revenue)/.test(normalized) &&
+    /(なぜ|なんで|どうして|理由|原因|要因|主因|背景|driver|cause|why|伸び|成長|増収|減収|変化)/.test(normalized)
+  ) {
+    return "yoy_change";
+  }
+
+  if (
     /(売上|sales|revenue|収益)/.test(normalized) &&
     /(内訳|構成|柱|源泉|セクター|sector|セグメント|segment|事業|business|部門|地域|geography|製品|product)/.test(
       normalized
@@ -86,6 +93,14 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
 
   if (/(売上|sales|revenue|収益)/.test(normalized)) {
     return "revenue_breakdown";
+  }
+
+  if (
+    /(なぜ|なんで|どうして|理由|原因|要因|主因|背景|driver|cause|why|一時的|一過性|継続|続く|持続|構造的|temporary|transitory|recurring|sustain|continue)/.test(
+      normalized
+    )
+  ) {
+    return "mda_summary";
   }
 
   return "unknown";

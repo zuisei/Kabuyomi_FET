@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const routeMocks = vi.hoisted(() => ({
+  ensureLatestFiling: vi.fn()
+}));
+
 vi.mock("../src/clients/sec", () => ({
   lookupTicker: vi.fn(),
   listTickersByCik: vi.fn(),
@@ -7,7 +11,11 @@ vi.mock("../src/clients/sec", () => ({
 }));
 
 vi.mock("../src/lib/pipeline", () => ({
-  ensureLatestFiling: vi.fn()
+  ensureLatestFiling: routeMocks.ensureLatestFiling
+}));
+
+vi.mock("../src/lib/filings/latest", () => ({
+  ensureLatestFiling: routeMocks.ensureLatestFiling
 }));
 
 vi.mock("../src/lib/filings/cache", () => ({
@@ -198,6 +206,11 @@ describe("ticker-aware routes", () => {
       companyName: "Alphabet Inc.",
       cik: "0001652044",
       retryAfterSeconds: 2,
+      filingPrepJob: {
+        status: "preparing",
+        ticker: "GOOG",
+        retryAfterSeconds: 2
+      },
       usage
     });
     expect(ctx.waitUntil).toHaveBeenCalledTimes(1);

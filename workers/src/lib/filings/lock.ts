@@ -1,5 +1,7 @@
 import type { Env } from "../../env";
 
+const DEFAULT_LOCK_RENEW_INTERVAL_MS = 10_000;
+
 export async function acquireFilingLock(
   filingKey: string,
   env: Env
@@ -9,8 +11,27 @@ export async function acquireFilingLock(
   if (!response.ok) {
     throw new Error("Failed to acquire filing lock");
   }
+  const payload = (await response.json()) as { token?: string; ttlMs?: number };
+  if (!payload.token) {
+    throw new Error("Failed to acquire filing lock token");
+  }
+
+  const renewIntervalMs = Math.max(
+    1_000,
+    Math.min(DEFAULT_LOCK_RENEW_INTERVAL_MS, Math.floor((payload.ttlMs ?? 30_000) / 3))
+  );
+  const interval = setInterval(() => {
+    void stub.fetch("https://do/renew", {
+      method: "POST",
+      body: JSON.stringify({ token: payload.token })
+    });
+  }, renewIntervalMs);
 
   return async () => {
-    await stub.fetch("https://do/unlock", { method: "POST" });
+    clearInterval(interval);
+    await stub.fetch("https://do/unlock", {
+      method: "POST",
+      body: JSON.stringify({ token: payload.token })
+    });
   };
 }

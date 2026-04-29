@@ -12,11 +12,63 @@ struct QuotaRequestContext {
     }
 }
 
-private enum APIBaseURLResolver {
+enum APIEnvironment: String {
+    case production
+    case test
+
+    var displayName: String {
+        switch self {
+        case .production:
+            return "Production API"
+        case .test:
+            return "Test API"
+        }
+    }
+}
+
+enum APIBaseURLResolver {
     static let productionURL = URL(string: "https://kabuyomi-api.dznqjmctk7.workers.dev")!
+    static let testURL = URL(string: "https://kabuyomi-api-test.dznqjmctk7.workers.dev")!
+
+    #if DEBUG
+    static let debugEnvironmentDefaultsKey = "kabuyomi.apiEnvironment"
+
+    static var selectedDebugEnvironment: APIEnvironment {
+        guard let rawValue = UserDefaults.standard.string(forKey: debugEnvironmentDefaultsKey),
+              let environment = APIEnvironment(rawValue: rawValue) else {
+            return .production
+        }
+        return environment
+    }
+
+    static func setSelectedDebugEnvironment(_ environment: APIEnvironment) {
+        UserDefaults.standard.set(environment.rawValue, forKey: debugEnvironmentDefaultsKey)
+    }
+    #endif
 
     static func resolve(baseURL: URL?) -> URL {
-        baseURL ?? configuredBaseURL() ?? productionURL
+        if let baseURL {
+            return baseURL
+        }
+
+        if let configuredURL = configuredBaseURL() {
+            return configuredURL
+        }
+
+        #if DEBUG
+        return url(for: selectedDebugEnvironment)
+        #else
+        return productionURL
+        #endif
+    }
+
+    static func url(for environment: APIEnvironment) -> URL {
+        switch environment {
+        case .production:
+            return productionURL
+        case .test:
+            return testURL
+        }
     }
 
     private static func parsedURL(from rawValue: String) -> URL? {

@@ -226,10 +226,26 @@ struct SettingsView: View {
                     }
                 }
 
+                Toggle(isOn: Binding(
+                    get: { appModel.usesTestAPI },
+                    set: { appModel.setUsesTestAPI($0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Test API を使う")
+                            .font(.system(.body, design: .rounded, weight: .semibold))
+                        Text("DEBUG ビルド専用です。ON で kabuyomi-api-test、OFF で本番 API を叩きます。切り替え後に利用状況を再同期します。")
+                            .font(.footnote)
+                            .foregroundStyle(KabuyomiTheme.inkMuted)
+                    }
+                }
+
                 VStack(alignment: .leading, spacing: 8) {
                     Text("現在の API 接続先")
                         .font(.system(.footnote, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
+                    Text(appModel.currentAPIEnvironmentDisplayName)
+                        .font(.system(.caption, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
                     Text(appModel.currentAPIBaseURLDisplay)
                         .font(.system(.footnote, design: .monospaced, weight: .medium))
                         .foregroundStyle(KabuyomiTheme.ink)

@@ -164,6 +164,69 @@ describe("Gemini summary fallback", () => {
 });
 
 describe("Gemini local chat fallback", () => {
+  it("translates pricing drivers instead of leaking partial English fragments", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "前回決算との違いは？",
+      filing: {
+        filingKey: "v1:0000021665:000002166526000006",
+        ticker: "CL",
+        companyName: "COLGATE PALMOLIVE CO",
+        cik: "0000021665",
+        formType: "10-K",
+        filedAt: "2026-02-23",
+        periodOfReport: "2025-12-31",
+        primaryDocumentUrl: "https://example.com",
+        mdaText: "",
+        mdaTokenCount: 0,
+        metrics: [
+          {
+            logicalName: "revenue",
+            tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+            value: 20101000000,
+            unit: "USD",
+            periodEnd: "2025-12-31",
+            comparisonValue: 20094000000,
+            yoyPercent: 0.03
+          }
+        ],
+        sourceChunks: [
+          {
+            sourceId: "S3",
+            sectionType: "md_a",
+            sectionTitle: "Item 7",
+            sourceLabel: "10-K Item 7",
+            text:
+              "Net sales increased primarily due to net selling price increases of 2.0%, partially offset by volume declines of 0.4% and negative foreign exchange of 0.3%.",
+            startOffset: 0,
+            endOffset: 112,
+            sortOrder: 3
+          },
+          {
+            sourceId: "S9",
+            sectionType: "xbrl_metric",
+            sectionTitle: "売上高",
+            sourceLabel: "XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)",
+            text: "売上高: 20101000000 USD / 比較値: 20094000000 / YoY: 0.03%",
+            startOffset: 0,
+            endOffset: 0,
+            tagName: "RevenueFromContractWithCustomerExcludingAssessedTax",
+            sortOrder: 9
+          }
+        ],
+        summary: { verdict: "", highlights: [], changes: [] },
+        generatedAt: "2026-04-14T00:00:00.000Z",
+        extractorVersion: "v1",
+        promptVersion: "v1"
+      }
+    });
+
+    expect(response.answer).toContain("販売価格の引き上げ（2.0%）");
+    expect(response.answer).toContain("販売数量の減少（0.4%）");
+    expect(response.answer).toContain("為替のマイナス影響（0.3%）");
+    expect(response.answer).not.toContain("net selling price increases of 2");
+    expect(response.sourceIds).toContain("S3");
+  });
+
   it("strips markdown emphasis and inline source citations from model answers", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -616,7 +679,7 @@ describe("Gemini local chat fallback", () => {
     expect(response.sourceIds).toEqual(["S9"]);
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
     expect(response.answer).toContain("15.7%増");
-    expect(response.answer).toContain("どの事業が押したかまでは");
+    expect(response.answer).toContain("売上変化の直接要因は明示されていません");
     expect(response.answer).not.toContain("分かりません");
   });
 
@@ -1504,7 +1567,7 @@ describe("Gemini local chat fallback", () => {
     expect(response.sourceIds).toEqual(["S6"]);
     expect(response.answer).toContain("関税");
     expect(response.answer).toContain("サプライチェーン");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("recovers from low-signal narrative citations on broader driver questions", async () => {

@@ -71,6 +71,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "If the exact question is broader than the filing but related facts exist, do not refuse immediately. Answer with the closest supported facts from the filing, then state what remains outside the filing.",
     "If the user asks about a driver, cause, or contributor but the provided support is only a metric, explain the observed change first, then say what extra filing detail would help narrow the driver.",
     "If the user asks whether a driver, cause, factor, or its impact is temporary, recurring, sustainable, or likely to continue, answer that durability question first. Use filing-backed outlook, risk, demand, cost, or management discussion language when present. If the provided context does not identify the prior driver clearly, say that the prior factor is not explicit in this request and answer from the closest filing-backed driver. Never answer this kind of question with only a revenue or profit metric.",
+    "For very short cause or durability follow-ups such as なぜ？, その要因は一時的？, or 続きそう？, do not treat the wording as standalone general advice. Anchor the answer to the closest provided filing driver, risk, demand, cost, margin, cash-flow, or outlook source.",
     "If the user asks why the company is in the red, why losses widened, or why net income is negative, anchor the answer on net income or operating income evidence and any filing text about losses, valuation changes, costs, taxes, or impairments. Do not switch to a revenue-only answer unless no profit-related evidence exists at all.",
     "If the user asks why the stock moved or what investors want to know, distinguish backward-looking results from forward-looking expectations.",
     "If the answer is only partially supported, say what is supported and what is still not confirmable from this filing context.",
@@ -202,7 +203,7 @@ function answerFormatInstruction(intent: NonNullable<ChatPromptInput["questionIn
     case "risk_factors":
       return "Cover, in this order: 主要リスク3つ以内, 影響, 根拠, まだ数字に出ているか。";
     case "mda_summary":
-      return "Cover, in this order: 会社コメントの要点, 数字とのつながり, 強い材料, 注意点。";
+      return "Cover, in this order: 質問への直接回答, 会社コメントまたは本文の要点, 数字とのつながり, まだ断定できない点。For short cause/durability follow-ups, start with whether the filing supports a temporary, continuing, or uncertain read.";
     case "yoy_change":
       return "Cover, in this order: 一番大きい変化, 主要数値, 本文で説明されている要因, 追加確認が必要な点。";
     case "historical_comparison":

@@ -85,7 +85,12 @@ const legalPages: LegalPage[] = [
           "Kabuyomi の情報を用いた投資判断は利用者自身の責任で行ってください。アプリの不具合、停止、表示内容の誤りによって生じた損失について、補償を前提としていません。"
       },
       {
-        title: "5. お問い合わせ",
+        title: "5. 購読について",
+        body:
+          "月額プランは Apple の自動更新サブスクリプションとして提供されます。購入、更新、解約、返金、請求は App Store の規約と Apple ID の設定に従います。購読は App Store のアカウント設定からいつでも管理できます。Apple 標準使用許諾契約: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
+      },
+      {
+        title: "6. お問い合わせ",
         body: "問い合わせは kabuyomi.support@gmail.com または X（Twitter）@0xt4dano までご連絡ください。"
       }
     ]

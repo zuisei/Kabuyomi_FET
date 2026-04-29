@@ -1,0 +1,68 @@
+# Test API Worker config.
+#
+# This file is intentionally separate from wrangler.toml so deploy commands must
+# explicitly opt into the test Worker:
+#
+#   npx wrangler deploy --config wrangler.test.toml
+#
+# Do not point these bindings at production resources.
+
+name = "kabuyomi-api-test"
+main = "src/index.ts"
+compatibility_date = "2026-04-12"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+kv_namespaces = [
+  { binding = "KABUYOMI_CACHE", id = "93784a55abc94d46a68d3064eb711549", preview_id = "93784a55abc94d46a68d3064eb711549" }
+]
+
+d1_databases = [
+  { binding = "DB", database_name = "kabuyomi-history-test", database_id = "96270bac-37e0-46c5-af52-d96f192bec04", migrations_dir = "./d1/migrations" }
+]
+
+r2_buckets = [
+  { binding = "FILINGS_BUCKET", bucket_name = "kabuyomi-filings-test", preview_bucket_name = "kabuyomi-filings-test" }
+]
+
+[vars]
+ENVIRONMENT = "test"
+KABUYOMI_ENV = "test"
+SEC_USER_AGENT = "Kabuyomi test admin@kabuyomi.app"
+SEC_FETCHER_BASE_URL = "https://kabuyomifet-production.up.railway.app"
+GEMINI_TIMEOUT_MS = "12000"
+GEMINI_CHAT_TIMEOUT_MS = "7000"
+SEC_FETCHER_TIMEOUT_MS = "25000"
+DEV_DETACHED_ACCESS_DEVICE_KEYS = "1e5200e1-9b6e-4970-a232-9ac542bb0827"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+persist = true
+
+[[durable_objects.bindings]]
+name = "SEC_RATE_LIMITER"
+class_name = "SecRateLimiterDO"
+
+[[durable_objects.bindings]]
+name = "FILING_LOCK"
+class_name = "FilingLockDO"
+
+[[durable_objects.bindings]]
+name = "USER_QUOTA"
+class_name = "UserQuotaDO"
+
+[[durable_objects.bindings]]
+name = "ENTITLEMENT"
+class_name = "EntitlementDO"
+
+[[migrations]]
+tag = "test-v1"
+new_sqlite_classes = ["SecRateLimiterDO", "FilingLockDO", "UserQuotaDO", "EntitlementDO"]
+
+[triggers]
+crons = []

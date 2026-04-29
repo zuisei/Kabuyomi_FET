@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180" role="img" aria-labelledby="title desc">
+  <title id="title">Kabuyomi Worker chat response flow</title>
+  <desc id="desc">Diagram of the current Worker chat answer pipeline and improvement touch points.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f8fb; }
+      .band { fill: #ffffff; stroke: #d8dee9; stroke-width: 2; }
+      .box { fill: #ffffff; stroke: #243447; stroke-width: 2.2; rx: 8; }
+      .entry { fill: #e8f2ff; stroke: #1f5f9f; }
+      .core { fill: #fff3dc; stroke: #9b6617; }
+      .model { fill: #ece8ff; stroke: #6447b6; }
+      .guard { fill: #e9f7ef; stroke: #26834a; }
+      .fail { fill: #ffe8e5; stroke: #b04233; }
+      .out { fill: #eaf7f7; stroke: #26767a; }
+      .note { fill: #fff; stroke: #aeb7c3; stroke-dasharray: 6 5; }
+      .text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17212b; }
+      .h1 { font-size: 34px; font-weight: 750; }
+      .h2 { font-size: 24px; font-weight: 750; }
+      .label { font-size: 19px; font-weight: 700; }
+      .small { font-size: 16px; font-weight: 500; fill: #344457; }
+      .tiny { font-size: 14px; font-weight: 500; fill: #4a586a; }
+      .arrow { stroke: #243447; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .arrow2 { stroke: #7a4f14; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .arrow3 { stroke: #2f6b47; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .dash { stroke-dasharray: 7 6; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#243447"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1600" height="1180"/>
+  <text x="70" y="72" class="text h1">Worker の返答生成フロー: 現状の仕組みと改善ポイント</text>
+  <text x="72" y="106" class="text small">対象: /v1/chat → routes/chat.ts → lib/chat/orchestrator.ts → Gemini / deterministic / fallback</text>
+
+  <rect x="55" y="145" width="1490" height="190" class="band" rx="10"/>
+  <text x="80" y="184" class="text h2">1. リクエスト受付と課金境界</text>
+  <rect x="85" y="215" width="250" height="82" class="box entry"/>
+  <text x="110" y="248" class="text label">iOS / client</text>
+  <text x="110" y="274" class="text tiny">filingKey, question</text>
+  <text x="110" y="294" class="text tiny">conversationContext</text>
+  <rect x="420" y="205" width="300" height="102" class="box entry"/>
+  <text x="445" y="238" class="text label">routes/chat.ts</text>
+  <text x="445" y="264" class="text tiny">payload validation</text>
+  <text x="445" y="284" class="text tiny">loadFilingByKey</text>
+  <text x="445" y="304" class="text tiny">resolveContextualQuestion</text>
+  <rect x="805" y="205" width="290" height="102" class="box entry"/>
+  <text x="830" y="238" class="text label">quota / credit</text>
+  <text x="830" y="264" class="text tiny">consume before chat</text>
+  <text x="830" y="284" class="text tiny">refund if non-chargeable</text>
+  <text x="830" y="304" class="text tiny">creditBillingEnabled</text>
+  <rect x="1180" y="205" width="285" height="102" class="box entry"/>
+  <text x="1205" y="238" class="text label">prepare filing</text>
+  <text x="1205" y="264" class="text tiny">metrics-only upgrade</text>
+  <text x="1205" y="284" class="text tiny">current cache only</text>
+  <text x="1205" y="304" class="text tiny">404 if cache missing</text>
+  <path class="arrow" d="M335 256 H420"/>
+  <path class="arrow" d="M720 256 H805"/>
+  <path class="arrow" d="M1095 256 H1180"/>
+
+  <rect x="55" y="375" width="1490" height="500" class="band" rx="10"/>
+  <text x="80" y="414" class="text h2">2. orchestrator.ts: 返答経路の選択</text>
+  <rect x="90" y="455" width="270" height="95" class="box core"/>
+  <text x="115" y="488" class="text label">questionIntent</text>
+  <text x="115" y="514" class="text tiny">business_overview</text>
+  <text x="115" y="534" class="text tiny">cash_flow, risk_factors...</text>
+  <rect x="450" y="455" width="300" height="95" class="box core"/>
+  <text x="475" y="488" class="text label">historical path</text>
+  <text x="475" y="514" class="text tiny">前回比較・履歴が必要なら</text>
+  <text x="475" y="534" class="text tiny">historical response</text>
+  <rect x="840" y="455" width="300" height="95" class="box core"/>
+  <text x="865" y="488" class="text label">deterministic path</text>
+  <text x="865" y="514" class="text tiny">数値・定型回答で足りる場合</text>
+  <text x="865" y="534" class="text tiny">Gemini を使わず返す</text>
+  <rect x="1230" y="455" width="270" height="95" class="box core"/>
+  <text x="1255" y="488" class="text label">context pack</text>
+  <text x="1255" y="514" class="text tiny">intent 別に metrics</text>
+  <text x="1255" y="534" class="text tiny">factualPack / sources 選択</text>
+  <path class="arrow2" d="M360 502 H450"/>
+  <path class="arrow2" d="M750 502 H840"/>
+  <path class="arrow2" d="M1140 502 H1230"/>
+
+  <rect x="90" y="620" width="300" height="115" class="box model"/>
+  <text x="115" y="653" class="text label">Gemini prompt</text>
+  <text x="115" y="679" class="text tiny">Japanese answer rules</text>
+  <text x="115" y="699" class="text tiny">intent-specific format</text>
+  <text x="115" y="719" class="text tiny">JSON: answer + sourceIds</text>
+  <rect x="485" y="620" width="300" height="115" class="box model"/>
+  <text x="510" y="653" class="text label">generateChatAnswer</text>
+  <text x="510" y="679" class="text tiny">Gemini call or local fallback</text>
+  <text x="510" y="699" class="text tiny">schema repair retry</text>
+  <text x="510" y="719" class="text tiny">fallbackReason を保持</text>
+  <rect x="880" y="620" width="300" height="115" class="box guard"/>
+  <text x="905" y="653" class="text label">grounding guard</text>
+  <text x="905" y="679" class="text tiny">sourceIds が実在するか</text>
+  <text x="905" y="699" class="text tiny">弱い根拠なら fallback</text>
+  <text x="905" y="719" class="text tiny">SEC source URL を付与</text>
+  <rect x="1265" y="620" width="250" height="115" class="box out"/>
+  <text x="1290" y="653" class="text label">final response</text>
+  <text x="1290" y="679" class="text tiny">answer</text>
+  <text x="1290" y="699" class="text tiny">sources</text>
+  <text x="1290" y="719" class="text tiny">responsePath</text>
+  <path class="arrow" d="M1365 550 C1365 590 240 575 240 620"/>
+  <path class="arrow" d="M390 677 H485"/>
+  <path class="arrow" d="M785 677 H880"/>
+  <path class="arrow3" d="M1180 677 H1265"/>
+
+  <rect x="250" y="775" width="1085" height="70" class="box fail"/>
+  <text x="275" y="807" class="text label">fallback / repair routes</text>
+  <text x="275" y="832" class="text tiny">gemini_timeout, schema_invalid, invalid_source_id, no_sources, weak_grounding, low_quality_answer, metrics_only_insufficient</text>
+  <path class="arrow dash" d="M1030 735 C1015 770 870 775 820 810"/>
+  <path class="arrow dash" d="M635 735 C660 765 720 780 770 810"/>
+
+  <rect x="55" y="915" width="1490" height="205" class="band" rx="10"/>
+  <text x="80" y="954" class="text h2">3. 返答向上で先に変える候補</text>
+  <rect x="90" y="985" width="320" height="92" class="box note"/>
+  <text x="115" y="1018" class="text label">A. intent 判定</text>
+  <text x="115" y="1044" class="text tiny">質問を分類し間違えると</text>
+  <text x="115" y="1064" class="text tiny">以降の文脈選択が全部ズレる</text>
+  <rect x="455" y="985" width="330" height="92" class="box note"/>
+  <text x="480" y="1018" class="text label">B. context pack</text>
+  <text x="480" y="1044" class="text tiny">metrics / factualPack / sources の</text>
+  <text x="480" y="1064" class="text tiny">選び方が回答品質の中心</text>
+  <rect x="830" y="985" width="320" height="92" class="box note"/>
+  <text x="855" y="1018" class="text label">C. prompt format</text>
+  <text x="855" y="1044" class="text tiny">日本語の口調・順序・拒否条件</text>
+  <text x="855" y="1064" class="text tiny">を調整する層</text>
+  <rect x="1195" y="985" width="320" height="92" class="box note"/>
+  <text x="1220" y="1018" class="text label">D. guard / eval</text>
+  <text x="1220" y="1044" class="text tiny">sourceIds, fallbackReason, logsで</text>
+  <text x="1220" y="1064" class="text tiny">改善/劣化を見分ける</text>
+
+  <text x="70" y="1150" class="text tiny">Generated from current files: workers/src/routes/chat.ts, workers/src/lib/chat/orchestrator.ts, workers/src/lib/chat/context-pack.ts, workers/src/clients/gemini/prompts.ts</text>
+</svg>

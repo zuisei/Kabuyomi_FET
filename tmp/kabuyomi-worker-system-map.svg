@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="1180" viewBox="0 0 1700 1180" role="img" aria-labelledby="title desc">
+  <title id="title">Kabuyomi Worker system map</title>
+  <desc id="desc">High level map of Kabuyomi Worker routes, filings, chat, clients, storage, and external services.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f6f7f9; }
+      .panel { fill: #ffffff; stroke: #d5dce8; stroke-width: 2; rx: 14; }
+      .route { fill: #eaf2ff; stroke: #2f66b1; stroke-width: 2.3; rx: 10; }
+      .chat { fill: #f0ecff; stroke: #6b4cc2; stroke-width: 2.3; rx: 10; }
+      .filing { fill: #fff6dc; stroke: #b87918; stroke-width: 2.3; rx: 10; }
+      .store { fill: #e9f7ef; stroke: #26834a; stroke-width: 2.3; rx: 10; }
+      .external { fill: #fff0ee; stroke: #b94336; stroke-width: 2.4; rx: 10; }
+      .common { fill: #eef1f4; stroke: #687386; stroke-width: 2.1; rx: 10; }
+      .text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17212b; }
+      .title { font-size: 38px; font-weight: 780; }
+      .sub { font-size: 19px; font-weight: 520; fill: #415064; }
+      .h2 { font-size: 25px; font-weight: 760; }
+      .h3 { font-size: 20px; font-weight: 740; }
+      .small { font-size: 15px; font-weight: 500; fill: #4b596b; }
+      .tiny { font-size: 13px; font-weight: 500; fill: #5d6977; }
+      .arrow { stroke: #26384c; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .dash { stroke-dasharray: 8 6; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#26384c"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1700" height="1180"/>
+  <text x="60" y="72" class="text title">Kabuyomi Worker System Map</text>
+  <text x="62" y="108" class="text sub">ファイル一覧ではなく「どこからどこへ流れるか」を見る地図</text>
+
+  <rect x="55" y="145" width="1590" height="960" class="panel"/>
+
+  <rect x="95" y="205" width="210" height="80" class="route"/>
+  <text x="125" y="238" class="text h3">iOS app</text>
+  <text x="125" y="263" class="text small">ユーザー操作</text>
+
+  <rect x="385" y="190" width="270" height="110" class="route"/>
+  <text x="415" y="224" class="text h3">Worker index.ts</text>
+  <text x="415" y="249" class="text small">request 入口</text>
+  <text x="415" y="271" class="text small">routes に振り分け</text>
+
+  <rect x="760" y="170" width="300" height="150" class="route"/>
+  <text x="790" y="204" class="text h3">routes/</text>
+  <text x="790" y="231" class="text small">chat.ts</text>
+  <text x="790" y="253" class="text small">company.ts</text>
+  <text x="790" y="275" class="text small">watchlist-add.ts</text>
+  <text x="790" y="297" class="text small">usage/search/billing</text>
+
+  <path class="arrow" d="M305 245 H385"/>
+  <path class="arrow" d="M655 245 H760"/>
+
+  <rect x="1155" y="160" width="330" height="165" class="common"/>
+  <text x="1185" y="195" class="text h3">共通ガード</text>
+  <text x="1185" y="222" class="text small">request parse</text>
+  <text x="1185" y="244" class="text small">quota / credit</text>
+  <text x="1185" y="266" class="text small">remote config</text>
+  <text x="1185" y="288" class="text small">error / response</text>
+  <path class="arrow dash" d="M1060 245 H1155"/>
+
+  <rect x="155" y="430" width="350" height="180" class="filing"/>
+  <text x="185" y="466" class="text h2">Filing prep</text>
+  <text x="185" y="498" class="text small">lib/filings/latest.ts</text>
+  <text x="185" y="522" class="text small">lib/filings/ingest.ts</text>
+  <text x="185" y="546" class="text small">content-upgrade.ts</text>
+  <text x="185" y="570" class="text small">history-persistence.ts</text>
+
+  <rect x="655" y="410" width="390" height="220" class="chat"/>
+  <text x="685" y="446" class="text h2">Chat answer</text>
+  <text x="685" y="478" class="text small">lib/chat/orchestrator.ts</text>
+  <text x="685" y="502" class="text small">intent.ts / context-pack.ts</text>
+  <text x="685" y="526" class="text small">deterministic.ts / historical.ts</text>
+  <text x="685" y="550" class="text small">grounding.ts / web-supplement.ts</text>
+  <text x="685" y="574" class="text small">answer-format.ts</text>
+
+  <rect x="1195" y="430" width="310" height="180" class="common"/>
+  <text x="1225" y="466" class="text h2">Quota / billing</text>
+  <text x="1225" y="498" class="text small">lib/quota.ts</text>
+  <text x="1225" y="522" class="text small">durable/user-quota.ts</text>
+  <text x="1225" y="546" class="text small">apple-store-server.ts</text>
+  <text x="1225" y="570" class="text small">entitlements.ts</text>
+
+  <path class="arrow" d="M910 320 V410"/>
+  <path class="arrow" d="M820 320 C650 360 430 375 330 430"/>
+  <path class="arrow" d="M980 320 C1110 360 1260 370 1350 430"/>
+
+  <rect x="145" y="750" width="320" height="150" class="external"/>
+  <text x="175" y="785" class="text h2">sec-fetcher</text>
+  <text x="175" y="817" class="text small">SEC API / HTML</text>
+  <text x="175" y="841" class="text small">companyfacts</text>
+  <text x="175" y="865" class="text small">filing-assets</text>
+
+  <rect x="540" y="750" width="280" height="150" class="external"/>
+  <text x="570" y="785" class="text h2">Gemini</text>
+  <text x="570" y="817" class="text small">summary</text>
+  <text x="570" y="841" class="text small">chat</text>
+  <text x="570" y="865" class="text small">translation</text>
+
+  <rect x="895" y="720" width="340" height="210" class="store"/>
+  <text x="925" y="755" class="text h2">Cloudflare storage</text>
+  <text x="925" y="787" class="text small">KV: light cache</text>
+  <text x="925" y="811" class="text small">R2: filing artifacts</text>
+  <text x="925" y="835" class="text small">D1: history / metadata</text>
+  <text x="925" y="859" class="text small">DO: quota / lock / rate limit</text>
+
+  <rect x="1320" y="750" width="230" height="150" class="external"/>
+  <text x="1350" y="785" class="text h2">Web search</text>
+  <text x="1350" y="817" class="text small">market context</text>
+  <text x="1350" y="841" class="text small">supplement only</text>
+
+  <path class="arrow" d="M330 610 V750"/>
+  <path class="arrow" d="M505 520 H655"/>
+  <path class="arrow" d="M850 630 C820 700 700 710 680 750"/>
+  <path class="arrow" d="M1045 520 H1195"/>
+  <path class="arrow" d="M850 630 C900 675 990 685 1065 720"/>
+  <path class="arrow" d="M1045 525 C1180 580 1350 640 1435 750"/>
+  <path class="arrow" d="M465 825 H895"/>
+  <path class="arrow" d="M820 825 H895"/>
+  <path class="arrow" d="M1235 825 H1320"/>
+
+  <rect x="180" y="990" width="1300" height="60" class="common"/>
+  <text x="210" y="1025" class="text h3">読み方: routes は入口。filings は SEC filing 準備。chat は返答生成。clients は外部接続。storage/DO は状態保存。</text>
+  <text x="60" y="1145" class="text tiny">Generated from docs/worker_file_map.md and current workers/src structure.</text>
+</svg>

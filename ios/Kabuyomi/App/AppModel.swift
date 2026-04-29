@@ -76,7 +76,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     static let devModeEnabledKey = "kabuyomi.detachedAccess.devModeEnabled"
     #endif
 
-    let apiClient: APIClient
+    private(set) var apiClient: APIClient
     let persistence: PersistenceController
     let deviceIdentity: DeviceIdentityStore
     private let subscriptionStore: SubscriptionStore
@@ -112,6 +112,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var appLaunchCount = UserDefaults.standard.integer(forKey: "kabuyomi.appLaunchCount")
     #if DEBUG
     var devModeEnabled = UserDefaults.standard.bool(forKey: "kabuyomi.detachedAccess.devModeEnabled")
+    var usesTestAPI = APIBaseURLResolver.selectedDebugEnvironment == .test
     #endif
 
     private var searchGeneration = 0
@@ -223,6 +224,12 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var currentAPIBaseURLDisplay: String {
         apiClient.baseURLDisplayString
     }
+
+    #if DEBUG
+    var currentAPIEnvironmentDisplayName: String {
+        (usesTestAPI ? APIEnvironment.test : APIEnvironment.production).displayName
+    }
+    #endif
 
     var chatCreditCost: Int {
         2
@@ -426,6 +433,21 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         let store = DetachedAccessStore.shared
         store.setDevModeEnabled(value)
         devModeEnabled = value
+        Task { [weak self] in
+            await self?.refreshUsage()
+        }
+    }
+
+    func setUsesTestAPI(_ value: Bool) {
+        let environment: APIEnvironment = value ? .test : .production
+        APIBaseURLResolver.setSelectedDebugEnvironment(environment)
+        usesTestAPI = value
+        apiClient = APIClient(
+            deviceIdentity: deviceIdentity,
+            subscriptionStore: subscriptionStore
+        )
+        usage = nil
+        usageLoadState = .loading
         Task { [weak self] in
             await self?.refreshUsage()
         }

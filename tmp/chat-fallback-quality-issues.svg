@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1650" height="1180" viewBox="0 0 1650 1180" role="img" aria-labelledby="title desc">
+  <title id="title">Kabuyomi chat fallback quality issues</title>
+  <desc id="desc">Visual explanation of why non-Gemini chat answers feel weak and which files are involved.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f6f7f9; }
+      .panel { fill: #ffffff; stroke: #d5dce8; stroke-width: 2; rx: 14; }
+      .bad { fill: #fff0ee; stroke: #b94336; stroke-width: 2.5; rx: 10; }
+      .warn { fill: #fff6dc; stroke: #b87918; stroke-width: 2.3; rx: 10; }
+      .good { fill: #e9f7ef; stroke: #26834a; stroke-width: 2.3; rx: 10; }
+      .neutral { fill: #eaf2ff; stroke: #2f66b1; stroke-width: 2.3; rx: 10; }
+      .model { fill: #f0ecff; stroke: #6b4cc2; stroke-width: 2.3; rx: 10; }
+      .dark { fill: #243447; }
+      .text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17212b; }
+      .title { font-size: 38px; font-weight: 780; }
+      .sub { font-size: 19px; font-weight: 520; fill: #415064; }
+      .h2 { font-size: 25px; font-weight: 760; }
+      .h3 { font-size: 20px; font-weight: 740; }
+      .body { font-size: 17px; font-weight: 520; fill: #344255; }
+      .small { font-size: 15px; font-weight: 500; fill: #4b596b; }
+      .tiny { font-size: 13px; font-weight: 500; fill: #5d6977; }
+      .white { fill: #ffffff; }
+      .arrow { stroke: #26384c; stroke-width: 2.6; fill: none; marker-end: url(#arrow); }
+      .badarrow { stroke: #b94336; stroke-width: 2.8; fill: none; marker-end: url(#arrowBad); }
+      .goodarrow { stroke: #26834a; stroke-width: 2.8; fill: none; marker-end: url(#arrowGood); }
+      .dash { stroke-dasharray: 8 6; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#26384c"/>
+    </marker>
+    <marker id="arrowBad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#b94336"/>
+    </marker>
+    <marker id="arrowGood" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#26834a"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1650" height="1180"/>
+  <text x="60" y="72" class="text title">Gemini なし回答が弱く見える問題</text>
+  <text x="62" y="108" class="text sub">対象: deterministic.ts / fallback.ts / context-pack.ts / grounding.ts</text>
+
+  <rect x="55" y="150" width="1540" height="245" class="panel"/>
+  <text x="85" y="195" class="text h2">今のざっくり経路</text>
+  <rect x="95" y="235" width="235" height="80" class="neutral"/>
+  <text x="120" y="267" class="text h3">質問</text>
+  <text x="120" y="292" class="text small">何の会社？ / なぜ？ / リスクは？</text>
+
+  <rect x="410" y="225" width="250" height="100" class="model"/>
+  <text x="435" y="257" class="text h3">Gemini 経路</text>
+  <text x="435" y="282" class="text small">context + prompt</text>
+  <text x="435" y="302" class="text small">自然な文章にできる</text>
+
+  <rect x="740" y="225" width="250" height="100" class="bad"/>
+  <text x="765" y="257" class="text h3">Gemini なし経路</text>
+  <text x="765" y="282" class="text small">deterministic</text>
+  <text x="765" y="302" class="text small">fallback</text>
+
+  <rect x="1070" y="225" width="335" height="100" class="warn"/>
+  <text x="1095" y="257" class="text h3">体感</text>
+  <text x="1095" y="282" class="text small">数字だけ / 薄い / 質問に刺さらない</text>
+  <text x="1095" y="302" class="text small">「確認できません」に寄りがち</text>
+
+  <path class="arrow" d="M330 275 H410"/>
+  <path class="badarrow" d="M660 275 H740"/>
+  <path class="badarrow" d="M990 275 H1070"/>
+
+  <rect x="55" y="430" width="1540" height="430" class="panel"/>
+  <text x="85" y="475" class="text h2">問題点は 4つ</text>
+
+  <rect x="95" y="515" width="330" height="135" class="bad"/>
+  <text x="120" y="548" class="text h3">1. fallback が汎用すぎる</text>
+  <text x="120" y="576" class="text small">Gemini 失敗時に近い facts を返すが、</text>
+  <text x="120" y="598" class="text small">質問 intent ごとの答え方が弱い。</text>
+  <text x="120" y="623" class="text tiny">file: clients/gemini/fallback.ts</text>
+
+  <rect x="475" y="515" width="330" height="135" class="bad"/>
+  <text x="500" y="548" class="text h3">2. deterministic が数字寄り</text>
+  <text x="500" y="576" class="text small">売上・利益・CFは強いが、</text>
+  <text x="500" y="598" class="text small">事業説明・理由・リスクは薄くなりやすい。</text>
+  <text x="500" y="623" class="text tiny">file: lib/chat/deterministic.ts</text>
+
+  <rect x="855" y="515" width="330" height="135" class="bad"/>
+  <text x="880" y="548" class="text h3">3. 材料不足のまま答える</text>
+  <text x="880" y="576" class="text small">sourceChunks や factualPack が弱いと、</text>
+  <text x="880" y="598" class="text small">fallback も賢くなれない。</text>
+  <text x="880" y="623" class="text tiny">file: lib/chat/context-pack.ts</text>
+
+  <rect x="1235" y="515" width="330" height="135" class="bad"/>
+  <text x="1260" y="548" class="text h3">4. 監査後の回復が単調</text>
+  <text x="1260" y="576" class="text small">source が弱い時に落とせるが、</text>
+  <text x="1260" y="598" class="text small">より良い答えへ直す型が少ない。</text>
+  <text x="1260" y="623" class="text tiny">file: lib/chat/grounding.ts</text>
+
+  <rect x="150" y="715" width="285" height="88" class="warn"/>
+  <text x="175" y="748" class="text h3">結果 A</text>
+  <text x="175" y="774" class="text small">質問: 何の会社？</text>
+  <text x="175" y="794" class="text small">答え: 売上説明に寄る</text>
+
+  <rect x="515" y="715" width="285" height="88" class="warn"/>
+  <text x="540" y="748" class="text h3">結果 B</text>
+  <text x="540" y="774" class="text small">質問: なぜ？</text>
+  <text x="540" y="794" class="text small">答え: 数字だけになる</text>
+
+  <rect x="880" y="715" width="285" height="88" class="warn"/>
+  <text x="905" y="748" class="text h3">結果 C</text>
+  <text x="905" y="774" class="text small">質問: リスクは？</text>
+  <text x="905" y="794" class="text small">答え: 一般論っぽい</text>
+
+  <rect x="1245" y="715" width="285" height="88" class="warn"/>
+  <text x="1270" y="748" class="text h3">結果 D</text>
+  <text x="1270" y="774" class="text small">質問: 一時的？</text>
+  <text x="1270" y="794" class="text small">答え: 判断材料不足</text>
+
+  <path class="badarrow dash" d="M260 650 V715"/>
+  <path class="badarrow dash" d="M640 650 V715"/>
+  <path class="badarrow dash" d="M1020 650 V715"/>
+  <path class="badarrow dash" d="M1400 650 V715"/>
+
+  <rect x="55" y="895" width="1540" height="220" class="panel"/>
+  <text x="85" y="940" class="text h2">直すならこの順番</text>
+
+  <rect x="95" y="980" width="300" height="82" class="good"/>
+  <text x="120" y="1012" class="text h3">1. fallback を intent 別にする</text>
+  <text x="120" y="1038" class="text small">business / cash_flow / risk で型を分ける</text>
+
+  <rect x="465" y="980" width="300" height="82" class="good"/>
+  <text x="490" y="1012" class="text h3">2. deterministic を厚くする</text>
+  <text x="490" y="1038" class="text small">数字だけでなく「意味」を添える</text>
+
+  <rect x="835" y="980" width="300" height="82" class="good"/>
+  <text x="860" y="1012" class="text h3">3. context-pack を補強</text>
+  <text x="860" y="1038" class="text small">fallback も使える材料を増やす</text>
+
+  <rect x="1205" y="980" width="300" height="82" class="good"/>
+  <text x="1230" y="1012" class="text h3">4. grounding 後の回復を増やす</text>
+  <text x="1230" y="1038" class="text small">弱い source の時に別型で答え直す</text>
+
+  <path class="goodarrow" d="M395 1021 H465"/>
+  <path class="goodarrow" d="M765 1021 H835"/>
+  <path class="goodarrow" d="M1135 1021 H1205"/>
+
+  <text x="65" y="1150" class="text tiny">Generated for Kabuyomi chat quality discussion. This diagram explains non-Gemini answer quality risks; it does not change runtime code.</text>
+</svg>

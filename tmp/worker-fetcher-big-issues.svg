@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="1250" viewBox="0 0 1700 1250" role="img" aria-labelledby="title desc">
+  <title id="title">Kabuyomi Worker and SEC Fetcher big issues</title>
+  <desc id="desc">Visual summary of three major Worker and fetcher architecture risks.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f6f7f9; }
+      .panel { fill: #ffffff; stroke: #d5dce8; stroke-width: 2; rx: 14; }
+      .bad { fill: #fff0ee; stroke: #bb4438; stroke-width: 2.5; rx: 10; }
+      .warn { fill: #fff6dc; stroke: #b87918; stroke-width: 2.3; rx: 10; }
+      .good { fill: #e9f7ef; stroke: #26834a; stroke-width: 2.3; rx: 10; }
+      .neutral { fill: #eaf2ff; stroke: #2f66b1; stroke-width: 2.3; rx: 10; }
+      .model { fill: #f0ecff; stroke: #6b4cc2; stroke-width: 2.2; rx: 10; }
+      .dark { fill: #243447; }
+      .text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17212b; }
+      .title { font-size: 38px; font-weight: 780; }
+      .sub { font-size: 19px; font-weight: 520; fill: #415064; }
+      .h2 { font-size: 26px; font-weight: 760; }
+      .h3 { font-size: 20px; font-weight: 740; }
+      .body { font-size: 17px; font-weight: 520; fill: #344255; }
+      .small { font-size: 15px; font-weight: 500; fill: #4b596b; }
+      .tiny { font-size: 13px; font-weight: 500; fill: #5d6977; }
+      .white { fill: #ffffff; }
+      .arrow { stroke: #26384c; stroke-width: 2.6; fill: none; marker-end: url(#arrow); }
+      .badarrow { stroke: #bb4438; stroke-width: 2.8; fill: none; marker-end: url(#arrowBad); }
+      .goodarrow { stroke: #26834a; stroke-width: 2.8; fill: none; marker-end: url(#arrowGood); }
+      .dash { stroke-dasharray: 8 6; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#26384c"/>
+    </marker>
+    <marker id="arrowBad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#bb4438"/>
+    </marker>
+    <marker id="arrowGood" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#26834a"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1700" height="1250"/>
+  <text x="65" y="72" class="text title">Worker / Fetcher の大きい問題 3つ</text>
+  <text x="67" y="108" class="text sub">目的: 503・遅延・重複処理・返答不安定化につながる構造を、コードを読まなくても分かる形にする</text>
+
+  <!-- Issue 1 -->
+  <rect x="55" y="150" width="1590" height="305" class="panel"/>
+  <rect x="80" y="180" width="105" height="42" class="dark" rx="8"/>
+  <text x="105" y="208" class="text h3 white">P1</text>
+  <text x="205" y="210" class="text h2">1. SEC の巨大データを Worker が丸飲みしている</text>
+  <text x="205" y="242" class="text body">HTML と companyFacts を JSON に詰めて、fetcher から Worker にそのまま返している</text>
+
+  <rect x="105" y="282" width="235" height="90" class="neutral"/>
+  <text x="130" y="315" class="text h3">SEC</text>
+  <text x="130" y="340" class="text small">10-K HTML</text>
+  <text x="130" y="360" class="text small">companyfacts JSON</text>
+
+  <rect x="430" y="270" width="275" height="115" class="bad"/>
+  <text x="455" y="302" class="text h3">sec-fetcher</text>
+  <text x="455" y="328" class="text small">response.text()</text>
+  <text x="455" y="348" class="text small">HTML をメモリに保持</text>
+  <text x="455" y="368" class="text small">JSON に包んで返す</text>
+
+  <rect x="795" y="270" width="275" height="115" class="bad"/>
+  <text x="820" y="302" class="text h3">Worker</text>
+  <text x="820" y="328" class="text small">response.text()</text>
+  <text x="820" y="348" class="text small">JSON.parse()</text>
+  <text x="820" y="368" class="text small">MD&amp;A 抽出も同じ流れ</text>
+
+  <rect x="1160" y="270" width="350" height="115" class="warn"/>
+  <text x="1185" y="302" class="text h3">起きること</text>
+  <text x="1185" y="328" class="text small">同じ巨大データを複数箇所で保持</text>
+  <text x="1185" y="348" class="text small">メモリ・CPU・待ち時間が跳ねる</text>
+  <text x="1185" y="368" class="text small">同時アクセスで 503 化しやすい</text>
+
+  <path class="badarrow" d="M340 327 H430"/>
+  <path class="badarrow" d="M705 327 H795"/>
+  <path class="badarrow" d="M1070 327 H1160"/>
+
+  <rect x="105" y="402" width="1405" height="34" class="good"/>
+  <text x="130" y="425" class="text small">直す方向: Worker に巨大 HTML を返さない。fetcher 側で必要な抽出済みテキスト・metrics・source chunks だけ返す / R2 に置いてキーだけ渡す。</text>
+
+  <!-- Issue 2 -->
+  <rect x="55" y="485" width="1590" height="330" class="panel"/>
+  <rect x="80" y="515" width="105" height="42" class="dark" rx="8"/>
+  <text x="105" y="543" class="text h3 white">P1</text>
+  <text x="205" y="545" class="text h2">2. background 処理が durable queue ではなく waitUntil に積まれている</text>
+  <text x="205" y="577" class="text body">「非同期で準備中」に見えるが、実体は Worker invocation の後処理として重いジョブが連鎖している</text>
+
+  <rect x="105" y="625" width="245" height="90" class="neutral"/>
+  <text x="130" y="657" class="text h3">watchlist/add</text>
+  <text x="130" y="682" class="text small">status: preparing</text>
+  <text x="130" y="702" class="text small">ユーザーには即返す</text>
+
+  <rect x="435" y="625" width="245" height="90" class="bad"/>
+  <text x="460" y="657" class="text h3">waitUntil</text>
+  <text x="460" y="682" class="text small">ensureLatestFiling</text>
+  <text x="460" y="702" class="text small">失敗状態は永続化されない</text>
+
+  <rect x="765" y="610" width="280" height="120" class="bad"/>
+  <text x="790" y="642" class="text h3">連鎖する後処理</text>
+  <text x="790" y="668" class="text small">history persistence</text>
+  <text x="790" y="688" class="text small">historical preload</text>
+  <text x="790" y="708" class="text small">content upgrade</text>
+
+  <rect x="1130" y="610" width="355" height="120" class="warn"/>
+  <text x="1155" y="642" class="text h3">起きること</text>
+  <text x="1155" y="668" class="text small">backpressure がない</text>
+  <text x="1155" y="688" class="text small">retry / progress / failure が見えにくい</text>
+  <text x="1155" y="708" class="text small">同時多発で Worker が重くなる</text>
+
+  <path class="badarrow" d="M350 670 H435"/>
+  <path class="badarrow" d="M680 670 H765"/>
+  <path class="badarrow" d="M1045 670 H1130"/>
+
+  <rect x="105" y="755" width="1405" height="34" class="good"/>
+  <text x="130" y="778" class="text small">直す方向: filing-prep / content-upgrade / history-preload を Queue or Workflow 化。jobId・状態・retry・最大並列数を持たせる。</text>
+
+  <!-- Issue 3 -->
+  <rect x="55" y="845" width="1590" height="320" class="panel"/>
+  <rect x="80" y="875" width="105" height="42" class="dark" rx="8"/>
+  <text x="105" y="903" class="text h3 white">P1</text>
+  <text x="205" y="905" class="text h2">3. filing lock の 30秒 TTL が実処理より短い</text>
+  <text x="205" y="937" class="text body">通常 ingest は fetcher timeout・retry・抽出・summary 生成で 30秒を超えうる</text>
+
+  <rect x="105" y="985" width="260" height="95" class="neutral"/>
+  <text x="130" y="1018" class="text h3">Request A</text>
+  <text x="130" y="1043" class="text small">lock 取得</text>
+  <text x="130" y="1063" class="text small">ingest 開始</text>
+
+  <rect x="450" y="985" width="260" height="95" class="warn"/>
+  <text x="475" y="1018" class="text h3">30秒 TTL</text>
+  <text x="475" y="1043" class="text small">処理中でも期限切れ</text>
+  <text x="475" y="1063" class="text small">lease 更新なし</text>
+
+  <rect x="795" y="985" width="260" height="95" class="bad"/>
+  <text x="820" y="1018" class="text h3">Request B</text>
+  <text x="820" y="1043" class="text small">同じ filingKey を取得</text>
+  <text x="820" y="1063" class="text small">二重 ingest 可能</text>
+
+  <rect x="1140" y="985" width="355" height="95" class="bad"/>
+  <text x="1165" y="1018" class="text h3">起きること</text>
+  <text x="1165" y="1043" class="text small">重複 fetch / 重複 LLM / 保存競合</text>
+  <text x="1165" y="1063" class="text small">503 とコスト増の増幅器になる</text>
+
+  <path class="badarrow" d="M365 1032 H450"/>
+  <path class="badarrow" d="M710 1032 H795"/>
+  <path class="badarrow" d="M1055 1032 H1140"/>
+
+  <rect x="105" y="1118" width="1405" height="34" class="good"/>
+  <text x="130" y="1141" class="text small">直す方向: fixed TTL lock ではなく、lease 更新・job-state・single-flight queue にする。同じ filingKey は同じ job に合流させる。</text>
+
+  <text x="65" y="1210" class="text tiny">Source files: workers/src/clients/sec-fetcher.ts, sec-fetcher/src/sec-service.mjs, workers/src/routes/watchlist-add.ts, workers/src/lib/filings/latest.ts, workers/src/durable/filing-lock.ts</text>
+</svg>

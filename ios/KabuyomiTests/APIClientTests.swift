@@ -28,6 +28,34 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(items.map(\.ticker), ["MSFT"])
     }
 
+    #if DEBUG
+    func testUsesSelectedDebugAPIBaseURLWhenNoExplicitOverride() async throws {
+        let defaults = UserDefaults.standard
+        let previousValue = defaults.string(forKey: APIBaseURLResolver.debugEnvironmentDefaultsKey)
+        defaults.set(APIEnvironment.test.rawValue, forKey: APIBaseURLResolver.debugEnvironmentDefaultsKey)
+        defer {
+            if let previousValue {
+                defaults.set(previousValue, forKey: APIBaseURLResolver.debugEnvironmentDefaultsKey)
+            } else {
+                defaults.removeObject(forKey: APIBaseURLResolver.debugEnvironmentDefaultsKey)
+            }
+        }
+
+        let client = makeClient(baseURL: nil) { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://kabuyomi-api-test.dznqjmctk7.workers.dev/v1/search?q=MSFT")
+            XCTAssertEqual(request.httpMethod, "GET")
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.searchResponseData()
+            )
+        }
+
+        let items = try await client.search(query: "MSFT")
+
+        XCTAssertEqual(items.map(\.ticker), ["MSFT"])
+    }
+    #endif
+
     func testSearchItemAllowsUnknownFilingStatusToBeVerifiedOnOpenOrSave() {
         let item = SearchItem(
             ticker: "SSB",
@@ -552,6 +580,7 @@ final class APIClientTests: XCTestCase {
     }
 
     private func makeClient(
+        baseURL: URL? = URL(string: "https://example.com")!,
         context: QuotaRequestContext = QuotaRequestContext(deviceKey: "device-123"),
         handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> APIClient {
@@ -563,7 +592,7 @@ final class APIClientTests: XCTestCase {
 
         return APIClient(
             session: session,
-            baseURL: URL(string: "https://example.com")!,
+            baseURL: baseURL,
             requestContext: context,
             subscriptionStore: nil,
             detachedAccessStore: nil

@@ -47,7 +47,7 @@ export async function invokeGemini(
   kind: "summary" | "chat" | "quote_translation"
 ): Promise<GeminiInvocationResult> {
   const model = kind === "quote_translation" ? resolveGeminiTranslationModel(env) : resolveGeminiModel(env);
-  const timeoutMs = resolveGeminiTimeoutMs(env);
+  const timeoutMs = resolveGeminiTimeoutMs(env, kind);
   const responseJsonSchema =
     kind === "summary"
       ? summaryResponseJsonSchema()
@@ -131,6 +131,9 @@ export async function invokeGemini(
         timeoutMs,
         reason: timedOut ? "timeout" : "network_error"
       });
+      if (kind === "chat" && timedOut) {
+        throw error;
+      }
       if (attempts[index + 1]) {
         await waitBeforeGeminiRetry(index);
         continue;
@@ -226,8 +229,9 @@ function resolveGeminiTranslationFallbackModel(env: Env): string | null {
   return fallback == primary ? null : fallback;
 }
 
-function resolveGeminiTimeoutMs(env: Env): number {
-  const parsed = Number.parseInt(env.GEMINI_TIMEOUT_MS ?? "", 10);
+function resolveGeminiTimeoutMs(env: Env, kind: "summary" | "chat" | "quote_translation"): number {
+  const raw = kind === "chat" ? env.GEMINI_CHAT_TIMEOUT_MS ?? env.GEMINI_TIMEOUT_MS : env.GEMINI_TIMEOUT_MS;
+  const parsed = Number.parseInt(raw ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_GEMINI_TIMEOUT_MS;
 }
 

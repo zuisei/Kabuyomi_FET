@@ -65,6 +65,12 @@ When recording an evaluation run, write one JSON object per answer:
 
 Run `npm run eval:chat:validate` before relying on the dataset.
 
+Validate a recorded run before comparing it:
+
+```bash
+npm run eval:chat:validate-run -- ./eval/runs/<run-id>.jsonl
+```
+
 ## Pilot Run
 
 The pilot runner executes only one question per ticker. It uses `GET /v1/company/{ticker}` to resolve the current filing key, then calls `/v1/chat`.
@@ -92,4 +98,18 @@ KABUYOMI_EVAL_BASE_URL=https://kabuyomi-api.example.workers.dev \
 KABUYOMI_EVAL_DEVICE_KEY=eval-chat-quality-v1 \
 KABUYOMI_EVAL_QUESTION_IDS=AAPL-01,AAPL-02,MSFT-01,MSFT-02,GOOGL-06,GOOGL-07,GOOGL-08,AMZN-02 \
 npm run eval:chat:pilot
+```
+
+## Contract
+
+The current quality contract is documented in:
+
+```text
+../../docs/chat_quality_contract.md
+```
+
+Use the local test console for quick manual checks:
+
+```text
+http://127.0.0.1:5187
 ```

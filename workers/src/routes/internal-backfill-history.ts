@@ -1,7 +1,7 @@
 import { BackfillHistoryRequestSchema } from "../lib/contracts";
+import { ensureHistoricalFilingStored } from "../lib/filings/history-persistence";
 import { backfillHistoricalFilings } from "../lib/history-store";
 import { isAuthorizedInternalRequest } from "../lib/internal-auth";
-import { ensureHistoricalFilingStored } from "../lib/pipeline";
 import { json } from "../lib/response";
 import { parseJsonBody } from "../lib/request";
 import { resolveTrackedTickersForExecution } from "../lib/tracked-tickers";

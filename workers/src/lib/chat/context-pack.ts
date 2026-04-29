@@ -125,19 +125,33 @@ export function buildChatContextPack(
   if (shouldLeadWithMetrics(questionIntent)) {
     addMetricSources(filing.sourceChunks, metrics, add);
     addRankedSources(rankedIntentSources, add, profile.maxSources);
+  } else if (shouldLeadWithDriverNarrative(questionIntent)) {
+    addRankedSources(rankedIntentSources, add, profile.maxSources);
+    for (const supplemental of buildSupplementalContextChunks(
+      filing,
+      questionIntent,
+      selected,
+      profile,
+      diagnostics
+    )) {
+      add(supplemental);
+    }
+    addMetricSources(filing.sourceChunks, metrics, add);
   } else {
     addRankedSources(rankedIntentSources, add, profile.maxSources);
     addMetricSources(filing.sourceChunks, metrics, add);
   }
 
-  for (const supplemental of buildSupplementalContextChunks(
-    filing,
-    questionIntent,
-    selected,
-    profile,
-    diagnostics
-  )) {
-    add(supplemental);
+  if (!shouldLeadWithDriverNarrative(questionIntent)) {
+    for (const supplemental of buildSupplementalContextChunks(
+      filing,
+      questionIntent,
+      selected,
+      profile,
+      diagnostics
+    )) {
+      add(supplemental);
+    }
   }
 
   if (!hasSelectedNarrative(selected)) {
@@ -381,12 +395,12 @@ function baseContextProfile(questionIntent: QuestionIntent): ContextProfile {
     case "historical_comparison":
     case "unknown":
       return {
-        tokenBudget: 6_000,
-        minSources: 2,
-        maxSources: 6,
-        supplementalSources: 2,
-        sourceExcerptChars: 900,
-        supplementalWindowChars: 1_800
+        tokenBudget: questionIntent === "yoy_change" ? 8_000 : 6_000,
+        minSources: questionIntent === "yoy_change" ? 4 : 2,
+        maxSources: questionIntent === "yoy_change" ? 7 : 6,
+        supplementalSources: questionIntent === "yoy_change" ? 5 : 2,
+        sourceExcerptChars: questionIntent === "yoy_change" ? 1_300 : 900,
+        supplementalWindowChars: questionIntent === "yoy_change" ? 2_700 : 1_800
       };
   }
 }
@@ -420,9 +434,12 @@ function shouldLeadWithMetrics(questionIntent: QuestionIntent): boolean {
   return (
     questionIntent === "margin_profitability" ||
     questionIntent === "cash_flow" ||
-    questionIntent === "yoy_change" ||
     questionIntent === "historical_comparison"
   );
+}
+
+function shouldLeadWithDriverNarrative(questionIntent: QuestionIntent): boolean {
+  return questionIntent === "yoy_change" || questionIntent === "mda_summary";
 }
 
 export function resolveContentMode(filing: FilingCacheRecord): "full" | "metrics_only" {
@@ -457,7 +474,11 @@ function selectIntentMetrics(metrics: MetricSnapshot[], questionIntent: Question
       logicalNames.add("netIncome");
       break;
     case "risk_factors":
+      break;
     case "historical_comparison":
+      logicalNames.add("revenue");
+      logicalNames.add("operatingIncome");
+      logicalNames.add("netIncome");
       break;
     case "mda_summary":
     case "unknown":
@@ -1118,11 +1139,14 @@ function intentSourceScore(source: SourceChunkRecord, questionIntent: QuestionIn
       ]);
     case "mda_summary":
       return scoreMatches(haystack, [
+        [revenueDriverPattern(), 95],
         [/management'?s discussion|results of operations|md&a|operating results|company commentary|demand|net sales|gross margin/i, 70]
       ]);
     case "yoy_change":
       return scoreMatches(haystack, [
-        [/increase|decrease|higher|lower|compared|year over year|net sales|operating income|net income|demand|growth/i, 60]
+        [revenueDriverPattern(), 120],
+        [/comparable store sales|same-store sales|traffic|ticket|pricing|rate increase|volume|occupancy|leasing|renewal|new stores?|store openings?|tariff|foreign exchange|currency|fuel|weather|customer demand|end-market demand/i, 85],
+        [/increase|decrease|higher|lower|compared|year over year|net sales|operating income|net income|demand|growth/i, 55]
       ]);
     case "stock_market_context":
     case "investment_view":
@@ -1145,6 +1169,10 @@ function metricSourceScore(source: SourceChunkRecord, questionIntent: QuestionIn
         : 0;
     case "cash_flow":
       return /cash|operatingcashflow|operating activities|netincome|revenue|sales/.test(haystack) ? 35 : 0;
+    case "historical_comparison":
+      return /revenue|sales|net sales|operatingincome|operating income|netincome|net income|profit|income/.test(haystack)
+        ? 35
+        : 0;
     case "revenue_breakdown":
     case "segment_analysis":
     case "stock_market_context":
@@ -1155,7 +1183,6 @@ function metricSourceScore(source: SourceChunkRecord, questionIntent: QuestionIn
       return /revenue|sales|net sales/.test(haystack) ? 5 : 0;
     case "risk_factors":
     case "mda_summary":
-    case "historical_comparison":
     case "unknown":
       return 0;
   }
@@ -1257,7 +1284,7 @@ function supplementalPattern(questionIntent: QuestionIntent): RegExp {
     case "stock_market_context":
       return /risk|uncertain|outlook|guidance|demand|margin|cash flow|repurchase|dividend|competition|supply|regulation|customer|segment|geograph/gi;
     case "mda_summary":
-      return /management'?s discussion|results of operations|net sales|gross margin|operating income|demand|expenses?|cash flow/gi;
+      return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|comparable store sales|same-store sales|traffic|ticket|pricing|rate increase|volume|occupancy|leasing|renewal|new stores?|store openings?|tariff|foreign exchange|currency|fuel|weather|customer demand|end-market demand|management'?s discussion|results of operations|net sales|gross margin|operating income|demand|expenses?|cash flow/gi;
     case "margin_profitability":
       return /margin|gross profit|operating income|net income|profitability|cost|pricing|expenses?/gi;
     case "cash_flow":
@@ -1265,7 +1292,7 @@ function supplementalPattern(questionIntent: QuestionIntent): RegExp {
     case "yoy_change":
     case "historical_comparison":
     case "unknown":
-      return /increase|decrease|higher|lower|compared|net sales|operating income|net income|growth|demand/gi;
+      return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|comparable store sales|same-store sales|traffic|ticket|pricing|rate increase|volume|occupancy|leasing|renewal|new stores?|store openings?|tariff|foreign exchange|currency|fuel|weather|customer demand|end-market demand|increase|decrease|higher|lower|compared|net sales|operating income|net income|growth|demand/gi;
   }
 }
 
@@ -1534,6 +1561,10 @@ function countContextHits(filing: FilingCacheRecord, pattern: RegExp): number {
 
 function businessContextPattern(): RegExp {
   return /item\s+1\.\s*business|business overview|overview|our business|we are|we provide|we offer|products?|services?|customers?|end markets?|reportable segments?|geograph|revenue by|disaggregation|accelerated computing|artificial intelligence|\bai\b|gpu|graphics|compute|semiconductor|data center|gaming|professional visualization|networking|automotive|cloud service providers?|consumer internet|enterprise|oem/i;
+}
+
+function revenueDriverPattern(): RegExp {
+  return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|increase(?:d)? due to|decrease(?:d)? due to|higher (?:net )?sales of|lower (?:net )?sales of|sales (?:increase|decrease)|revenue (?:increase|decrease)|net sales (?:increase|decrease)/i;
 }
 
 function riskContextPattern(): RegExp {

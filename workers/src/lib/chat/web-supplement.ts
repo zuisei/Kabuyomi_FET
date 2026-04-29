@@ -89,7 +89,9 @@ function shouldUseWebSupplement(question: string, answer: string): boolean {
     answer.includes("この決算資料以外") ||
     answer.includes("この filing だけでは") ||
     answer.includes("この filing 以外") ||
+    answer.includes("この filing の範囲では") ||
     answer.includes("この先を言い切ることはできません") ||
+    answer.includes("直接要因は明示されていません") ||
     answer.includes("断定できません") ||
     answer.includes("切り分けられません") ||
     answer.includes("追加情報が必要です") ||
@@ -99,6 +101,7 @@ function shouldUseWebSupplement(question: string, answer: string): boolean {
     answer.includes("精度が上が") ||
     answer.includes("もう一段絞れます") ||
     answer.includes("伸びの候補") ||
+    answer.includes("本文で名前が出ている") ||
     answer.includes("次に見るなら") ||
     answer.includes("判断しやすい") ||
     answer.includes("見たいところ") ||
@@ -107,6 +110,7 @@ function shouldUseWebSupplement(question: string, answer: string): boolean {
 
   return (
     asksCurrentOrMarketContext ||
+    (asksGrowthDrivers && /売上高|前年同期比|revenue|sales/i.test(answer)) ||
     (asksGrowthDrivers && hasFilingLimitSignal) ||
     (asksBroaderFilingAdjacentContext && hasFilingLimitSignal)
   );

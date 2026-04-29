@@ -3,6 +3,7 @@ import {
   fetchFilingAssetsFromFetcher,
   fetchFilingHtmlFromFetcher,
   fetchMetricsFromFetcher,
+  fetchPreparedFilingFromFetcher,
   fetchSubmissionsFromFetcher,
   fetchTickerSnapshotFromFetcher
 } from "./sec-fetcher";
@@ -64,6 +65,29 @@ export interface CompanyFactsResponse {
 export interface FilingHtmlResponse {
   html: string;
   primaryDocumentUrl: string;
+}
+
+export interface PreparedFilingResponse {
+  primaryDocumentUrl: string;
+  mdaText: string;
+  mdaTokenCount: number;
+  metrics: MetricSnapshot[];
+  usedStartPattern: string;
+  usedEndPattern: string;
+  diagnostics: {
+    inputHtmlChars: number;
+    normalizedChars: number;
+    startMatchesCount: number;
+    endMatchesCount: number;
+    sanitizeMs: number;
+    domParseMs: number;
+    textReadMs: number;
+    cleanupMs: number;
+    normalizeMs: number;
+    boundaryScanMs: number;
+    selectionMs: number;
+    totalMs: number;
+  };
 }
 
 export interface TickerSnapshotEnvelope {
@@ -493,6 +517,27 @@ export async function fetchFilingAssets(
     html: fetcherPayload.html,
     primaryDocumentUrl: fetcherPayload.primaryDocumentUrl,
     metrics: buildMetricSnapshotsFromFetcherPayload(filing, comparisonFiling, fetcherPayload)
+  };
+}
+
+export async function fetchPreparedFiling(
+  filing: FilingReference,
+  comparisonFiling: FilingReference | null,
+  env: Env
+): Promise<PreparedFilingResponse | null> {
+  const fetcherPayload = await fetchPreparedFilingFromFetcher(filing, METRIC_TAG_LIST, env);
+  if (!fetcherPayload) {
+    return null;
+  }
+
+  return {
+    primaryDocumentUrl: fetcherPayload.primaryDocumentUrl,
+    mdaText: fetcherPayload.mdaText,
+    mdaTokenCount: fetcherPayload.mdaTokenCount,
+    metrics: buildMetricSnapshotsFromFetcherPayload(filing, comparisonFiling, fetcherPayload),
+    usedStartPattern: fetcherPayload.usedStartPattern,
+    usedEndPattern: fetcherPayload.usedEndPattern,
+    diagnostics: fetcherPayload.diagnostics
   };
 }
 

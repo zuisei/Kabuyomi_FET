@@ -13,6 +13,7 @@ import { handleBillingSyncRoute } from "./routes/billing-sync";
 import { handleChatRoute } from "./routes/chat";
 import { handleCompanyRoute } from "./routes/company";
 import { handleCreditPurchaseGrantRoute } from "./routes/credit-purchase-grant";
+import { handleFilingPrepJobRoute } from "./routes/filing-prep-job";
 import { handleInternalBackfillHistoryRoute } from "./routes/internal-backfill-history";
 import { handleInternalCleanupFilingsRoute } from "./routes/internal-cleanup-filings";
 import { handleInternalCreditPurchaseGrantRoute } from "./routes/internal-credit-purchase-grant";
@@ -36,6 +37,7 @@ const preMaintenanceRoutes: RouteHandler[] = [
 ];
 const apiRoutes: RouteHandler[] = [
   handleSearchRoute,
+  handleFilingPrepJobRoute,
   handleWatchlistAddRoute,
   handleWatchlistRemoveRoute,
   handleCompanyRoute,
