@@ -1,4 +1,4 @@
-import type { Env, FilingCacheRecord, SourceChunkRecord } from "../../env";
+import type { Env, FilingCacheRecord } from "../../env";
 import { generateChatAnswer } from "../../clients/gemini";
 import type { ChatFallbackReason, GeminiChatAnswer, GeminiInvocationUsage } from "../../clients/gemini/types";
 import { AppError } from "../errors";
@@ -7,7 +7,7 @@ import { DEFAULT_REMOTE_CONFIG, type RemoteConfig } from "../remote-config";
 import { buildChatContextPack, type ChatContextPack, resolveContentMode } from "./context-pack";
 import { buildContextDebugFields } from "./diagnostics";
 import { logChatContextSelection, logChatLlmUsage, logChatPathDecision } from "./decision-log";
-import { buildDeterministicMetricAnswer, shouldRecoverFromWeakModelSources, type DeterministicChatAnswer } from "./deterministic";
+import { buildDeterministicMetricAnswer, shouldRecoverFromWeakModelSources } from "./deterministic";
 import {
   attachCurrentFilingSourceUrls,
   type ChatResponseDebug,
@@ -92,7 +92,8 @@ export async function buildChatResponse(
   }
 
   const deterministic = buildDeterministicMetricAnswer(filing, question);
-  if (deterministic && shouldUseDeterministicBeforeModel(deterministic.strategy, questionIntent, Boolean(env.GEMINI_API_KEY))) {
+  const letModelTryFirst = deterministic?.strategy === "business_overview" && Boolean(env.GEMINI_API_KEY);
+  if (deterministic && !letModelTryFirst) {
     logEvent("chat_path_selected", {
       filingKey: filing.filingKey,
       ticker: filing.ticker,
@@ -141,8 +142,8 @@ export async function buildChatResponse(
   logChatContextSelection(filing, contextPack);
   let modelResponse = await generateChatAnswer(env, { filing, question, questionIntent, contextPack });
   let sourceValidation = validateModelSources(modelResponse, contextPack);
-  const retryReason = chooseRetryReason(filing, question, modelResponse, sourceValidation.approvedSourceIds, contextPack);
-  if (shouldRetryModelAnswer(modelResponse, retryReason, question)) {
+  const retryReason = chooseRetryReason(filing, question, modelResponse, sourceValidation.approvedSourceIds);
+  if (shouldRetryModelAnswer(modelResponse, retryReason)) {
     const retryResult = await retryModelAnswer({
       filing,
       question,
@@ -417,10 +418,7 @@ export async function buildChatResponse(
     throw new AppError(502, "Chat response is temporarily unavailable", "Model returned no valid sourceIds");
   }
 
-  if (
-    shouldRecoverFromMetricOnlyReasoningSources(question, approvedSourceIds, sourceById) ||
-    shouldRecoverFromWeakModelSources(filing, question, approvedSourceIds)
-  ) {
+  if (shouldRecoverFromWeakModelSources(filing, question, approvedSourceIds)) {
     const recovered = await buildFallbackResponse(filing, question, env, fallbackValidSourceIds, contextPack);
     if (recovered) {
       logWarnEvent("chat_grounding_repair_used", {
@@ -540,32 +538,11 @@ export async function buildChatResponse(
   );
 }
 
-function shouldUseDeterministicBeforeModel(
-  strategy: DeterministicChatAnswer["strategy"],
-  questionIntent: QuestionIntent,
-  hasGeminiApiKey: boolean
-): boolean {
-  if (!hasGeminiApiKey) {
-    return true;
-  }
-
-  if (strategy === "business_overview") {
-    return false;
-  }
-
-  if (questionIntent === "risk_factors" || questionIntent === "mda_summary" || questionIntent === "stock_market_context" || questionIntent === "investment_view") {
-    return false;
-  }
-
-  return strategy === "margin_snapshot" || strategy === "revenue_breakdown" || strategy === "cash_generation";
-}
-
 function chooseRetryReason(
   filing: FilingCacheRecord,
   question: string,
   modelResponse: GeminiChatAnswer,
-  approvedSourceIds: string[],
-  contextPack: ChatContextPack
+  approvedSourceIds: string[]
 ): ChatFallbackReason | null {
   if (modelResponse.fallbackReason) {
     return modelResponse.fallbackReason;
@@ -579,10 +556,6 @@ function chooseRetryReason(
     return modelResponse.answer === CONTEXT_UNAVAILABLE_ANSWER ? "no_sources" : "invalid_source_id";
   }
 
-  if (shouldRecoverFromMetricOnlyReasoningSources(question, approvedSourceIds, buildSourceLookup(filing, contextPack))) {
-    return "weak_grounding";
-  }
-
   if (shouldRecoverFromWeakModelSources(filing, question, approvedSourceIds)) {
     return "weak_grounding";
   }
@@ -590,54 +563,15 @@ function chooseRetryReason(
   return null;
 }
 
-function shouldRecoverFromMetricOnlyReasoningSources(
-  question: string,
-  approvedSourceIds: string[],
-  sourceById: Map<string, SourceChunkRecord>
-): boolean {
-  if (!asksDriverOrCauseQuestion(question)) {
-    return false;
-  }
-
-  const citedSources = approvedSourceIds
-    .map((sourceId) => sourceById.get(sourceId))
-    .filter((source): source is SourceChunkRecord => Boolean(source));
-  if (citedSources.length === 0 || !citedSources.every((source) => source.sectionType === "xbrl_metric")) {
-    return false;
-  }
-
-  return [...sourceById.values()].some(
-    (source) =>
-      source.sectionType === "md_a" &&
-      source.text.trim().length >= 160 &&
-      !/available information|forward-looking statements|private securities litigation reform act|investor relations website|corporate website|securities and exchange commission|should be read in conjunction/i.test(
-        source.text
-      )
-  );
-}
-
-function asksDriverOrCauseQuestion(question: string): boolean {
-  const normalized = question.replace(/\s+/g, "").toLowerCase();
-  return (
-    /(なぜ|なんで|どうして|理由|原因|要因|主因|背景|driver|cause|why)/.test(normalized) &&
-    /(売上|収益|sales|revenue|営業利益|純利益|利益|margin|profit|income|増収|減収|変化|伸び|成長)/.test(normalized)
-  );
-}
-
 function shouldRetryModelAnswer(
   modelResponse: GeminiChatAnswer,
-  retryReason: ChatFallbackReason | null,
-  question: string
+  retryReason: ChatFallbackReason | null
 ): boolean {
   if (!retryReason || (modelResponse.retryAttempt ?? 0) >= 1) {
     return false;
   }
 
   if (modelResponse.geminiCalled === false) {
-    return false;
-  }
-
-  if (asksDriverOrCauseQuestion(question) && (retryReason === "weak_grounding" || retryReason === "low_quality_answer")) {
     return false;
   }
 

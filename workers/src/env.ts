@@ -2,6 +2,8 @@ import type { RemoteConfig } from "./lib/remote-config";
 import type { AccessPlan } from "./lib/billing-catalog";
 
 export interface Env {
+  KABUYOMI_ENV?: string;
+  ENVIRONMENT?: string;
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
   GEMINI_TRANSLATION_MODEL?: string;
