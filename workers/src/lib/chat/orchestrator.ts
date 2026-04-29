@@ -92,7 +92,8 @@ export async function buildChatResponse(
   }
 
   const deterministic = buildDeterministicMetricAnswer(filing, question);
-  const letModelTryFirst = deterministic?.strategy === "business_overview" && Boolean(env.GEMINI_API_KEY);
+  const letModelTryFirst =
+    Boolean(env.GEMINI_API_KEY) && (deterministic?.strategy === "business_overview" || deterministic?.strategy === "revenue_drivers");
   if (deterministic && !letModelTryFirst) {
     logEvent("chat_path_selected", {
       filingKey: filing.filingKey,

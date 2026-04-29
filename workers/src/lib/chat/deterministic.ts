@@ -36,6 +36,10 @@ export function buildDeterministicMetricAnswer(
   const asksRevenueDrivers =
     /(売上|増収|成長|growth|revenue)/.test(normalizedQuestion) &&
     /(支え|押し上げ|牽引|ドライバ|主因|要因|原因|理由|どの変化|何が)/.test(normalizedQuestion);
+  const asksDurability =
+    /(一時的|一過性|一時要因|一回限り|単発|継続|持続|続く|続きそう|構造的|恒常|今後も|来期も|短期|長期|temporary|transitory|one[-]?time|one[-]?off|recurring|sustain|continue|ongoing)/.test(
+      normalizedQuestion
+    ) && /(要因|原因|理由|影響|それ|その|この|driver|cause|factor)/.test(normalizedQuestion);
   const asksBusinessOverview = isBusinessOverviewQuestion(normalizedQuestion);
   const asksCashGeneration =
     /(営業cf|フリーcf|キャッシュフロー|operatingcashflow|freecashflow|cashflow|cash flow|現金|お金.*稼|稼げてる)/.test(
@@ -72,7 +76,7 @@ export function buildDeterministicMetricAnswer(
     return response ? { strategy: "revenue_breakdown", response } : null;
   }
 
-  if (asksRevenueDrivers) {
+  if (asksRevenueDrivers && !asksDurability) {
     const response = buildRevenueDriversAnswer(filing);
     return response ? { strategy: "revenue_drivers", response } : null;
   }

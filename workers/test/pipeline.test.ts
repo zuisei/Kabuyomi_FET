@@ -89,6 +89,53 @@ describe("buildChatResponse", () => {
     expect(response.sources.every((source) => source.sourceUrl === filing.primaryDocumentUrl)).toBe(true);
   });
 
+  it("lets the model answer revenue-driver questions when Gemini is available", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.startsWith("https://generativelanguage.googleapis.com/")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        answer:
+                          "売上成長の主因は、Americas の iPhone と Services の売上増です。数字だけではなく、本文のドライバー説明に基づく回答です。",
+                        sourceIds: ["S7", "S9"]
+                      })
+                    }
+                  ]
+                }
+              }
+            ]
+          })
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filing = makeDriverRichFiling();
+    const response = await buildChatResponse(
+      filing,
+      "売上成長の要因は？",
+      { GEMINI_API_KEY: "test-key" } as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(response.responsePath).toBe("gemini");
+    expect(response.answer).toContain("iPhone");
+    expect(response.answer).not.toContain("もう一段絞れます");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S7", "S9"]);
+  });
+
   it("answers revenue sector questions deterministically with business buckets", async () => {
     const filing = makeRevenueBreakdownFiling();
 
@@ -814,6 +861,54 @@ describe("buildChatResponse", () => {
     expect(response.answer).not.toContain("一般的な注意書き");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S7", "S9"]);
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+  });
+
+  it("does not short-circuit rewritten revenue durability follow-ups through deterministic drivers", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.startsWith("https://generativelanguage.googleapis.com/")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        answer:
+                          "売上高は 1,437.6億ドルで、前年同期比 15.7%増です。事業別・地域別の押し上げ役は、本文の追加説明があるともう一段絞れます。",
+                        sourceIds: ["S9"]
+                      })
+                    }
+                  ]
+                }
+              }
+            ]
+          })
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filing = makeDriverRichFiling();
+    const response = await buildChatResponse(
+      filing,
+      "売上高が変化した要因は一時的ですか？",
+      { GEMINI_API_KEY: "test-key" } as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.answer).toContain("一時的");
+    expect(response.answer).toContain("断定");
+    expect(response.answer).toContain("iPhone");
+    expect(response.answer).not.toContain("もう一段絞れます");
+    expect(response.debug?.fallbackReason).toBe("low_quality_answer");
   });
 
   it("recovers to filing-first fallback when Gemini returns only invalid sourceIds", async () => {

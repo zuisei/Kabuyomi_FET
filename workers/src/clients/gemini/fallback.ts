@@ -517,6 +517,11 @@ function summarizeDurabilityEvidence(source: SourceChunkRecord): string {
   const text = source.text.trim();
   const lowered = text.toLowerCase();
 
+  const pricingDriver = summarizePricingDriver(text);
+  if (pricingDriver) {
+    return pricingDriver;
+  }
+
   if (/fuel/.test(lowered) && /(price|cost|availability|supply|volatility)/.test(lowered)) {
     return "提出資料では、燃料価格や供給量の変動が業績に大きく影響しうる論点として出ています。";
   }
