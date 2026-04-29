@@ -1,6 +1,6 @@
 import type { Env, FilingCacheRecord } from "../../env";
 import { generateChatAnswer } from "../../clients/gemini";
-import type { ChatFallbackReason, GeminiChatAnswer, GeminiInvocationUsage } from "../../clients/gemini/types";
+import type { ChatFallbackReason, GeminiChatAnswer } from "../../clients/gemini/types";
 import { AppError } from "../errors";
 import { logErrorEvent, logEvent, logWarnEvent } from "../logging";
 import { DEFAULT_REMOTE_CONFIG, type RemoteConfig } from "../remote-config";
@@ -17,6 +17,16 @@ import {
 } from "./grounding";
 import { maybeBuildHistoricalChatResponseWithHydration } from "./historical";
 import { classifyQuestionIntent, type QuestionIntent } from "./intent";
+import {
+  chooseRetryReason,
+  combineLlmUsage,
+  fallbackReasonForMissingValidSourceIds,
+  fallbackReasonForNoSources,
+  retryContextMode,
+  shouldLetModelTryBeforeDeterministic,
+  shouldPreferDeterministicBusinessOverview,
+  shouldRetryModelAnswer
+} from "./route-policy";
 import {
   buildFallbackValidSourceIds,
   buildSourceLookup,
@@ -92,8 +102,7 @@ export async function buildChatResponse(
   }
 
   const deterministic = buildDeterministicMetricAnswer(filing, question);
-  const letModelTryFirst =
-    Boolean(env.GEMINI_API_KEY) && (deterministic?.strategy === "business_overview" || deterministic?.strategy === "revenue_drivers");
+  const letModelTryFirst = shouldLetModelTryBeforeDeterministic(env, deterministic);
   if (deterministic && !letModelTryFirst) {
     logEvent("chat_path_selected", {
       filingKey: filing.filingKey,
@@ -143,7 +152,12 @@ export async function buildChatResponse(
   logChatContextSelection(filing, contextPack);
   let modelResponse = await generateChatAnswer(env, { filing, question, questionIntent, contextPack });
   let sourceValidation = validateModelSources(modelResponse, contextPack);
-  const retryReason = chooseRetryReason(filing, question, modelResponse, sourceValidation.approvedSourceIds);
+  const retryReason = chooseRetryReason({
+    filing,
+    question,
+    modelResponse,
+    approvedSourceIds: sourceValidation.approvedSourceIds
+  });
   if (shouldRetryModelAnswer(modelResponse, retryReason)) {
     const retryResult = await retryModelAnswer({
       filing,
@@ -539,46 +553,6 @@ export async function buildChatResponse(
   );
 }
 
-function chooseRetryReason(
-  filing: FilingCacheRecord,
-  question: string,
-  modelResponse: GeminiChatAnswer,
-  approvedSourceIds: string[]
-): ChatFallbackReason | null {
-  if (modelResponse.fallbackReason) {
-    return modelResponse.fallbackReason;
-  }
-
-  if (modelResponse.sourceIds.length > 0 && approvedSourceIds.length !== modelResponse.sourceIds.length) {
-    return "invalid_source_id";
-  }
-
-  if (approvedSourceIds.length === 0) {
-    return modelResponse.answer === CONTEXT_UNAVAILABLE_ANSWER ? "no_sources" : "invalid_source_id";
-  }
-
-  if (shouldRecoverFromWeakModelSources(filing, question, approvedSourceIds)) {
-    return "weak_grounding";
-  }
-
-  return null;
-}
-
-function shouldRetryModelAnswer(
-  modelResponse: GeminiChatAnswer,
-  retryReason: ChatFallbackReason | null
-): boolean {
-  if (!retryReason || (modelResponse.retryAttempt ?? 0) >= 1) {
-    return false;
-  }
-
-  if (modelResponse.geminiCalled === false) {
-    return false;
-  }
-
-  return retryReason !== "gemini_timeout" && retryReason !== "gemini_api_error" && retryReason !== "metrics_only_insufficient";
-}
-
 async function retryModelAnswer({
   filing,
   question,
@@ -638,46 +612,6 @@ async function retryModelAnswer({
   };
 }
 
-function combineLlmUsage(
-  first: GeminiInvocationUsage[] | undefined,
-  second: GeminiInvocationUsage[] | undefined
-): GeminiInvocationUsage[] | undefined {
-  const combined = [...(first ?? []), ...(second ?? [])];
-  return combined.length > 0 ? combined : undefined;
-}
-
-function retryContextMode(retryReason: ChatFallbackReason): "standard" | "expanded" | "compact" {
-  switch (retryReason) {
-    case "no_sources":
-    case "weak_grounding":
-    case "low_quality_answer":
-    case "invalid_source_id":
-      return "expanded";
-    case "schema_invalid":
-    case "json_parse_failed":
-    case "deterministic_repair":
-      return "standard";
-    case "gemini_timeout":
-    case "gemini_api_error":
-    case "metrics_only_insufficient":
-      return "compact";
-  }
-}
-
-function shouldPreferDeterministicBusinessOverview(answer: string, usedRemoteModel: boolean): boolean {
-  if (!usedRemoteModel) {
-    return true;
-  }
-
-  return (
-    answer === CONTEXT_UNAVAILABLE_ANSWER ||
-    /売上高は|revenue|net sales|前年同期比|一般的な注意書き|案内文|材料としては弱め/i.test(answer) ||
-    /historically experienced higher net sales|forward-looking statements|available information|investor relations website/i.test(
-      answer
-    )
-  );
-}
-
 async function buildFallbackResponse(
   filing: FilingCacheRecord,
   question: string,
@@ -718,26 +652,4 @@ function attachChatDebug(response: ChatResponsePayload, debug: Omit<ChatResponse
       sourceIds: response.sources.map((source) => source.sourceId)
     }
   };
-}
-
-function fallbackReasonForNoSources(
-  modelResponse: GeminiChatAnswer,
-  contentMode: "full" | "metrics_only"
-): ChatFallbackReason {
-  if (modelResponse.fallbackReason) {
-    return modelResponse.fallbackReason;
-  }
-
-  return contentMode === "metrics_only" ? "metrics_only_insufficient" : "no_sources";
-}
-
-function fallbackReasonForMissingValidSourceIds(
-  modelResponse: GeminiChatAnswer,
-  contentMode: "full" | "metrics_only"
-): ChatFallbackReason {
-  if (modelResponse.sourceIds.length > 0) {
-    return "invalid_source_id";
-  }
-
-  return fallbackReasonForNoSources(modelResponse, contentMode);
 }

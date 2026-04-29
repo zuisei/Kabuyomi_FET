@@ -73,6 +73,54 @@ history-store.ts の分割
 quota/credit mutation helper の適用範囲拡大
 ```
 
+## 2026-04-29 責任明確化ブランチ
+
+branch:
+
+```text
+codex/worker-responsibility-clarity
+```
+
+今回やった最小スライス:
+
+```text
+workers/src/lib/chat/orchestrator.ts から、
+chat の route/retry/fallback 方針だけを
+workers/src/lib/chat/route-policy.ts に分離。
+```
+
+分離した責任:
+
+```text
+Gemini を deterministic より先に試すか
+retry する理由をどう決めるか
+retry 時の context mode をどう選ぶか
+source 不足時の fallbackReason をどう決めるか
+LLM usage をどう結合するか
+business overview で deterministic 修復を優先する条件
+```
+
+このスライスで守ったこと:
+
+```text
+prompt は触らない
+model selection は触らない
+quota / credit / billing は触らない
+API response shape は変えない
+answer quality tuning はしない
+本番 deploy はしない
+```
+
+次に小さくやるなら:
+
+```text
+1. orchestrator.ts の fallback response 組み立てをさらに小さくする
+2. fallback.ts を「fallback 判定」と「fallback 文面生成」に分ける
+3. context-pack.ts を scoring / source selection / diagnostics に分ける
+4. filing latest / ingest / content-upgrade は別ブランチで慎重に扱う
+5. quota / billing は money path なので読むだけから始める
+```
+
 ## 触らなくてよさそうな場所
 
 ### `workers/src/index.ts`
