@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildChatPrompt } from "../src/clients/gemini/prompts";
+import { buildChatFactualPack } from "../src/lib/chat/context-factual-pack";
 import { buildChatContextPack } from "../src/lib/chat/context-pack";
 
 describe("chat Q3-lite factual packs", () => {
@@ -18,6 +19,22 @@ describe("chat Q3-lite factual packs", () => {
       productsServices: ["iPhone", "Mac", "iPad", "Wearables, Home and Accessories", "Services"]
     });
     expect(contextPack.factualPack?.sourceIds).toContain("S1");
+  });
+
+  it("exposes factual-pack construction outside context-pack orchestration", () => {
+    const filing = makeFactualPackFiling({
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      text:
+        "Net sales by category include iPhone, Mac, iPad, Wearables, Home and Accessories, and Services."
+    });
+
+    const factualPack = buildChatFactualPack(filing, "business_overview");
+
+    expect(factualPack).toMatchObject({
+      kind: "business_overview",
+      productsServices: ["iPhone", "Mac", "iPad", "Wearables, Home and Accessories", "Services"]
+    });
   });
 
   it("builds an MSFT business pack with reportable segments", () => {

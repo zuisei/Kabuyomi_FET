@@ -1,5 +1,5 @@
 import type { FilingCacheRecord, SourceChunkRecord } from "../../env";
-import { buildChatFactualPack } from "./context-pack";
+import { buildChatFactualPack } from "./context-factual-pack";
 import {
   buildMetricObservationSentence,
   findMetricSourceId,

@@ -1,39 +1,32 @@
 import type { Env, FilingCacheRecord } from "../../env";
-import { generateChatAnswer } from "../../clients/gemini";
 import { AppError } from "../errors";
 import { logErrorEvent, logEvent, logWarnEvent } from "../logging";
 import { DEFAULT_REMOTE_CONFIG, type RemoteConfig } from "../remote-config";
-import { buildChatContextPack, resolveContentMode } from "./context-pack";
+import { resolveContentMode } from "./context-pack";
 import { buildContextDebugFields } from "./diagnostics";
-import { logChatContextSelection, logChatLlmUsage, logChatPathDecision } from "./decision-log";
+import { logChatLlmUsage, logChatPathDecision } from "./decision-log";
 import { buildDeterministicMetricAnswer, shouldRecoverFromWeakModelSources } from "./deterministic";
 import { buildLocalFallbackResponse } from "./fallback-response";
 import {
-  attachCurrentFilingSourceUrls,
   CONTEXT_UNAVAILABLE_ANSWER,
-  ensureFilingGroundedResponse,
-  type ChatResponseDebug,
   type ChatResponsePayload
 } from "./grounding";
 import { maybeBuildHistoricalChatResponseWithHydration } from "./historical";
 import { classifyQuestionIntent } from "./intent";
-import { retryModelAnswer } from "./model-retry";
-import { attachChatDebug } from "./response-payload";
+import { buildValidatedModelAnswer } from "./model-attempt";
+import { finalizeChatResponse } from "./response-finalizer";
 import {
-  chooseRetryReason,
   fallbackReasonForMissingValidSourceIds,
   fallbackReasonForNoSources,
   shouldLetModelTryBeforeDeterministic,
-  shouldPreferDeterministicBusinessOverview,
-  shouldRetryModelAnswer
+  shouldPreferDeterministicBusinessOverview
 } from "./route-policy";
 import {
   buildFallbackValidSourceIds,
   buildSourceLookup,
-  mapSourceIdsToSecFilingSources,
-  validateModelSources
+  mapSourceIdsToSecFilingSources
 } from "./source-validation";
-import { maybeAppendWebSupplement } from "./web-supplement";
+import { createChatTimingTracker } from "./timing";
 
 export async function buildChatResponse(
   filing: FilingCacheRecord,
@@ -53,25 +46,22 @@ export async function buildChatResponse(
       timings: timings.snapshot()
     });
   };
-  const attachTimedDebug = (
+  const finalize = (
     response: ChatResponsePayload,
-    debug: Parameters<typeof attachChatDebug>[1]
-  ): ChatResponsePayload => attachChatDebug(response, {
-    ...debug,
-    ...timings.snapshot()
+    responsePath: Parameters<typeof finalizeChatResponse>[0]["responsePath"],
+    debug: Parameters<typeof finalizeChatResponse>[0]["debug"],
+    options: Pick<Parameters<typeof finalizeChatResponse>[0], "includeWebSupplement" | "attachSourceUrls"> = {}
+  ): Promise<ChatResponsePayload> => finalizeChatResponse({
+    filing,
+    question,
+    response,
+    responsePath,
+    debug,
+    env,
+    config: resolvedConfig,
+    timings,
+    ...options
   });
-  const appendWebSupplement = (
-    targetFiling: FilingCacheRecord,
-    targetQuestion: string,
-    response: ChatResponsePayload,
-    targetEnv: Env,
-    targetConfig: RemoteConfig
-  ): Promise<ChatResponsePayload> =>
-    timings.timeAsync("webSupplementMs", () =>
-      maybeAppendWebSupplement(targetFiling, targetQuestion, response, targetEnv, targetConfig)
-    );
-  const attachCurrentFilingSourceUrlsTimed = (response: ChatResponsePayload): ChatResponsePayload =>
-    timings.timeSync("groundingMs", () => attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl));
   const questionIntent = classifyQuestionIntent(question);
   const contentMode = resolveContentMode(filing);
   let historical = null;
@@ -95,24 +85,9 @@ export async function buildChatResponse(
       ticker: filing.ticker,
       path: responsePath
     });
-    const responseWithUrls = attachCurrentFilingSourceUrlsTimed(ensureFilingGroundedResponse(historical));
-    logDecision({
-      filing,
-      questionIntent,
+    const finalResponse = await finalize(
+      historical,
       responsePath,
-      geminiCalled: false,
-      geminiSucceeded: false,
-      fallbackReason: null,
-      schemaValid: true,
-      sourceIdsValid: true,
-      sourceCount: responseWithUrls.sources.length,
-      contentMode
-    });
-    return attachTimedDebug(
-      {
-        ...responseWithUrls,
-        responsePath
-      },
       {
         questionIntent,
         responsePath,
@@ -122,8 +97,22 @@ export async function buildChatResponse(
         geminiCalled: false,
         geminiSucceeded: false,
         schemaValid: true
-      }
+      },
+      { includeWebSupplement: false }
     );
+    logDecision({
+      filing,
+      questionIntent,
+      responsePath,
+      geminiCalled: false,
+      geminiSucceeded: false,
+      fallbackReason: null,
+      schemaValid: true,
+      sourceIdsValid: true,
+      sourceCount: finalResponse.sources.length,
+      contentMode
+    });
+    return finalResponse;
   }
 
   const deterministic = timings.timeSync("deterministicBuildMs", () => buildDeterministicMetricAnswer(filing, question));
@@ -135,31 +124,9 @@ export async function buildChatResponse(
       path: "deterministic",
       strategy: deterministic.strategy
     });
-    const response = await appendWebSupplement(
-      filing,
-      question,
-      ensureFilingGroundedResponse(deterministic.response),
-      env,
-      resolvedConfig
-    );
-    const responseWithUrls = attachCurrentFilingSourceUrlsTimed(response);
-    logDecision({
-      filing,
-      questionIntent,
-      responsePath: "deterministic",
-      geminiCalled: false,
-      geminiSucceeded: false,
-      fallbackReason: null,
-      schemaValid: true,
-      sourceIdsValid: true,
-      sourceCount: responseWithUrls.sources.length,
-      contentMode
-    });
-    return attachTimedDebug(
-      {
-        ...responseWithUrls,
-        responsePath: "deterministic"
-      },
+    const finalResponse = await finalize(
+      deterministic.response,
+      "deterministic",
       {
         questionIntent,
         responsePath: "deterministic",
@@ -171,33 +138,29 @@ export async function buildChatResponse(
         schemaValid: true
       }
     );
+    logDecision({
+      filing,
+      questionIntent,
+      responsePath: "deterministic",
+      geminiCalled: false,
+      geminiSucceeded: false,
+      fallbackReason: null,
+      schemaValid: true,
+      sourceIdsValid: true,
+      sourceCount: finalResponse.sources.length,
+      contentMode
+    });
+    return finalResponse;
   }
 
-  let contextPack = timings.timeSync("contextBuildMs", () => buildChatContextPack(filing, questionIntent));
-  logChatContextSelection(filing, contextPack);
-  let modelResponse = await timings.timeAsync("geminiFirstCallMs", () =>
-    generateChatAnswer(env, { filing, question, questionIntent, contextPack })
-  );
-  let sourceValidation = validateModelSources(modelResponse, contextPack);
-  const retryReason = chooseRetryReason({
+  const modelAttempt = await buildValidatedModelAnswer({
     filing,
     question,
-    modelResponse,
-    approvedSourceIds: sourceValidation.approvedSourceIds
+    env,
+    questionIntent,
+    timings
   });
-  if (shouldRetryModelAnswer(modelResponse, retryReason)) {
-    const retryResult = await timings.timeAsync("geminiRetryMs", () => retryModelAnswer({
-      filing,
-      question,
-      env,
-      questionIntent,
-      retryReason: retryReason!,
-      previousModelResponse: modelResponse
-    }));
-    contextPack = retryResult.contextPack;
-    modelResponse = retryResult.modelResponse;
-    sourceValidation = validateModelSources(modelResponse, contextPack);
-  }
+  const { contextPack, modelResponse, sourceValidation } = modelAttempt;
   const fallbackValidSourceIds = buildFallbackValidSourceIds(filing, contextPack);
   const sourceById = buildSourceLookup(filing, contextPack);
   const approvedSourceIds = sourceValidation.approvedSourceIds;
@@ -220,35 +183,9 @@ export async function buildChatResponse(
     });
     logChatLlmUsage(modelResponse, filing, "deterministic");
 
-    const response = await appendWebSupplement(
-      filing,
-      question,
-      ensureFilingGroundedResponse(deterministic.response),
-      env,
-      resolvedConfig
-    );
-    const responseWithUrls = attachCurrentFilingSourceUrlsTimed(response);
-    logDecision({
-      filing,
-      questionIntent,
-      responsePath: "deterministic",
-      geminiCalled: modelResponse.geminiCalled ?? true,
-      geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
-      fallbackReason: modelResponse.fallbackReason ?? "deterministic_repair",
-      schemaValid: modelResponse.schemaValid ?? true,
-      sourceIdsValid: modelSourceIdsValid,
-      sourceCount: responseWithUrls.sources.length,
-      contentMode,
-      contextPack,
-      retryAttempt: modelResponse.retryAttempt ?? 0,
-      retryReason: modelResponse.retryReason ?? null,
-      llmUsage: modelResponse.llmUsage
-    });
-    return attachTimedDebug(
-      {
-        ...responseWithUrls,
-        responsePath: "deterministic"
-      },
+    const finalResponse = await finalize(
+      deterministic.response,
+      "deterministic",
       {
         questionIntent,
         responsePath: "deterministic",
@@ -263,6 +200,23 @@ export async function buildChatResponse(
         ...buildContextDebugFields(contextPack)
       }
     );
+    logDecision({
+      filing,
+      questionIntent,
+      responsePath: "deterministic",
+      geminiCalled: modelResponse.geminiCalled ?? true,
+      geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+      fallbackReason: modelResponse.fallbackReason ?? "deterministic_repair",
+      schemaValid: modelResponse.schemaValid ?? true,
+      sourceIdsValid: modelSourceIdsValid,
+      sourceCount: finalResponse.sources.length,
+      contentMode,
+      contextPack,
+      retryAttempt: modelResponse.retryAttempt ?? 0,
+      retryReason: modelResponse.retryReason ?? null,
+      llmUsage: modelResponse.llmUsage
+    });
+    return finalResponse;
   }
 
   if (approvedSourceIds.length !== modelResponse.sourceIds.length) {
@@ -296,39 +250,14 @@ export async function buildChatResponse(
       });
       logChatLlmUsage(modelResponse, filing, "fallback");
 
-      const response = await appendWebSupplement(
-        filing,
-        question,
-        ensureFilingGroundedResponse(recovered),
-        env,
-        resolvedConfig
-      );
-      const responseWithUrls = attachCurrentFilingSourceUrlsTimed(response);
-      logDecision({
-        filing,
-        questionIntent,
-        responsePath: "fallback",
-        geminiCalled: modelResponse.geminiCalled ?? true,
-        geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
-        fallbackReason: fallbackReasonForNoSources(modelResponse, contentMode),
-        schemaValid: modelResponse.schemaValid ?? true,
-        sourceIdsValid: false,
-        sourceCount: responseWithUrls.sources.length,
-        contentMode,
-        contextPack,
-        retryAttempt: modelResponse.retryAttempt ?? 0,
-        retryReason: modelResponse.retryReason ?? null,
-        llmUsage: modelResponse.llmUsage
-      });
-      return attachTimedDebug(
-        {
-          ...responseWithUrls,
-          responsePath: "fallback"
-        },
+      const fallbackReason = fallbackReasonForNoSources(modelResponse, contentMode);
+      const finalResponse = await finalize(
+        recovered,
+        "fallback",
         {
           questionIntent,
           responsePath: "fallback",
-          fallbackReason: fallbackReasonForNoSources(modelResponse, contentMode),
+          fallbackReason,
           sourceIdsValid: false,
           contentMode,
           geminiCalled: modelResponse.geminiCalled ?? true,
@@ -339,6 +268,23 @@ export async function buildChatResponse(
           ...buildContextDebugFields(contextPack)
         }
       );
+      logDecision({
+        filing,
+        questionIntent,
+        responsePath: "fallback",
+        geminiCalled: modelResponse.geminiCalled ?? true,
+        geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+        fallbackReason,
+        schemaValid: modelResponse.schemaValid ?? true,
+        sourceIdsValid: false,
+        sourceCount: finalResponse.sources.length,
+        contentMode,
+        contextPack,
+        retryAttempt: modelResponse.retryAttempt ?? 0,
+        retryReason: modelResponse.retryReason ?? null,
+        llmUsage: modelResponse.llmUsage
+      });
+      return finalResponse;
     }
 
     logWarnEvent("chat_unsupported_due_to_source_gap", {
@@ -364,12 +310,13 @@ export async function buildChatResponse(
       retryReason: modelResponse.retryReason ?? null,
       llmUsage: modelResponse.llmUsage
     });
-    return attachTimedDebug(
+    return finalize(
       {
         answer: modelResponse.answer,
         sources: [],
         responsePath
       },
+      responsePath,
       {
         questionIntent,
         responsePath,
@@ -382,7 +329,8 @@ export async function buildChatResponse(
         retryAttempt: modelResponse.retryAttempt ?? 0,
         retryReason: modelResponse.retryReason ?? null,
         ...buildContextDebugFields(contextPack)
-      }
+      },
+      { includeWebSupplement: false, attachSourceUrls: false }
     );
   }
 
@@ -408,39 +356,14 @@ export async function buildChatResponse(
       });
       logChatLlmUsage(modelResponse, filing, "fallback");
 
-      const response = await appendWebSupplement(
-        filing,
-        question,
-        ensureFilingGroundedResponse(recovered),
-        env,
-        resolvedConfig
-      );
-      const responseWithUrls = attachCurrentFilingSourceUrlsTimed(response);
-      logDecision({
-        filing,
-        questionIntent,
-        responsePath: "fallback",
-        geminiCalled: modelResponse.geminiCalled ?? true,
-        geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
-        fallbackReason: fallbackReasonForMissingValidSourceIds(modelResponse, contentMode),
-        schemaValid: modelResponse.schemaValid ?? true,
-        sourceIdsValid: false,
-        sourceCount: responseWithUrls.sources.length,
-        contentMode,
-        contextPack,
-        retryAttempt: modelResponse.retryAttempt ?? 0,
-        retryReason: modelResponse.retryReason ?? null,
-        llmUsage: modelResponse.llmUsage
-      });
-      return attachTimedDebug(
-        {
-          ...responseWithUrls,
-          responsePath: "fallback"
-        },
+      const fallbackReason = fallbackReasonForMissingValidSourceIds(modelResponse, contentMode);
+      const finalResponse = await finalize(
+        recovered,
+        "fallback",
         {
           questionIntent,
           responsePath: "fallback",
-          fallbackReason: fallbackReasonForMissingValidSourceIds(modelResponse, contentMode),
+          fallbackReason,
           sourceIdsValid: false,
           contentMode,
           geminiCalled: modelResponse.geminiCalled ?? true,
@@ -451,6 +374,23 @@ export async function buildChatResponse(
           ...buildContextDebugFields(contextPack)
         }
       );
+      logDecision({
+        filing,
+        questionIntent,
+        responsePath: "fallback",
+        geminiCalled: modelResponse.geminiCalled ?? true,
+        geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+        fallbackReason,
+        schemaValid: modelResponse.schemaValid ?? true,
+        sourceIdsValid: false,
+        sourceCount: finalResponse.sources.length,
+        contentMode,
+        contextPack,
+        retryAttempt: modelResponse.retryAttempt ?? 0,
+        retryReason: modelResponse.retryReason ?? null,
+        llmUsage: modelResponse.llmUsage
+      });
+      return finalResponse;
     }
 
     logDecision({
@@ -494,35 +434,9 @@ export async function buildChatResponse(
       });
       logChatLlmUsage(modelResponse, filing, "fallback");
 
-      const response = await appendWebSupplement(
-        filing,
-        question,
-        ensureFilingGroundedResponse(recovered),
-        env,
-        resolvedConfig
-      );
-      const responseWithUrls = attachCurrentFilingSourceUrlsTimed(response);
-      logDecision({
-        filing,
-        questionIntent,
-        responsePath: "fallback",
-        geminiCalled: modelResponse.geminiCalled ?? true,
-        geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
-        fallbackReason: "weak_grounding",
-        schemaValid: modelResponse.schemaValid ?? true,
-        sourceIdsValid: modelSourceIdsValid,
-        sourceCount: responseWithUrls.sources.length,
-        contentMode,
-        contextPack,
-        retryAttempt: modelResponse.retryAttempt ?? 0,
-        retryReason: modelResponse.retryReason ?? null,
-        llmUsage: modelResponse.llmUsage
-      });
-      return attachTimedDebug(
-        {
-          ...responseWithUrls,
-          responsePath: "fallback"
-        },
+      const finalResponse = await finalize(
+        recovered,
+        "fallback",
         {
           questionIntent,
           responsePath: "fallback",
@@ -537,6 +451,23 @@ export async function buildChatResponse(
           ...buildContextDebugFields(contextPack)
         }
       );
+      logDecision({
+        filing,
+        questionIntent,
+        responsePath: "fallback",
+        geminiCalled: modelResponse.geminiCalled ?? true,
+        geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+        fallbackReason: "weak_grounding",
+        schemaValid: modelResponse.schemaValid ?? true,
+        sourceIdsValid: modelSourceIdsValid,
+        sourceCount: finalResponse.sources.length,
+        contentMode,
+        contextPack,
+        retryAttempt: modelResponse.retryAttempt ?? 0,
+        retryReason: modelResponse.retryReason ?? null,
+        llmUsage: modelResponse.llmUsage
+      });
+      return finalResponse;
     }
   }
 
@@ -550,38 +481,12 @@ export async function buildChatResponse(
   });
   logChatLlmUsage(modelResponse, filing, responsePath);
 
-  const response = await appendWebSupplement(
-    filing,
-    question,
-    ensureFilingGroundedResponse({
+  const finalResponse = await finalize(
+    {
       answer: modelResponse.answer,
       sources: mapSourceIdsToSecFilingSources(approvedSourceIds, sourceById)
-    }),
-    env,
-    resolvedConfig
-  );
-  const responseWithUrls = attachCurrentFilingSourceUrlsTimed(response);
-  logDecision({
-    filing,
-    questionIntent,
-    responsePath,
-    geminiCalled: modelResponse.geminiCalled ?? true,
-    geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
-    fallbackReason: modelResponse.fallbackReason ?? null,
-    schemaValid: modelResponse.schemaValid ?? true,
-    sourceIdsValid: modelSourceIdsValid,
-    sourceCount: responseWithUrls.sources.length,
-    contentMode,
-    contextPack,
-    retryAttempt: modelResponse.retryAttempt ?? 0,
-    retryReason: modelResponse.retryReason ?? null,
-    llmUsage: modelResponse.llmUsage
-  });
-  return attachTimedDebug(
-    {
-      ...responseWithUrls,
-      responsePath
     },
+    responsePath,
     {
       questionIntent,
       responsePath,
@@ -596,68 +501,21 @@ export async function buildChatResponse(
       ...buildContextDebugFields(contextPack)
     }
   );
-}
-
-type ChatTimingMetric = Extract<
-  keyof ChatResponseDebug,
-  | "historicalLookupMs"
-  | "deterministicBuildMs"
-  | "contextBuildMs"
-  | "geminiFirstCallMs"
-  | "geminiRetryMs"
-  | "fallbackBuildMs"
-  | "webSupplementMs"
-  | "groundingMs"
->;
-
-type ChatTimingSnapshot = Pick<
-  ChatResponseDebug,
-  | "totalPipelineMs"
-  | "historicalLookupMs"
-  | "deterministicBuildMs"
-  | "contextBuildMs"
-  | "geminiFirstCallMs"
-  | "geminiRetryMs"
-  | "fallbackBuildMs"
-  | "webSupplementMs"
-  | "groundingMs"
->;
-
-function createChatTimingTracker(): {
-  add: (metric: ChatTimingMetric, ms: number) => void;
-  timeSync: <T>(metric: ChatTimingMetric, work: () => T) => T;
-  timeAsync: <T>(metric: ChatTimingMetric, work: () => Promise<T>) => Promise<T>;
-  snapshot: () => Partial<ChatTimingSnapshot>;
-} {
-  const startedAt = Date.now();
-  const values: Partial<Record<ChatTimingMetric, number>> = {};
-  const add = (metric: ChatTimingMetric, ms: number): void => {
-    values[metric] = Math.max(0, Math.round((values[metric] ?? 0) + ms));
-  };
-
-  return {
-    add,
-    timeSync(metric, work) {
-      const stageStartedAt = Date.now();
-      try {
-        return work();
-      } finally {
-        add(metric, Date.now() - stageStartedAt);
-      }
-    },
-    async timeAsync(metric, work) {
-      const stageStartedAt = Date.now();
-      try {
-        return await work();
-      } finally {
-        add(metric, Date.now() - stageStartedAt);
-      }
-    },
-    snapshot() {
-      return {
-        totalPipelineMs: Math.max(0, Date.now() - startedAt),
-        ...values
-      };
-    }
-  };
+  logDecision({
+    filing,
+    questionIntent,
+    responsePath,
+    geminiCalled: modelResponse.geminiCalled ?? true,
+    geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+    fallbackReason: modelResponse.fallbackReason ?? null,
+    schemaValid: modelResponse.schemaValid ?? true,
+    sourceIdsValid: modelSourceIdsValid,
+    sourceCount: finalResponse.sources.length,
+    contentMode,
+    contextPack,
+    retryAttempt: modelResponse.retryAttempt ?? 0,
+    retryReason: modelResponse.retryReason ?? null,
+    llmUsage: modelResponse.llmUsage
+  });
+  return finalResponse;
 }
