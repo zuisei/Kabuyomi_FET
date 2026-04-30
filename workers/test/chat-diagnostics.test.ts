@@ -68,7 +68,13 @@ describe("chat diagnostics helpers", () => {
         geminiSucceeded: true,
         schemaValid: true,
         retryAttempt: 1,
-        retryReason: "weak_grounding"
+        retryReason: "weak_grounding",
+        totalPipelineMs: 321,
+        contextBuildMs: 3,
+        geminiFirstCallMs: 240,
+        fallbackBuildMs: 12,
+        webSupplementMs: 5,
+        groundingMs: 1
       }
     };
 
@@ -104,6 +110,12 @@ describe("chat diagnostics helpers", () => {
       schemaValid: true,
       retryAttempt: 1,
       retryReason: "weak_grounding",
+      totalPipelineMs: 321,
+      contextBuildMs: 3,
+      geminiFirstCallMs: 240,
+      fallbackBuildMs: 12,
+      webSupplementMs: 5,
+      groundingMs: 1,
       contextApplied: true,
       contextMessageCount: 2,
       finalSourceIds: ["S1"],

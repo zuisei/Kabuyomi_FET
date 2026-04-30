@@ -12,6 +12,7 @@ import {
   attachCurrentFilingSourceUrls,
   CONTEXT_UNAVAILABLE_ANSWER,
   ensureFilingGroundedResponse,
+  type ChatResponseDebug,
   type ChatResponsePayload
 } from "./grounding";
 import { maybeBuildHistoricalChatResponseWithHydration } from "./historical";
@@ -45,11 +46,39 @@ export async function buildChatResponse(
     ...DEFAULT_REMOTE_CONFIG,
     ...config
   };
+  const timings = createChatTimingTracker();
+  const logDecision = (fields: Parameters<typeof logChatPathDecision>[0]): void => {
+    logChatPathDecision({
+      ...fields,
+      timings: timings.snapshot()
+    });
+  };
+  const attachTimedDebug = (
+    response: ChatResponsePayload,
+    debug: Parameters<typeof attachChatDebug>[1]
+  ): ChatResponsePayload => attachChatDebug(response, {
+    ...debug,
+    ...timings.snapshot()
+  });
+  const appendWebSupplement = (
+    targetFiling: FilingCacheRecord,
+    targetQuestion: string,
+    response: ChatResponsePayload,
+    targetEnv: Env,
+    targetConfig: RemoteConfig
+  ): Promise<ChatResponsePayload> =>
+    timings.timeAsync("webSupplementMs", () =>
+      maybeAppendWebSupplement(targetFiling, targetQuestion, response, targetEnv, targetConfig)
+    );
+  const attachCurrentFilingSourceUrlsTimed = (response: ChatResponsePayload): ChatResponsePayload =>
+    timings.timeSync("groundingMs", () => attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl));
   const questionIntent = classifyQuestionIntent(question);
   const contentMode = resolveContentMode(filing);
   let historical = null;
   try {
+    const historicalStartedAt = Date.now();
     historical = await maybeBuildHistoricalChatResponseWithHydration(filing, question, env, resolvedConfig, options);
+    timings.add("historicalLookupMs", Date.now() - historicalStartedAt);
   } catch (error) {
     logErrorEvent("chat_historical_answer_failed", {
       filingKey: filing.filingKey,
@@ -66,11 +95,8 @@ export async function buildChatResponse(
       ticker: filing.ticker,
       path: responsePath
     });
-    const responseWithUrls = attachCurrentFilingSourceUrls(
-      ensureFilingGroundedResponse(historical),
-      filing.primaryDocumentUrl
-    );
-    logChatPathDecision({
+    const responseWithUrls = attachCurrentFilingSourceUrlsTimed(ensureFilingGroundedResponse(historical));
+    logDecision({
       filing,
       questionIntent,
       responsePath,
@@ -82,7 +108,7 @@ export async function buildChatResponse(
       sourceCount: responseWithUrls.sources.length,
       contentMode
     });
-    return attachChatDebug(
+    return attachTimedDebug(
       {
         ...responseWithUrls,
         responsePath
@@ -100,7 +126,7 @@ export async function buildChatResponse(
     );
   }
 
-  const deterministic = buildDeterministicMetricAnswer(filing, question);
+  const deterministic = timings.timeSync("deterministicBuildMs", () => buildDeterministicMetricAnswer(filing, question));
   const letModelTryFirst = shouldLetModelTryBeforeDeterministic(env, deterministic);
   if (deterministic && !letModelTryFirst) {
     logEvent("chat_path_selected", {
@@ -109,15 +135,15 @@ export async function buildChatResponse(
       path: "deterministic",
       strategy: deterministic.strategy
     });
-    const response = await maybeAppendWebSupplement(
+    const response = await appendWebSupplement(
       filing,
       question,
       ensureFilingGroundedResponse(deterministic.response),
       env,
       resolvedConfig
     );
-    const responseWithUrls = attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl);
-    logChatPathDecision({
+    const responseWithUrls = attachCurrentFilingSourceUrlsTimed(response);
+    logDecision({
       filing,
       questionIntent,
       responsePath: "deterministic",
@@ -129,7 +155,7 @@ export async function buildChatResponse(
       sourceCount: responseWithUrls.sources.length,
       contentMode
     });
-    return attachChatDebug(
+    return attachTimedDebug(
       {
         ...responseWithUrls,
         responsePath: "deterministic"
@@ -147,9 +173,11 @@ export async function buildChatResponse(
     );
   }
 
-  let contextPack = buildChatContextPack(filing, questionIntent);
+  let contextPack = timings.timeSync("contextBuildMs", () => buildChatContextPack(filing, questionIntent));
   logChatContextSelection(filing, contextPack);
-  let modelResponse = await generateChatAnswer(env, { filing, question, questionIntent, contextPack });
+  let modelResponse = await timings.timeAsync("geminiFirstCallMs", () =>
+    generateChatAnswer(env, { filing, question, questionIntent, contextPack })
+  );
   let sourceValidation = validateModelSources(modelResponse, contextPack);
   const retryReason = chooseRetryReason({
     filing,
@@ -158,14 +186,14 @@ export async function buildChatResponse(
     approvedSourceIds: sourceValidation.approvedSourceIds
   });
   if (shouldRetryModelAnswer(modelResponse, retryReason)) {
-    const retryResult = await retryModelAnswer({
+    const retryResult = await timings.timeAsync("geminiRetryMs", () => retryModelAnswer({
       filing,
       question,
       env,
       questionIntent,
       retryReason: retryReason!,
       previousModelResponse: modelResponse
-    });
+    }));
     contextPack = retryResult.contextPack;
     modelResponse = retryResult.modelResponse;
     sourceValidation = validateModelSources(modelResponse, contextPack);
@@ -192,15 +220,15 @@ export async function buildChatResponse(
     });
     logChatLlmUsage(modelResponse, filing, "deterministic");
 
-    const response = await maybeAppendWebSupplement(
+    const response = await appendWebSupplement(
       filing,
       question,
       ensureFilingGroundedResponse(deterministic.response),
       env,
       resolvedConfig
     );
-    const responseWithUrls = attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl);
-    logChatPathDecision({
+    const responseWithUrls = attachCurrentFilingSourceUrlsTimed(response);
+    logDecision({
       filing,
       questionIntent,
       responsePath: "deterministic",
@@ -216,7 +244,7 @@ export async function buildChatResponse(
       retryReason: modelResponse.retryReason ?? null,
       llmUsage: modelResponse.llmUsage
     });
-    return attachChatDebug(
+    return attachTimedDebug(
       {
         ...responseWithUrls,
         responsePath: "deterministic"
@@ -247,13 +275,13 @@ export async function buildChatResponse(
   }
 
   if (approvedSourceIds.length === 0 && modelResponse.answer === CONTEXT_UNAVAILABLE_ANSWER) {
-    const recovered = await buildLocalFallbackResponse({
+    const recovered = await timings.timeAsync("fallbackBuildMs", () => buildLocalFallbackResponse({
       filing,
       question,
       env,
       validSourceIds: fallbackValidSourceIds,
       contextPack
-    });
+    }));
     if (recovered) {
       logWarnEvent("chat_grounding_repair_used", {
         filingKey: filing.filingKey,
@@ -268,15 +296,15 @@ export async function buildChatResponse(
       });
       logChatLlmUsage(modelResponse, filing, "fallback");
 
-      const response = await maybeAppendWebSupplement(
+      const response = await appendWebSupplement(
         filing,
         question,
         ensureFilingGroundedResponse(recovered),
         env,
         resolvedConfig
       );
-      const responseWithUrls = attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl);
-      logChatPathDecision({
+      const responseWithUrls = attachCurrentFilingSourceUrlsTimed(response);
+      logDecision({
         filing,
         questionIntent,
         responsePath: "fallback",
@@ -292,7 +320,7 @@ export async function buildChatResponse(
         retryReason: modelResponse.retryReason ?? null,
         llmUsage: modelResponse.llmUsage
       });
-      return attachChatDebug(
+      return attachTimedDebug(
         {
           ...responseWithUrls,
           responsePath: "fallback"
@@ -320,7 +348,7 @@ export async function buildChatResponse(
     });
     const responsePath = modelResponse.usedRemoteModel === true ? "gemini" : "fallback";
     logChatLlmUsage(modelResponse, filing, responsePath);
-    logChatPathDecision({
+    logDecision({
       filing,
       questionIntent,
       responsePath,
@@ -336,7 +364,7 @@ export async function buildChatResponse(
       retryReason: modelResponse.retryReason ?? null,
       llmUsage: modelResponse.llmUsage
     });
-    return attachChatDebug(
+    return attachTimedDebug(
       {
         answer: modelResponse.answer,
         sources: [],
@@ -359,13 +387,13 @@ export async function buildChatResponse(
   }
 
   if (approvedSourceIds.length === 0) {
-    const recovered = await buildLocalFallbackResponse({
+    const recovered = await timings.timeAsync("fallbackBuildMs", () => buildLocalFallbackResponse({
       filing,
       question,
       env,
       validSourceIds: fallbackValidSourceIds,
       contextPack
-    });
+    }));
     if (recovered) {
       logWarnEvent("chat_grounding_repair_used", {
         filingKey: filing.filingKey,
@@ -380,15 +408,15 @@ export async function buildChatResponse(
       });
       logChatLlmUsage(modelResponse, filing, "fallback");
 
-      const response = await maybeAppendWebSupplement(
+      const response = await appendWebSupplement(
         filing,
         question,
         ensureFilingGroundedResponse(recovered),
         env,
         resolvedConfig
       );
-      const responseWithUrls = attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl);
-      logChatPathDecision({
+      const responseWithUrls = attachCurrentFilingSourceUrlsTimed(response);
+      logDecision({
         filing,
         questionIntent,
         responsePath: "fallback",
@@ -404,7 +432,7 @@ export async function buildChatResponse(
         retryReason: modelResponse.retryReason ?? null,
         llmUsage: modelResponse.llmUsage
       });
-      return attachChatDebug(
+      return attachTimedDebug(
         {
           ...responseWithUrls,
           responsePath: "fallback"
@@ -425,7 +453,7 @@ export async function buildChatResponse(
       );
     }
 
-    logChatPathDecision({
+    logDecision({
       filing,
       questionIntent,
       responsePath: "fallback",
@@ -445,13 +473,13 @@ export async function buildChatResponse(
   }
 
   if (shouldRecoverFromWeakModelSources(filing, question, approvedSourceIds)) {
-    const recovered = await buildLocalFallbackResponse({
+    const recovered = await timings.timeAsync("fallbackBuildMs", () => buildLocalFallbackResponse({
       filing,
       question,
       env,
       validSourceIds: fallbackValidSourceIds,
       contextPack
-    });
+    }));
     if (recovered) {
       logWarnEvent("chat_grounding_repair_used", {
         filingKey: filing.filingKey,
@@ -466,15 +494,15 @@ export async function buildChatResponse(
       });
       logChatLlmUsage(modelResponse, filing, "fallback");
 
-      const response = await maybeAppendWebSupplement(
+      const response = await appendWebSupplement(
         filing,
         question,
         ensureFilingGroundedResponse(recovered),
         env,
         resolvedConfig
       );
-      const responseWithUrls = attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl);
-      logChatPathDecision({
+      const responseWithUrls = attachCurrentFilingSourceUrlsTimed(response);
+      logDecision({
         filing,
         questionIntent,
         responsePath: "fallback",
@@ -490,7 +518,7 @@ export async function buildChatResponse(
         retryReason: modelResponse.retryReason ?? null,
         llmUsage: modelResponse.llmUsage
       });
-      return attachChatDebug(
+      return attachTimedDebug(
         {
           ...responseWithUrls,
           responsePath: "fallback"
@@ -522,7 +550,7 @@ export async function buildChatResponse(
   });
   logChatLlmUsage(modelResponse, filing, responsePath);
 
-  const response = await maybeAppendWebSupplement(
+  const response = await appendWebSupplement(
     filing,
     question,
     ensureFilingGroundedResponse({
@@ -532,8 +560,8 @@ export async function buildChatResponse(
     env,
     resolvedConfig
   );
-  const responseWithUrls = attachCurrentFilingSourceUrls(response, filing.primaryDocumentUrl);
-  logChatPathDecision({
+  const responseWithUrls = attachCurrentFilingSourceUrlsTimed(response);
+  logDecision({
     filing,
     questionIntent,
     responsePath,
@@ -549,7 +577,7 @@ export async function buildChatResponse(
     retryReason: modelResponse.retryReason ?? null,
     llmUsage: modelResponse.llmUsage
   });
-  return attachChatDebug(
+  return attachTimedDebug(
     {
       ...responseWithUrls,
       responsePath
@@ -568,4 +596,68 @@ export async function buildChatResponse(
       ...buildContextDebugFields(contextPack)
     }
   );
+}
+
+type ChatTimingMetric = Extract<
+  keyof ChatResponseDebug,
+  | "historicalLookupMs"
+  | "deterministicBuildMs"
+  | "contextBuildMs"
+  | "geminiFirstCallMs"
+  | "geminiRetryMs"
+  | "fallbackBuildMs"
+  | "webSupplementMs"
+  | "groundingMs"
+>;
+
+type ChatTimingSnapshot = Pick<
+  ChatResponseDebug,
+  | "totalPipelineMs"
+  | "historicalLookupMs"
+  | "deterministicBuildMs"
+  | "contextBuildMs"
+  | "geminiFirstCallMs"
+  | "geminiRetryMs"
+  | "fallbackBuildMs"
+  | "webSupplementMs"
+  | "groundingMs"
+>;
+
+function createChatTimingTracker(): {
+  add: (metric: ChatTimingMetric, ms: number) => void;
+  timeSync: <T>(metric: ChatTimingMetric, work: () => T) => T;
+  timeAsync: <T>(metric: ChatTimingMetric, work: () => Promise<T>) => Promise<T>;
+  snapshot: () => Partial<ChatTimingSnapshot>;
+} {
+  const startedAt = Date.now();
+  const values: Partial<Record<ChatTimingMetric, number>> = {};
+  const add = (metric: ChatTimingMetric, ms: number): void => {
+    values[metric] = Math.max(0, Math.round((values[metric] ?? 0) + ms));
+  };
+
+  return {
+    add,
+    timeSync(metric, work) {
+      const stageStartedAt = Date.now();
+      try {
+        return work();
+      } finally {
+        add(metric, Date.now() - stageStartedAt);
+      }
+    },
+    async timeAsync(metric, work) {
+      const stageStartedAt = Date.now();
+      try {
+        return await work();
+      } finally {
+        add(metric, Date.now() - stageStartedAt);
+      }
+    },
+    snapshot() {
+      return {
+        totalPipelineMs: Math.max(0, Date.now() - startedAt),
+        ...values
+      };
+    }
+  };
 }

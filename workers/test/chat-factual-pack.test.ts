@@ -44,6 +44,41 @@ describe("chat Q3-lite factual packs", () => {
     ]);
   });
 
+  it("does not infer generic AI or cloud business lines for Cintas", () => {
+    const filing = makeFactualPackFiling({
+      ticker: "CTAS",
+      companyName: "CINTAS CORP",
+      text:
+        "Cintas classifies its businesses into Uniform Rental and Facility Services and First Aid and Safety Services. Revenue increased due to new customers, penetration of existing customers, price increases, and retention. We use information technology and cloud systems to support operations."
+    });
+
+    const contextPack = buildChatContextPack(filing, "business_overview");
+
+    expect(contextPack.factualPack?.productsServices).toEqual([
+      "Uniform Rental and Facility Services",
+      "First Aid and Safety Services"
+    ]);
+    expect(contextPack.factualPack?.productsServices).not.toContain("クラウドサービス");
+    expect(contextPack.factualPack?.productsServices).not.toContain("AI・データセンター向け計算基盤");
+  });
+
+  it("uses Baker Hughes energy segments instead of generic AI compute labels", () => {
+    const filing = makeFactualPackFiling({
+      ticker: "BKR",
+      companyName: "Baker Hughes Co",
+      text:
+        "Baker Hughes reports Oilfield Services & Equipment and Industrial & Energy Technology. IET includes Gas Technology Equipment and Gas Technology Services. The filing discusses artificial intelligence and data center demand only as market context."
+    });
+
+    const contextPack = buildChatContextPack(filing, "business_overview");
+
+    expect(contextPack.factualPack?.productsServices).toEqual([
+      "Oilfield Services & Equipment",
+      "Industrial & Energy Technology"
+    ]);
+    expect(contextPack.factualPack?.productsServices).not.toContain("AI・データセンター向け計算基盤");
+  });
+
   it("prioritizes segment and product revenue over geography in revenue packs", () => {
     const filing = makeFactualPackFiling({
       ticker: "MSFT",

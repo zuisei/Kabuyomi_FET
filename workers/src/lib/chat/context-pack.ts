@@ -514,7 +514,7 @@ function buildBusinessOverviewFactualPack(filing: FilingCacheRecord): ChatFactua
     collectOrderedLabels(sourceText, reportableSegmentDefinitions(filing.ticker))
   );
   const revenueCategories = extractRevenueFacts(filing).filter((fact) => fact.kind !== "geography");
-  const sourceIds = selectFactualSourceIds(
+  let sourceIds = selectFactualSourceIds(
     filing,
     [
       ...productsServices,
@@ -523,6 +523,9 @@ function buildBusinessOverviewFactualPack(filing: FilingCacheRecord): ChatFactua
     ],
     { questionIntent: "business_overview" }
   );
+  if (sourceIds.length === 0 && hasKnownBusinessLabels(filing.ticker) && (productsServices.length > 0 || reportableSegments.length > 0)) {
+    sourceIds = fallbackKnownBusinessSourceIds(filing);
+  }
 
   if (productsServices.length === 0 && reportableSegments.length === 0 && revenueCategories.length === 0) {
     return undefined;
@@ -666,11 +669,6 @@ function collectOrderedLabels(
 
 function businessProductDefinitions(ticker: string): Array<{ label: string; patterns: RegExp[] }> {
   const upperTicker = ticker.toUpperCase();
-  const common = [
-    { label: "クラウドサービス", patterns: [/cloud|azure|aws|google cloud/i] },
-    { label: "広告", patterns: [/advertising|ads\b|google search|youtube/i] },
-    { label: "AI・データセンター向け計算基盤", patterns: [/artificial intelligence|\bai\b|accelerated computing|data center|gpu|compute/i] }
-  ];
 
   if (upperTicker === "AAPL") {
     return [
@@ -723,7 +721,53 @@ function businessProductDefinitions(ticker: string): Array<{ label: string; patt
     ];
   }
 
-  return common;
+  if (upperTicker === "AON") {
+    return [
+      { label: "Risk Capital", patterns: [/risk capital|commercial risk|reinsurance/i] },
+      { label: "Human Capital", patterns: [/human capital|health solutions|wealth solutions/i] }
+    ];
+  }
+
+  if (upperTicker === "CTAS") {
+    return [
+      { label: "Uniform Rental and Facility Services", patterns: [/uniform rental and facility services|uniform rental|facility services/i] },
+      { label: "First Aid and Safety Services", patterns: [/first aid and safety services|first aid|safety services/i] }
+    ];
+  }
+
+  if (upperTicker === "BKR") {
+    return [
+      { label: "Oilfield Services & Equipment", patterns: [/oilfield services (?:&|and) equipment|\bofse\b|oilfield services/i] },
+      { label: "Industrial & Energy Technology", patterns: [/industrial (?:&|and) energy technology|\biet\b|gas technology/i] }
+    ];
+  }
+
+  if (upperTicker === "CL") {
+    return [
+      { label: "Oral Care", patterns: [/oral care|toothpaste|toothbrush/i] },
+      { label: "Personal Care", patterns: [/personal care/i] },
+      { label: "Home Care", patterns: [/home care/i] },
+      { label: "Pet Nutrition", patterns: [/pet nutrition|hill'?s/i] }
+    ];
+  }
+
+  if (upperTicker === "PH") {
+    return [
+      { label: "Aerospace Systems", patterns: [/aerospace systems|aerospace/i] },
+      { label: "Diversified Industrial", patterns: [/diversified industrial|industrial/i] },
+      { label: "Motion and Control Technologies", patterns: [/motion and control technologies|motion and control/i] }
+    ];
+  }
+
+  if (upperTicker === "CRWD") {
+    return [
+      { label: "Falcon platform", patterns: [/falcon platform|crowdstrike falcon|\bfalcon\b/i] },
+      { label: "cybersecurity subscriptions", patterns: [/cybersecurity|security subscriptions?|subscription revenue|endpoint security/i] },
+      { label: "cloud security and identity protection", patterns: [/cloud security|identity protection|threat intelligence/i] }
+    ];
+  }
+
+  return [];
 }
 
 function reportableSegmentDefinitions(ticker: string): Array<{ label: string; patterns: RegExp[] }> {
@@ -757,6 +801,39 @@ function reportableSegmentDefinitions(ticker: string): Array<{ label: string; pa
       { label: "International", patterns: [/international/i] },
       { label: "AWS", patterns: [/\baws\b|amazon web services/i] }
     ];
+  }
+  if (upperTicker === "AON") {
+    return [
+      { label: "Risk Capital", patterns: [/risk capital/i] },
+      { label: "Human Capital", patterns: [/human capital/i] }
+    ];
+  }
+  if (upperTicker === "CTAS") {
+    return [
+      { label: "Uniform Rental and Facility Services", patterns: [/uniform rental and facility services/i] },
+      { label: "First Aid and Safety Services", patterns: [/first aid and safety services/i] }
+    ];
+  }
+  if (upperTicker === "BKR") {
+    return [
+      { label: "Oilfield Services & Equipment", patterns: [/oilfield services (?:&|and) equipment|\bofse\b/i] },
+      { label: "Industrial & Energy Technology", patterns: [/industrial (?:&|and) energy technology|\biet\b/i] }
+    ];
+  }
+  if (upperTicker === "CL") {
+    return [
+      { label: "Oral, Personal and Home Care", patterns: [/oral,?\s+personal and home care|oral care|personal care|home care/i] },
+      { label: "Pet Nutrition", patterns: [/pet nutrition|hill'?s/i] }
+    ];
+  }
+  if (upperTicker === "PH") {
+    return [
+      { label: "Aerospace Systems", patterns: [/aerospace systems|aerospace/i] },
+      { label: "Diversified Industrial", patterns: [/diversified industrial|industrial/i] }
+    ];
+  }
+  if (upperTicker === "CRWD") {
+    return [];
   }
   return [
     { label: "reportable segments", patterns: [/reportable segments?|operating segments?/i] }
@@ -860,9 +937,26 @@ function seedKnownTickerLabels(
     GOOG: {
       products_services: ["Google Search", "YouTube", "Google Cloud", "Google Network", "Other Bets"],
       reportable_segments: ["Google Services", "Google Cloud", "Other Bets"]
+    },
+    PH: {
+      products_services: ["Motion and Control Technologies"],
+      reportable_segments: ["Aerospace Systems", "Diversified Industrial"]
+    },
+    CRWD: {
+      products_services: ["Falcon platform", "cybersecurity subscriptions", "cloud security and identity protection"],
+      reportable_segments: []
     }
   };
   return mergeLabels(labels, seeds[upperTicker]?.[field] ?? []);
+}
+
+function hasKnownBusinessLabels(ticker: string): boolean {
+  return ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "GOOG", "PH", "CRWD"].includes(ticker.toUpperCase());
+}
+
+function fallbackKnownBusinessSourceIds(filing: FilingCacheRecord): string[] {
+  const source = filing.sourceChunks.find((chunk) => chunk.sectionType === "md_a" && normalizeWhitespace(chunk.text).length > 0);
+  return source ? [source.sourceId] : [];
 }
 
 function seedKnownTickerRevenueFacts(filing: FilingCacheRecord, facts: RevenueFact[]): RevenueFact[] {

@@ -176,6 +176,67 @@ describe("buildChatResponse", () => {
     expect(response.responsePath).toBe("deterministic");
   });
 
+  it("keeps deterministic company overviews specific and deduped for non-tech tickers", async () => {
+    const filing = makeCintasOverviewFiling();
+
+    const response = await buildChatResponse(
+      filing,
+      "何の会社？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.answer).toContain("Uniform Rental and Facility Services");
+    expect(response.answer).toContain("First Aid and Safety Services");
+    expect(response.answer).not.toContain("クラウドサービス");
+    expect(response.answer).not.toContain("AI・データセンター");
+    expect(response.answer.match(/Uniform Rental and Facility Services/g)?.length).toBe(1);
+    expect(response.answer.match(/First Aid and Safety Services/g)?.length).toBe(1);
+    expect(response.answer).not.toContain("segment revenue");
+    expect(response.responsePath).toBe("deterministic");
+  });
+
+  it("does not expose generic reportable-segments labels as a company overview", async () => {
+    const filing = makeGenericSegmentOverviewFiling();
+
+    const response = await buildChatResponse(
+      filing,
+      "何の会社？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.answer).not.toContain("reportable segmentsを主な事業");
+    expect(response.answer).not.toContain("segment revenue");
+  });
+
+  it("keeps known PH and CRWD company overviews away from generic tech labels", async () => {
+    const parker = await buildChatResponse(
+      makeParkerOverviewFiling(),
+      "何の会社？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+    const crowdstrike = await buildChatResponse(
+      makeCrowdstrikeOverviewFiling(),
+      "何の会社？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(parker.responsePath).toBe("deterministic");
+    expect(parker.answer).toContain("Aerospace Systems");
+    expect(parker.answer).toContain("Diversified Industrial");
+    expect(parker.answer).not.toContain("本文では「");
+
+    expect(crowdstrike.responsePath).toBe("deterministic");
+    expect(crowdstrike.answer).toContain("Falcon platform");
+    expect(crowdstrike.answer).toContain("cybersecurity subscriptions");
+    expect(crowdstrike.answer).not.toContain("AI向けアクセラレーテッドコンピューティング");
+    expect(crowdstrike.answer).not.toContain("データセンター向けコンピューティング");
+  });
+
   it("lets Gemini answer business-overview prompts when it stays filing-grounded", async () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const filing = makeBusinessOverviewFiling();
@@ -1902,6 +1963,182 @@ function makeBusinessOverviewFiling() {
         endOffset: 0,
         tagName: "Revenues",
         sortOrder: 9
+      }
+    ]
+  } as any;
+}
+
+function makeCintasOverviewFiling() {
+  return {
+    filingKey: "v6:0000723254:000072325426000012",
+    ticker: "CTAS",
+    companyName: "CINTAS CORP",
+    cik: "0000723254",
+    formType: "10-Q",
+    filedAt: "2026-04-07",
+    periodOfReport: "2026-02-28",
+    primaryDocumentUrl: "https://example.com/ctas",
+    mdaText: "",
+    mdaTokenCount: 0,
+    extractorVersion: "v6",
+    promptVersion: "v1",
+    generatedAt: "2026-04-29T00:00:00.000Z",
+    summary: { verdict: "", highlights: [], changes: [] },
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        value: 2700000000,
+        unit: "USD",
+        periodEnd: "2026-02-28",
+        comparisonValue: 2480000000,
+        yoyPercent: 8.9
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Item 2",
+        sourceLabel: "10-Q Item 2, filed 2026-04-07",
+        text:
+          "Cintas classifies its businesses into Uniform Rental and Facility Services and First Aid and Safety Services. Revenue increased due to new customers, penetration of existing customers, price increases, and retention. We use cloud systems to support internal operations.",
+        startOffset: 0,
+        endOffset: 260,
+        sortOrder: 2
+      },
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)",
+        text: "売上高: 2700000000 USD / 比較値: 2480000000 / YoY: 8.9%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        sortOrder: 9
+      }
+    ]
+  } as any;
+}
+
+function makeGenericSegmentOverviewFiling() {
+  return {
+    filingKey: "v6:0000773840:000077384026000057",
+    ticker: "HON",
+    companyName: "HONEYWELL INTERNATIONAL INC",
+    cik: "0000773840",
+    formType: "10-Q",
+    filedAt: "2026-04-23",
+    periodOfReport: "2026-03-31",
+    primaryDocumentUrl: "https://example.com/hon",
+    mdaText: "",
+    mdaTokenCount: 0,
+    extractorVersion: "v6",
+    promptVersion: "v1",
+    generatedAt: "2026-04-29T00:00:00.000Z",
+    summary: { verdict: "", highlights: [], changes: [] },
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        value: 9143000000,
+        unit: "USD",
+        periodEnd: "2026-03-31",
+        comparisonValue: 8925000000,
+        yoyPercent: 2.4
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Item 2",
+        sourceLabel: "10-Q Item 2, filed 2026-04-23",
+        text:
+          "The company reports results through reportable segments. Revenue increased from the prior period, while macroeconomic uncertainty and tariff developments affected operating conditions.",
+        startOffset: 0,
+        endOffset: 170,
+        sortOrder: 2
+      },
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)",
+        text: "売上高: 9143000000 USD / 比較値: 8925000000 / YoY: 2.4%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        sortOrder: 9
+      }
+    ]
+  } as any;
+}
+
+function makeParkerOverviewFiling() {
+  return {
+    filingKey: "v6:0000076334:000007633426000008",
+    ticker: "PH",
+    companyName: "PARKER-HANNIFIN CORP",
+    cik: "0000076334",
+    formType: "10-Q",
+    filedAt: "2026-01-30",
+    periodOfReport: "2025-12-31",
+    primaryDocumentUrl: "https://example.com/ph",
+    mdaText: "",
+    mdaTokenCount: 0,
+    extractorVersion: "v6",
+    promptVersion: "v1",
+    generatedAt: "2026-04-29T00:00:00.000Z",
+    summary: { verdict: "", highlights: [], changes: [] },
+    metrics: [],
+    sourceChunks: [
+      {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Item 2",
+        sourceLabel: "10-Q Item 2, filed 2026-01-30",
+        text:
+          "Parker is a motion and control technologies company serving mobile, industrial and aerospace markets. " +
+          "The company reports results through the Aerospace Systems Segment and Diversified Industrial Segment. " +
+          "Sales in both operating groups are discussed with industrial demand, aerospace aftermarket activity and the Curtis acquisition.",
+        startOffset: 0,
+        endOffset: 320,
+        sortOrder: 2
+      }
+    ]
+  } as any;
+}
+
+function makeCrowdstrikeOverviewFiling() {
+  return {
+    filingKey: "v6:0001535527:000153552726000010",
+    ticker: "CRWD",
+    companyName: "CrowdStrike Holdings, Inc.",
+    cik: "0001535527",
+    formType: "10-K",
+    filedAt: "2026-03-05",
+    periodOfReport: "2026-01-31",
+    primaryDocumentUrl: "https://example.com/crwd",
+    mdaText: "",
+    mdaTokenCount: 0,
+    extractorVersion: "v6",
+    promptVersion: "v1",
+    generatedAt: "2026-04-29T00:00:00.000Z",
+    summary: { verdict: "", highlights: [], changes: [] },
+    metrics: [],
+    sourceChunks: [
+      {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7, filed 2026-03-05",
+        text:
+          "CrowdStrike provides the Falcon platform for cybersecurity subscriptions, including endpoint security, cloud security, identity protection and threat intelligence. The company also uses artificial intelligence in its security products.",
+        startOffset: 0,
+        endOffset: 225,
+        sortOrder: 2
       }
     ]
   } as any;

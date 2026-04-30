@@ -3,8 +3,21 @@ import type { ChatFallbackReason, GeminiInvocationUsage } from "../../clients/ge
 import { logLlmUsage } from "../llm-usage";
 import { logEvent } from "../logging";
 import type { ChatContextPack } from "./context-pack";
-import type { ChatResponsePath } from "./grounding";
+import type { ChatResponseDebug, ChatResponsePath } from "./grounding";
 import type { QuestionIntent } from "./intent";
+
+type ChatTimingFields = Pick<
+  ChatResponseDebug,
+  | "totalPipelineMs"
+  | "historicalLookupMs"
+  | "deterministicBuildMs"
+  | "contextBuildMs"
+  | "geminiFirstCallMs"
+  | "geminiRetryMs"
+  | "fallbackBuildMs"
+  | "webSupplementMs"
+  | "groundingMs"
+>;
 
 export function logChatContextSelection(
   filing: FilingCacheRecord,
@@ -62,7 +75,8 @@ export function logChatPathDecision({
   contextPack,
   retryAttempt,
   retryReason,
-  llmUsage
+  llmUsage,
+  timings
 }: {
   filing: FilingCacheRecord;
   questionIntent: QuestionIntent;
@@ -78,6 +92,7 @@ export function logChatPathDecision({
   retryAttempt?: number;
   retryReason?: ChatFallbackReason | null;
   llmUsage?: GeminiInvocationUsage[];
+  timings?: Partial<ChatTimingFields>;
 }): void {
   const usage = summarizeLlmUsage(llmUsage);
   logEvent("chat_path_decision", {
@@ -105,7 +120,16 @@ export function logChatPathDecision({
     estimatedContextTokens: contextPack?.selectionDiagnostics.estimatedContextTokens ?? null,
     sourceSelectionStrategy: contextPack?.sourceSelectionStrategy ?? null,
     selectedSourceIds: contextPack?.sourceChunks.map((source) => source.sourceId) ?? [],
-    selectedSourceLabels: contextPack?.sourceChunks.map((source) => source.sourceLabel) ?? []
+    selectedSourceLabels: contextPack?.sourceChunks.map((source) => source.sourceLabel) ?? [],
+    totalPipelineMs: timings?.totalPipelineMs ?? null,
+    historicalLookupMs: timings?.historicalLookupMs ?? null,
+    deterministicBuildMs: timings?.deterministicBuildMs ?? null,
+    contextBuildMs: timings?.contextBuildMs ?? null,
+    geminiFirstCallMs: timings?.geminiFirstCallMs ?? null,
+    geminiRetryMs: timings?.geminiRetryMs ?? null,
+    fallbackBuildMs: timings?.fallbackBuildMs ?? null,
+    webSupplementMs: timings?.webSupplementMs ?? null,
+    groundingMs: timings?.groundingMs ?? null
   });
 }
 

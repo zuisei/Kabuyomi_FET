@@ -227,6 +227,107 @@ describe("Gemini local chat fallback", () => {
     expect(response.sourceIds).toContain("S3");
   });
 
+  it("translates generic reportable-segment driver fragments", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "売上成長の要因は？",
+      filing: {
+        filingKey: "v1:0000064040:000006404026000024",
+        ticker: "SPGI",
+        companyName: "S&P Global Inc.",
+        cik: "0000064040",
+        formType: "10-Q",
+        filedAt: "2026-04-28",
+        periodOfReport: "2026-03-31",
+        primaryDocumentUrl: "https://example.com",
+        mdaText: "",
+        mdaTokenCount: 0,
+        metrics: [
+          {
+            logicalName: "revenue",
+            tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+            value: 4171000000,
+            unit: "USD",
+            periodEnd: "2026-03-31",
+            comparisonValue: 3777000000,
+            yoyPercent: 10.4
+          }
+        ],
+        sourceChunks: [
+          {
+            sourceId: "S3",
+            sectionType: "md_a",
+            sectionTitle: "Item 2",
+            sourceLabel: "10-Q Item 2",
+            text: "Revenue increased 10% primarily due to increases at all of our reportable segments.",
+            startOffset: 0,
+            endOffset: 84,
+            sortOrder: 3
+          },
+          {
+            sourceId: "S9",
+            sectionType: "xbrl_metric",
+            sectionTitle: "売上高",
+            sourceLabel: "XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)",
+            text: "売上高: 4171000000 USD / 比較値: 3777000000 / YoY: 10.4%",
+            startOffset: 0,
+            endOffset: 0,
+            tagName: "RevenueFromContractWithCustomerExcludingAssessedTax",
+            sortOrder: 9
+          }
+        ],
+        summary: { verdict: "", highlights: [], changes: [] },
+        generatedAt: "2026-04-14T00:00:00.000Z",
+        extractorVersion: "v1",
+        promptVersion: "v1"
+      }
+    });
+
+    expect(response.answer).toContain("全報告セグメントでの増収");
+    expect(response.answer).not.toContain("increases at all of our reportable segments");
+    expect(response.sourceIds).toContain("S3");
+  });
+
+  it("keeps known CRWD business fallback from drifting into generic data-center wording", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "何の会社？",
+      filing: {
+        filingKey: "v6:0001535527:000153552726000010",
+        ticker: "CRWD",
+        companyName: "CrowdStrike Holdings, Inc.",
+        cik: "0001535527",
+        formType: "10-K",
+        filedAt: "2026-03-05",
+        periodOfReport: "2026-01-31",
+        primaryDocumentUrl: "https://example.com",
+        mdaText: "",
+        mdaTokenCount: 0,
+        metrics: [],
+        sourceChunks: [
+          {
+            sourceId: "S3",
+            sectionType: "md_a",
+            sectionTitle: "Item 7",
+            sourceLabel: "10-K Item 7",
+            text:
+              "CrowdStrike provides the Falcon platform for cybersecurity subscriptions, cloud security, identity protection and threat intelligence. The company applies artificial intelligence to security workflows.",
+            startOffset: 0,
+            endOffset: 190,
+            sortOrder: 3
+          }
+        ],
+        summary: { verdict: "", highlights: [], changes: [] },
+        generatedAt: "2026-04-14T00:00:00.000Z",
+        extractorVersion: "v1",
+        promptVersion: "v1"
+      }
+    });
+
+    expect(response.answer).toContain("Falcon platform");
+    expect(response.answer).toContain("サイバーセキュリティ");
+    expect(response.answer).not.toContain("アクセラレーテッドコンピューティング");
+    expect(response.answer).not.toContain("データセンター向けコンピューティング");
+  });
+
   it("keeps pricing-driver durability fallback in Japanese", async () => {
     const response = await generateChatAnswer({} as never, {
       question: "売上高が変化した要因は一時的ですか？",

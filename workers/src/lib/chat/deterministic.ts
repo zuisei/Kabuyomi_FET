@@ -267,11 +267,17 @@ function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePay
       return source ? [buildSecFilingSource(source)] : [];
     });
     if (sources.length > 0) {
-      const businessLines = [
+      const businessLines = Array.from(new Set([
         ...(factualPack.productsServices ?? []),
         ...(factualPack.reportableSegments ?? [])
-      ].slice(0, 6);
-      const revenueCategories = factualPack.revenueCategories?.map((fact) => fact.label).filter((label) => !businessLines.includes(label)).slice(0, 3) ?? [];
+      ].filter((label) => !isGenericBusinessLineLabel(label)))).slice(0, 6);
+      if (businessLines.length === 0) {
+        return null;
+      }
+      const revenueCategories = factualPack.revenueCategories
+        ?.map((fact) => fact.label)
+        .filter((label) => !businessLines.includes(label) && !isGenericRevenueCategoryLabel(label))
+        .slice(0, 3) ?? [];
       const revenueSentence =
         revenueCategories.length > 0
           ? `売上区分としては、${revenueCategories.join("、")}も確認できます。`
@@ -301,6 +307,14 @@ function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePay
     answer: `${filing.companyName}は、${overview.labels.join("、")}を主な事業にする会社です。${overview.context}`,
     sources: dedupeChatSources(sources)
   };
+}
+
+function isGenericRevenueCategoryLabel(label: string): boolean {
+  return /^(product revenue|service revenue|segment revenue|geography revenue)$/i.test(label.trim());
+}
+
+function isGenericBusinessLineLabel(label: string): boolean {
+  return /^(reportable segments?|operating segments?)$/i.test(label.trim());
 }
 
 function buildRevenueBreakdownAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {

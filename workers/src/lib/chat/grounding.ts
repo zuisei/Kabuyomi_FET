@@ -46,6 +46,15 @@ export interface ChatResponseDebug {
   selectedSourceIds?: string[];
   selectedSourceLabels?: string[];
   answerQualityFlags?: string[];
+  totalPipelineMs?: number;
+  historicalLookupMs?: number;
+  deterministicBuildMs?: number;
+  contextBuildMs?: number;
+  geminiFirstCallMs?: number;
+  geminiRetryMs?: number;
+  fallbackBuildMs?: number;
+  webSupplementMs?: number;
+  groundingMs?: number;
 }
 
 export const CONTEXT_UNAVAILABLE_ANSWER = "この決算資料の範囲では確認できません。";
