@@ -284,6 +284,49 @@ describe("chat question intent and context packing", () => {
     expect(context.selectionDiagnostics.selectedSourceCharCount).toBeGreaterThan(driverText.length);
   });
 
+  it("filters disaster risk windows out of revenue-growth context", () => {
+    const riskText =
+      "Natural disasters and other catastrophic events such as public health crises could affect our personnel, data centers, service providers, manufacturing vendors, and logistics providers. Climate change could increase the frequency or severity of these events, which could affect revenue timing.";
+    const driverText =
+      "Subscription revenue increased primarily due to new customers, expansion within existing customers, and additional module adoption on the Falcon platform. Annual recurring revenue continued to grow as customers adopted cloud security and identity protection modules.";
+    const filing = {
+      ...makeIntentFiling(),
+      ticker: "CRWD",
+      companyName: "CrowdStrike Holdings, Inc.",
+      mdaText: [riskText, driverText].join(" "),
+      sourceChunks: [
+        {
+          sourceId: "S1",
+          sectionType: "md_a" as const,
+          sectionTitle: "Item 7",
+          sourceLabel: "10-K Item 7",
+          text: riskText,
+          startOffset: 0,
+          endOffset: riskText.length,
+          sortOrder: 1
+        },
+        {
+          sourceId: "S2",
+          sectionType: "md_a" as const,
+          sectionTitle: "Item 7",
+          sourceLabel: "10-K Item 7",
+          text: driverText,
+          startOffset: riskText.length + 1,
+          endOffset: riskText.length + 1 + driverText.length,
+          sortOrder: 2
+        },
+        ...makeIntentFiling().sourceChunks.filter((chunk) => chunk.sectionType === "xbrl_metric")
+      ]
+    };
+
+    const context = buildChatContextPack(filing, "yoy_change");
+
+    expect(context.sourceChunks.map((chunk) => chunk.sourceId)).toContain("S2");
+    expect(context.sourceChunks.map((chunk) => chunk.sourceId)).not.toContain("S1");
+    expect(context.sourceChunks.some((chunk) => chunk.text.includes("Natural disasters"))).toBe(false);
+    expect(context.sourceChunks[0]?.text).toContain("Subscription revenue increased");
+  });
+
   it("classifies investor-style pros and cons prompts as investment_view", () => {
     expect(classifyQuestionIntent("投資家目線で良い点と悪い点は？")).toBe("investment_view");
     expect(classifyQuestionIntent("bull bearで強みと弱みを見て")).toBe("investment_view");

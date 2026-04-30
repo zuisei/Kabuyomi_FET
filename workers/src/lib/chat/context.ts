@@ -38,7 +38,18 @@ function isContextDependentFollowUp(question: string): boolean {
 }
 
 function detectLatestAnchor(context: ChatContextMessage[]): ContextAnchor | null {
-  for (const message of [...context].reverse()) {
+  const reversed = [...context].reverse();
+  for (const message of reversed) {
+    if (message.role !== "user") {
+      continue;
+    }
+    const anchor = detectAnchor(message.content);
+    if (anchor) {
+      return anchor;
+    }
+  }
+
+  for (const message of reversed) {
     const anchor = detectAnchor(message.content);
     if (anchor) {
       return anchor;

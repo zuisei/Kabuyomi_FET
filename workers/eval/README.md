@@ -81,6 +81,37 @@ KABUYOMI_EVAL_BASE_URL=https://kabuyomi-api.example.workers.dev npm run eval:cha
 
 Output is written to `eval/runs/<runId>.jsonl`. Live runs consume chat credits.
 
+## Dynamic Full Benchmark
+
+Use `KABUYOMI_EVAL_TICKERS` when you want the same benchmark questions against any ticker set.
+
+The dynamic benchmark uses 10 standard questions per ticker:
+
+1. `何の会社？`
+2. `売上成長の要因は？`
+3. `その要因は一時的？`
+4. `利益率が悪化した理由は？`
+5. `リスクは？`
+6. `前回決算との違いは？`
+7. `売上の柱は？`
+8. `キャッシュフローは強い？`
+9. `投資家目線で良い点と悪い点は？`
+10. `この資料だけでは分からないことは？`
+
+Question 3 is sent with `conversationContext` from question 2 for the same ticker, so follow-up grounding is tested as an actual chat flow.
+
+Example full run for 5 tickers:
+
+```bash
+KABUYOMI_EVAL_BASE_URL=https://kabuyomi-api-test.dznqjmctk7.workers.dev \
+KABUYOMI_EVAL_DEVICE_KEY=1e5200e1-9b6e-4970-a232-9ac542bb0827 \
+KABUYOMI_EVAL_DETACHED_ACCESS=dev_unlimited \
+KABUYOMI_EVAL_TICKERS=CRWD,CL,VRT,LMT,NEM \
+KABUYOMI_EVAL_MODE=full \
+KABUYOMI_EVAL_LIMIT=50 \
+npm run eval:chat:pilot
+```
+
 For a full run:
 
 ```bash

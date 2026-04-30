@@ -1,9 +1,9 @@
 export function businessContextPattern(): RegExp {
-  return /item\s+1\.\s*business|business overview|overview|our business|we are|we provide|we offer|products?|services?|customers?|end markets?|reportable segments?|geograph|revenue by|disaggregation|accelerated computing|artificial intelligence|\bai\b|gpu|graphics|compute|semiconductor|data center|gaming|professional visualization|networking|automotive|cloud service providers?|consumer internet|enterprise|oem/i;
+  return /item\s+1\.\s*business|business overview|overview|our business|we are|we provide|we offer|products?|services?|customers?|end markets?|reportable segments?|geograph|revenue by|disaggregation|accelerated computing|gpu|graphics|compute|semiconductor|data center|gaming|professional visualization|networking|automotive|cloud service providers?|consumer internet|enterprise|oem/i;
 }
 
 export function revenueDriverPattern(): RegExp {
-  return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|increase(?:d)? due to|decrease(?:d)? due to|higher (?:net )?sales of|lower (?:net )?sales of|sales (?:increase|decrease)|revenue (?:increase|decrease)|net sales (?:increase|decrease)/i;
+  return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|increase(?:d)? due to|decrease(?:d)? due to|higher (?:net )?sales of|lower (?:net )?sales of|sales (?:increase|decrease)|revenue (?:increase|decrease)|net sales (?:increase|decrease)|subscription revenue|annual recurring revenue|\barr\b|new customers?|existing customers?|additional modules?|module adoption/i;
 }
 
 export function riskContextPattern(): RegExp {

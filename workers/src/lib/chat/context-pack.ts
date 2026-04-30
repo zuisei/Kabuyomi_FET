@@ -162,7 +162,10 @@ export function buildChatContextPack(
 
   if (!hasSelectedNarrative(selected)) {
     for (const chunk of rankDefaultSources(filing.sourceChunks)) {
-      if (chunk.sectionType === "md_a") {
+      if (
+        chunk.sectionType === "md_a" &&
+        !isOffIntentRiskNarrative(questionIntent, `${chunk.sectionTitle} ${chunk.sourceLabel} ${chunk.text}`)
+      ) {
         add(chunk);
         break;
       }
@@ -171,6 +174,9 @@ export function buildChatContextPack(
 
   if (selected.size < profile.minSources) {
     for (const chunk of rankDefaultSources(filing.sourceChunks)) {
+      if (chunk.sectionType === "md_a" && isOffIntentRiskNarrative(questionIntent, `${chunk.sectionTitle} ${chunk.sourceLabel} ${chunk.text}`)) {
+        continue;
+      }
       add(chunk);
       if (selected.size >= profile.minSources) {
         break;
@@ -207,12 +213,11 @@ export function buildChatContextPack(
 }
 
 function removeRiskDistractorSources(selected: Map<string, SourceChunkRecord>, questionIntent: QuestionIntent): void {
-  if (questionIntent !== "risk_factors") {
-    return;
-  }
-
   for (const [sourceId, source] of selected) {
-    if (source.sectionType === "md_a" && isAccountingEstimateRiskDistractor(`${source.sectionTitle} ${source.sourceLabel} ${source.text}`)) {
+    if (
+      source.sectionType === "md_a" &&
+      isOffIntentRiskNarrative(questionIntent, `${source.sectionTitle} ${source.sourceLabel} ${source.text}`)
+    ) {
       selected.delete(sourceId);
     }
   }
@@ -223,16 +228,52 @@ function filterExpandedRiskDistractorSources(
   questionIntent: QuestionIntent,
   sourceChunks: SourceChunkRecord[]
 ): SourceChunkRecord[] {
-  if (questionIntent !== "risk_factors") {
-    return sourceChunks;
-  }
-
   return sourceChunks.filter((source) => {
     const original = filing.sourceChunks.find((chunk) => chunk.sourceId === source.sourceId);
-    return !isAccountingEstimateRiskDistractor(
+    return !isOffIntentRiskNarrative(
+      questionIntent,
       `${source.sectionTitle} ${source.sourceLabel} ${original?.text ?? ""} ${source.text}`
     );
   });
+}
+
+function isOffIntentRiskNarrative(questionIntent: QuestionIntent, text: string): boolean {
+  if (questionIntent === "risk_factors") {
+    return isAccountingEstimateRiskDistractor(text);
+  }
+
+  if (questionIntent !== "yoy_change" && questionIntent !== "mda_summary") {
+    return false;
+  }
+
+  const haystack = text.toLowerCase();
+  const hasRiskTerms = hasOffIntentRiskTerms(haystack);
+  const hasExplicitDriverSignal =
+    /(primarily due to|driven by|attributable to|resulted from|because of|benefited from|partially offset|offset by|subscription revenue (?:increased|grew)|annual recurring revenue.{0,80}(?:increased|grew|growth)|revenue (?:increased|grew|decreased|declined)|net sales (?:increased|grew|decreased|declined)|new customers?|existing customers?|additional modules?|module adoption)/.test(
+      haystack
+    );
+  if (hasRiskTerms && !hasExplicitDriverSignal) {
+    return true;
+  }
+
+  const hasBusinessDriverSignal =
+    /(\brevenue\b|net sales|\bsales\b|subscription|annual recurring revenue|\barr\b|customers?|modules?|operating income|net income|cash flow|margin|pricing|volume|traffic|demand)/.test(
+      haystack
+    );
+  if (hasBusinessDriverSignal) {
+    return false;
+  }
+
+  return (
+    isAccountingEstimateRiskDistractor(haystack) ||
+    hasOffIntentRiskTerms(haystack)
+  );
+}
+
+function hasOffIntentRiskTerms(text: string): boolean {
+  return /natural disasters?|catastrophic events?|public health crises|climate change|service providers?|data centers?|manufacturing vendors?|logistics providers?|information technology systems|cybersecurity|data breach|security incident|adversely impact|adversely affect|could affect|could result|could materially|subject to risks?|risk factors?|stock price (?:to )?decline|volatility|corporate responsibility|equity investments?|loss of invested capital|financial reporting standards?|new pronouncements|accounting policies/i.test(
+    text
+  );
 }
 
 export function buildChatFactualPack(
@@ -767,6 +808,23 @@ function businessProductDefinitions(ticker: string): Array<{ label: string; patt
     ];
   }
 
+  if (upperTicker === "INTU") {
+    return [
+      { label: "QuickBooks", patterns: [/quickbooks/i] },
+      { label: "TurboTax", patterns: [/turbotax|turbo tax/i] },
+      { label: "Credit Karma", patterns: [/credit karma/i] },
+      { label: "ProTax", patterns: [/protax|proconnect|lacerte|proseries/i] }
+    ];
+  }
+
+  if (upperTicker === "CEG") {
+    return [
+      { label: "発電・電力販売", patterns: [/generation|electricity|power|nuclear|energy/i] },
+      { label: "原子力発電", patterns: [/nuclear/i] },
+      { label: "エネルギー供給", patterns: [/energy supply|electricity supply|load serving/i] }
+    ];
+  }
+
   return [];
 }
 
@@ -945,13 +1003,21 @@ function seedKnownTickerLabels(
     CRWD: {
       products_services: ["Falcon platform", "cybersecurity subscriptions", "cloud security and identity protection"],
       reportable_segments: []
+    },
+    INTU: {
+      products_services: ["QuickBooks", "TurboTax", "Credit Karma", "ProTax"],
+      reportable_segments: ["Global Business Solutions", "Consumer", "Credit Karma", "ProTax"]
+    },
+    CEG: {
+      products_services: ["発電・電力販売", "原子力発電", "エネルギー供給"],
+      reportable_segments: []
     }
   };
   return mergeLabels(labels, seeds[upperTicker]?.[field] ?? []);
 }
 
 function hasKnownBusinessLabels(ticker: string): boolean {
-  return ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "GOOG", "PH", "CRWD"].includes(ticker.toUpperCase());
+  return ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "GOOG", "PH", "CRWD", "INTU", "CEG"].includes(ticker.toUpperCase());
 }
 
 function fallbackKnownBusinessSourceIds(filing: FilingCacheRecord): string[] {
@@ -1174,6 +1240,11 @@ function rankIntentSources(
     diagnostics && (diagnostics.candidateSourceCount += 1);
 
     if (chunk.sectionType !== "xbrl_metric") {
+      if (isOffIntentRiskNarrative(questionIntent, `${chunk.sectionTitle} ${chunk.sourceLabel} ${chunk.text}`)) {
+        diagnostics && (diagnostics.rejectedLowTextQualityCount += 1);
+        continue;
+      }
+
       const quality = assessNarrativeQuality(chunk.text);
       if (shouldRejectNarrativeSource(questionIntent, quality)) {
         recordRejectedNarrative(diagnostics, quality);
@@ -1208,7 +1279,7 @@ function intentSourceScore(source: SourceChunkRecord, questionIntent: QuestionIn
     case "business_overview":
       return scoreMatches(haystack, [
         [businessContextPattern(), 80],
-        [/accelerated computing|artificial intelligence|\bai\b|gpu|graphics|compute|semiconductor|data center|gaming|professional visualization|networking|automotive|cloud service providers?|consumer internet|enterprise|oem/i, 55],
+        [/accelerated computing|gpu|graphics|compute|semiconductor|data center|gaming|professional visualization|networking|automotive|cloud service providers?|consumer internet|enterprise|oem/i, 55],
         [/automotive|energy|cloud|advertising|subscription|payments?|oncology|diagnostic|pharmaceutical/i, 40]
       ]);
     case "revenue_breakdown":
@@ -1356,7 +1427,7 @@ function buildIntentTextWindows(
   const usable: string[] = [];
   for (const window of windows) {
     diagnostics.candidateSourceCount += 1;
-    if (questionIntent === "risk_factors" && isAccountingEstimateRiskDistractor(window)) {
+    if (isOffIntentRiskNarrative(questionIntent, window)) {
       diagnostics.rejectedLowTextQualityCount += 1;
       continue;
     }
@@ -1374,7 +1445,7 @@ function buildIntentTextWindows(
 function supplementalPattern(questionIntent: QuestionIntent): RegExp {
   switch (questionIntent) {
     case "business_overview":
-      return /item\s+1\.\s*business|business overview|overview|our business|we are|we provide|we offer|products?|services?|customers?|end markets?|reportable segments?|revenue by segment|geograph|accelerated computing|artificial intelligence|\bai\b|gpu|graphics|compute|semiconductor|data center|gaming|professional visualization|networking|automotive|cloud service providers?|consumer internet|enterprise|oem/gi;
+      return /item\s+1\.\s*business|business overview|overview|our business|we are|we provide|we offer|products?|services?|customers?|end markets?|reportable segments?|revenue by segment|geograph|accelerated computing|gpu|graphics|compute|semiconductor|data center|gaming|professional visualization|networking|automotive|cloud service providers?|consumer internet|enterprise|oem/gi;
     case "risk_factors":
       return /item\s+1a|risk factors?|\brisks?\b|uncertain|uncertainty|adverse|depend|competition|competitive|cybersecurity|security vulnerabilities|data breach|privacy|data protection|cloud services?|service outage|third-?party|supply|supplier|regulation|regulatory|antitrust|volatility|tariff|macro|export controls?|customer concentration|demand|inventory|geopolitical|manufacturing|semiconductor|artificial intelligence|\bai\b/gi;
     case "segment_analysis":
@@ -1384,7 +1455,7 @@ function supplementalPattern(questionIntent: QuestionIntent): RegExp {
     case "stock_market_context":
       return /risk|uncertain|outlook|guidance|demand|margin|cash flow|repurchase|dividend|competition|supply|regulation|customer|segment|geograph/gi;
     case "mda_summary":
-      return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|comparable store sales|same-store sales|traffic|ticket|pricing|rate increase|volume|occupancy|leasing|renewal|new stores?|store openings?|tariff|foreign exchange|currency|fuel|weather|customer demand|end-market demand|management'?s discussion|results of operations|net sales|gross margin|operating income|demand|expenses?|cash flow/gi;
+      return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|comparable store sales|same-store sales|traffic|ticket|pricing|rate increase|volume|occupancy|leasing|renewal|new stores?|store openings?|tariff|foreign exchange|currency|fuel|weather|customer demand|end-market demand|subscription revenue|annual recurring revenue|\barr\b|new customers?|existing customers?|additional modules?|module adoption|management'?s discussion|results of operations|net sales|gross margin|operating income|demand|expenses?|cash flow/gi;
     case "margin_profitability":
       return /margin|gross profit|operating income|net income|profitability|cost|pricing|expenses?/gi;
     case "cash_flow":
@@ -1392,7 +1463,7 @@ function supplementalPattern(questionIntent: QuestionIntent): RegExp {
     case "yoy_change":
     case "historical_comparison":
     case "unknown":
-      return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|comparable store sales|same-store sales|traffic|ticket|pricing|rate increase|volume|occupancy|leasing|renewal|new stores?|store openings?|tariff|foreign exchange|currency|fuel|weather|customer demand|end-market demand|increase|decrease|higher|lower|compared|net sales|operating income|net income|growth|demand/gi;
+      return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|comparable store sales|same-store sales|traffic|ticket|pricing|rate increase|volume|occupancy|leasing|renewal|new stores?|store openings?|tariff|foreign exchange|currency|fuel|weather|customer demand|end-market demand|subscription revenue|annual recurring revenue|\barr\b|new customers?|existing customers?|additional modules?|module adoption|increase|decrease|higher|lower|compared|net sales|operating income|net income|growth|demand/gi;
   }
 }
 
@@ -1516,7 +1587,7 @@ function expandSelectedSourceChunk(
   const candidates = [
     chunk.text,
     buildNeighborExpandedText(filing.sourceChunks, original, questionIntent),
-    buildOffsetExpandedText(filing.mdaText, original, profile.sourceExcerptChars)
+    buildOffsetExpandedText(filing.mdaText, original, questionIntent, profile.sourceExcerptChars)
   ]
     .filter((value): value is string => Boolean(value?.trim()))
     .map((value) => clipToSourceExcerpt(value, profile.sourceExcerptChars));
@@ -1548,14 +1619,21 @@ function buildNeighborExpandedText(
       Boolean(source) &&
       source.sectionType === "md_a" &&
       source.sectionTitle === chunk.sectionTitle &&
-      (source.sourceId === chunk.sourceId || !shouldRejectNarrativeSource(questionIntent, assessNarrativeQuality(source.text)))
+      (source.sourceId === chunk.sourceId ||
+        (!shouldRejectNarrativeSource(questionIntent, assessNarrativeQuality(source.text)) &&
+          !isOffIntentRiskNarrative(questionIntent, `${source.sectionTitle} ${source.sourceLabel} ${source.text}`)))
   );
 
   const joined = normalizeWhitespace(candidates.map((source) => source.text).join(" "));
   return joined.length > normalizeWhitespace(chunk.text).length ? joined : null;
 }
 
-function buildOffsetExpandedText(mdaText: string, chunk: SourceChunkRecord, sourceExcerptChars: number): string | null {
+function buildOffsetExpandedText(
+  mdaText: string,
+  chunk: SourceChunkRecord,
+  questionIntent: QuestionIntent,
+  sourceExcerptChars: number
+): string | null {
   const text = mdaText;
   if (!text || chunk.startOffset < 0 || chunk.startOffset >= text.length) {
     return null;
@@ -1563,6 +1641,13 @@ function buildOffsetExpandedText(mdaText: string, chunk: SourceChunkRecord, sour
 
   const center = Math.min(text.length - 1, Math.max(0, Math.floor((chunk.startOffset + chunk.endOffset) / 2)));
   const window = extractWindow(text, center, sourceExcerptChars);
+  if (
+    (questionIntent === "yoy_change" || questionIntent === "mda_summary") &&
+    hasOffIntentRiskTerms(window) &&
+    !hasOffIntentRiskTerms(chunk.text)
+  ) {
+    return null;
+  }
   return window.length > normalizeWhitespace(chunk.text).length ? window : null;
 }
 
@@ -1674,7 +1759,7 @@ function assessNarrativeQuality(text: string): NarrativeQuality {
   const hasTableBoilerplatePhrase = /table of contents|following table sets forth|expressed as a percentage of revenue/i.test(
     normalized
   );
-  const hasBusinessSignal = /accelerated computing|artificial intelligence|\bai\b|data center|compute|networking|graphics|gaming|professional visualization|automotive|customers?|cloud service providers?|enterprise|revenue from/i.test(
+  const hasBusinessSignal = /accelerated computing|data center|compute|networking|graphics|gaming|professional visualization|automotive|customers?|cloud service providers?|enterprise|revenue from/i.test(
     normalized
   );
   const isTableBoilerplate =

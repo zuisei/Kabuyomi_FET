@@ -6,6 +6,7 @@ import {
   resolveGeminiModel,
   resolveGeminiTranslationModel
 } from "../src/clients/gemini/request";
+import { buildDeterministicMetricAnswer } from "../src/lib/chat/deterministic";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -326,6 +327,250 @@ describe("Gemini local chat fallback", () => {
     expect(response.answer).toContain("サイバーセキュリティ");
     expect(response.answer).not.toContain("アクセラレーテッドコンピューティング");
     expect(response.answer).not.toContain("データセンター向けコンピューティング");
+  });
+
+  it("explains CRWD subscription revenue drivers instead of giving navigational fallback text", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "売上成長の要因は？",
+      filing: makeCrowdstrikeSubscriptionGrowthFiling()
+    });
+
+    expect(response.answer).toContain("売上高は");
+    expect(response.answer).toContain("新規顧客・新規契約の増加");
+    expect(response.answer).toContain("既存顧客への追加導入・利用拡大");
+    expect(response.answer).toContain("サブスクリプション型の継続収益");
+    expect(response.answer).not.toContain("本文全体と数字を並べると");
+    expect(response.answer).not.toContain("伸びの候補として見ます");
+    expect(response.sourceIds).toEqual(expect.arrayContaining(["S3", "S9"]));
+  });
+
+  it("treats CRWD subscription growth durability as recurring rather than a next-step answer", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "その要因は一時的？",
+      filing: makeCrowdstrikeSubscriptionGrowthFiling()
+    });
+
+    expect(response.answer).toContain("サブスクリプション型の継続収益");
+    expect(response.answer).toContain("一回限りだけの要因とは見にくい");
+    expect(response.answer).toContain("顧客維持・追加導入・サブスクリプション拡大が続くか");
+    expect(response.answer).not.toContain("次に見るなら");
+    expect(response.sourceIds).toEqual(expect.arrayContaining(["S3", "S9"]));
+  });
+
+  it("does not present profit metrics as revenue-growth drivers when revenue context is missing", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "売上成長の要因は？",
+      filing: makeCrowdstrikeMissingRevenueDriverFiling()
+    });
+
+    expect(response.answer).toContain("売上成長の要因は");
+    expect(response.answer).toContain("売上高指標や要因説明が不足");
+    expect(response.answer).toContain("純利益や営業利益の数字");
+    expect(response.answer).not.toContain("本文全体と数字を並べると");
+    expect(response.answer).not.toContain("伸びの候補として見ます");
+    expect(response.sourceIds).toEqual(["S9"]);
+  });
+
+  it("does not label generic platform language as Falcon for non-CRWD revenue drivers", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "売上成長の要因は？",
+      filing: makeIntuitPlatformGrowthFiling()
+    });
+
+    expect(response.answer).toContain("プラットフォーム利用の拡大");
+    expect(response.answer).not.toContain("Falcon");
+    expect(response.sourceIds).toEqual(expect.arrayContaining(["S2", "S9"]));
+  });
+
+  it("uses known CEG business context instead of mapping AI acronym glossary text to Nvidia-like business", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "何の会社？",
+      filing: makeConstellationAcronymGlossaryFiling()
+    });
+
+    expect(response.answer).toContain("発電・電力販売");
+    expect(response.answer).toContain("エネルギー会社");
+    expect(response.answer).not.toContain("アクセラレーテッドコンピューティング");
+  });
+
+  it("uses CEG risk-factor context instead of returning no-source fallback", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "リスクは？",
+      filing: makeConstellationRiskContextFiling()
+    });
+
+    expect(response.answer).toContain("リスク");
+    expect(response.answer).toMatch(/発電|電力|規制|市場価格/);
+    expect(response.answer).not.toBe("この決算資料の範囲では確認できません。");
+    expect(response.sourceIds).toEqual(["CTX1"]);
+  });
+
+  it("does not map non-utility energy wording to power-company risk fallback", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "リスクは？",
+      filing: makeSecurityRiskWithEnergyWordingFiling()
+    });
+
+    expect(response.answer).toContain("リスク");
+    expect(response.answer).not.toContain("発電・電力事業");
+    expect(response.answer).not.toContain("市場価格や需要変動");
+    expect(response.sourceIds).toEqual(["CTX1"]);
+  });
+
+  it("does not cite heading-only MD&A text for durability follow-ups", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "その要因は一時的？",
+      filing: makeConstellationHeadingOnlyDurabilityFiling()
+    });
+
+    expect(response.answer).toContain("本文に売上変化の要因説明がない");
+    expect(response.answer).toContain("売上高は 255.3億ドル");
+    expect(response.answer).not.toContain("この要因に近い説明があります");
+    expect(response.sourceIds).toEqual(["S9"]);
+  });
+
+  it("summarizes RevPAR durability context instead of generic nearby-explanation text", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "その要因は一時的？",
+      filing: makeMarriottRevparDurabilityFiling()
+    });
+
+    expect(response.answer).toContain("RevPAR");
+    expect(response.answer).toContain("稼働率");
+    expect(response.answer).toContain("旅行需要");
+    expect(response.answer).not.toContain("この要因に近い説明があります");
+    expect(response.sourceIds).toEqual(expect.arrayContaining(["S7", "S9"]));
+  });
+
+  it("translates Synopsys acquisition and product-group growth drivers in durability fallback", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "その要因は一時的？",
+      filing: makeSynopsysDurabilityFiling()
+    });
+
+    expect(response.answer).toContain("大半の製品グループと地域での増収");
+    expect(response.answer).toContain("Ansys買収による約885百万ドルの寄与");
+    expect(response.answer).not.toContain("revenue growth across");
+    expect(response.answer).not.toContain("geographies");
+  });
+
+  it("builds balanced investor-view fallback from metrics instead of a single vague sentence", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "投資家目線で良い点と悪い点は？",
+      filing: makeInvestorViewFallbackFiling()
+    });
+
+    expect(response.answer).toContain("良い点");
+    expect(response.answer).toContain("悪い点・注意点");
+    expect(response.answer).toContain("売上はプラス材料");
+    expect(response.answer).toContain("営業CFは注意材料");
+    expect(response.answer).not.toContain("本文全体と数字を並べると");
+    expect(response.sourceIds).toEqual(expect.arrayContaining(["S9", "S12"]));
+  });
+
+  it("adds context when deterministic margin answer says deterioration is not present", () => {
+    const result = buildDeterministicMetricAnswer(makeAdpMarginImprovementFiling(), "利益率が悪化した理由は？");
+
+    expect(result?.response.answer).toContain("利益率悪化は確認できません");
+    expect(result?.response.answer).toContain("悪化要因を探すより改善が続くか");
+    expect(result?.response.answer.length).toBeGreaterThan(80);
+  });
+
+  it("softens revenue-breakdown limitation wording in remote Gemini answers", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        answer:
+                          "ADPの主な売上区分は、給与計算や人事管理などのHCMプラットフォーム、リタイアメントサービス、およびPEOサービスです。具体的にどの区分が最大であるかや、それぞれの詳細な売上額などの内訳は、この資料だけでは確認できません。",
+                        sourceIds: ["CTX1"]
+                      })
+                    }
+                  ]
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      )
+    );
+
+    const response = await generateChatAnswer({ GEMINI_API_KEY: "test-key" } as never, {
+      question: "売上の柱は？",
+      filing: makeAdpRevenueBreakdownFiling()
+    });
+
+    expect(response.answer).toContain("上記のサービス群が売上構造を見る軸");
+    expect(response.answer).not.toContain("この資料だけでは確認できません");
+  });
+
+  it("softens common revenue-breakdown refusal endings across service and marketplace answers", async () => {
+    const examples = [
+      {
+        raw:
+          "DoorDashの主な売上区分は地域別で管理されていますが、事業内容としては地域の料理配送物流が現在最大のカテゴリーとなっています。具体的な製品やサービスごとの売上内訳については、この資料だけでは確認できません。",
+        expected: "上記の事業内容を売上の柱として見るのが近い"
+      },
+      {
+        raw:
+          "CINTAS CORPの主な売上区分は、ユニフォームのレンタルおよび販売、およびそれに付随するビジネスサービスです。売上の具体的な内訳や変化の方向については、この資料だけでは確認できません。",
+        expected: "上記の事業区分が売上構造を見る軸"
+      },
+      {
+        raw:
+          "Fortinetの主な売上区分は、地域別の売上高に分かれています。特に、FortiGuardなどのセキュリティサブスクリプションとFortiCareのテクニカルサポートサービスからの収益が重要な柱となっています。具体的な製品やサービスごとの売上内訳や、それぞれの成長率などの詳細な数値は、この資料だけでは確認できません。",
+        expected: "上記のサービス区分が売上構造を見る軸"
+      },
+      {
+        raw:
+          "Airbnbは、宿泊施設や体験、サービスの提供を仲介するグローバルなマーケットプレイスを運営しています。売上の具体的な内訳については、この資料では地域別の売上高などの地理的な区分のみが記載されており、製品やサービスごとの詳細な売上構成は確認できません。",
+        expected: "上記の宿泊・体験・サービス領域が売上構造を見る軸"
+      }
+    ];
+
+    for (const example of examples) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              candidates: [
+                {
+                  content: {
+                    parts: [
+                      {
+                        text: JSON.stringify({
+                          answer: example.raw,
+                          sourceIds: ["CTX1"]
+                        })
+                      }
+                    ]
+                  }
+                }
+              ]
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          )
+        )
+      );
+
+      const response = await generateChatAnswer({ GEMINI_API_KEY: "test-key" } as never, {
+        question: "売上の柱は？",
+        filing: makeAdpRevenueBreakdownFiling()
+      });
+
+      expect(response.answer).toContain(example.expected);
+      expect(response.answer).not.toContain("この資料だけでは確認できません");
+      expect(response.answer).not.toContain("詳細な売上構成は確認できません");
+    }
   });
 
   it("keeps pricing-driver durability fallback in Japanese", async () => {
@@ -2012,3 +2257,578 @@ describe("Gemini local chat fallback", () => {
     expect(response.answer).toContain("売上高は 1,437.6億ドル");
   });
 });
+
+function makeCrowdstrikeSubscriptionGrowthFiling() {
+  return {
+    filingKey: "v6:0001535527:000153552726000010",
+    ticker: "CRWD",
+    companyName: "CrowdStrike Holdings, Inc.",
+    cik: "0001535527",
+    formType: "10-K",
+    filedAt: "2026-03-05",
+    periodOfReport: "2026-01-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        value: 3953000000,
+        unit: "USD",
+        periodEnd: "2026-01-31",
+        comparisonValue: 3056000000,
+        yoyPercent: 29.4
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S3",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7",
+        text:
+          "Subscription revenue increased primarily due to new customers, expansion within existing customers, and additional module adoption on the Falcon platform. Annual recurring revenue continued to grow with customer adoption of cloud security, identity protection and threat intelligence modules.",
+        startOffset: 0,
+        endOffset: 285,
+        sortOrder: 3
+      },
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)",
+        text: "売上高: 3953000000 USD / 比較値: 3056000000 / YoY: 29.4%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        sortOrder: 9
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeCrowdstrikeMissingRevenueDriverFiling() {
+  const filing = makeCrowdstrikeSubscriptionGrowthFiling();
+  return {
+    ...filing,
+    metrics: [
+      {
+        logicalName: "netIncome",
+        tagUsed: "NetIncomeLoss",
+        value: -162502000,
+        unit: "USD",
+        periodEnd: "2026-01-31",
+        comparisonValue: -15241000,
+        yoyPercent: -966.2
+      },
+      {
+        logicalName: "operatingIncome",
+        tagUsed: "OperatingIncomeLoss",
+        value: -293292000,
+        unit: "USD",
+        periodEnd: "2026-01-31",
+        comparisonValue: -116400000,
+        yoyPercent: -152
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7",
+        text:
+          "Additionally, we regularly monitor our compliance with applicable financial reporting standards and review new pronouncements and drafts thereof that are relevant to us. Such changes may require us to change accounting policies.",
+        startOffset: 0,
+        endOffset: 220,
+        sortOrder: 2
+      },
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "純利益",
+        sourceLabel: "XBRL 純利益 (NetIncomeLoss)",
+        text: "純利益: -162502000 USD / 比較値: -15241000 / YoY: -966.2%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "NetIncomeLoss",
+        sortOrder: 9
+      },
+      {
+        sourceId: "S11",
+        sectionType: "xbrl_metric",
+        sectionTitle: "営業利益",
+        sourceLabel: "XBRL 営業利益 (OperatingIncomeLoss)",
+        text: "営業利益: -293292000 USD / 比較値: -116400000 / YoY: -152.0%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "OperatingIncomeLoss",
+        sortOrder: 11
+      }
+    ]
+  } as any;
+}
+
+function makeIntuitPlatformGrowthFiling() {
+  return {
+    filingKey: "v6:0000896878:000089687826000014",
+    ticker: "INTU",
+    companyName: "INTUIT INC.",
+    cik: "0000896878",
+    formType: "10-Q",
+    filedAt: "2026-02-26",
+    periodOfReport: "2026-01-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "Revenues",
+        value: 4651000000,
+        unit: "USD",
+        periodEnd: "2026-01-31",
+        comparisonValue: 3963000000,
+        yoyPercent: 17.4
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Item 2",
+        sourceLabel: "10-Q Item 2",
+        text:
+          "Revenue increased due to customers adopting more platform services and broader workflows across our business and tax offerings.",
+        startOffset: 0,
+        endOffset: 130,
+        sortOrder: 2
+      },
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (Revenues)",
+        text: "売上高: 4651000000 USD / 比較値: 3963000000 / YoY: 17.4%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "Revenues",
+        sortOrder: 9
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeConstellationAcronymGlossaryFiling() {
+  return {
+    filingKey: "v6:0001868275:000186827526000032",
+    ticker: "CEG",
+    companyName: "Constellation Energy Corp",
+    cik: "0001868275",
+    formType: "10-K",
+    filedAt: "2026-02-24",
+    periodOfReport: "2025-12-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [],
+    sourceChunks: [
+      {
+        sourceId: "CTX2",
+        sectionType: "md_a",
+        sectionTitle: "Business overview context",
+        sourceLabel: "10-K Business overview context",
+        text:
+          "AESO Alberta Electric Systems Operator AI Artificial Intelligence AOCI Accumulated Other Comprehensive Income ARO Asset Retirement Obligation. Constellation Energy operates generation assets and sells electricity to customers.",
+        startOffset: 0,
+        endOffset: 220,
+        sortOrder: 2
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeConstellationRiskContextFiling() {
+  return {
+    filingKey: "v6:0001868275:000186827526000032",
+    ticker: "CEG",
+    companyName: "Constellation Energy Corp",
+    cik: "0001868275",
+    formType: "10-K",
+    filedAt: "2026-02-24",
+    periodOfReport: "2025-12-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [],
+    sourceChunks: [
+      {
+        sourceId: "CTX1",
+        sectionType: "md_a",
+        sectionTitle: "Risk factors context",
+        sourceLabel: "10-K Risk factors context",
+        text:
+          "Our business is subject to risks related to nuclear generation operations, power and capacity market prices, regulation, electricity demand, supply constraints and geopolitical uncertainty. These risks may adversely affect our results of operations.",
+        startOffset: 0,
+        endOffset: 245,
+        sortOrder: 1
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeSecurityRiskWithEnergyWordingFiling() {
+  return {
+    filingKey: "v6:0001262039:000126203926000001",
+    ticker: "FTNT",
+    companyName: "Fortinet Inc.",
+    cik: "0001262039",
+    formType: "10-K",
+    filedAt: "2026-02-20",
+    periodOfReport: "2025-12-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [],
+    sourceChunks: [
+      {
+        sourceId: "CTX1",
+        sectionType: "md_a",
+        sectionTitle: "Risk factors context",
+        sourceLabel: "10-K Risk factors context",
+        text:
+          "Our business is subject to risks from cybersecurity threats, security vulnerabilities, competition, regulation, supply constraints, and higher energy consumption in data centers.",
+        startOffset: 0,
+        endOffset: 165,
+        sortOrder: 1
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeConstellationHeadingOnlyDurabilityFiling() {
+  return {
+    filingKey: "v6:0001868275:000186827526000032",
+    ticker: "CEG",
+    companyName: "Constellation Energy Corp",
+    cik: "0001868275",
+    formType: "10-K",
+    filedAt: "2026-02-24",
+    periodOfReport: "2025-12-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "Revenues",
+        value: 25533000000,
+        unit: "USD",
+        periodEnd: "2025-12-31",
+        comparisonValue: 23568000000,
+        yoyPercent: 8.3
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7",
+        text: "MANAGEMENT’S DISCUSSION AND ANALYSIS OF FINANCIAL CONDITION AND RESULTS OF OPERATIONS",
+        startOffset: 0,
+        endOffset: 86,
+        sortOrder: 2
+      },
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (Revenues)",
+        text: "売上高: 25533000000 USD / 比較値: 23568000000 / YoY: 8.3%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "Revenues",
+        sortOrder: 9
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeInvestorViewFallbackFiling() {
+  return {
+    filingKey: "v6:test",
+    ticker: "TEST",
+    companyName: "TEST CO",
+    cik: "0000000000",
+    formType: "10-Q",
+    filedAt: "2026-04-30",
+    periodOfReport: "2026-03-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "Revenues",
+        value: 1000,
+        unit: "USD",
+        periodEnd: "2026-03-31",
+        comparisonValue: 900,
+        yoyPercent: 11.1
+      },
+      {
+        logicalName: "operatingCashFlow",
+        tagUsed: "NetCashProvidedByUsedInOperatingActivities",
+        value: 80,
+        unit: "USD",
+        periodEnd: "2026-03-31",
+        comparisonValue: 120,
+        yoyPercent: -33.3
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (Revenues)",
+        text: "売上高: 1000 USD / 比較値: 900 / YoY: 11.1%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "Revenues",
+        sortOrder: 9
+      },
+      {
+        sourceId: "S12",
+        sectionType: "xbrl_metric",
+        sectionTitle: "営業CF",
+        sourceLabel: "XBRL 営業CF (NetCashProvidedByUsedInOperatingActivities)",
+        text: "営業CF: 80 USD / 比較値: 120 / YoY: -33.3%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "NetCashProvidedByUsedInOperatingActivities",
+        sortOrder: 12
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeMarriottRevparDurabilityFiling() {
+  return {
+    filingKey: "v6:0001048286:000104828626000010",
+    ticker: "MAR",
+    companyName: "MARRIOTT INTERNATIONAL INC",
+    cik: "0001048286",
+    formType: "10-K",
+    filedAt: "2026-02-10",
+    periodOfReport: "2025-12-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "Revenues",
+        value: 26186000000,
+        unit: "USD",
+        periodEnd: "2025-12-31",
+        comparisonValue: 25100000000,
+        yoyPercent: 4.3
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S7",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7",
+        text:
+          "We believe Revenue per Available Room (RevPAR), which we calculate by dividing property level room revenue by total rooms available for the period, is a meaningful indicator of our performance because it measures occupancy and average daily rate across our lodging properties.",
+        startOffset: 0,
+        endOffset: 285,
+        sortOrder: 7
+      },
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (Revenues)",
+        text: "売上高: 26186000000 USD / 比較値: 25100000000 / YoY: 4.3%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "Revenues",
+        sortOrder: 9
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeSynopsysDurabilityFiling() {
+  return {
+    filingKey: "v6:0000883241:000088324126000020",
+    ticker: "SNPS",
+    companyName: "SYNOPSYS INC",
+    cik: "0000883241",
+    formType: "10-Q",
+    filedAt: "2026-02-25",
+    periodOfReport: "2026-01-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        value: 2408798000,
+        unit: "USD",
+        periodEnd: "2026-01-31",
+        comparisonValue: 1455315000,
+        yoyPercent: 65.5
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S7",
+        sectionType: "md_a",
+        sectionTitle: "Part I Item 2",
+        sourceLabel: "10-Q Part I Item 2",
+        text:
+          "For the first quarter of fiscal 2026, revenue growth was primarily due to revenue growth across a majority of product groups and geographies and Ansys' contribution of $885 million.",
+        startOffset: 0,
+        endOffset: 178,
+        sortOrder: 7
+      },
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)",
+        text: "売上高: 2408798000 USD / 比較値: 1455315000 / YoY: 65.5%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        sortOrder: 9
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeAdpMarginImprovementFiling() {
+  return {
+    filingKey: "v6:0000008670:000000867026000010",
+    ticker: "ADP",
+    companyName: "AUTOMATIC DATA PROCESSING, INC.",
+    cik: "0000008670",
+    formType: "10-Q",
+    filedAt: "2026-01-29",
+    periodOfReport: "2025-12-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        value: 5359300000,
+        unit: "USD",
+        periodEnd: "2025-12-31",
+        comparisonValue: 5048400000,
+        yoyPercent: 6.2
+      },
+      {
+        logicalName: "netIncome",
+        tagUsed: "NetIncomeLoss",
+        value: 1062000000,
+        unit: "USD",
+        periodEnd: "2025-12-31",
+        comparisonValue: 963200000,
+        yoyPercent: 10.3
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)",
+        text: "売上高: 5359300000 USD / 比較値: 5048400000 / YoY: 6.2%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        sortOrder: 9
+      },
+      {
+        sourceId: "S10",
+        sectionType: "xbrl_metric",
+        sectionTitle: "純利益",
+        sourceLabel: "XBRL 純利益 (NetIncomeLoss)",
+        text: "純利益: 1062000000 USD / 比較値: 963200000 / YoY: 10.3%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "NetIncomeLoss",
+        sortOrder: 10
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-14T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeAdpRevenueBreakdownFiling() {
+  return {
+    ...makeAdpMarginImprovementFiling(),
+    sourceChunks: [
+      {
+        sourceId: "CTX1",
+        sectionType: "md_a",
+        sectionTitle: "Segment and revenue context",
+        sourceLabel: "10-Q Segment and revenue context",
+        text:
+          "ADP provides HCM platforms, payroll, retirement services and PEO services to employers. These services are the main business lines discussed in the filing.",
+        startOffset: 0,
+        endOffset: 150,
+        sortOrder: 1
+      }
+    ]
+  } as any;
+}

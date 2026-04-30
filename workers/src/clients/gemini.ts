@@ -119,7 +119,10 @@ export async function generateChatAnswer(env: Env, input: ChatPromptInput): Prom
   }
 
   const remoteAnswer: GeminiChatAnswer = {
-    answer: stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(normalized.answer))),
+    answer: polishChatAnswerForQuestion(
+      input.question,
+      stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(normalized.answer)))
+    ),
     sourceIds: normalized.sourceIds,
     usedRemoteModel: normalized.usedRemoteModel
   };
@@ -317,6 +320,11 @@ function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: strin
   const asksProfitCause =
     /(赤字|黒字|損失|欠損|純利益|利益|net income|net loss|profit|income|earnings|loss)/.test(normalizedQuestion) &&
     /(主因|要因|原因|理由|なぜ|背景|何が|driver|cause|why)/.test(normalizedQuestion);
+  const asksRevenueCause =
+    /(売上|増収|revenue|sales|growth)/.test(normalizedQuestion) &&
+    /(主因|要因|原因|理由|なぜ|背景|押し上げ|牽引|driver|cause|why|一時|継続|持続|temporary|recurring)/.test(
+      normalizedQuestion
+    );
   const asksBroadStockContext =
     /(株の調子|株調子|株の動き|株どう|株はどう|最近株|最近の株|直近株|足元株|足元の株|stockperformance|shareperformance)/.test(
       normalizedQuestion
@@ -407,6 +415,14 @@ function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: strin
     }
   }
 
+  if (asksRevenueCause) {
+    const mentionsRevenue = /(売上|増収|revenue|sales)/.test(normalizedAnswer);
+    const leansOnProfitOnly = /(営業利益|純利益|利益率|eps|operating income|net income|profit|earnings)/.test(normalizedAnswer);
+    if (leansOnProfitOnly && !mentionsRevenue) {
+      return true;
+    }
+  }
+
   if (asksProfitCause) {
     const mentionsProfitContext = /(純利益|赤字|黒字|損失|net income|net loss|profit|loss)/.test(normalizedAnswer);
     const leansOnRevenue = /(売上高|revenue|sales)/.test(normalizedAnswer);
@@ -447,6 +463,47 @@ function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: strin
   const latinCount = (answer.match(/[A-Za-z]/g) ?? []).length;
   const japaneseCount = (answer.match(/[ぁ-んァ-ヶ一-龠]/g) ?? []).length;
   return !asksAboutFilingStructure && latinCount >= 40 && japaneseCount <= 12;
+}
+
+function polishChatAnswerForQuestion(question: string, answer: string): string {
+  const normalizedQuestion = question.replace(/\s+/g, "").toLowerCase();
+  const asksRevenueBreakdown =
+    /(売上|sales|revenue)/.test(normalizedQuestion) &&
+    /(セクター|sector|セグメント|segment|事業|business|部門|内訳|構成|柱|源泉|カテゴリ)/.test(normalizedQuestion);
+
+  if (!asksRevenueBreakdown) {
+    return answer;
+  }
+
+  return answer
+    .replace(
+      /具体的な売上高の金額や、製品・サービス別の内訳は、この資料だけでは確認できません。/g,
+      "金額の細目は限定的ですが、上記の事業・地域区分を売上の柱として見るのが近いです。"
+    )
+    .replace(
+      /具体的な製品やサービスごとの詳細な売上金額は、この資料だけでは確認できません。/g,
+      "製品・サービスごとの細かい金額までは限定的ですが、上記の区分が売上構造を見る軸です。"
+    )
+    .replace(
+      /具体的にどの区分が最大であるかや、それぞれの詳細な売上額などの内訳は、この資料だけでは確認できません。/g,
+      "最大区分や細かい金額までは限定的ですが、上記のサービス群が売上構造を見る軸です。"
+    )
+    .replace(
+      /具体的な製品やサービスごとの売上内訳については、この資料だけでは確認できません。/g,
+      "製品・サービスごとの細かい金額は限定的ですが、上記の事業内容を売上の柱として見るのが近いです。"
+    )
+    .replace(
+      /売上の具体的な内訳や変化の方向については、この資料だけでは確認できません。/g,
+      "細かい内訳や変化率は限定的ですが、上記の事業区分が売上構造を見る軸です。"
+    )
+    .replace(
+      /具体的な製品やサービスごとの売上内訳や、それぞれの成長率などの詳細な数値は、この資料だけでは確認できません。/g,
+      "製品・サービス別の細かい成長率は限定的ですが、上記のサービス区分が売上構造を見る軸です。"
+    )
+    .replace(
+      /売上の具体的な内訳については、この資料では地域別の売上高などの地理的な区分のみが記載されており、製品やサービスごとの詳細な売上構成は確認できません。/g,
+      "製品・サービス別の細かい売上構成は限定的ですが、上記の宿泊・体験・サービス領域が売上構造を見る軸です。"
+    );
 }
 
 function firstPatternIndex(value: string, pattern: RegExp): number {

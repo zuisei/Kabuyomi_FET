@@ -149,7 +149,8 @@ export function buildDeterministicMetricAnswer(
         response: {
           answer: [
             "提出資料上、今期の利益率悪化は確認できません。",
-            ...marginSnapshots.map(formatMarginSnapshot)
+            ...marginSnapshots.map(formatMarginSnapshot),
+            "質問は悪化理由ですが、確認できる範囲では利益率は横ばいから改善方向なので、悪化要因を探すより改善が続くかを見た方が近いです。"
           ].join(" "),
           sources
         }
@@ -327,7 +328,13 @@ function buildRevenueBreakdownAnswer(filing: FilingCacheRecord): ChatResponsePay
       return source ? [buildSecFilingSource(source)] : [];
     });
     if (sources.length > 0) {
-      const labels = primaryCategories.slice(0, 6).map((fact) => fact.label);
+      const labels = primaryCategories
+        .map((fact) => fact.label)
+        .filter((label) => !isGenericRevenueCategoryLabel(label))
+        .slice(0, 6);
+      if (labels.length === 0) {
+        return null;
+      }
       const geography = factualPack.revenueCategories
         ?.filter((fact) => fact.kind === "geography")
         .slice(0, 3)

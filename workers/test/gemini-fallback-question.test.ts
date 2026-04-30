@@ -17,4 +17,11 @@ describe("Gemini fallback question profiling", () => {
     expect(stockProfile.asksStockContext).toBe(true);
     expect(wantsNarrativeDepth(stockProfile)).toBe(true);
   });
+
+  it("classifies investor-view prompts as narrative questions", () => {
+    const profile = analyzeQuestion("投資家目線で良い点と悪い点は？");
+
+    expect(profile.asksInvestmentView).toBe(true);
+    expect(wantsNarrativeDepth(profile)).toBe(true);
+  });
 });

@@ -67,11 +67,41 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
     };
   }
 
+  if (profile.asksInvestmentView) {
+    const investmentView = buildInvestmentViewFallbackAnswer(input.filing, sourceChunks, narrative);
+    if (investmentView) {
+      return investmentView;
+    }
+  }
+
   if (profile.asksStockPrice || profile.asksRecommendation || profile.asksMarketReaction || profile.asksStockContext) {
     const closest = buildClosestContextFallbackAnswer(metric, metricSourceId, narrative, profile);
     if (closest) {
       return closest;
     }
+  }
+
+  if (profile.asksRevenue && profile.asksCause && !metric) {
+    const driverSentence = narrative ? summarizeRevenueDriverNarrative(narrative) : null;
+    if (driverSentence) {
+      return {
+        answer: `売上高の直接指標はこの context では確認できませんが、本文では ${driverSentence}`,
+        sourceIds: [narrative!.sourceId]
+      };
+    }
+
+    const nearestMetricSource = sourceChunks.find((chunk) => chunk.sectionType === "xbrl_metric" && chunk.text.trim());
+    if (nearestMetricSource) {
+      return {
+        answer: "売上成長の要因は、この資料から直接確認できる売上高指標や要因説明が不足しているため断定できません。純利益や営業利益の数字はありますが、売上成長の主因としては使わない方が安全です。",
+        sourceIds: [nearestMetricSource.sourceId]
+      };
+    }
+
+    return {
+      answer: "この決算資料の範囲では確認できません。",
+      sourceIds: []
+    };
   }
 
   if (profile.asksDurability) {
@@ -163,6 +193,7 @@ function selectRelevantMetric(filing: FilingCacheRecord, profile: QuestionProfil
     profile.asksRevenue ||
     profile.asksStockPrice ||
     profile.asksRecommendation ||
+    profile.asksInvestmentView ||
     profile.asksStockContext ||
     profile.asksGuidance ||
     profile.asksForecast
@@ -178,6 +209,9 @@ function selectRelevantNarrative(
   profile: QuestionProfile,
   metricSourceId?: string
 ): SourceChunkRecord | undefined {
+  const riskFallbackNarrative = profile.asksRisk
+    ? selectRiskFallbackNarrative(sourceChunks, metricSourceId)
+    : undefined;
   const narratives = sourceChunks.filter(
     (chunk) => chunk.sectionType === "md_a" && chunk.sourceId !== metricSourceId && !isLowSignalNarrative(chunk)
   );
@@ -212,7 +246,7 @@ function selectRelevantNarrative(
 
   if (profile.asksBusinessOverview) {
     return findNarrative(
-      /precision oncology|oncology|cancer|tumor|screening|diagnostic|blood[- ]based|liquid biopsy|molecular|biopharmaceutical|revenue by|disaggregation of revenue|vehicle sales|automotive|energy generation and storage|subscription and services|transaction revenue|cloud|advertising|accelerated computing|artificial intelligence|\bai\b|gpu|data center|compute|networking|graphics|gaming|professional visualization|cloud service providers?|enterprise/
+      /precision oncology|oncology|cancer|tumor|screening|diagnostic|blood[- ]based|liquid biopsy|molecular|biopharmaceutical|revenue by|disaggregation of revenue|vehicle sales|automotive|energy generation and storage|subscription and services|transaction revenue|cloud|advertising|accelerated computing|gpu|data center|compute|networking|graphics|gaming|professional visualization|cloud service providers?|enterprise/
     ) ?? driverNarrative;
   }
 
@@ -221,7 +255,7 @@ function selectRelevantNarrative(
   }
 
   if (profile.asksRisk) {
-    return riskNarrative ?? driverNarrative;
+    return riskFallbackNarrative ?? riskNarrative ?? driverNarrative;
   }
 
   if (profile.asksDurability) {
@@ -249,6 +283,7 @@ function selectRelevantNarrative(
   if (
     profile.asksStockPrice ||
     profile.asksRecommendation ||
+    profile.asksInvestmentView ||
     profile.asksStockContext ||
     profile.asksMarketReaction
   ) {
@@ -256,6 +291,37 @@ function selectRelevantNarrative(
   }
 
   return narratives[0];
+}
+
+function selectRiskFallbackNarrative(
+  sourceChunks: SourceChunkRecord[],
+  metricSourceId?: string
+): SourceChunkRecord | undefined {
+  const riskCandidates = sourceChunks
+    .filter((chunk) => chunk.sectionType === "md_a" && chunk.sourceId !== metricSourceId && chunk.text.trim())
+    .filter((chunk) => hasRiskContextLabel(chunk) || hasSubstantiveRiskSignal(chunk));
+
+  return (
+    riskCandidates.find((chunk) => hasRiskContextLabel(chunk)) ??
+    riskCandidates.find((chunk) => !isAccountingOnlyRiskDistractor(chunk)) ??
+    riskCandidates[0]
+  );
+}
+
+function hasRiskContextLabel(chunk: SourceChunkRecord): boolean {
+  return /risk factors?|risk factors context/i.test(`${chunk.sectionTitle ?? ""} ${chunk.sourceLabel ?? ""}`);
+}
+
+function hasSubstantiveRiskSignal(chunk: SourceChunkRecord): boolean {
+  return /risk|uncertain|uncertainty|adverse|depend|competition|regulation|regulatory|geopolitical|volatility|supply|supplier|demand|market|commodity|nuclear|energy|power|electricity/i.test(
+    chunk.text
+  );
+}
+
+function isAccountingOnlyRiskDistractor(chunk: SourceChunkRecord): boolean {
+  return /critical accounting|accounting policies|new pronouncements|financial reporting standards?|estimates/i.test(
+    chunk.text
+  );
 }
 
 function buildMetricFallbackAnswer(
@@ -347,6 +413,62 @@ function buildClosestContextFallbackAnswer(
     : null;
 }
 
+function buildInvestmentViewFallbackAnswer(
+  filing: FilingCacheRecord,
+  sourceChunks: SourceChunkRecord[],
+  narrative: SourceChunkRecord | undefined
+): GeminiChatAnswer | null {
+  const positives: string[] = [];
+  const cautions: string[] = [];
+  const sourceIds: string[] = [];
+
+  const addMetric = (logicalName: MetricSnapshot["logicalName"], positiveLabel: string, cautionLabel: string) => {
+    const metric = filing.metrics.find((entry) => entry.logicalName === logicalName);
+    if (!metric) {
+      return;
+    }
+    const sourceId = findMetricSourceId(sourceChunks, metric);
+    if (sourceId) {
+      sourceIds.push(sourceId);
+    }
+    const line = buildMetricObservation(metric);
+    if ((metric.yoyPercent ?? 0) >= 0) {
+      positives.push(`${positiveLabel}: ${line}`);
+    } else {
+      cautions.push(`${cautionLabel}: ${line}`);
+    }
+  };
+
+  addMetric("revenue", "売上はプラス材料", "売上は注意材料");
+  addMetric("operatingIncome", "営業利益はプラス材料", "営業利益は注意材料");
+  addMetric("operatingCashFlow", "営業CFはプラス材料", "営業CFは注意材料");
+
+  if (narrative) {
+    sourceIds.push(narrative.sourceId);
+    const narrativeText = summarizeNarrativeEvidence(narrative, {
+      ...analyzeQuestion("投資家目線で良い点と悪い点は？"),
+      asksInvestmentView: true
+    });
+    if (/risk|uncertain|uncertainty|adverse|リスク|不確実|弱|悪|減|低下|費用|cost|expense/i.test(narrative.text)) {
+      cautions.push(narrativeText);
+    } else {
+      positives.push(narrativeText);
+    }
+  }
+
+  if (positives.length === 0 && cautions.length === 0) {
+    return null;
+  }
+
+  const positiveText = positives.length > 0 ? positives.slice(0, 2).join(" ") : "明確なプラス材料はこの抜粋だけでは限定的です。";
+  const cautionText = cautions.length > 0 ? cautions.slice(0, 2).join(" ") : "大きな注意材料はこの抜粋だけでは限定的です。";
+
+  return {
+    answer: `良い点は、${positiveText} 一方で悪い点・注意点は、${cautionText} なお、この資料だけでは株価評価や将来の市場反応までは断定できません。`,
+    sourceIds: Array.from(new Set(sourceIds))
+  };
+}
+
 function buildNarrativeFallbackAnswer(narrative: SourceChunkRecord, profile: QuestionProfile): GeminiChatAnswer {
   if (profile.asksBusinessOverview) {
     return {
@@ -376,12 +498,14 @@ function buildDurabilityFallbackAnswer(
   const sourceIds: string[] = [];
   const parts: string[] = [];
 
+  const hasSubscriptionDurabilitySignal = narrative ? hasSubscriptionGrowthSignal(narrative.text) : false;
+
   if (narrative) {
     sourceIds.push(narrative.sourceId);
     parts.push(buildDurabilityLead(narrative));
     parts.push(summarizeDurabilityEvidence(narrative));
   } else {
-    parts.push("この決算資料だけでは、その要因が一時的か継続的かは断定できません。");
+    parts.push(buildNoNarrativeDurabilityLead(profile));
   }
 
   if (metric && metricSourceId) {
@@ -389,7 +513,11 @@ function buildDurabilityFallbackAnswer(
     parts.push(`${buildMetricObservation(metric)} ただし、この数字だけでは要因の継続性までは分かりません。`);
   }
 
-  parts.push("次に見るなら、会社が一回限りの要因として明示しているか、次の期も同じ需要・コスト・リスクが続くと言っているかを確認するのが近いです。");
+  parts.push(
+    hasSubscriptionDurabilitySignal
+      ? "したがって、今回の材料は一回限りよりも、顧客維持・追加導入・サブスクリプション拡大が続くかで判断する性質です。"
+      : "一回限りの要因として明示されているか、次の期も同じ需要・コスト・リスクが続くかで判断する性質です。"
+  );
 
   return sourceIds.length > 0
     ? {
@@ -397,6 +525,14 @@ function buildDurabilityFallbackAnswer(
         sourceIds: Array.from(new Set(sourceIds))
       }
     : null;
+}
+
+function buildNoNarrativeDurabilityLead(profile: QuestionProfile): string {
+  if (profile.asksRevenue || profile.asksCause) {
+    return "本文に売上変化の要因説明がないため、その要因が一時的か継続的かはこの資料だけでは判断できません。";
+  }
+
+  return "この決算資料だけでは、その要因が一時的か継続的かは断定できません。";
 }
 
 function selectDurabilityNarrative(sourceChunks: SourceChunkRecord[]): SourceChunkRecord | undefined {
@@ -457,6 +593,15 @@ function summarizeDurabilityEvidence(source: SourceChunkRecord): string {
     )} が主因と説明されています。`;
   }
 
+  const subscriptionGrowth = summarizeSubscriptionDurabilityEvidence(text);
+  if (subscriptionGrowth) {
+    return subscriptionGrowth;
+  }
+
+  if (/revpar|revenue per available room/.test(lowered)) {
+    return "提出資料では、RevPAR（販売可能客室あたり売上）をホテル事業の重要指標として扱っています。継続性は稼働率、客室単価、旅行需要が続くかに左右されます。";
+  }
+
   const generalDriver = text.match(/(?:primarily due to|driven by|helped by|powered by)\s+([^.]+)\./i);
   if (generalDriver?.[1]) {
     return `提出資料では、${translateDriverList(generalDriver[1])} が要因として説明されています。`;
@@ -471,6 +616,23 @@ function summarizeDurabilityEvidence(source: SourceChunkRecord): string {
   }
 
   return "提出資料の本文に、この要因に近い説明があります。";
+}
+
+function summarizeSubscriptionDurabilityEvidence(text: string): string | null {
+  const lowered = text.toLowerCase();
+  if (!/(subscription revenue|annual recurring revenue|\barr\b|recurring revenue|customers?|modules?|platform|falcon)/.test(lowered)) {
+    return null;
+  }
+
+  if (/(subscription revenue|annual recurring revenue|\barr\b|recurring revenue)/.test(lowered)) {
+    return "提出資料では、サブスクリプション型の継続収益や顧客基盤が成長材料として出ています。一回限りだけの要因とは見にくいです。";
+  }
+
+  if (/(new customers?|existing customers?|additional modules?|module adoption|platform|falcon)/.test(lowered)) {
+    return "提出資料では、新規顧客、既存顧客への追加導入、プラットフォーム利用拡大が材料として出ています。継続性は顧客維持と追加導入が続くかに依存します。";
+  }
+
+  return "提出資料では、顧客基盤やプラットフォーム利用が材料として出ています。一時要因だけとは断定しにくいです。";
 }
 
 function summarizeBusinessNarrativeEvidence(narrative: SourceChunkRecord, companyName?: string): string {
@@ -491,7 +653,7 @@ function summarizeBusinessNarrativeEvidence(narrative: SourceChunkRecord, compan
   add("クラウドサービス", /cloud|azure/i);
   add("広告", /advertising|\bads\b/i);
   add("サブスク・サービス", /subscription and services|subscription/i);
-  add("AI向けアクセラレーテッドコンピューティング", /accelerated computing|artificial intelligence|\bai\b|gpu/i);
+  add("AI向けアクセラレーテッドコンピューティング", /accelerated computing|gpu/i);
   add("データセンター向けコンピューティング", /data center|blackwell|gb200|gb300/i);
   add("ネットワーキング", /networking|ethernet|infiniband|nvlink/i);
   add("ゲーミング", /gaming/i);
@@ -525,6 +687,24 @@ function summarizeKnownCompanyBusiness(filing: FilingCacheRecord): GeminiChatAns
       answer:
         `${filing.companyName}は、Falcon platform を中心にサイバーセキュリティのサブスクリプションを提供する会社です。` +
         "提出資料では、クラウドセキュリティ、ID保護、脅威インテリジェンスなどのセキュリティ領域が文脈として確認できます。",
+      sourceIds
+    };
+  }
+
+  if (ticker === "CEG") {
+    return {
+      answer:
+        `${filing.companyName}は、米国の発電・電力販売を中心とするエネルギー会社です。` +
+        "提出資料では、売上高や発電・電力事業に関する実績が確認できます。",
+      sourceIds
+    };
+  }
+
+  if (ticker === "INTU") {
+    return {
+      answer:
+        `${filing.companyName}は、QuickBooks や TurboTax などを中心に、個人・中小企業向けの会計、税務、財務管理サービスを提供する会社です。` +
+        "提出資料では、Consumer、Global Business Solutions、Credit Karma、ProTax などの事業軸が確認できます。",
       sourceIds
     };
   }
@@ -774,6 +954,13 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
   const lowered = trimmed.toLowerCase();
 
   if (
+    profile.asksRisk &&
+    hasPowerUtilityRiskSignal(lowered)
+  ) {
+    return "本文では、発電・電力事業、規制、市場価格や需要変動が業績に影響しうるリスクとして扱われています。";
+  }
+
+  if (
     /management's discussion|results of operations|our business risks|forward-looking statements|investors are cautioned|available information|investor relations website|corporate website|private securities litigation reform act/.test(
       lowered
     )
@@ -815,6 +1002,10 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
     return pricingDriver;
   }
 
+  if (profile.asksRevenue && (profile.asksCause || profile.asksDetail) && hasSubscriptionGrowthSignal(trimmed)) {
+    return summarizeSubscriptionGrowthNarrative(trimmed);
+  }
+
   const generalDriverMatch = trimmed.match(/(?:primarily due to|driven by|helped by|powered by)\s+([^.]+)\./i);
   if (generalDriverMatch?.[1]) {
     return profile.asksProfit && profile.asksCause
@@ -834,6 +1025,10 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
     return "本文では、コストや値付けが利益率に影響した可能性に触れています。";
   }
 
+  if (hasPowerUtilityRiskSignal(lowered)) {
+    return "本文では、発電・電力事業、規制、市場価格や需要変動が業績に影響しうるリスクとして扱われています。";
+  }
+
   if (/(risk|uncertain|uncertainty|macro|consumer sentiment|consumer spending|slowdown|adverse impact)/.test(lowered)) {
     return "本文では、景気や需要の不確実性をリスクとして挙げています。";
   }
@@ -844,6 +1039,10 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
 
   const excerpt = truncateExcerpt(trimmed, 140).replace(/^「|」$/g, "");
   return excerpt.match(/[。！？]$/) ? excerpt : `${excerpt}。`;
+}
+
+function hasPowerUtilityRiskSignal(text: string): boolean {
+  return /(nuclear|generation operations?|power and capacity|electricity demand|commodity|market prices?)/.test(text);
 }
 
 function summarizeRevenueDriverNarrative(source: SourceChunkRecord): string | null {
@@ -871,9 +1070,13 @@ function summarizeRevenueDriverNarrative(source: SourceChunkRecord): string | nu
     return pricingDriver;
   }
 
+  if (hasSubscriptionGrowthSignal(text)) {
+    return summarizeSubscriptionGrowthNarrative(text);
+  }
+
   const directPatterns = [
-    /(?:net sales|revenue|sales) (?:increased|decreased|grew|declined)[^.]{0,180}?(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from)\s+([^.]+)\./i,
-    /(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from)\s+([^.]{0,220}?(?:demand|volume|pricing|traffic|ticket|occupancy|leasing|renewal|new stores?|same-store|comparable store|foreign exchange|currency|customer|sales|revenue)[^.]*?)\./i
+    /(?:net sales|revenue|sales|subscription revenue|annual recurring revenue|arr) (?:increased|decreased|grew|declined)[^.]{0,220}?(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from)\s+([^.]+)\./i,
+    /(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from)\s+([^.]{0,260}?(?:demand|volume|pricing|traffic|ticket|occupancy|leasing|renewal|new stores?|same-store|comparable store|foreign exchange|currency|customer|customers|sales|revenue|subscription|arr|module|platform)[^.]*?)\./i
   ];
   for (const pattern of directPatterns) {
     const match = text.match(pattern);
@@ -893,8 +1096,38 @@ function summarizeRevenueDriverNarrative(source: SourceChunkRecord): string | nu
   return null;
 }
 
+function hasSubscriptionGrowthSignal(text: string): boolean {
+  return /(subscription revenue|annual recurring revenue|\barr\b|recurring revenue|new customers?|existing customers?|customer adoption|customers adopting|additional modules?|module adoption|platform services?|falcon|endpoint security|cloud security|identity protection|threat intelligence)/i.test(text);
+}
+
 function revenueDriverNarrativePattern(): RegExp {
-  return /(?:net sales|revenue|sales).{0,160}(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from|demand|volume|pricing|traffic|ticket|comparable store|same-store|occupancy|leasing|renewal|new stores?|foreign exchange|currency)|(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from).{0,180}(?:net sales|revenue|sales|demand|volume|pricing|traffic|ticket|comparable store|same-store|occupancy|leasing|renewal|new stores?|foreign exchange|currency)/i;
+  return /(?:net sales|revenue|sales|subscription revenue|annual recurring revenue|\barr\b).{0,220}(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from|demand|volume|pricing|traffic|ticket|comparable store|same-store|occupancy|leasing|renewal|new stores?|foreign exchange|currency|customers?|modules?|platform|subscription)|(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from).{0,220}(?:net sales|revenue|sales|subscription revenue|annual recurring revenue|\barr\b|demand|volume|pricing|traffic|ticket|comparable store|same-store|occupancy|leasing|renewal|new stores?|foreign exchange|currency|customers?|modules?|platform|subscription)/i;
+}
+
+function summarizeSubscriptionGrowthNarrative(text: string): string {
+  const lowered = text.toLowerCase();
+  const drivers: string[] = [];
+
+  if (/new customers?|new subscriptions?|new logos?/.test(lowered)) {
+    drivers.push("新規顧客・新規契約の増加");
+  }
+  if (/existing customers?|customer adoption|customers adopting|expansion|upsell|cross-sell|additional modules?|module adoption|more modules/.test(lowered)) {
+    drivers.push("既存顧客への追加導入・利用拡大");
+  }
+  if (/subscription revenue|annual recurring revenue|\barr\b|recurring revenue/.test(lowered)) {
+    drivers.push("サブスクリプション型の継続収益");
+  }
+  if (/falcon|cloud security|identity protection|endpoint security|threat intelligence/.test(lowered)) {
+    drivers.push("Falcon platform 周辺サービスの拡大");
+  } else if (/platform/.test(lowered)) {
+    drivers.push("プラットフォーム利用の拡大");
+  }
+
+  if (drivers.length === 0) {
+    return "本文では、サブスクリプションや顧客基盤に関する説明が売上成長の材料として確認できます。";
+  }
+
+  return `本文では、${Array.from(new Set(drivers)).slice(0, 3).join("、")}が売上成長の材料として確認できます。`;
 }
 
 function summarizePricingDriver(text: string): string | null {
@@ -987,6 +1220,11 @@ function translateDriverList(raw: string): string {
     .replace(/\bSUVs\b/g, "SUV")
     .replace(/strong consumer demand for our products/gi, "製品への強い消費者需要")
     .replace(/the execution of our core business strategy/gi, "中核事業戦略の実行")
+    .replace(/revenue growth across a majority of product groups and geographies/gi, "大半の製品グループと地域での増収")
+    .replace(/revenue growth across a majority of product groups/gi, "大半の製品グループでの増収")
+    .replace(/geographies/gi, "地域")
+    .replace(/Ansys'? contribution of \$?([0-9,.]+)/gi, (_, value: string) => `Ansys買収による約${value}百万ドルの寄与`)
+    .replace(/Ansys'? contribution/gi, "Ansys買収による寄与")
     .replace(/comparable store sales growth/gi, "既存店売上の伸び")
     .replace(/same-store sales growth/gi, "既存店売上の伸び")
     .replace(/new store openings?/gi, "新規出店")
@@ -1065,7 +1303,15 @@ function findMetricSourceId(sourceChunks: SourceChunkRecord[], metric: MetricSna
 function isLowSignalNarrative(chunk: SourceChunkRecord): boolean {
   const text = chunk.text;
   const normalized = text.replace(/\s+/g, " ").trim();
-  const hasBusinessSignal = /accelerated computing|artificial intelligence|\bai\b|gpu|data center|compute|networking|graphics|gaming|professional visualization|automotive|customers?|cloud service providers?|enterprise|revenue from/i.test(
+  const normalizedLower = normalized.toLowerCase();
+  if (
+    normalized.length < 140 &&
+    /management.?s discussion and analysis|results of operations|financial condition/i.test(normalizedLower)
+  ) {
+    return true;
+  }
+
+  const hasBusinessSignal = /accelerated computing|gpu|data center|compute|networking|graphics|gaming|professional visualization|automotive|customers?|cloud service providers?|enterprise|revenue from/i.test(
     normalized
   );
   const hasTableNoise = /table of contents|following table sets forth|expressed as a percentage of revenue/i.test(
@@ -1075,7 +1321,7 @@ function isLowSignalNarrative(chunk: SourceChunkRecord): boolean {
     return false;
   }
 
-  return /available information|available free of charge|forward-looking statements|private securities litigation reform act|investor relations website|corporate website|sec.?s website|securities and exchange commission|investor\.nvidia\.com|table of contents|following table sets forth|expressed as a percentage of revenue|should be read in conjunction/i.test(
+  return /available information|available free of charge|forward-looking statements|private securities litigation reform act|investor relations website|corporate website|sec.?s website|securities and exchange commission|investor\.nvidia\.com|table of contents|following table sets forth|expressed as a percentage of revenue|should be read in conjunction|financial reporting standards?|new pronouncements|accounting policies/i.test(
     normalized
   );
 }

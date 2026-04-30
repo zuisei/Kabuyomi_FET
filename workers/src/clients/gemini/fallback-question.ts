@@ -17,6 +17,7 @@ export type QuestionProfile = {
   asksProductMix: boolean;
   asksStockPrice: boolean;
   asksRecommendation: boolean;
+  asksInvestmentView: boolean;
   asksForecast: boolean;
   asksDurability: boolean;
 };
@@ -57,6 +58,9 @@ export function analyzeQuestion(question: string): QuestionProfile {
     asksProductMix: /(iphone|services|cloud|広告|ads|product mix|サービス|クラウド)/.test(normalized),
     asksStockPrice: /(株価|shareprice|stockprice)/.test(normalized),
     asksRecommendation: /(買いか|売りか|おすすめ|投資判断|recommend)/.test(normalized),
+    asksInvestmentView: /(投資家目線|投資家として|良い点|悪い点|強み|弱み|ポジティブ|ネガティブ|bull|bear|positive|negative|strength|weakness)/.test(
+      normalized
+    ),
     asksForecast: /(今後|この先|予想|forecast)/.test(normalized),
     asksDurability:
       /(一時的|一過性|一時要因|一回限り|単発|継続|持続|続く|続きそう|構造的|恒常|今後も|来期も|短期|長期|temporary|transitory|one[- ]?time|one[- ]?off|recurring|sustain|continue|ongoing)/.test(
@@ -76,6 +80,7 @@ export function wantsNarrativeDepth(profile: QuestionProfile): boolean {
     profile.asksDurability ||
     profile.asksRevenue ||
     profile.asksBusinessOverview ||
-    profile.asksStockContext
+    profile.asksStockContext ||
+    profile.asksInvestmentView
   );
 }
