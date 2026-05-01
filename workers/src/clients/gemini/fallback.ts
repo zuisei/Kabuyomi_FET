@@ -10,6 +10,7 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
   const metric = selectRelevantMetric(input.filing, profile);
   const metricSourceId = metric ? findMetricSourceId(sourceChunks, metric) : undefined;
   const narrative = selectRelevantNarrative(sourceChunks, profile, metricSourceId);
+  const nonHardFallback = buildNonHardFallbackIfNeeded(input, profile, sourceChunks, metric, metricSourceId, narrative);
 
   if (profile.asksBusinessOverview) {
     const knownBusiness = summarizeKnownCompanyBusiness(input.filing);
@@ -24,10 +25,7 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
       };
     }
 
-    return {
-      answer: "この決算資料の範囲では確認できません。",
-      sourceIds: []
-    };
+    return nonHardFallback ?? buildNonHardFallbackAnswer(input, "business_model", metric, metricSourceId, sourceChunks);
   }
 
   if (profile.asksInvestmentView) {
@@ -35,6 +33,10 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
     if (investmentView) {
       return investmentView;
     }
+  }
+
+  if (nonHardFallback && shouldPreferNonHardFallback(input, profile, narrative)) {
+    return nonHardFallback;
   }
 
   if (profile.asksStockPrice || profile.asksRecommendation || profile.asksMarketReaction || profile.asksStockContext) {
@@ -61,10 +63,7 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
       };
     }
 
-    return {
-      answer: "この決算資料の範囲では確認できません。",
-      sourceIds: []
-    };
+    return nonHardFallback ?? buildNonHardFallbackAnswer(input, "revenue_driver", metric, metricSourceId, sourceChunks);
   }
 
   if (profile.asksDurability) {
@@ -79,14 +78,19 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
       return buildNarrativeFallbackAnswer(narrative, profile);
     }
 
-    return {
-      answer: "この決算資料の範囲では確認できません。",
-      sourceIds: []
-    };
+    return nonHardFallback ?? buildNonHardFallbackAnswer(input, "risk_summary", metric, metricSourceId, sourceChunks);
+  }
+
+  if (profile.asksRegion || profile.asksProductMix) {
+    const segment = buildSegmentDriverFallbackAnswer(input.filing, sourceChunks, metric, metricSourceId, narrative);
+    if (segment) {
+      return segment;
+    }
+    return nonHardFallback ?? buildNonHardFallbackAnswer(input, "segment_driver", metric, metricSourceId, sourceChunks);
   }
 
   if (metric && metricSourceId) {
-    return buildMetricFallbackAnswer(metric, metricSourceId, narrative, profile);
+    return buildMetricFallbackAnswer(input.filing, metric, metricSourceId, narrative, profile);
   }
 
   if (narrative) {
@@ -95,22 +99,21 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
 
   const anchorSource = selectFallbackAnchorSource(sourceChunks);
   if (!anchorSource) {
-    return {
-      answer: "この決算資料の範囲では確認できません。",
-      sourceIds: []
-    };
+    return nonHardFallback ?? buildNonHardFallbackAnswer(input, "unknown", metric, metricSourceId, sourceChunks);
   }
 
-  return {
-    answer: `この論点を直接言い切れる材料は薄いですが、提出資料の近い記述としては「${truncateExcerpt(anchorSource.text, 150)}」があります。`,
-    sourceIds: [anchorSource.sourceId]
-  };
+  return nonHardFallback ?? buildNonHardFallbackAnswer(input, "unknown", metric, metricSourceId, [anchorSource]);
 }
 
 export function recoverBroaderFallbackIfNeeded(
   input: ChatPromptInput,
   response: GeminiChatAnswer
 ): GeminiChatAnswer {
+  const hasLocalFallbackSources = fallbackSourceChunks(input).length > 0;
+  if (!hasLocalFallbackSources) {
+    return response;
+  }
+
   if (response.sourceIds.length === 0 && isUnavailableOnlyAnswer(response.answer)) {
     return localChatFallback(input);
   }
@@ -239,7 +242,9 @@ function selectRelevantNarrative(
 
   if (profile.asksRevenue || profile.asksCause || profile.asksRegion || profile.asksProductMix) {
     return profile.asksRevenue && profile.asksCause
-      ? findNarrative(revenueDriverNarrativePattern()) ?? findNarrative(/revenue|net sales|sales|segment|region|geograph/)
+      ? findNarrative(revenueDriverNarrativePattern()) ??
+          findNarrative(/revenue|net sales|sales|segment|region|geograph/) ??
+          driverNarrative
       : driverNarrative;
   }
 
@@ -287,19 +292,239 @@ function isAccountingOnlyRiskDistractor(chunk: SourceChunkRecord): boolean {
   );
 }
 
+type NonHardFallbackIntent =
+  | "business_model"
+  | "segment_driver"
+  | "liquidity_debt"
+  | "risk_summary"
+  | "watch_points"
+  | "margin_driver"
+  | "prior_filing_delta"
+  | "revenue_driver"
+  | "unknown";
+
+function buildNonHardFallbackIfNeeded(
+  input: ChatPromptInput,
+  profile: QuestionProfile,
+  sourceChunks: SourceChunkRecord[],
+  metric: MetricSnapshot | undefined,
+  metricSourceId: string | undefined,
+  narrative: SourceChunkRecord | undefined
+): GeminiChatAnswer | null {
+  const intent = resolveNonHardFallbackIntent(input, profile);
+  if (!intent) {
+    return null;
+  }
+
+  if (narrative && hasDirectNonHardEvidence(intent, narrative)) {
+    return null;
+  }
+
+  return buildNonHardFallbackAnswer(input, intent, metric, metricSourceId, sourceChunks);
+}
+
+function shouldPreferNonHardFallback(
+  input: ChatPromptInput,
+  profile: QuestionProfile,
+  narrative: SourceChunkRecord | undefined
+): boolean {
+  const intent = resolveNonHardFallbackIntent(input, profile);
+  return Boolean(intent && (!narrative || !hasDirectNonHardEvidence(intent, narrative)));
+}
+
+function resolveNonHardFallbackIntent(
+  input: ChatPromptInput,
+  profile: QuestionProfile
+): NonHardFallbackIntent | null {
+  const questionIntent = input.questionIntent;
+  const normalized = input.question.replace(/\s+/g, "").toLowerCase();
+
+  if (questionIntent === "business_overview" || profile.asksBusinessOverview) {
+    return "business_model";
+  }
+  if (
+    questionIntent === "segment_analysis" ||
+    questionIntent === "revenue_breakdown" ||
+    profile.asksRegion ||
+    profile.asksProductMix
+  ) {
+    return "segment_driver";
+  }
+  if (
+    questionIntent === "cash_flow" ||
+    /(資金繰り|負債|債務|借入|流動性|liquidity|debt|maturity|cashflow|cash flow)/.test(normalized)
+  ) {
+    return "liquidity_debt";
+  }
+  if (questionIntent === "risk_factors" || profile.asksRisk) {
+    return "risk_summary";
+  }
+  if (/(次回決算|次に見る|見るべき|ポイント|watchpoints?|nextquarter|nextfiling)/.test(normalized)) {
+    return "watch_points";
+  }
+  if (questionIntent === "margin_profitability" || profile.asksProfitability) {
+    return "margin_driver";
+  }
+  if (questionIntent === "historical_comparison" || /(前回決算|前回との差|前期との差|previousfiling|priorfiling)/.test(normalized)) {
+    return "prior_filing_delta";
+  }
+  return null;
+}
+
+function hasDirectNonHardEvidence(intent: NonHardFallbackIntent, source: SourceChunkRecord): boolean {
+  const text = `${source.sourceLabel ?? ""} ${source.sectionTitle ?? ""} ${source.text}`.toLowerCase();
+  if (isLowSignalNarrative(source)) {
+    return false;
+  }
+  switch (intent) {
+    case "business_model":
+      return /(business|segment|revenue by|products?|services?|customers?|operations|principal activities|主な事業|事業内容)/i.test(text);
+    case "segment_driver":
+      return /(segment results|reportable segments?|geographic|product revenue|regional|walmart u\.s\.|sam'?s club|upstream|downstream|construction industries)/i.test(text);
+    case "liquidity_debt":
+      return /(liquidity|debt|borrowings?|maturit|cash and cash equivalents|credit facilit|cash flow|capital resources|deposits|capital ratios?)/i.test(text);
+    case "risk_summary":
+      return /(risk factors?|material risks?|adverse|uncertainty|competition|regulatory|commodity|credit quality)/i.test(text) &&
+        !isAccountingOnlyRiskDistractor(source);
+    case "watch_points":
+      return /(outlook|guidance|expect|risk|segment results|revenue|margin|liquidity|backlog|orders|traffic|ticket|commodity|deposits)/i.test(text);
+    case "margin_driver":
+      return /(gross margin|operating margin|cost|pricing|mix|operating expenses|provision|restructuring|impairment|segment margin|sg&a|r&d|利益率|悪化|改善|主因|要因|コスト|販促費|費用)/i.test(text);
+    case "prior_filing_delta":
+      return /(previous filing|prior filing|prior quarter|sequential|前回|前四半期|前期)/i.test(text) ||
+        summarizeRevenueDriverNarrative(source) !== null;
+    case "revenue_driver":
+    case "unknown":
+      return false;
+  }
+}
+
+function buildNonHardFallbackAnswer(
+  input: ChatPromptInput,
+  intent: NonHardFallbackIntent,
+  metric: MetricSnapshot | undefined,
+  metricSourceId: string | undefined,
+  sourceChunks: SourceChunkRecord[]
+): GeminiChatAnswer {
+  const sourceIds = fallbackSourceIds(metricSourceId, sourceChunks);
+  const metricObservation = metric && metricSourceId ? buildMetricObservation(metric) : null;
+  const missing = missingSourceTypesForNonHard(input, intent);
+  const missingText = missing.join("、");
+
+  switch (intent) {
+    case "business_model":
+      return {
+        answer: `事業内容や収益内訳は、選択されたsourceだけでは十分に特定できません。確認すべきsourceは Business、Segment Information、Revenue Note、MD&A business discussion です。売上などの数値だけから事業モデルは断定しません。`,
+        sourceIds
+      };
+    case "segment_driver":
+      return {
+        answer: `${metricObservation ? `${metricObservation} ` : ""}全社売上の増減は確認できますが、セグメント・地域別の強弱はこのsourceでは十分に分解できません。確認すべきsourceは Segment results、Geographic revenue、Product/category revenue、業種固有のsegment KPIです。`,
+        sourceIds
+      };
+    case "liquidity_debt":
+      return {
+        answer: `選択されたsourceでは、資金繰りや負債を判断するための cash、debt、liquidity、maturity、cash flow の説明が不足しています。したがって、懸念の有無は断定しません。確認すべきsourceは Balance Sheet、Debt Note、Liquidity MD&A、Cash Flow Statement です。`,
+        sourceIds
+      };
+    case "risk_summary":
+      return {
+        answer: `このsourceだけでは、filing固有の重要リスクを十分に絞れません。確認すべきsourceは、リスク要因セクション、MD&Aのリスク説明、業種固有リスクの説明です。一般的なリスク記述だけから重要リスクは断定しません。`,
+        sourceIds
+      };
+    case "watch_points":
+      return {
+        answer: `次回見るべき点は、現時点で不足しているsourceに基づくと、1) セグメント別実績、2) 売上driverの説明、3) 資金繰りまたはリスクの説明です。具体的なdriverはこのsourceだけでは特定しません。`,
+        sourceIds
+      };
+    case "margin_driver":
+      return {
+        answer: `${metricObservation ? `${metricObservation} ` : ""}利益率の方向は確認できますが、改善/悪化の具体的なdriverは十分に特定できません。判断には、コスト、mix、pricing、営業費用、provision、restructuring、impairment、segment margin の説明が必要です。`,
+        sourceIds
+      };
+    case "prior_filing_delta":
+      return {
+        answer: `${metricObservation ? `${metricObservation} ` : ""}前年同期比の増減は確認できますが、前回決算との差分には previous filing evidence が必要です。確認すべきsourceは previous filing、prior filing MD&A、prior period XBRL です。`,
+        sourceIds
+      };
+    case "revenue_driver":
+      return {
+        answer: `${metricObservation ? `${metricObservation} ` : ""}売上の増減は確認できますが、会社固有の売上driverは十分に特定できません。確認すべきsourceは ${missingText} です。`,
+        sourceIds
+      };
+    case "unknown":
+      return {
+        answer: `選択されたsourceだけでは、この質問に直接答えるための具体的な説明を十分に確認できません。確認すべきsourceは ${missingText} です。`,
+        sourceIds
+      };
+  }
+}
+
+function missingSourceTypesForNonHard(
+  input: ChatPromptInput,
+  intent: NonHardFallbackIntent
+): string[] {
+  if (intent === "liquidity_debt" && isBankLike(input.filing)) {
+    return ["Balance Sheet", "Debt Note", "Liquidity MD&A", "Cash Flow Statement", "capital", "liquidity", "deposits", "credit quality"];
+  }
+  switch (intent) {
+    case "business_model":
+      return ["Business", "Segment Information", "Revenue Note", "MD&A business discussion"];
+    case "segment_driver":
+      return ["Segment results", "Geographic revenue", "Product/category revenue", "sector-specific segment KPIs"];
+    case "liquidity_debt":
+      return ["Balance Sheet", "Debt Note", "Liquidity MD&A", "Cash Flow Statement"];
+    case "risk_summary":
+      return ["リスク要因セクション", "MD&Aのリスク説明", "業種固有リスクの説明"];
+    case "watch_points":
+      return ["セグメント別実績", "売上driverの説明", "資金繰りまたはリスクの説明"];
+    case "margin_driver":
+      return ["cost discussion", "mix", "pricing", "operating expenses", "provision", "restructuring", "impairment", "segment margin"];
+    case "prior_filing_delta":
+      return ["previous filing evidence", "prior filing MD&A", "prior period XBRL"];
+    case "revenue_driver":
+      return ["MD&A revenue discussion", "segment results", "revenue discussion", "sector-specific KPIs"];
+    case "unknown":
+      return ["MD&A", "segment results", "revenue discussion", "業種固有KPI"];
+  }
+}
+
+function fallbackSourceIds(metricSourceId: string | undefined, sourceChunks: SourceChunkRecord[]): string[] {
+  const ids = [
+    metricSourceId,
+    ...sourceChunks
+      .filter((source) => source.sourceId && source.text.trim())
+      .map((source) => source.sourceId)
+  ].filter((sourceId): sourceId is string => Boolean(sourceId));
+  return Array.from(new Set(ids)).slice(0, 2);
+}
+
+function isBankLike(filing: FilingCacheRecord): boolean {
+  const haystack = `${filing.ticker} ${filing.companyName} ${filing.mdaText.slice(0, 5000)}`.toLowerCase();
+  return /(jpm|bank|financial|deposits?|loans?|net interest income|credit quality|capital ratios?)/.test(haystack);
+}
+
 function buildMetricFallbackAnswer(
+  filing: FilingCacheRecord,
   metric: MetricSnapshot,
   metricSourceId: string,
   narrative: SourceChunkRecord | undefined,
   profile: QuestionProfile
 ): GeminiChatAnswer {
   if (metric.logicalName === "revenue" && profile.asksRevenue && profile.asksCause) {
-    return buildRevenueDriverFallbackAnswer(metric, metricSourceId, narrative);
+    return buildRevenueDriverFallbackAnswer(filing, metric, metricSourceId, narrative);
   }
 
   const sourceIds = [metricSourceId];
   const parts = [buildMetricObservation(metric)];
   let includedNarrative = false;
+
+  if (metric.logicalName === "revenue" && profile.asksRevenue && !profile.asksCause && !profile.asksDetail) {
+    return {
+      answer: parts.join(" "),
+      sourceIds
+    };
+  }
 
   if (narrative) {
     const narrativeContext = buildNarrativeContext(narrative, profile);
@@ -321,7 +546,54 @@ function buildMetricFallbackAnswer(
   };
 }
 
+function buildSegmentDriverFallbackAnswer(
+  filing: FilingCacheRecord,
+  sourceChunks: SourceChunkRecord[],
+  metric: MetricSnapshot | undefined,
+  metricSourceId: string | undefined,
+  narrative: SourceChunkRecord | undefined
+): GeminiChatAnswer | null {
+  const segmentNarrative = selectSegmentNarrative(sourceChunks) ?? narrative;
+  const sourceIds: string[] = [];
+  const parts: string[] = [];
+
+  if (metric?.logicalName === "revenue" && metricSourceId) {
+    parts.push(buildMetricObservation(metric));
+    sourceIds.push(metricSourceId);
+  } else {
+    const revenue = filing.metrics.find((entry) => entry.logicalName === "revenue");
+    const revenueSourceId = revenue ? findMetricSourceId(sourceChunks, revenue) : undefined;
+    if (revenue && revenueSourceId) {
+      parts.push(buildMetricObservation(revenue));
+      sourceIds.push(revenueSourceId);
+    }
+  }
+
+  if (segmentNarrative) {
+    sourceIds.push(segmentNarrative.sourceId);
+    const segmentSignals = summarizeRevenueAdjacentSignals(segmentNarrative.text);
+    const directDriver = summarizeRevenueDriverNarrative(segmentNarrative);
+    parts.push(
+      directDriver ??
+        segmentSignals ??
+        "セグメント・地域別の強弱は、この抜粋だけでは十分に分解できません。全社売上だけでなく、事業別・地域別売上の表とMD&Aを合わせて見る必要があります。"
+    );
+  } else {
+    parts.push(
+      "この context ではセグメント・地域別の強弱を直接示す本文が不足しています。全社売上だけでは、どの部門や地域が伸びたかまでは判断できません。"
+    );
+  }
+
+  return sourceIds.length > 0
+    ? {
+        answer: parts.join(" "),
+        sourceIds: Array.from(new Set(sourceIds))
+      }
+    : null;
+}
+
 function buildRevenueDriverFallbackAnswer(
+  filing: FilingCacheRecord,
   metric: MetricSnapshot,
   metricSourceId: string,
   narrative: SourceChunkRecord | undefined
@@ -333,18 +605,70 @@ function buildRevenueDriverFallbackAnswer(
   if (driverSentence) {
     sourceIds.push(narrative!.sourceId);
     parts.push(driverSentence);
+  } else if (narrative && isRevenueAdjacentNarrative(narrative)) {
+    sourceIds.push(narrative.sourceId);
+    const adjacentSignal = summarizeRevenueAdjacentSignals(narrative.text);
+    parts.push(
+      adjacentSignal ??
+        "本文では、売上区分や地域・セグメントの説明が近い材料です。次に見るべきなのは、価格、数量、既存店、地域、商品構成のどれが増減に効いたかです。"
+    );
+  } else if (narrative) {
+    sourceIds.push(narrative.sourceId);
+    parts.push(
+      `選ばれた Item 7 の範囲では、価格・数量・地域・セグメントのどれが主因かまでは薄めです。${sectorRevenueDriverChecklist(filing)}`
+    );
   } else {
-    parts.push("ただし、この提出資料の範囲では、売上変化の直接要因は明示されていません。");
-    if (narrative && isRevenueAdjacentNarrative(narrative)) {
-      sourceIds.push(narrative.sourceId);
-      parts.push("近い材料としては、売上区分や地域・セグメントの説明はありますが、どれが増減の主因かまでは切り分けられません。");
-    }
+    parts.push(`ただし、選択された本文だけでは売上変化の直接要因は明示されていません。${sectorRevenueDriverChecklist(filing)}`);
   }
 
   return {
     answer: parts.join(" "),
     sourceIds: Array.from(new Set(sourceIds))
   };
+}
+
+function sectorRevenueDriverChecklist(filing: FilingCacheRecord): string {
+  const ticker = filing.ticker.toUpperCase();
+  const company = filing.companyName.toLowerCase();
+  const haystack = filing.mdaText.slice(0, 8000).toLowerCase();
+
+  if (ticker === "WMT" || /walmart|sam'?s club/.test(company)) {
+    return "小売では、既存店売上、traffic、ticket、eCommerce、membership/advertising、在庫とgross marginを分けて確認する必要があります。";
+  }
+
+  if (ticker === "CAT" || /caterpillar/.test(company)) {
+    return "工業株では、price realization、販売数量、dealer inventory、backlog、Construction/Resource/Energy & Transportation別の強弱を分けて確認する必要があります。";
+  }
+
+  if (ticker === "XOM" || /exxon/.test(company)) {
+    return "エネルギーでは、原油・天然ガス価格、upstreamの生産量、refining margin、chemical margin、為替や売却影響を分けて確認する必要があります。";
+  }
+
+  if (ticker === "AAPL" || /apple/.test(company)) {
+    return "Appleのような製品・サービス企業では、iPhone、Services、Mac、地域別売上、為替、製品mixを分けて確認する必要があります。";
+  }
+
+  if (ticker === "JPM" || /bank|financial|deposits?|loans?|net interest income|credit losses/.test(haystack)) {
+    return "銀行では、net interest income、noninterest income、信用損失引当、預金・貸出残高、投資銀行やマーケット収益を分けて確認する必要があります。";
+  }
+
+  if (ticker === "XOM" || /exxon|upstream|downstream|chemical|crude oil|natural gas|refining margin/.test(haystack)) {
+    return "エネルギーでは、原油・天然ガス価格、upstreamの生産量、refining margin、chemical margin、為替や売却影響を分けて確認する必要があります。";
+  }
+
+  if (ticker === "CAT" || /caterpillar|construction industries|resource industries|energy and transportation|backlog|dealer inventory/.test(haystack)) {
+    return "工業株では、price realization、販売数量、dealer inventory、backlog、Construction/Resource/Energy & Transportation別の強弱を分けて確認する必要があります。";
+  }
+
+  if (/walmart|sam'?s club|comparable sales|comp sales|traffic|ticket|membership|ecommerce|e-commerce/.test(haystack)) {
+    return "小売では、既存店売上、traffic、ticket、eCommerce、membership/advertising、在庫とgross marginを分けて確認する必要があります。";
+  }
+
+  if (/apple|iphone|mac|ipad|services|wearables|greater china|americas/.test(haystack)) {
+    return "Appleのような製品・サービス企業では、iPhone、Services、Mac、地域別売上、為替、製品mixを分けて確認する必要があります。";
+  }
+
+  return "次に見るべきなのは、価格、数量、地域、セグメント、商品構成のどれが増減に効いたかです。";
 }
 
 function buildClosestContextFallbackAnswer(
@@ -453,10 +777,7 @@ function buildDurabilityFallbackAnswer(
   profile: QuestionProfile
 ): GeminiChatAnswer | null {
   const narrative = selectDurabilityNarrative(sourceChunks);
-  const metric = selectRelevantMetric(filing, {
-    ...profile,
-    asksRevenue: profile.asksRevenue || (!profile.asksProfit && !profile.asksProfitability && !profile.asksCashFlow)
-  });
+  const metric = selectDurabilityMetric(filing, sourceChunks, profile);
   const metricSourceId = metric ? findMetricSourceId(sourceChunks, metric) : undefined;
   const sourceIds: string[] = [];
   const parts: string[] = [];
@@ -465,21 +786,27 @@ function buildDurabilityFallbackAnswer(
 
   if (narrative) {
     sourceIds.push(narrative.sourceId);
+    const evidence = summarizeDurabilityEvidence(narrative);
     parts.push(buildDurabilityLead(narrative));
-    parts.push(summarizeDurabilityEvidence(narrative));
+    parts.push(evidence);
+    if (isGenericDurabilityEvidence(evidence)) {
+      parts.push(
+        "前問の要因をこの抜粋から十分に特定できていないため、一時要因か構造変化かも強くは判定しません。次回は同じ要因が売上、利益率、セグメント別実績に続けて出るかを確認するのが妥当です。"
+      );
+    }
   } else {
     parts.push(buildNoNarrativeDurabilityLead(profile));
   }
 
   if (metric && metricSourceId) {
     sourceIds.push(metricSourceId);
-    parts.push(`${buildMetricObservation(metric)} ただし、この数字だけでは要因の継続性までは分かりません。`);
+    parts.push(`${buildMetricObservation(metric)} この数字だけでは継続性は決まりませんが、本文の要因説明と並べると判断しやすくなります。`);
   }
 
   parts.push(
     hasSubscriptionDurabilitySignal
-      ? "したがって、今回の材料は一回限りよりも、顧客維持・追加導入・サブスクリプション拡大が続くかで判断する性質です。"
-      : "一回限りの要因として明示されているか、次の期も同じ需要・コスト・リスクが続くかで判断する性質です。"
+      ? "したがって、今回の材料は一回限りだけの要因とは見にくいです。顧客維持・追加導入・サブスクリプション拡大が続くかで判断する性質です。"
+      : buildDurabilityConclusion(narrative)
   );
 
   return sourceIds.length > 0
@@ -488,6 +815,43 @@ function buildDurabilityFallbackAnswer(
         sourceIds: Array.from(new Set(sourceIds))
       }
     : null;
+}
+
+function isGenericDurabilityEvidence(evidence: string): boolean {
+  return /この要因に近い説明|この論点に関する説明|本文全体と数字を並べる/.test(evidence);
+}
+
+function selectDurabilityMetric(
+  filing: FilingCacheRecord,
+  sourceChunks: SourceChunkRecord[],
+  profile: QuestionProfile
+): MetricSnapshot | undefined {
+  const haystack = sourceChunks
+    .map((chunk) => `${chunk.sectionTitle} ${chunk.sourceLabel} ${chunk.text}`)
+    .join(" ")
+    .toLowerCase();
+
+  if (
+    profile.asksProfitability ||
+    profile.asksProfit ||
+    /profitability context|operating income|net income|gross profit|gross margin|margin|profitability|cost of sales|expense/.test(
+      haystack
+    )
+  ) {
+    return (
+      filing.metrics.find((metric) => metric.logicalName === "operatingIncome") ??
+      filing.metrics.find((metric) => metric.logicalName === "netIncome")
+    );
+  }
+
+  if (/cash flow|liquidity|operating activities/.test(haystack)) {
+    return filing.metrics.find((metric) => metric.logicalName === "operatingCashFlow");
+  }
+
+  return selectRelevantMetric(filing, {
+    ...profile,
+    asksRevenue: profile.asksRevenue || (!profile.asksProfit && !profile.asksProfitability && !profile.asksCashFlow)
+  });
 }
 
 function buildNoNarrativeDurabilityLead(profile: QuestionProfile): string {
@@ -518,6 +882,22 @@ function selectDurabilityNarrative(sourceChunks: SourceChunkRecord[]): SourceChu
   );
 }
 
+function selectSegmentNarrative(sourceChunks: SourceChunkRecord[]): SourceChunkRecord | undefined {
+  const narratives = sourceChunks.filter(
+    (chunk) => chunk.sectionType === "md_a" && chunk.text.trim() && !isLowSignalNarrative(chunk)
+  );
+
+  return (
+    narratives.find((chunk) =>
+      /(segment|reportable|geographic|geograph|region|americas|greater china|japan|international|walmart u\.s\.|sam'?s club|construction industries|resource industries|energy & transportation|upstream|energy products|chemical products|specialty products|product|services)/i.test(
+        `${chunk.sourceLabel} ${chunk.sectionTitle} ${chunk.text}`
+      )
+    ) ??
+    narratives.find((chunk) => /revenue|sales|net sales/i.test(chunk.text)) ??
+    narratives[0]
+  );
+}
+
 function buildDurabilityLead(narrative: SourceChunkRecord): string {
   const lowered = narrative.text.toLowerCase();
 
@@ -543,6 +923,16 @@ function summarizeDurabilityEvidence(source: SourceChunkRecord): string {
   const pricingDriver = summarizePricingDriver(text);
   if (pricingDriver) {
     return pricingDriver;
+  }
+
+  const revenueDriver = summarizeRevenueDriverNarrative(source);
+  if (revenueDriver) {
+    return revenueDriver;
+  }
+
+  const marginDriver = summarizeMarginNarrative(text);
+  if (marginDriver) {
+    return marginDriver;
   }
 
   if (/fuel/.test(lowered) && /(price|cost|availability|supply|volatility)/.test(lowered)) {
@@ -579,6 +969,24 @@ function summarizeDurabilityEvidence(source: SourceChunkRecord): string {
   }
 
   return "提出資料の本文に、この要因に近い説明があります。";
+}
+
+function buildDurabilityConclusion(narrative: SourceChunkRecord | undefined): string {
+  const text = narrative?.text.toLowerCase() ?? "";
+
+  if (/(one[- ]?time|one[- ]?off|non[- ]recurring|temporary|transitory|impairment|restructuring)/.test(text)) {
+    return "一回限り・一時費用として明示されている部分は一時性が強い一方、需要、価格、コスト構造が続くなら次期以降も影響します。";
+  }
+
+  if (/(price|pricing|net selling price|volume|demand|traffic|ticket|comparable store|same-store|membership|ecommerce|cost|margin|inflation)/.test(text)) {
+    return "価格、数量、需要、コスト、mixのような営業要因は一回限りとは言いにくく、次回も同じ方向で出るかを確認する論点です。";
+  }
+
+  if (/(commodity|crude|natural gas|refining margin|realization|foreign exchange|currency)/.test(text)) {
+    return "資源価格、精製マージン、為替のような外部要因は変動しやすいため、一時か継続かは次期の市況が同じ方向で続くか次第です。";
+  }
+
+  return "一回限りの要因として明示されているか、次の期も同じ需要・コスト・リスクが続くかで判断する性質です。";
 }
 
 function summarizeSubscriptionDurabilityEvidence(text: string): string | null {
@@ -831,6 +1239,16 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
     return "本文では、ビットコインなどデジタル資産の評価損益が利益を大きく動かしたと説明しています。";
   }
 
+  const pricingDriver = summarizePricingDriver(trimmed);
+  if (pricingDriver) {
+    return pricingDriver;
+  }
+
+  const marginDriver = profile.asksProfitability || profile.asksProfit ? summarizeMarginNarrative(trimmed) : null;
+  if (marginDriver) {
+    return marginDriver;
+  }
+
   if (/(interest expense|debt)/.test(lowered)) {
     return "本文では、支払利息などの金融費用が利益の重荷になった可能性に触れています。";
   }
@@ -856,11 +1274,6 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
     }
   }
 
-  const pricingDriver = summarizePricingDriver(trimmed);
-  if (pricingDriver) {
-    return pricingDriver;
-  }
-
   if (profile.asksRevenue && (profile.asksCause || profile.asksDetail) && hasSubscriptionGrowthSignal(trimmed)) {
     return summarizeSubscriptionGrowthNarrative(trimmed);
   }
@@ -881,7 +1294,7 @@ function summarizeNarrativeEvidence(source: SourceChunkRecord, profile: Question
   }
 
   if (/(margin|pricing|gross margin|profitability)/.test(lowered) && /(cost|pressure|higher|inflation)/.test(lowered)) {
-    return "本文では、コストや値付けが利益率に影響した可能性に触れています。";
+    return "本文では、コスト、価格、商品構成などが利益率に影響した可能性に触れています。";
   }
 
   if (hasPowerUtilityRiskSignal(lowered)) {
@@ -934,8 +1347,9 @@ function summarizeRevenueDriverNarrative(source: SourceChunkRecord): string | nu
   }
 
   const directPatterns = [
-    /(?:net sales|revenue|sales|subscription revenue|annual recurring revenue|arr) (?:increased|decreased|grew|declined)[^.]{0,220}?(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from)\s+([^.]+)\./i,
-    /(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from)\s+([^.]{0,260}?(?:demand|volume|pricing|traffic|ticket|occupancy|leasing|renewal|new stores?|same-store|comparable store|foreign exchange|currency|customer|customers|sales|revenue|subscription|arr|module|platform)[^.]*?)\./i
+    /(?:net sales|revenue|revenues|sales|sales and revenues|subscription revenue|annual recurring revenue|arr) (?:increased|decreased|grew|declined|were impacted)[^.]{0,260}?(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from|due to)\s+([^.]+)\./i,
+    /(?:increase|decrease|growth|decline) (?:was|were)?[^.]{0,120}?(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from|due to)\s+([^.]+)\./i,
+    /(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from|due to)\s+([^.]{0,300}?(?:demand|volume|pricing|price realization|traffic|ticket|comparable sales|comparable store|same-store|ecommerce|membership|occupancy|leasing|renewal|new stores?|foreign exchange|currency|customer|customers|sales|revenue|subscription|arr|module|platform|commodity|crude|natural gas|refining margin|realization)[^.]*?)\./i
   ];
   for (const pattern of directPatterns) {
     const match = text.match(pattern);
@@ -945,7 +1359,7 @@ function summarizeRevenueDriverNarrative(source: SourceChunkRecord): string | nu
   }
 
   if (/(comparable store sales|same-store sales|traffic|ticket)/i.test(text)) {
-    return "本文では、既存店売上、客数、客単価など小売の売上ドライバーに関する説明があります。";
+    return summarizeRevenueAdjacentSignals(text) ?? "本文では、既存店売上、客数、客単価など小売の売上ドライバーに関する説明があります。";
   }
 
   if (/demand/.test(lowered) && /(strong|resilient|healthy|higher|increase|growth|rebound)/.test(lowered)) {
@@ -955,12 +1369,100 @@ function summarizeRevenueDriverNarrative(source: SourceChunkRecord): string | nu
   return null;
 }
 
+function summarizeRevenueAdjacentSignals(text: string): string | null {
+  const lowered = text.toLowerCase();
+  const signals: string[] = [];
+
+  if (/walmart u\.s\.|walmart international|sam'?s club/.test(lowered)) {
+    signals.push("Walmart U.S.・海外・Sam's Club の事業別動向");
+  }
+  if (/construction industries|resource industries|energy & transportation|financial products/.test(lowered)) {
+    signals.push("建機・資源・エネルギー/輸送などの事業別動向");
+  }
+  if (/upstream|energy products|chemical products|specialty products/.test(lowered)) {
+    signals.push("上流、エネルギー製品、化学品などの部門別動向");
+  }
+  if (/comparable sales|comparable store|same-store/.test(lowered)) {
+    signals.push("既存店売上");
+  }
+  if (/traffic/.test(lowered)) {
+    signals.push("来店客数");
+  }
+  if (/ticket|average ticket/.test(lowered)) {
+    signals.push("客単価");
+  }
+  if (/ecommerce|e-commerce/.test(lowered)) {
+    signals.push("eコマース");
+  }
+  if (/membership/.test(lowered)) {
+    signals.push("会員収入・会員基盤");
+  }
+  if (/sales volume|volume/.test(lowered)) {
+    signals.push("販売数量");
+  }
+  if (/price realization|pricing|net selling price|price increase/.test(lowered)) {
+    signals.push("価格");
+  }
+  if (/crude|natural gas|commodity|realization|refining margin/.test(lowered)) {
+    signals.push("資源価格・精製マージン");
+  }
+  if (/foreign exchange|currency/.test(lowered)) {
+    signals.push("為替");
+  }
+  if (/segment|reportable/.test(lowered)) {
+    signals.push("セグメント構成");
+  }
+
+  return signals.length > 0
+    ? `本文から近い材料としては、${Array.from(new Set(signals)).slice(0, 4).join("、")}が売上変化を見る軸です。`
+    : null;
+}
+
+function summarizeMarginNarrative(text: string): string | null {
+  const lowered = text.toLowerCase();
+  const factors: string[] = [];
+
+  if (/gross margin|gross profit/.test(lowered)) {
+    factors.push("粗利率・粗利益");
+  }
+  if (/cost of sales|cost of revenue|costs? of products?|product cost|merchandise cost|input cost|inflation|labor cost|fuel cost/.test(lowered)) {
+    factors.push("原価・人件費・燃料費などのコスト");
+  }
+  if (/operating expense|selling, general and administrative|sg&a|research and development|compensation|advertising|marketing/.test(lowered)) {
+    factors.push("販管費・開発費などの営業費用");
+  }
+  if (/price realization|pricing|net selling price|price increase|markdown|promotion/.test(lowered)) {
+    factors.push("価格・値下げ・販促");
+  }
+  if (/mix|product mix|sales mix|business mix|channel mix/.test(lowered)) {
+    factors.push("商品構成・事業構成");
+  }
+  if (/inventory|shrink/.test(lowered)) {
+    factors.push("在庫・ロス");
+  }
+  if (/impairment|restructuring|one[- ]?time|one[- ]?off|non[- ]recurring/.test(lowered)) {
+    factors.push("一時費用・減損・再編費用");
+  }
+  if (/tax expense|income tax|valuation allowance/.test(lowered)) {
+    factors.push("税金関連要因");
+  }
+  if (/foreign exchange|currency/.test(lowered)) {
+    factors.push("為替");
+  }
+
+  if (factors.length === 0) {
+    return null;
+  }
+
+  return `本文では、${Array.from(new Set(factors)).slice(0, 5).join("、")}が利益率や利益の動きを見る材料として出ています。`;
+}
+
 function hasSubscriptionGrowthSignal(text: string): boolean {
   return /(subscription revenue|annual recurring revenue|\barr\b|recurring revenue|new customers?|existing customers?|customer adoption|customers adopting|additional modules?|module adoption|platform services?|falcon|endpoint security|cloud security|identity protection|threat intelligence)/i.test(text);
 }
 
 function revenueDriverNarrativePattern(): RegExp {
-  return /(?:net sales|revenue|sales|subscription revenue|annual recurring revenue|\barr\b).{0,220}(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from|demand|volume|pricing|traffic|ticket|comparable store|same-store|occupancy|leasing|renewal|new stores?|foreign exchange|currency|customers?|modules?|platform|subscription)|(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from).{0,220}(?:net sales|revenue|sales|subscription revenue|annual recurring revenue|\barr\b|demand|volume|pricing|traffic|ticket|comparable store|same-store|occupancy|leasing|renewal|new stores?|foreign exchange|currency|customers?|modules?|platform|subscription)/i;
+  return /(?:net sales|revenue|revenues|sales|sales and revenues|subscription revenue|annual recurring revenue|\barr\b).{0,260}(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from|due to|demand|volume|pricing|price realization|traffic|ticket|comparable sales|comparable store|same-store|ecommerce|membership|occupancy|leasing|renewal|new stores?|foreign exchange|currency|commodity|crude|natural gas|refining margin|realization|customers?|modules?|platform|subscription)|(?:primarily due to|driven by|attributable to|because of|reflecting|resulted from|due to).{0,260}(?:net sales|revenue|revenues|sales|sales and revenues|subscription revenue|annual recurring revenue|\barr\b|demand|volume|pricing|price realization|traffic|ticket|comparable sales|comparable store|same-store|ecommerce|membership|occupancy|leasing|renewal|new stores?|foreign exchange|currency|commodity|crude|natural gas|refining margin|realization|customers?|modules?|platform|subscription)/i;
 }
 
 function summarizeSubscriptionGrowthNarrative(text: string): string {
@@ -1085,11 +1587,29 @@ function translateDriverList(raw: string): string {
     .replace(/Ansys'? contribution of \$?([0-9,.]+)/gi, (_, value: string) => `Ansys買収による約${value}百万ドルの寄与`)
     .replace(/Ansys'? contribution/gi, "Ansys買収による寄与")
     .replace(/comparable store sales growth/gi, "既存店売上の伸び")
+    .replace(/comparable sales growth/gi, "既存店売上の伸び")
+    .replace(/higher comparable sales/gi, "既存店売上の増加")
+    .replace(/comparable sales/gi, "既存店売上")
     .replace(/same-store sales growth/gi, "既存店売上の伸び")
     .replace(/new store openings?/gi, "新規出店")
+    .replace(/e-?commerce sales/gi, "eコマース売上")
+    .replace(/membership income/gi, "会員収入")
     .replace(/stronger customer traffic/gi, "来店客数の増加")
     .replace(/higher customer traffic/gi, "来店客数の増加")
     .replace(/higher average ticket/gi, "客単価の上昇")
+    .replace(/favorable price realization/gi, "価格実現の改善")
+    .replace(/price realization/gi, "価格実現")
+    .replace(/higher sales volume/gi, "販売数量の増加")
+    .replace(/sales volume/gi, "販売数量")
+    .replace(/lower crude oil and natural gas realizations/gi, "原油・天然ガス価格の下落")
+    .replace(/lower crude oil realizations/gi, "原油価格の下落")
+    .replace(/lower natural gas realizations/gi, "天然ガス価格の下落")
+    .replace(/crude oil/gi, "原油")
+    .replace(/natural gas/gi, "天然ガス")
+    .replace(/refining margins?/gi, "精製マージン")
+    .replace(/commodity prices?/gi, "商品市況")
+    .replace(/realizations?/gi, "実現価格")
+    .replace(/sales and revenues/gi, "売上・収益")
     .replace(/(?:organic\s+)?volume declines? of\s+([0-9]+(?:\.[0-9]+)?%?)/gi, (_, value: string) => `販売数量の減少（${formatPercentText(value)}）`)
     .replace(/customer traffic/gi, "来店客数")
     .replace(/average ticket/gi, "客単価")
@@ -1126,7 +1646,20 @@ function isWeakNarrativeContext(context: string): boolean {
 }
 
 function fallbackSourceChunks(input: ChatPromptInput): SourceChunkRecord[] {
-  return input.contextPack?.sourceChunks ?? input.filing.sourceChunks;
+  if (!input.contextPack) {
+    return input.filing.sourceChunks;
+  }
+
+  const seen = new Set<string>();
+  const merged: SourceChunkRecord[] = [];
+  for (const source of [...input.contextPack.sourceChunks, ...input.filing.sourceChunks]) {
+    if (seen.has(source.sourceId)) {
+      continue;
+    }
+    seen.add(source.sourceId);
+    merged.push(source);
+  }
+  return merged;
 }
 
 function findMetricSourceId(sourceChunks: SourceChunkRecord[], metric: MetricSnapshot): string | undefined {

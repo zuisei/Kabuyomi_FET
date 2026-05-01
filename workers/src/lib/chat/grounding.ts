@@ -38,6 +38,40 @@ export interface ChatResponseDebug {
   schemaValid?: boolean;
   retryAttempt?: number;
   retryReason?: string | null;
+  retryAttempted?: boolean;
+  retryAllowed?: boolean;
+  retryBlockedReason?: string | null;
+  retryOutcome?: string | null;
+  retryWasted?: boolean;
+  firstCallFailureKind?: string | null;
+  sourceGateApplied?: boolean;
+  sourceGateSufficient?: boolean | null;
+  sourceGateMissingSourceTypes?: string[];
+  sourceGateFailureLabels?: string[];
+  sourceGateRetrievalRetryRecommended?: boolean;
+  retrievalRetryUsed?: boolean;
+  retrievalRetryOutcome?: "improved" | "no_improvement" | "not_used";
+  evidenceFallbackUsed?: boolean;
+  fallbackKind?: import("../../clients/gemini/types").ChatFallbackKind;
+  fallbackKindSource?: "model_quality_control" | "finalizer" | "language_guard" | "orchestrator";
+  responsePathFallbackButKindNone?: boolean;
+  driverSlotsCount?: number;
+  marginDriverSlotsCount?: number;
+  followupTargetFound?: boolean | null;
+  genericFallbackPhraseDetected?: boolean;
+  finalAnswerJapaneseRatio?: number;
+  finalAnswerEnglishSentenceCount?: number;
+  finalAnswerRawExcerptLike?: boolean;
+  finalAnswerLanguageLabels?: string[];
+  finalAnswerLanguageViolations?: string[];
+  languageGuardChecked?: boolean;
+  languageGuardOk?: boolean;
+  languageGuardViolationLabels?: string[];
+  languageGuardFallbackUsed?: boolean;
+  languageGuardFallbackKind?: import("../../clients/gemini/types").ChatFallbackKind | null;
+  originalAnswerBeforeLanguageGuardLength?: number | null;
+  originalAnswerBeforeLanguageGuardSample?: string | null;
+  sourceRepairLabels?: string[];
   contextTokenBudget?: number | null;
   selectedSourceCount?: number | null;
   selectedSourceCharCount?: number | null;
@@ -104,11 +138,7 @@ export function attachCurrentFilingSourceUrls(
 
 export function ensureFilingGroundedResponse(response: ChatResponsePayload): ChatResponsePayload {
   if (response.answer === CONTEXT_UNAVAILABLE_ANSWER) {
-    return {
-      ...response,
-      answer: response.answer,
-      sources: []
-    };
+    return response;
   }
 
   if (!response.sources.some((source) => source.sourceKind === "sec_filing" || source.sourceKind === "historical_filing")) {

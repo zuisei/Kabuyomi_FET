@@ -111,6 +111,17 @@ export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer
     if (leansOnProfitOnly && !mentionsRevenue) {
       return true;
     }
+
+    const declinesDriverAnswer =
+      /(具体的な)?(?:主な)?(?:要因|主因|理由|driver).{0,40}(?:記載|説明|確認|明示).{0,20}(?:ない|ありません|されていません|できません)/.test(
+        normalizedAnswer
+      ) ||
+      /(?:記載|説明|確認|明示).{0,20}(?:ない|ありません|されていません|できません).{0,40}(?:要因|主因|理由|driver)/.test(
+        normalizedAnswer
+      );
+    if (declinesDriverAnswer && (hasRevenueDriverContext(input) || hasRevenueDiscussionContext(input))) {
+      return true;
+    }
   }
 
   if (asksProfitCause) {
@@ -153,6 +164,49 @@ export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer
   const latinCount = (answer.match(/[A-Za-z]/g) ?? []).length;
   const japaneseCount = (answer.match(/[ぁ-んァ-ヶ一-龠]/g) ?? []).length;
   return !asksAboutFilingStructure && latinCount >= 40 && japaneseCount <= 12;
+}
+
+function hasRevenueDriverContext(input: ChatPromptInput): boolean {
+  const chunks = [...(input.contextPack?.sourceChunks ?? []), ...input.filing.sourceChunks];
+  return chunks.some((chunk) => {
+    if (!isRevenueDriverContextChunk(chunk)) {
+      return false;
+    }
+
+    return /(?:net sales (?:increased|decreased)|sales (?:increased|decreased)|primarily due to|driven by|attributable to|because of|reflecting|resulted from|due to|comparable sales|comparable store|same-store|traffic|ticket|ecommerce|membership|sales volume|volume|price realization|pricing|realization|crude|natural gas|refining margin|commodity|walmart u\.s\.|walmart international|sam'?s club|construction industries|resource industries|energy & transportation|upstream|energy products|chemical products|specialty products)/i.test(
+      chunk.text
+    );
+  });
+}
+
+function hasRevenueDiscussionContext(input: ChatPromptInput): boolean {
+  const chunks = [...(input.contextPack?.sourceChunks ?? []), ...input.filing.sourceChunks];
+  return chunks.some((chunk) => {
+    if (chunk.sectionType === "xbrl_metric") {
+      return false;
+    }
+
+    const label = chunk.sourceLabel ?? "";
+    const text = chunk.text;
+    return (
+      /(?:item 7|management'?s discussion|md&a|segment|revenue context|filing context)/i.test(label) ||
+      /(?:revenue|sales|net sales|売上)/i.test(text)
+    );
+  });
+}
+
+function isRevenueDriverContextChunk(chunk: ChatPromptInput["filing"]["sourceChunks"][number]): boolean {
+  if (chunk.sectionType === "xbrl_metric") {
+    return false;
+  }
+
+  if (chunk.sectionType === "md_a" || chunk.sectionType === "business" || chunk.sectionType === "segment") {
+    return true;
+  }
+
+  return /(?:md&a|management'?s discussion|item 7|segment|revenue context|filing context)/i.test(
+    chunk.sourceLabel ?? ""
+  );
 }
 
 export function polishChatAnswerForQuestion(question: string, answer: string): string {

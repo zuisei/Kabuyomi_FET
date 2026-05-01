@@ -43,6 +43,49 @@ describe("chat source validation helpers", () => {
     });
   });
 
+  it("allows local fallback source IDs from the broader filing source set", () => {
+    const filing = makeFiling([source("S1")]);
+    const contextPack = makeContextPack([source("S2")]);
+
+    expect(
+      validateModelSources(
+        {
+          answer: "fallback answer",
+          sourceIds: ["S1", "S2"],
+          fallbackReason: "low_quality_answer",
+          geminiCalled: true,
+          geminiSucceeded: true,
+          schemaValid: true
+        },
+        contextPack,
+        filing
+      )
+    ).toEqual({
+      approvedSourceIds: ["S1", "S2"],
+      modelSourceIdsValid: true
+    });
+  });
+
+  it("still validates remote model source IDs against the selected context only", () => {
+    const filing = makeFiling([source("S1")]);
+    const contextPack = makeContextPack([source("S2")]);
+
+    expect(
+      validateModelSources(
+        {
+          answer: "remote answer",
+          sourceIds: ["S1", "S2"],
+          usedRemoteModel: true
+        },
+        contextPack,
+        filing
+      )
+    ).toEqual({
+      approvedSourceIds: ["S2"],
+      modelSourceIdsValid: false
+    });
+  });
+
   it("treats an empty model source list as invalid", () => {
     expect(validateModelSources({ answer: "answer", sourceIds: [] }, makeContextPack([source("S1")]))).toEqual({
       approvedSourceIds: [],

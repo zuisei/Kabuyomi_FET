@@ -1,0 +1,6 @@
+{
+  "version": "testbench-minimal-5-v1",
+  "description": "Default 5-company benchmark set. Replace tickers freely for equivalent 5-company runs.",
+  "tickers": ["AAPL", "JPM", "XOM", "CAT", "WMT"]
+}
+

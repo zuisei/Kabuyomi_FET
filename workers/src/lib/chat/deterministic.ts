@@ -528,10 +528,42 @@ function buildCashGenerationAnswer(
     };
   }
 
+  const isFinancialCompany = isFinancialFiling(filing);
+  const directionSentence = buildCashFlowDirectionSentence(metric);
+  const interpretation = isFinancialCompany
+    ? "ただし金融機関の営業CFは、貸出・預金・取引資産負債の増減で大きく動くため、一般事業会社のように単純な本業の現金創出力とは見ません。預金、貸出、信用損失、流動性の説明と合わせて見る必要があります。"
+    : metric.value > 0
+      ? "プラスの営業CFなので、本業から現金は生んでいます。健全性は、純利益との対応、運転資本、設備投資後の余力を合わせて見るのが自然です。"
+      : "営業CFがマイナスなので、この数字だけでは本業からの現金創出が強いとは言いにくいです。理由は運転資本や一時要因の説明と合わせて確認する必要があります。";
+
   return {
-    answer: `${buildMetricObservationSentence(metric)} この数字がプラスで伸びているなら、本業からの現金創出は確認できます。`,
+    answer: `${buildMetricObservationSentence(metric)} ${directionSentence} ${interpretation}`,
     sources: [buildSecFilingSource(source)]
   };
+}
+
+function buildCashFlowDirectionSentence(metric: NonNullable<FilingCacheRecord["metrics"][number]>): string {
+  if (metric.yoyPercent === undefined) {
+    return metric.value >= 0 ? "営業CFはプラスです。" : "営業CFはマイナスです。";
+  }
+
+  if (metric.yoyPercent > 0) {
+    return metric.value >= 0 ? "前年差でも改善しています。" : "前年差では改善していますが、まだマイナスです。";
+  }
+
+  if (metric.yoyPercent < 0) {
+    return metric.value >= 0 ? "前年差では悪化していますが、金額はプラスです。" : "前年差でも悪化し、金額もマイナスです。";
+  }
+
+  return metric.value >= 0 ? "前年差はほぼ横ばいで、金額はプラスです。" : "前年差はほぼ横ばいですが、金額はマイナスです。";
+}
+
+function isFinancialFiling(filing: FilingCacheRecord): boolean {
+  const haystack = `${filing.ticker} ${filing.companyName} ${filing.sourceChunks
+    .slice(0, 20)
+    .map((chunk) => `${chunk.sourceLabel} ${chunk.text}`)
+    .join(" ")}`.toLowerCase();
+  return /\b(jpm|bank|bancorp|financial|securities|brokerage|deposit|loans?|net interest income|credit losses)\b/.test(haystack);
 }
 
 function summarizeCashFlowContext(sourceChunks: SourceChunkRecord[]): { text: string; sourceIds: string[] } | null {

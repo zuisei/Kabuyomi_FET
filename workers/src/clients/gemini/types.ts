@@ -33,6 +33,18 @@ export type ChatFallbackReason =
   | "deterministic_repair"
   | "metrics_only_insufficient";
 
+export type ChatRetryOutcome = "accepted" | "blocked" | "fallback" | "invalid_source_ids" | "no_valid_sources";
+
+export interface ChatRetryDiagnostics {
+  retryAttempted: boolean;
+  retryAllowed: boolean;
+  retryReason?: ChatFallbackReason | null;
+  retryBlockedReason?: string | null;
+  retryOutcome?: ChatRetryOutcome | null;
+  retryWasted?: boolean;
+  firstCallFailureKind?: ChatFallbackReason | null;
+}
+
 export interface QuoteTranslationPromptInput {
   text: string;
   sourceLanguage?: string;
@@ -50,6 +62,8 @@ export interface GeminiChatAnswer {
   schemaValid?: boolean;
   retryAttempt?: number;
   retryReason?: ChatFallbackReason;
+  retryDiagnostics?: ChatRetryDiagnostics;
+  qualityControl?: ChatQualityControlDiagnostics;
 }
 
 export interface GeminiInvocationUsage {
@@ -58,6 +72,47 @@ export interface GeminiInvocationUsage {
   candidatesTokenCount: number | null;
   totalTokenCount: number | null;
   latencyMs: number;
+}
+
+export type ChatFallbackKind =
+  | "none"
+  | "legacy_template"
+  | "evidence_slot"
+  | "model_timeout"
+  | "hard_model_timeout_evidence"
+  | "non_hard_model_timeout"
+  | "context_unavailable"
+  | "api_error"
+  | "deterministic_metric"
+  | "weak_grounding"
+  | "low_quality"
+  | "language_guard_fallback"
+  | "unknown_fallback";
+
+export interface ChatQualityControlDiagnostics {
+  sourceGateApplied: boolean;
+  sourceGateSufficient: boolean | null;
+  sourceGateMissingSourceTypes: string[];
+  sourceGateFailureLabels: string[];
+  sourceGateRetrievalRetryRecommended: boolean;
+  retrievalRetryUsed: boolean;
+  retrievalRetryOutcome: "improved" | "no_improvement" | "not_used";
+  evidenceFallbackUsed: boolean;
+  fallbackKind: ChatFallbackKind;
+  driverSlotsCount: number;
+  marginDriverSlotsCount: number;
+  followupTargetFound: boolean | null;
+  genericFallbackPhraseDetected: boolean;
+}
+
+export interface ChatLanguageGuardDiagnostics {
+  languageGuardChecked?: boolean;
+  languageGuardOk?: boolean;
+  languageGuardViolationLabels?: string[];
+  languageGuardFallbackUsed?: boolean;
+  languageGuardFallbackKind?: ChatFallbackKind | null;
+  originalAnswerBeforeLanguageGuardLength?: number | null;
+  originalAnswerBeforeLanguageGuardSample?: string | null;
 }
 
 export interface ChatRetryInstruction {
