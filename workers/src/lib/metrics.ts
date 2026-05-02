@@ -21,6 +21,9 @@ export function formatMetricValue(value: number, unit: string): string {
     if (abs >= 100_000_000) {
       return `${formatCompactNumber(value / 100_000_000)}億ドル`;
     }
+    if (abs >= 1_000_000) {
+      return `${formatCompactNumber(value / 1_000_000)}百万ドル`;
+    }
   }
 
   return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value)} ${unit}`.trim();

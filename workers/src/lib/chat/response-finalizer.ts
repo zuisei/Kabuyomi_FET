@@ -58,12 +58,13 @@ export async function finalizeChatResponse({
     ? timings.timeSync("groundingMs", () => attachCurrentFilingSourceUrls(supplemented, filing.primaryDocumentUrl))
     : supplemented;
   const normalizedFallbackKind = normalizeFallbackKind(responsePath, debug);
-  const originalAnswerBeforeLanguageGuard = responseWithUrls.answer;
-  const languageCheck = checkFinalAnswerJapaneseOnly(responseWithUrls.answer);
-  const bannedPhraseDetected = hasBannedPhrase(responseWithUrls.answer);
+  const uxCleanedAnswer = cleanFallbackAnswerForQuestion(responseWithUrls.answer, responsePath, normalizedFallbackKind, question, debug.questionIntent);
+  const originalAnswerBeforeLanguageGuard = uxCleanedAnswer;
+  const languageCheck = checkFinalAnswerJapaneseOnly(uxCleanedAnswer);
+  const bannedPhraseDetected = hasBannedPhrase(uxCleanedAnswer);
   const bannedPhraseCleanedAnswer = languageCheck.ok && bannedPhraseDetected
-    ? cleanBannedFinalAnswer(responseWithUrls.answer, debug.questionIntent)
-    : responseWithUrls.answer;
+    ? cleanBannedFinalAnswer(uxCleanedAnswer, debug.questionIntent)
+    : uxCleanedAnswer;
   const bannedPhraseStillDetected = languageCheck.ok && hasBannedPhrase(bannedPhraseCleanedAnswer);
   const finalAnswerSafe = languageCheck.ok && !bannedPhraseStillDetected;
   const languageSafeAnswer = finalAnswerSafe
@@ -116,6 +117,40 @@ export async function finalizeChatResponse({
       ...timings.snapshot()
     }
   );
+}
+
+function cleanFallbackAnswerForQuestion(
+  answer: string,
+  responsePath: ChatResponsePath,
+  fallbackKind: ChatFallbackKind,
+  question: string,
+  questionIntent?: string | null
+): string {
+  if (
+    responsePath === "fallback" &&
+    isBusinessModelQuestion(question, questionIntent) &&
+    ["api_error", "low_quality", "weak_grounding", "non_hard_model_timeout", "legacy_template", "unknown_fallback"].includes(fallbackKind) &&
+    isMetricSnapshotOnly(answer)
+  ) {
+    return "事業内容や収益源は、選択されたsourceだけでは十分に特定できません。確認すべきsourceは Business、Segment Information、Revenue Note、MD&A の事業説明です。売上高だけでは、この会社が何で儲けているかは判断しません。";
+  }
+  return answer;
+}
+
+function isBusinessModelQuestion(question: string, questionIntent?: string | null): boolean {
+  if (questionIntent === "business_model" || questionIntent === "business_overview") {
+    return true;
+  }
+  const normalized = question.replace(/\s+/g, "").toLowerCase();
+  return /(何屋|なに屋|何で稼|なにで稼|何で儲|なにで儲|儲けている|儲けてる|稼いでる|稼いでん|なんの会社|何の会社|どんな会社|何してる|何をしてる|事業内容|収益源|businessmodel|whatdoes.*companydo|whatbusiness)/.test(normalized);
+}
+
+function isMetricSnapshotOnly(answer: string): boolean {
+  const normalized = answer.replace(/\s+/g, "");
+  const metricLabel = "(?:売上高|営業利益|純利益|営業CF|営業キャッシュフロー)";
+  const amount = "[-0-9.,]+(?:兆|億|百万)?ドル";
+  return new RegExp(`^${metricLabel}は${amount}で、?(?:前年同期比|前年比)[-0-9.]+%[増減]です。?$`).test(normalized) ||
+    new RegExp(`^${metricLabel}は${amount}です。?$`).test(normalized);
 }
 
 function sampleUnsafeAnswer(answer: string): string {

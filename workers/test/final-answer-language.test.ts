@@ -142,6 +142,150 @@ describe("Japanese-only final answer guard", () => {
     expect(response.debug?.fallbackKind).toBe("non_hard_model_timeout");
     expect(response.debug?.responsePathFallbackButKindNone).toBe(false);
   });
+
+  it("replaces business-model api_error revenue snapshots with source-insufficient fallback text", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "この会社は何で儲けている？",
+      response: {
+        answer: "売上高は 10.4億ドル で、前年同期比 3.1%減 です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "business_model",
+        responsePath: "fallback",
+        fallbackReason: "gemini_api_error",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: false,
+        schemaValid: false,
+        fallbackKind: "api_error"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.debug?.fallbackKind).toBe("api_error");
+    expect(response.answer).toContain("事業内容や収益源");
+    expect(response.answer).toContain("Business");
+    expect(response.answer).toContain("Segment Information");
+    expect(response.answer).toContain("Revenue Note");
+    expect(response.answer).toContain("売上高だけでは");
+    expect(response.answer).not.toBe("売上高は 10.4億ドル で、前年同期比 3.1%減 です。");
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("replaces casual business-model api_error snapshots even when debug intent is missing", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "なにで稼いでんのこの会社",
+      response: {
+        answer: "売上高は 10.4億ドル で、前年同期比 3.1%減 です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        responsePath: "fallback",
+        fallbackReason: "gemini_api_error",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: false,
+        schemaValid: false,
+        fallbackKind: "api_error",
+        geminiApiErrorKind: "rate_limit"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.debug?.fallbackKind).toBe("api_error");
+    expect(response.debug?.sourceIdsValid).toBe(true);
+    expect(response.debug?.languageGuardChecked).toBe(true);
+    expect(response.answer).toContain("事業内容や収益源");
+    expect(response.answer).toContain("Business");
+    expect(response.answer).toContain("Segment Information");
+    expect(response.answer).toContain("Revenue Note");
+    expect(response.answer).toContain("売上高だけでは");
+    expect(response.answer).not.toMatch(/^売上高は/);
+  });
+
+  it("replaces casual business-model follow-up api_error snapshots", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "つまり何屋なの？",
+      response: {
+        answer: "売上高は 29億ドル で、前年同期比 18.5%増 です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "business_model",
+        responsePath: "fallback",
+        fallbackReason: "gemini_api_error",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: false,
+        schemaValid: false,
+        fallbackKind: "api_error",
+        geminiApiErrorKind: "rate_limit"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.debug?.fallbackKind).toBe("api_error");
+    expect(response.answer).toContain("事業内容や収益源");
+    expect(response.answer).toContain("MD&A");
+    expect(response.answer).not.toMatch(/^売上高は/);
+  });
+
+  it("does not rewrite revenue snapshot answers for revenue_snapshot questions", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "直近決算の売上はどうだった？",
+      response: {
+        answer: "売上高は 10.4億ドル で、前年同期比 3.1%減 です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "revenue_snapshot",
+        responsePath: "fallback",
+        fallbackReason: "gemini_api_error",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: false,
+        schemaValid: false,
+        fallbackKind: "api_error",
+        geminiApiErrorKind: "rate_limit"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.debug?.fallbackKind).toBe("api_error");
+    expect(response.debug?.languageGuardChecked).toBe(true);
+    expect(response.answer).toBe("売上高は 10.4億ドル で、前年同期比 3.1%減 です。");
+  });
 });
 
 function makeFiling(): FilingCacheRecord {

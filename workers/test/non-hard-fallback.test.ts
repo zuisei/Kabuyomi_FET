@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { generateChatAnswer } from "../src/clients/gemini";
 import type { FilingCacheRecord, MetricSnapshot, SourceChunkRecord } from "../src/env";
+import { formatMetricValue } from "../src/lib/metrics";
 
 describe("non-hard deterministic fallback cleanup", () => {
   it("names missing liquidity and debt sources without saying there is no concern", async () => {
@@ -74,6 +75,13 @@ describe("non-hard deterministic fallback cleanup", () => {
     expect(response.answer).toContain("Segment Information");
     expect(response.answer).toContain("Revenue Note");
     expect(response.answer).not.toContain("儲けています");
+  });
+
+  it("formats USD amounts consistently in Japanese fallback units", () => {
+    expect(formatMetricValue(2_900_000_000, "USD")).toBe("29億ドル");
+    expect(formatMetricValue(1_040_000_000, "USD")).toBe("10.4億ドル");
+    expect(formatMetricValue(443_300_000, "USD")).toBe("4.4億ドル");
+    expect(formatMetricValue(79_200_000, "USD")).toBe("79.2百万ドル");
   });
 
   it("does not answer segment strength from company-level revenue only", async () => {

@@ -62,6 +62,8 @@ export function hasBannedPhrase(answer: string): boolean {
 function buildRevenueDriverFallback(sourceGateResult: SourceGateResult, evidenceSlots: EvidenceSlots): string {
   const metric = evidenceSlots.confirmedMetricMovement;
   const safeDrivers = safeDriverTexts(evidenceSlots.companyExplainedDrivers);
+  const missingSourceText = joinMissingSourceLabels(sourceGateResult.missingSourceTypes);
+  const nextIndicatorText = joinMissingSourceLabels(evidenceSlots.sectorSpecificNextIndicators.slice(0, 5));
   const parts: string[] = [];
   if (metric) {
     parts.push(`${metric.metricName}は${metric.currentValue ?? "確認できます"}${metric.changePct ? `で、${metric.comparisonBasis ?? "比較"}${metric.changePct}です` : "です"}。`);
@@ -72,8 +74,8 @@ function buildRevenueDriverFallback(sourceGateResult: SourceGateResult, evidence
   if (safeDrivers.length > 0) {
     parts.push(`会社が説明する主なdriverは、${safeDrivers.join(" / ")}です。`);
   } else {
-    parts.push(`ただし、取得できたsourceでは、会社固有の売上driverは十分に特定できていません。不足しているのは ${joinItems(sourceGateResult.missingSourceTypes)} です。`);
-    parts.push(`主因を見るには、${joinItems(evidenceSlots.sectorSpecificNextIndicators.slice(0, 5))} を追加確認する必要があります。`);
+    parts.push(`ただし、取得できたsourceでは、会社固有の売上driverは十分に特定できていません。不足しているのは ${missingSourceText} です。`);
+    parts.push(`主因を見るには、${nextIndicatorText} を追加確認する必要があります。`);
   }
   return parts.join("");
 }
@@ -81,10 +83,11 @@ function buildRevenueDriverFallback(sourceGateResult: SourceGateResult, evidence
 function buildDriverDurabilityFallback(sourceGateResult: SourceGateResult, evidenceSlots: EvidenceSlots): string {
   const safeDrivers = safeDriverTexts(evidenceSlots.companyExplainedDrivers);
   if (sourceGateResult.followupTargetFound === false || safeDrivers.length === 0) {
+    const nextIndicatorText = joinMissingSourceLabels(["MD&A", ...evidenceSlots.sectorSpecificNextIndicators.slice(0, 5)]);
     return [
       "前問の具体的なdriverが十分に特定できていません。",
       "そのため、選択sourceだけで一時要因か継続要因かは分類しません。",
-      `判断には、MD&Aと${joinItems(evidenceSlots.sectorSpecificNextIndicators.slice(0, 5))} の追加確認が必要です。`
+      `判断には、${nextIndicatorText} の追加確認が必要です。`
     ].join("");
   }
 
@@ -98,7 +101,7 @@ function buildDriverDurabilityFallback(sourceGateResult: SourceGateResult, evide
     parts.push(`継続性を見る材料は、${durable.join(" / ")} です。`);
   }
   if (temporary.length === 0 && durable.length === 0) {
-    parts.push(`継続性の判断には、${joinItems(evidenceSlots.sectorSpecificNextIndicators.slice(0, 5))} の追加確認が必要です。`);
+    parts.push(`継続性の判断には、${joinMissingSourceLabels(evidenceSlots.sectorSpecificNextIndicators.slice(0, 5))} の追加確認が必要です。`);
   }
   return parts.join("");
 }
@@ -113,13 +116,13 @@ function buildMarginDurabilityFallback(sourceGateResult: SourceGateResult, evide
     }
     parts.push("ただし、利益率変化の具体的なdriverは十分に特定できていません。");
     parts.push("そのため、選択sourceだけで一時要因か構造的変化かは分類しません。");
-    parts.push(`判断には、${joinItems([...sourceGateResult.missingSourceTypes, ...evidenceSlots.sectorSpecificNextIndicators].slice(0, 6))} の説明が必要です。`);
+    parts.push(`判断には、${joinMissingSourceLabels([...sourceGateResult.missingSourceTypes, ...evidenceSlots.sectorSpecificNextIndicators].slice(0, 6))} の説明が必要です。`);
     return parts.join("");
   }
 
   parts.push(`利益率driverとして確認できるのは、${safeMarginDrivers.join(" / ")}です。`);
   if (evidenceSlots.durabilityEvidence.likelyTemporary.length === 0 && evidenceSlots.durabilityEvidence.potentiallyDurable.length === 0) {
-    parts.push(`一時要因か構造変化かの判断には、${joinItems(evidenceSlots.sectorSpecificNextIndicators.slice(0, 5))} の継続確認が必要です。`);
+    parts.push(`一時要因か構造変化かの判断には、${joinMissingSourceLabels(evidenceSlots.sectorSpecificNextIndicators.slice(0, 5))} の継続確認が必要です。`);
   }
   return parts.join("");
 }
@@ -183,4 +186,54 @@ function joinItems(items: string[]): string {
     return "MD&Aやsegment results";
   }
   return unique.join("、");
+}
+
+export function joinMissingSourceLabels(items: string[]): string {
+  const normalized = normalizeMissingSourceLabels(items);
+  return joinItems(normalized);
+}
+
+export function normalizeMissingSourceLabels(items: string[]): string[] {
+  const order = [
+    "MD&A",
+    "segment results",
+    "revenue discussion",
+    "profitability discussion",
+    "cash flow / liquidity",
+    "risk factors",
+    "sector-specific KPIs"
+  ];
+  const aliases: Array<[RegExp, string]> = [
+    [/^md&a(?:\s+(driver|revenue|business)\s+discussion)?$|^management'?s discussion$/i, "MD&A"],
+    [/segment/i, "segment results"],
+    [/^revenue discussion$|^sales discussion$/i, "revenue discussion"],
+    [/^profitability discussion$|^margin discussion$/i, "profitability discussion"],
+    [/cash|liquidity|debt|balance sheet|maturit/i, "cash flow / liquidity"],
+    [/risk/i, "risk factors"],
+    [/^sector-specific (kpis?|indicators?)$/i, "sector-specific KPIs"]
+  ];
+  const seen = new Set<string>();
+  for (const item of items) {
+    const text = item.trim();
+    if (!text) continue;
+    const mapped = aliases.find(([pattern]) => pattern.test(text))?.[1] ?? text;
+    seen.add(mapped);
+  }
+  return [...seen].sort((a, b) => {
+    const ai = orderIndexForMissingSourceLabel(a, order);
+    const bi = orderIndexForMissingSourceLabel(b, order);
+    return (ai === -1 ? order.length : ai) - (bi === -1 ? order.length : bi);
+  });
+}
+
+function orderIndexForMissingSourceLabel(label: string, order: string[]): number {
+  const direct = order.indexOf(label);
+  if (direct !== -1) return direct;
+  if (/md&a/i.test(label)) return order.indexOf("MD&A");
+  if (/segment/i.test(label)) return order.indexOf("segment results");
+  if (/revenue|sales|net interest|noninterest|comparable|traffic|ticket|ecommerce/i.test(label)) return order.indexOf("revenue discussion");
+  if (/profit|margin|cost|pricing|mix|expense|provision|impairment|restructuring/i.test(label)) return order.indexOf("profitability discussion");
+  if (/cash|liquidity|debt|balance sheet|maturit/i.test(label)) return order.indexOf("cash flow / liquidity");
+  if (/risk/i.test(label)) return order.indexOf("risk factors");
+  return order.indexOf("sector-specific KPIs");
 }
