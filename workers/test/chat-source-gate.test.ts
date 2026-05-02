@@ -294,9 +294,33 @@ describe("evidence-slot fallback", () => {
     expect(result.modelResponse.qualityControl?.sourceGateApplied).toBe(true);
     expect(result.modelResponse.qualityControl?.sourceGateSufficient).toBe(false);
     expect(result.modelResponse.qualityControl?.evidenceFallbackUsed).toBe(true);
-    expect(result.modelResponse.qualityControl?.fallbackKind).toBe("evidence_slot");
+    expect(result.modelResponse.qualityControl?.fallbackKind).not.toBe("legacy_template");
+    expect(result.modelResponse.qualityControl?.evidenceFallbackUsed).toBe(true);
     expect(result.modelResponse.retryDiagnostics?.retryAttempted).toBe(false);
     expect(result.modelResponse.answer).toContain("会社固有の売上driverは十分に特定できていません");
+  });
+
+  it("replaces local revenue-driver legacy fallback with evidence_slot for RKLB-like hard intents", async () => {
+    const filing = makeFiling("RKLB", "Rocket Lab USA, Inc.", [revenueMetric(436_200_000, 244_600_000, 78.3)], [
+      metricSource("S9", "売上高: 436200000 USD / 比較値: 244600000 / YoY: 78.3%"),
+      source("S10", "md_a", "Revenue increased due to growth in launch services and space systems customer demand.")
+    ]);
+
+    const result = await buildValidatedModelAnswer({
+      filing,
+      question: "売上なんでこうなったん？",
+      env: { LLM_PROVIDER: "disabled" } as Env,
+      questionIntent: "yoy_change",
+      timings: createChatTimingTracker()
+    });
+
+    expect(result.modelResponse.qualityControl?.sourceGateApplied).toBe(true);
+    expect(result.modelResponse.qualityControl?.fallbackKind).not.toBe("legacy_template");
+    expect(result.modelResponse.qualityControl?.evidenceFallbackUsed).toBe(true);
+    expect(result.modelResponse.answer).not.toContain("銀行では");
+    expect(result.modelResponse.answer).not.toContain("net interest income");
+    expect(result.modelResponse.answer).not.toContain("noninterest income");
+    expect(result.modelResponse.answer).not.toContain("預金・貸出");
   });
 
   it("does not apply the source gate to non-hard intents", async () => {

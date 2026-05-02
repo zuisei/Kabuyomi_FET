@@ -2,8 +2,8 @@ import type { Env } from "../../../../env";
 import { logEvent } from "../../../../lib/logging";
 import { chatResponseJsonSchema } from "../../../gemini/prompts";
 import { buildOpenAIApiRequestError, classifyOpenAIHttpError } from "./errors";
-import { parseOpenAIChatCompletionPayload } from "./response";
-import type { OpenAIChatCompletionPayload, OpenAIChatInvocationResult } from "./types";
+import { parseOpenAIChatCompletionPayload, parseOpenAIResponsesPayload } from "./response";
+import type { OpenAIChatCompletionPayload, OpenAIChatInvocationResult, OpenAIResponsesPayload } from "./types";
 
 export const DEFAULT_OPENAI_CHAT_MODEL = "gpt-5-nano";
 const DEFAULT_OPENAI_TIMEOUT_MS = 12_000;
@@ -116,6 +116,113 @@ export async function invokeOpenAIChat(env: Env, prompt: string): Promise<OpenAI
   };
 }
 
+export async function invokeOpenAIDashboardPrompt(
+  env: Env,
+  fallbackPrompt: string,
+  variables: Record<string, string>
+): Promise<OpenAIChatInvocationResult> {
+  const model = resolveOpenAIChatModel(env);
+  const promptId = resolveOpenAIPromptId(env);
+  if (!promptId) {
+    return invokeOpenAIChat(env, fallbackPrompt);
+  }
+
+  const timeoutMs = resolveOpenAITimeoutMs(env);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
+  let response: Response;
+
+  try {
+    response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${env.OPENAI_API_KEY ?? ""}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(buildOpenAIResponsesPromptRequest(env, variables)),
+      signal: controller.signal
+    });
+  } catch (error) {
+    clearTimeout(timeout);
+    const timedOut =
+      (error instanceof Error && error.name === "AbortError") ||
+      (error instanceof DOMException && error.name === "AbortError");
+    logEvent("openai_request_failed", {
+      kind: "responses",
+      model,
+      promptId,
+      timeoutMs,
+      reason: timedOut ? "timeout" : "network_error"
+    });
+    throw buildOpenAIApiRequestError({
+      kind: timedOut ? "timeout" : "network_error",
+      model,
+      message: error instanceof Error ? error.message : "OpenAI network request failed.",
+      prompt: fallbackPrompt
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    const bodyPreview = (await response.text()).slice(0, 240);
+    const classified = classifyOpenAIHttpError(response.status, bodyPreview);
+    logEvent("openai_request_failed", {
+      kind: "responses",
+      model,
+      promptId,
+      status: response.status,
+      bodyPreview,
+      errorKind: classified.kind
+    });
+    throw buildOpenAIApiRequestError({
+      kind: classified.kind,
+      status: response.status,
+      code: classified.code,
+      model,
+      message: bodyPreview || `OpenAI request failed (${response.status})`,
+      prompt: fallbackPrompt
+    });
+  }
+
+  const latencyMs = Date.now() - startedAt;
+  logEvent("openai_request_succeeded", {
+    kind: "responses",
+    model,
+    promptId,
+    status: response.status,
+    latencyMs
+  });
+
+  const payload = await response.json<OpenAIResponsesPayload>();
+  const parsed = parseOpenAIResponsesPayload(payload);
+  const usage = [{
+    model: payload.model ?? model,
+    promptTokenCount: payload.usage?.input_tokens ?? null,
+    candidatesTokenCount: payload.usage?.output_tokens ?? null,
+    totalTokenCount: payload.usage?.total_tokens ?? null,
+    latencyMs
+  }];
+
+  if (parsed.failureReason !== undefined) {
+    logEvent("openai_invalid_response", {
+      kind: "responses",
+      reason: parsed.failureReason
+    });
+    return {
+      data: {},
+      usage,
+      failureReason: parsed.failureReason
+    };
+  }
+
+  return {
+    data: parsed.data,
+    usage
+  };
+}
+
 export function buildOpenAIChatRequest(
   model: string,
   prompt: string,
@@ -142,8 +249,40 @@ export function buildOpenAIChatRequest(
   };
 }
 
+export function buildOpenAIResponsesPromptRequest(env: Env, variables: Record<string, string>): Record<string, unknown> {
+  const prompt: Record<string, unknown> = {
+    id: resolveOpenAIPromptId(env),
+    variables
+  };
+  const version = env.OPENAI_PROMPT_VERSION?.trim();
+  if (version) {
+    prompt.version = version;
+  }
+
+  return {
+    prompt,
+    text: {
+      format: {
+        type: "json_schema",
+        name: "kabuyomi_chat_answer",
+        strict: true,
+        schema: openAIChatResponseJsonSchema()
+      },
+      verbosity: "low"
+    },
+    reasoning: {
+      effort: resolveOpenAIReasoningEffort(env)
+    },
+    max_output_tokens: resolveOpenAIMaxCompletionTokens(env)
+  };
+}
+
 export function resolveOpenAIChatModel(env: Env): string {
   return env.OPENAI_CHAT_MODEL?.trim() || DEFAULT_OPENAI_CHAT_MODEL;
+}
+
+export function resolveOpenAIPromptId(env: Env): string | null {
+  return env.OPENAI_PROMPT_ID?.trim() || null;
 }
 
 function resolveOpenAITimeoutMs(env: Env): number {

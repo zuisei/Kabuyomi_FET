@@ -25,6 +25,10 @@ import {
 
 const CHAT_CREDIT_COST = 2;
 
+function isRemoteModelResponsePath(responsePath: string | undefined): boolean {
+  return responsePath === "gemini" || responsePath === "openai";
+}
+
 export type ChatRequestPayload = z.infer<typeof ChatRequestSchema>;
 
 export async function answerChatUsecase({
@@ -72,7 +76,7 @@ export async function answerChatUsecase({
   const answerQualityFlags = buildAnswerQualityFlags(answer, {
     contextApplied: resolvedQuestion !== payload.question
   });
-  const modelNameForLog = answer.debug?.geminiCalled === true || responsePath === "gemini" ? resolveSelectedChatModelName(env, answer.debug?.modelName) : null;
+  const modelNameForLog = answer.debug?.geminiCalled === true || isRemoteModelResponsePath(responsePath) ? resolveSelectedChatModelName(env, answer.debug?.modelName) : null;
 
   if (answer.chargeable === false) {
     try {
@@ -125,7 +129,7 @@ export async function answerChatUsecase({
     })
   );
 
-  const modelName = answer.responsePath === "gemini" ? resolveSelectedChatModelName(env, answer.debug?.modelName) : null;
+  const modelName = isRemoteModelResponsePath(answer.responsePath) ? resolveSelectedChatModelName(env, answer.debug?.modelName) : null;
   const body: Record<string, unknown> = {
     answer: formatChatAnswerForDisplay(answer.answer),
     sources: answer.sources,

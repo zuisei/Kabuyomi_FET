@@ -83,7 +83,7 @@ describe("Japanese-only final answer guard", () => {
     const filing = makeFiling();
     const response = await finalizeChatResponse({
       filing,
-      question: "資金繰りや負債に懸念はある？",
+      question: "この filing で重要なリスクは？",
       response: {
         answer: "具体的な負債額や資金繰りの詳細なリスクについては、この資料の範囲では確認できません。",
         sources: [sourceToEvidence(filing.sourceChunks[0])]
@@ -108,7 +108,7 @@ describe("Japanese-only final answer guard", () => {
     expect(response.responsePath).toBe("gemini");
     expect(response.debug?.fallbackKind).toBe("none");
     expect(response.answer).not.toContain("この資料の範囲では確認できません");
-    expect(response.answer).toContain("debt note や liquidity discussion");
+    expect(response.answer).toContain("負債の注記 や 流動性の説明");
   });
 
   it("normalizes fallbackKind for fallback rows", async () => {
@@ -173,9 +173,9 @@ describe("Japanese-only final answer guard", () => {
     expect(response.responsePath).toBe("fallback");
     expect(response.debug?.fallbackKind).toBe("api_error");
     expect(response.answer).toContain("事業内容や収益源");
-    expect(response.answer).toContain("Business");
-    expect(response.answer).toContain("Segment Information");
-    expect(response.answer).toContain("Revenue Note");
+    expect(response.answer).toContain("事業内容");
+    expect(response.answer).toContain("セグメント情報");
+    expect(response.answer).toContain("売上注記");
     expect(response.answer).toContain("売上高だけでは");
     expect(response.answer).not.toBe("売上高は 10.4億ドル で、前年同期比 3.1%減 です。");
     expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
@@ -213,9 +213,9 @@ describe("Japanese-only final answer guard", () => {
     expect(response.debug?.sourceIdsValid).toBe(true);
     expect(response.debug?.languageGuardChecked).toBe(true);
     expect(response.answer).toContain("事業内容や収益源");
-    expect(response.answer).toContain("Business");
-    expect(response.answer).toContain("Segment Information");
-    expect(response.answer).toContain("Revenue Note");
+    expect(response.answer).toContain("事業内容");
+    expect(response.answer).toContain("セグメント情報");
+    expect(response.answer).toContain("売上注記");
     expect(response.answer).toContain("売上高だけでは");
     expect(response.answer).not.toMatch(/^売上高は/);
   });
@@ -250,7 +250,7 @@ describe("Japanese-only final answer guard", () => {
 
     expect(response.debug?.fallbackKind).toBe("api_error");
     expect(response.answer).toContain("事業内容や収益源");
-    expect(response.answer).toContain("MD&A");
+    expect(response.answer).toContain("経営陣による業績説明");
     expect(response.answer).not.toMatch(/^売上高は/);
   });
 
@@ -285,6 +285,499 @@ describe("Japanese-only final answer guard", () => {
     expect(response.debug?.fallbackKind).toBe("api_error");
     expect(response.debug?.languageGuardChecked).toBe(true);
     expect(response.answer).toBe("売上高は 10.4億ドル で、前年同期比 3.1%減 です。");
+  });
+
+  it("rewrites remote business-model answers that lead with financial metrics", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "なにで稼いでんのこの会社",
+      response: {
+        answer: "この会社は主に売上を「売上高」で稼いでいます。売上高は10.4億ドルで、前年同期比3.1%減です。純利益は79.2百万ドルでした。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "unknown",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.sourceIdsValid).toBe(true);
+    expect(response.debug?.fallbackKind).toBe("none");
+    expect(response.debug?.modelProvider).toBe("openai");
+    expect(response.answer).toContain("事業内容や収益源");
+    expect(response.answer).toContain("売上高だけでは");
+    expect(response.answer).not.toMatch(/^(この会社は)?主に?売上/);
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("preserves business-model answers that start with what the company sells", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "つまり何屋なの？",
+      response: {
+        answer: "Skyworks は、通信機器やスマートフォン向けのアナログ/RF半導体を売って稼ぐ会社です。今回のsourceだけでは製品別・顧客別の売上構成までは十分に分けられません。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "gemini",
+      debug: {
+        questionIntent: "unknown",
+        responsePath: "gemini",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("アナログ/RF半導体");
+    expect(response.answer).not.toContain("売上高だけでは");
+    expect(response.debug?.fallbackKind).toBe("none");
+  });
+
+  it("removes weird USD/JPY mixed unit sentences from business-model answers", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "つまり何屋なの？",
+      response: {
+        answer: "Skyworks は、通信機器向けの半導体部品を売って稼ぐ会社です。売上高は10億3,540千 USDでした。主な費用は6億8千8百万円でした。純利益は百万円で表されます。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "gemini",
+      debug: {
+        questionIntent: "business_overview",
+        responsePath: "gemini",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("通信機器向けの半導体部品");
+    expect(response.answer).not.toContain("10億3,540千 USD");
+    expect(response.answer).not.toContain("6億8千8百万円");
+    expect(response.answer).not.toContain("百万円");
+    expect(response.debug?.sourceIdsValid).toBe(true);
+  });
+
+  it("removes trailing metric snapshot sentences from OpenAI business-model answers", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "なにで稼いでんのこの会社",
+      response: {
+        answer: "この会社は主に半導体関連のソリューションを提供し、売上は主に製品の販売から稼いでいます。2026年1月2日時点の四半期実績では、総売上高は約10.354億ドル、純利益は約7920万ドル、営業利益は約1.038億ドルです。前年同期比で売上は約-3.1%、純利益は約-51.1%、営業利益は約-42.7%の減少となっています。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "unknown",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.answer).toBe("この会社は主に半導体関連のソリューションを提供し、売上は主に製品の販売から稼いでいます。");
+    expect(response.answer).not.toContain("総売上高");
+    expect(response.answer).not.toContain("純利益");
+    expect(response.answer).not.toContain("前年同期比");
+    expect(response.debug?.sourceIdsValid).toBe(true);
+  });
+
+  it("normalizes awkward OpenAI English terms and USD unit strings in final answers", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "次回決算で見るべきポイントを3つに絞って",
+      response: {
+        answer: "1) 営業利益の改善（552百万 USD）。2) government支出、acquisitions、repurchaseの影響。3) NIとCash flow、capital expenditureを確認。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "watch_points",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.answer).toContain("会社固有のポイント");
+    expect(response.answer).not.toContain("百万 USD");
+    expect(response.answer).not.toContain("government");
+    expect(response.answer).not.toContain("repurchase");
+    expect(response.answer).not.toContain("acquisitions");
+    expect(response.answer).not.toContain("NI");
+    expect(response.answer).not.toContain("Cash flow");
+  });
+
+  it("normalizes compact oku-USD output from OpenAI answers", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "売上成長、または減収の主な要因は？",
+      response: {
+        answer: "売上高は6.018億USDで、政府向け需要が支えました。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "revenue_driver",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("6.0億ドル");
+    expect(response.answer).toContain("政府向け需要");
+    expect(response.answer).not.toContain("億USD");
+  });
+
+  it("replaces generic risk-summary style answers for liquidity/debt questions", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "この filing で重要なリスクは？",
+      response: {
+        answer: "主要リスク: 規制、競争、顧客データ保護、市場環境の変動が業績に影響する可能性があります。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "liquidity_debt",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("資金繰りや負債の懸念を直接判断するには不足");
+    expect(response.answer).toContain("キャッシュフロー計算書");
+    expect(response.answer).toContain("負債の注記");
+    expect(response.answer).not.toContain("規制、競争、顧客データ保護");
+  });
+
+  it("translates English fallback source labels after language-guard fallback", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "この filing で重要なリスクは？",
+      response: {
+        answer: "Part I. Item 2 Results of Operations contains a raw English filing excerpt that should not be shown to users. Additional Risk Factors and MD&A risk discussion are needed.",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "risk_summary",
+        responsePath: "openai",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateMissingSourceTypes: ["Risk Factors", "MD&A risk discussion"],
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.debug?.fallbackKind).toBe("language_guard_fallback");
+    expect(response.answer).toContain("リスク要因");
+    expect(response.answer).toContain("MD&Aのリスク説明");
+    expect(response.answer).not.toContain("Risk Factors");
+    expect(response.answer).not.toContain("MD&A risk discussion");
+    expect(response.debug?.sourceIdsValid).toBe(true);
+  });
+
+  it("normalizes raw USD and comma-decimal currency strings", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "売上成長、または減収の主な要因は？",
+      response: {
+        answer: "売上高 601,0億ドル、参考値は379,600,000 USDです。前年同468,? は比較値として不明です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "revenue_driver",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("601.0億ドル");
+    expect(response.answer).toContain("3.8億ドル");
+    expect(response.answer).toContain("前年同期の比較値");
+    expect(response.answer).not.toContain("601,0億ドル");
+    expect(response.answer).not.toContain("379,600,000 USD");
+    expect(response.answer).not.toContain("前年同468,?");
+  });
+
+  it("rewrites liquidity/debt answers that start as generic risk summaries", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "資金繰りや負債に懸念はある？",
+      response: {
+        answer: "主要リスク: 金融市場の変動、規制、顧客データ保護が業績に影響する可能性があります。影響: 資金繰りや負債に関する懸念として、金利変動が流動性に影響します。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "liquidity_debt",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("キャッシュフロー計算書");
+    expect(response.answer).toContain("満期スケジュール");
+    expect(response.answer).not.toMatch(/^主要リスク/);
+    expect(response.answer).not.toContain("顧客データ保護");
+  });
+
+  it("rewrites generic watch-point answers with malformed raw USD text", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "次回決算で見るべきポイントを3つに絞って",
+      response: {
+        answer: "次回決算で見るべきポイントは次の3点です。1) 売上高の成長率、2) 純利益の成長、3) コスト構造とキャッシュフロー。これらは379,600,000 USD（前年同468,?）に裏付けられます。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "watch_points",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("会社固有のポイント");
+    expect(response.answer).toContain("セグメント実績");
+    expect(response.answer).toContain("キャッシュフロー・流動性");
+    expect(response.answer).not.toContain("379,600,000 USD");
+    expect(response.answer).not.toContain("前年同468,?");
+  });
+
+  it("replaces generic watch-point lists when no company-specific signal is present", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "次回決算で見るべきポイントを3つに絞って",
+      response: {
+        answer: "次回決算で見るべきポイントは三つです。 1) 売上高の推移と成長要因、2) 純利益の推移とドライバ、3) コスト構造や支出の動向。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "watch_points",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("会社固有のポイント");
+    expect(response.answer).toContain("セグメント実績");
+    expect(response.answer).toContain("売上説明");
+    expect(response.answer).toContain("キャッシュフロー・流動性");
+    expect(response.answer).not.toContain("純利益の推移");
+  });
+
+  it("replaces BDX-like universal watch-point lists even without malformed metrics", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "次回決算で見るべきポイントを3つに絞って",
+      response: {
+        answer: "次回決算で見るべきポイントは次の3つです。1) 売上高の推移とYoYの伸び率、需要の動向を確認。2) 営業利益と利益率の推移、コスト構造の改善を評価。3) 純利益の成長要因と季節性・非経常項目の影響を把握。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "watch_points",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("会社固有のポイント");
+    expect(response.answer).toContain("一般的な売上・利益・コストだけでは");
+    expect(response.answer).not.toContain("営業利益と利益率の推移");
+  });
+
+  it("keeps company-specific watch-point answers", async () => {
+    const filing = makeFiling();
+    const answer = "次回決算では、1) Alarisの出荷再開による医療機器需要、2) Life Sciencesの診断需要、3) Medication Management Solutionsの受注と在庫正常化を確認します。";
+    const response = await finalizeChatResponse({
+      filing,
+      question: "次回決算で見るべきポイントを3つに絞って",
+      response: {
+        answer,
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "watch_points",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("Alaris");
+    expect(response.answer).toContain("Life Sciences");
+    expect(response.answer).toContain("Medication Management Solutions");
+    expect(response.answer).not.toContain("会社固有のポイントを3つに絞るには不足");
   });
 });
 

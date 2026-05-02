@@ -3,7 +3,7 @@ import { AppError } from "../errors";
 
 export type ChatSourceKind = "sec_filing" | "historical_filing" | "web_supplement";
 export type ChatSourceStrength = "filing_primary" | "supplement_article" | "supplement_snippet";
-export type ChatResponsePath = "historical" | "deterministic" | "fallback" | "gemini";
+export type ChatResponsePath = "historical" | "deterministic" | "fallback" | "gemini" | "openai";
 
 export interface ChatEvidenceSource {
   sourceId: string;

@@ -131,6 +131,27 @@ describe("non-hard deterministic fallback cleanup", () => {
     expect(response.answer).toContain("previous filing evidence");
     expect(response.answer).not.toContain("前回決算との差は20.0%");
   });
+
+  it("does not use retail checklist terms for biotech revenue-driver fallback", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "売上成長、または減収の主な要因は？",
+      questionIntent: "yoy_change",
+      filing: makeFiling({
+        ticker: "ALNY",
+        companyName: "Alnylam Pharmaceuticals, Inc.",
+        metrics: [metric("revenue", 1_250_000_000, 501_000_000, 149.3)],
+        sources: [
+          xbrl("S1", "売上高", "売上高: 1250000000 USD / 比較値: 501000000 / YoY: 149.3%"),
+          md("S2", "Revenue context", "The company develops RNAi therapeutics and earns product and collaboration revenue from pharmaceutical products.")
+        ]
+      })
+    });
+
+    expect(response.answer).not.toContain("既存店");
+    expect(response.answer).not.toContain("traffic");
+    expect(response.answer).not.toContain("ticket");
+    expect(response.answer).toMatch(/製品別売上|提携収入|ロイヤリティ|売上driver|会社固有/);
+  });
 });
 
 function makeFiling({

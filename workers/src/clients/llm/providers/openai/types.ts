@@ -38,3 +38,20 @@ export interface OpenAIChatCompletionPayload {
     total_tokens?: number;
   };
 }
+
+export interface OpenAIResponsesPayload {
+  model?: string;
+  output_text?: string;
+  output?: Array<{
+    type?: string;
+    content?: Array<{
+      type?: string;
+      text?: string;
+    }>;
+  }>;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+  };
+}

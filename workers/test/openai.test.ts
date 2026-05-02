@@ -2,11 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateModelChatAnswer, resolveLlmProvider } from "../src/clients/llm/provider";
 import {
   buildOpenAIChatRequest,
+  buildOpenAIResponsesPromptRequest,
   classifyOpenAIError,
   classifyOpenAIHttpError,
   DEFAULT_OPENAI_CHAT_MODEL,
   OpenAIApiRequestError,
   parseOpenAIChatCompletionPayload,
+  parseOpenAIResponsesPayload,
+  resolveOpenAIPromptId,
   resolveOpenAIChatModel
 } from "../src/clients/llm/providers/openai";
 import type { FilingCacheRecord } from "../src/env";
@@ -45,6 +48,43 @@ describe("OpenAI provider config", () => {
     });
     expect(JSON.stringify(request)).toContain("kabuyomi_chat_answer");
     expect(JSON.stringify(request)).toContain("additionalProperties");
+    expect(JSON.stringify(request)).toContain("sourceIds");
+  });
+
+  it("builds a Responses API request for a dashboard prompt", () => {
+    const request = buildOpenAIResponsesPromptRequest({
+      OPENAI_PROMPT_ID: "pmpt_test",
+      OPENAI_PROMPT_VERSION: "1",
+      OPENAI_REASONING_EFFORT: "minimal",
+      OPENAI_MAX_COMPLETION_TOKENS: "500"
+    } as never, {
+      question: "なにで稼いでんのこの会社",
+      sources_json: "[]"
+    });
+
+    expect(resolveOpenAIPromptId({ OPENAI_PROMPT_ID: "pmpt_test" } as never)).toBe("pmpt_test");
+    expect(request).toMatchObject({
+      prompt: {
+        id: "pmpt_test",
+        version: "1",
+        variables: {
+          question: "なにで稼いでんのこの会社",
+          sources_json: "[]"
+        }
+      },
+      text: {
+        format: {
+          type: "json_schema",
+          name: "kabuyomi_chat_answer",
+          strict: true
+        },
+        verbosity: "low"
+      },
+      reasoning: {
+        effort: "minimal"
+      },
+      max_output_tokens: 500
+    });
     expect(JSON.stringify(request)).toContain("sourceIds");
   });
 });
@@ -103,6 +143,37 @@ describe("OpenAI response parser", () => {
       sourceIds: ["S1"]
     });
   });
+
+  it("extracts answer text and sourceIds from a Responses API payload", () => {
+    const parsed = parseOpenAIResponsesPayload({
+      model: "gpt-5-nano",
+      output: [
+        {
+          type: "message",
+          content: [
+            {
+              type: "output_text",
+              text: JSON.stringify({
+                answer: "日本語の回答です。",
+                sourceIds: ["S1"]
+              })
+            }
+          ]
+        }
+      ],
+      usage: {
+        input_tokens: 100,
+        output_tokens: 20,
+        total_tokens: 120
+      }
+    });
+
+    expect(parsed.failureReason).toBeUndefined();
+    expect(parsed.data).toEqual({
+      answer: "日本語の回答です。",
+      sourceIds: ["S1"]
+    });
+  });
 });
 
 describe("OpenAI chat provider", () => {
@@ -146,6 +217,75 @@ describe("OpenAI chat provider", () => {
       }
     );
 
+    expect(response.usedRemoteModel).toBe(true);
+    expect(response.modelProvider).toBe("openai");
+    expect(response.modelName).toBe("gpt-5-nano");
+    expect(response.answer).toContain("製品需要");
+    expect(response.sourceIds).toEqual(["S1"]);
+    expect(response.llmUsage?.[0]).toMatchObject({
+      model: "gpt-5-nano",
+      promptTokenCount: 100,
+      candidatesTokenCount: 20,
+      totalTokenCount: 120
+    });
+  });
+
+  it("uses the Responses API dashboard prompt when OPENAI_PROMPT_ID is configured", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      expect(url).toBe("https://api.openai.com/v1/responses");
+      const body = JSON.parse(String(init?.body));
+      expect(body.prompt.id).toBe("pmpt_test");
+      expect(body.prompt.version).toBe("1");
+      expect(body.prompt.variables.question).toBe("売上成長の要因は？");
+      expect(body.prompt.variables.question_intent).toBe("mda_summary");
+      expect(body.prompt.variables.filing_metadata_json).toContain("Test Corp");
+      expect(body.prompt.variables.sources_json).toContain("S1");
+      expect(body.text.format.name).toBe("kabuyomi_chat_answer");
+      return new Response(
+        JSON.stringify({
+          model: "gpt-5-nano",
+          output: [
+            {
+              type: "message",
+              content: [
+                {
+                  type: "output_text",
+                  text: JSON.stringify({
+                    answer: "売上成長の主因は、製品需要の増加です。",
+                    sourceIds: ["S1"]
+                  })
+                }
+              ]
+            }
+          ],
+          usage: {
+            input_tokens: 100,
+            output_tokens: 20,
+            total_tokens: 120
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await generateModelChatAnswer(
+      {
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key",
+        OPENAI_CHAT_MODEL: "gpt-5-nano",
+        OPENAI_PROMPT_ID: "pmpt_test",
+        OPENAI_PROMPT_VERSION: "1"
+      } as never,
+      {
+        filing: makeFiling(),
+        question: "売上成長の要因は？",
+        questionIntent: "mda_summary"
+      }
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(response.usedRemoteModel).toBe(true);
     expect(response.modelProvider).toBe("openai");
     expect(response.modelName).toBe("gpt-5-nano");

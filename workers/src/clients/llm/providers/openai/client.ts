@@ -8,10 +8,10 @@ import {
   stripAnswerFormattingArtifacts,
   stripEnglishParentheticals
 } from "../../../gemini/normalize";
-import { buildChatPrompt } from "../../../gemini/prompts";
+import { buildChatPrompt, buildChatPromptTemplateVariables } from "../../../gemini/prompts";
 import type { ChatPromptInput, GeminiChatAnswer } from "../../../gemini/types";
 import { classifyOpenAIError } from "./errors";
-import { invokeOpenAIChat, resolveOpenAIChatModel } from "./request";
+import { invokeOpenAIChat, invokeOpenAIDashboardPrompt, resolveOpenAIChatModel, resolveOpenAIPromptId } from "./request";
 
 export async function generateOpenAIChatAnswer(env: Env, input: ChatPromptInput): Promise<GeminiChatAnswer> {
   if (!env.OPENAI_API_KEY) {
@@ -24,9 +24,12 @@ export async function generateOpenAIChatAnswer(env: Env, input: ChatPromptInput)
   }
 
   const prompt = buildChatPrompt(input);
+  const promptVariables = buildChatPromptTemplateVariables(input);
   let invocation: Awaited<ReturnType<typeof invokeOpenAIChat>>;
   try {
-    invocation = await invokeOpenAIChat(env, prompt);
+    invocation = resolveOpenAIPromptId(env) !== null
+      ? await invokeOpenAIDashboardPrompt(env, prompt, promptVariables)
+      : await invokeOpenAIChat(env, prompt);
   } catch (error) {
     const classified = classifyOpenAIError(error);
     const fallbackReason = classified.modelApiErrorKind === "timeout" ? "gemini_timeout" : "gemini_api_error";

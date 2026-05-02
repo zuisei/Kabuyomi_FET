@@ -5,7 +5,7 @@ const ticker = process.env.KABUYOMI_SMOKE_TICKER?.trim().toUpperCase() || "AAPL"
 const searchQuery = process.env.KABUYOMI_SMOKE_SEARCH_QUERY?.trim() || ticker;
 const chatQuestion = process.env.KABUYOMI_SMOKE_CHAT_QUESTION?.trim() || "売上高は？";
 const historyQuestion = process.env.KABUYOMI_SMOKE_HISTORY_QUESTION?.trim() || "この3年の売上推移は？";
-const validResponsePaths = new Set(["historical", "deterministic", "fallback", "gemini"]);
+const validResponsePaths = new Set(["historical", "deterministic", "fallback", "gemini", "openai"]);
 
 if (!baseURL) {
   console.error(
@@ -263,9 +263,9 @@ function assertChatMetadata(payload, label) {
     throw new Error(`${label} returned an unexpected responsePath`);
   }
 
-  if (payload.responsePath === "gemini") {
+  if (payload.responsePath === "gemini" || payload.responsePath === "openai") {
     if (typeof payload.modelName !== "string" || payload.modelName.trim().length === 0) {
-      throw new Error(`${label} should return a modelName for the gemini path`);
+      throw new Error(`${label} should return a modelName for the remote model path`);
     }
     return;
   }

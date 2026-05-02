@@ -252,7 +252,7 @@ export async function buildValidatedModelAnswer({
   let sourceValidation = validateModelSources(modelResponse, contextPack, filing);
   if (
     sourceGateResult.sourceGateApplied &&
-    shouldReplaceHardIntentFallback(modelResponse)
+    shouldReplaceHardIntentFallback(modelResponse, sourceGateResult)
   ) {
     const evidenceSlots = extractEvidenceSlots({
       filing,
@@ -300,7 +300,11 @@ export async function buildValidatedModelAnswer({
       retrievalRetryUsed,
       retrievalRetryOutcome,
       evidenceFallbackUsed: false,
-      fallbackKind: modelResponse.usedRemoteModel === true ? "none" : "legacy_template",
+      fallbackKind: modelResponse.usedRemoteModel === true
+        ? "none"
+        : sourceGateResult.hardIntent
+          ? "evidence_slot"
+          : "legacy_template",
       genericFallbackPhraseDetected: false,
       hardRetrievalDiagnostics
     });
@@ -367,16 +371,30 @@ function shouldUseEvidenceFallbackForEmptyDriverSlots(
   return false;
 }
 
-function shouldReplaceHardIntentFallback(modelResponse: GeminiChatAnswer): boolean {
+function shouldReplaceHardIntentFallback(modelResponse: GeminiChatAnswer, sourceGateResult: SourceGateResult): boolean {
   return (
     modelResponse.fallbackReason === "gemini_timeout" ||
     modelResponse.fallbackReason === "gemini_api_error" ||
+    isUnsafeHardIntentLocalFallback(modelResponse, sourceGateResult) ||
     (
       modelResponse.fallbackReason !== undefined &&
       modelResponse.usedRemoteModel !== true &&
       hasBannedPhrase(modelResponse.answer)
     )
   );
+}
+
+function isUnsafeHardIntentLocalFallback(modelResponse: GeminiChatAnswer, sourceGateResult: SourceGateResult): boolean {
+  if (sourceGateResult.hardIntent !== "revenue_driver" || modelResponse.usedRemoteModel === true) {
+    return false;
+  }
+  const answer = modelResponse.answer;
+  const missing = sourceGateResult.missingSourceTypes.join(" ").toLowerCase();
+  const allowsBankTerms = /(net interest|noninterest|provision|deposit|credit quality|investment banking|trading|wealth management|bank)/i.test(missing);
+  const allowsRetailTerms = /(comparable|traffic|ticket|ecommerce|membership|retail|store)/i.test(missing);
+  const hasBankChecklist = /(銀行では|net interest income|noninterest income|provision|deposits?|credit quality|預金・貸出)/i.test(answer);
+  const hasRetailChecklist = /(小売では|既存店|traffic|ticket|eCommerce|membership\/advertising)/i.test(answer);
+  return (hasBankChecklist && !allowsBankTerms) || (hasRetailChecklist && !allowsRetailTerms);
 }
 
 function attachRetryDiagnostics(

@@ -1,4 +1,5 @@
 import type { Env, FilingCacheRecord } from "../../env";
+import type { GeminiChatAnswer } from "../../clients/gemini/types";
 import { AppError } from "../errors";
 import { logErrorEvent, logEvent, logWarnEvent } from "../logging";
 import { DEFAULT_REMOTE_CONFIG, type RemoteConfig } from "../remote-config";
@@ -62,6 +63,12 @@ export async function buildChatResponse(
     timings,
     ...options
   });
+  const resolveRemoteResponsePath = (modelResponse: GeminiChatAnswer): Parameters<typeof finalizeChatResponse>[0]["responsePath"] => {
+    if (modelResponse.usedRemoteModel !== true) {
+      return "fallback";
+    }
+    return modelResponse.modelProvider === "openai" ? "openai" : "gemini";
+  };
   const questionIntent = classifyQuestionIntent(question);
   const contentMode = resolveContentMode(filing);
   let historical = null;
@@ -300,7 +307,7 @@ export async function buildChatResponse(
       ticker: filing.ticker,
       reason: "model_context_unavailable"
     });
-    const responsePath = modelResponse.usedRemoteModel === true ? "gemini" : "fallback";
+    const responsePath = resolveRemoteResponsePath(modelResponse);
     const repairedSources = mapSourceIdsToSecFilingSources([...fallbackValidSourceIds].slice(0, 2), sourceById);
     const repairedSourceIdsValid = repairedSources.length > 0;
     logChatLlmUsage(modelResponse, filing, responsePath);
@@ -497,7 +504,7 @@ export async function buildChatResponse(
     }
   }
 
-  const responsePath = modelResponse.usedRemoteModel === true ? "gemini" : "fallback";
+  const responsePath = resolveRemoteResponsePath(modelResponse);
 
   logEvent("chat_path_selected", {
     filingKey: filing.filingKey,

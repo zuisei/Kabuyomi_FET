@@ -61,7 +61,9 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "If a cited source chunk is mostly boilerplate or legal cautionary language, ignore it and answer from a more substantive filing-backed fact when possible.",
     "Do not just copy or lightly paraphrase a source chunk.",
     "Many users are investors. For investor-style questions, prioritize what investors usually care about: guidance and outlook, demand trends, segment or regional drivers, pricing and margins, cash-flow quality, capital allocation such as buybacks or dividends, and key risks.",
-    "For prompts such as なんの企業, 何の会社, どんな会社, or 何をしている会社, answer the business overview first in 2 to 4 natural Japanese sentences: what the company does, who it serves, and which products or business lines the filing supports. Start with the company name or ticker as the subject; never start the answer with a Japanese particle such as は, が, を, に, or で. Do not lead with revenue, growth, or margins unless the user asked for those metrics.",
+    "For prompts such as なんの企業, 何の会社, どんな会社, 何をしている会社, なにで稼いでんの, 何で儲けている, or つまり何屋なの, answer the business overview first in 2 to 4 natural Japanese sentences: what the company sells, who it serves, and how it earns revenue. Start with the company name or ticker as the subject; never start the answer with a Japanese particle such as は, が, を, に, or で. Do not lead with revenue, net income, margins, or YoY metrics unless the user asked for those metrics.",
+    "For business overview questions, metrics are secondary context only. If Business, Segment, Revenue Note, or MD&A business description evidence is insufficient, say that the selected sources do not sufficiently identify the business model instead of answering from revenue numbers alone.",
+    "Do not convert USD filing metrics into Japanese yen. Never output 円, 万円, 億円, 百万円, or mixed forms such as 千 USD. For USD figures, use Japanese dollar units such as 10.4億ドル or 79.2百万ドル only when the provided metric value supports that number.",
     "For questions about 事業, セクター, セグメント, 売上内訳, or 売上の柱, answer with the major revenue buckets or business lines in plain Japanese first.",
     "For business_overview, revenue_breakdown, and risk_factors, use the Factual pack before using raw source excerpts. Treat geography revenue as secondary unless the Factual pack has no segment, product, or service revenue categories.",
     "Use numbers only when they appear in the Factual pack, Factual metrics pack, or provided Sources. If the Factual pack lists missingFields, mention the gap briefly at the end instead of turning the whole answer into a refusal.",
@@ -106,6 +108,34 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "Sources:",
     JSON.stringify(contextPack.sourceChunks)
   ].join("\n");
+}
+
+export function buildChatPromptTemplateVariables(input: ChatPromptInput): Record<string, string> {
+  const contextPack = input.contextPack ?? {
+    questionIntent: input.questionIntent ?? "unknown",
+    contentMode: input.filing.contentMode ?? "full",
+    metrics: input.filing.metrics,
+    factualPack: undefined,
+    sourceChunks: input.filing.sourceChunks
+  };
+  return {
+    question: input.question,
+    question_intent: contextPack.questionIntent,
+    content_mode: contextPack.contentMode,
+    answer_format_instruction: answerFormatInstruction(contextPack.questionIntent),
+    retry_instruction: retryInstruction(input) || "なし",
+    filing_metadata_json: JSON.stringify({
+      filingKey: input.filing.filingKey,
+      companyName: input.filing.companyName,
+      ticker: input.filing.ticker,
+      formType: input.filing.formType,
+      filedAt: input.filing.filedAt,
+      periodOfReport: input.filing.periodOfReport
+    }),
+    factual_metrics_pack_json: JSON.stringify(contextPack.metrics),
+    factual_pack_json: JSON.stringify(contextPack.factualPack ?? null),
+    sources_json: JSON.stringify(contextPack.sourceChunks)
+  };
 }
 
 export function buildQuoteTranslationPrompt(input: QuoteTranslationPromptInput): string {
@@ -189,7 +219,7 @@ export function quoteTranslationResponseJsonSchema() {
   };
 }
 
-function answerFormatInstruction(intent: NonNullable<ChatPromptInput["questionIntent"]>): string {
+export function answerFormatInstruction(intent: NonNullable<ChatPromptInput["questionIntent"]>): string {
   switch (intent) {
     case "business_overview":
       return "Cover, in this order: 一言概要, 主な収益源, 直近filingで見える変化, 注意点。";
@@ -217,7 +247,7 @@ function answerFormatInstruction(intent: NonNullable<ChatPromptInput["questionIn
   }
 }
 
-function retryInstruction(input: ChatPromptInput): string {
+export function retryInstruction(input: ChatPromptInput): string {
   if (!input.retryInstruction) {
     return "";
   }

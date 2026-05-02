@@ -610,7 +610,7 @@ function buildRevenueDriverFallbackAnswer(
     const adjacentSignal = summarizeRevenueAdjacentSignals(narrative.text);
     parts.push(
       adjacentSignal ??
-        "本文では、売上区分や地域・セグメントの説明が近い材料です。次に見るべきなのは、価格、数量、既存店、地域、商品構成のどれが増減に効いたかです。"
+        `本文では、売上区分や地域・セグメントの説明が近い材料です。${sectorRevenueDriverChecklist(filing)}`
     );
   } else if (narrative) {
     sourceIds.push(narrative.sourceId);
@@ -631,6 +631,7 @@ function sectorRevenueDriverChecklist(filing: FilingCacheRecord): string {
   const ticker = filing.ticker.toUpperCase();
   const company = filing.companyName.toLowerCase();
   const haystack = filing.mdaText.slice(0, 8000).toLowerCase();
+  const companyProfile = `${ticker} ${company}`;
 
   if (ticker === "WMT" || /walmart|sam'?s club/.test(company)) {
     return "小売では、既存店売上、traffic、ticket、eCommerce、membership/advertising、在庫とgross marginを分けて確認する必要があります。";
@@ -648,7 +649,7 @@ function sectorRevenueDriverChecklist(filing: FilingCacheRecord): string {
     return "Appleのような製品・サービス企業では、iPhone、Services、Mac、地域別売上、為替、製品mixを分けて確認する必要があります。";
   }
 
-  if (ticker === "JPM" || /bank|financial|deposits?|loans?|net interest income|credit losses/.test(haystack)) {
+  if (isBankOrFinancialCompany(companyProfile)) {
     return "銀行では、net interest income、noninterest income、信用損失引当、預金・貸出残高、投資銀行やマーケット収益を分けて確認する必要があります。";
   }
 
@@ -664,11 +665,23 @@ function sectorRevenueDriverChecklist(filing: FilingCacheRecord): string {
     return "小売では、既存店売上、traffic、ticket、eCommerce、membership/advertising、在庫とgross marginを分けて確認する必要があります。";
   }
 
+  if (/biotech|biopharma|pharmaceutical|drug|therapy|rna|clinical|royalt|collaboration|license/.test(haystack)) {
+    return "バイオ医薬では、製品別売上、提携収入、ロイヤリティ、承認済み製品の需要、研究開発や販売体制の変化を分けて確認する必要があります。";
+  }
+
+  if (/rocket lab|space|launch|aerospace|satellite/.test(`${company} ${haystack}`)) {
+    return "宇宙・航空関連では、打ち上げサービス、宇宙システム、受注残、ミッション数、顧客需要を分けて確認する必要があります。";
+  }
+
   if (/apple|iphone|mac|ipad|services|wearables|greater china|americas/.test(haystack)) {
     return "Appleのような製品・サービス企業では、iPhone、Services、Mac、地域別売上、為替、製品mixを分けて確認する必要があります。";
   }
 
-  return "次に見るべきなのは、価格、数量、地域、セグメント、商品構成のどれが増減に効いたかです。";
+  return "次に見るべきなのは、事業別・地域別・製品別の売上説明、価格や数量、顧客需要のどれが増減に効いたかです。";
+}
+
+function isBankOrFinancialCompany(companyProfile: string): boolean {
+  return /\b(jpm|bac|c|wfc|gs|ms|pnc|usb|td|schw|blk|bank|bancorp|financial|capital markets|wealth management|asset management|brokerage)\b/i.test(companyProfile);
 }
 
 function buildClosestContextFallbackAnswer(

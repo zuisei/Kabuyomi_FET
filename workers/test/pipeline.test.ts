@@ -181,7 +181,7 @@ describe("buildChatResponse", () => {
     );
 
     expect(fetchMock).toHaveBeenCalled();
-    expect(response.responsePath).toBe("gemini");
+    expect(response.responsePath).toBe("openai");
     expect(response.debug?.modelProvider).toBe("openai");
     expect(response.debug?.modelName).toBe("gpt-5-nano");
     expect(response.answer).toContain("iPhone");
@@ -970,7 +970,7 @@ describe("buildChatResponse", () => {
     expect(response.responsePath).toBe("fallback");
     expect(response.answer).toContain("前問の具体的なdriver");
     expect(response.answer).toContain("分類しません");
-    expect(response.answer).toContain("MD&A");
+    expect(response.answer).toContain("経営陣による業績説明");
     expect(response.answer).not.toContain("一般的な注意書き");
     expect(response.answer).not.toContain("本文の要因説明と並べると判断しやすくなります");
     expect(response.answer).not.toContain("product revenueです");
@@ -1021,7 +1021,7 @@ describe("buildChatResponse", () => {
     expect(response.responsePath).toBe("fallback");
     expect(response.answer).toContain("前問の具体的なdriver");
     expect(response.answer).toContain("分類しません");
-    expect(response.answer).toContain("MD&A");
+    expect(response.answer).toContain("経営陣による業績説明");
     expect(response.answer).not.toContain("もう一段絞れます");
     expect(response.answer).not.toContain("本文の要因説明と並べると判断しやすくなります");
     expect(response.answer).not.toContain("product revenueです");

@@ -2,10 +2,13 @@ export { generateOpenAIChatAnswer } from "./client";
 export {
   DEFAULT_OPENAI_CHAT_MODEL,
   buildOpenAIChatRequest,
+  buildOpenAIResponsesPromptRequest,
   invokeOpenAIChat,
+  invokeOpenAIDashboardPrompt,
+  resolveOpenAIPromptId,
   resolveOpenAIChatModel
 } from "./request";
-export { parseOpenAIChatCompletionPayload } from "./response";
+export { parseOpenAIChatCompletionPayload, parseOpenAIResponsesPayload } from "./response";
 export {
   OpenAIApiRequestError,
   buildOpenAIApiRequestError,

@@ -12,6 +12,8 @@ export interface Env {
   LLM_PROVIDER?: "gemini-legacy" | "gemini" | "openai" | "disabled";
   OPENAI_API_KEY?: string;
   OPENAI_CHAT_MODEL?: string;
+  OPENAI_PROMPT_ID?: string;
+  OPENAI_PROMPT_VERSION?: string;
   OPENAI_TIMEOUT_MS?: string;
   OPENAI_REASONING_EFFORT?: "minimal" | "low" | "medium" | "high";
   OPENAI_MAX_COMPLETION_TOKENS?: string;
