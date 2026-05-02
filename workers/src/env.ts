@@ -9,6 +9,7 @@ export interface Env {
   GEMINI_TRANSLATION_MODEL?: string;
   GEMINI_TIMEOUT_MS?: string;
   GEMINI_CHAT_TIMEOUT_MS?: string;
+  HARD_INTENT_TARGETED_RETRIEVAL_MODE?: "off" | "diagnostic" | "active";
   SEC_USER_AGENT: string;
   SEC_FETCHER_BASE_URL?: string;
   SEC_FETCHER_SHARED_SECRET?: string;

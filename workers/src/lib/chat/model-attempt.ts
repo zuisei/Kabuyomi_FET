@@ -5,11 +5,21 @@ import { buildChatContextPack, type ChatContextPack } from "./context-pack";
 import { logChatContextSelection } from "./decision-log";
 import { buildEvidenceFallbackAnswer, hasBannedPhrase } from "./evidence-fallback";
 import { extractEvidenceSlots, type EvidenceSlots } from "./evidence-slots";
+import {
+  analyzeHardIntentSourceCoverage,
+  applyHardIntentRetrievalPlan,
+  buildHardIntentRetrievalPlan,
+  resolveHardIntentRetrievalMode,
+  type HardIntentRetrievalMode,
+  type HardIntentSourceCoverage,
+  type HardIntentRetrievalPlan
+} from "./hard-intent-retrieval";
 import type { QuestionIntent } from "./intent";
 import { retryModelAnswer } from "./model-retry";
 import { chooseRetryReason, retryBlockedReasonForQuestion, shouldRetryModelAnswer } from "./route-policy";
 import {
   evaluateSourceGate,
+  normalizeSector,
   resolveHardFinancialIntent,
   type SourceGateResult
 } from "./source-gate";
@@ -46,28 +56,106 @@ export async function buildValidatedModelAnswer({
   let sourceGateResult = initialGate;
   let retrievalRetryUsed = false;
   let retrievalRetryOutcome: NonNullable<GeminiChatAnswer["qualityControl"]>["retrievalRetryOutcome"] = "not_used";
+  const hardRetrievalMode = resolveHardIntentRetrievalMode(env.HARD_INTENT_TARGETED_RETRIEVAL_MODE);
+  const initialCoverage = initialGate.sourceGateApplied
+    ? analyzeHardIntentSourceCoverage({
+        filing,
+        sector: normalizeSector(null, filing.ticker, filing.companyName),
+        questionIntent,
+        sourceGateMissingSourceTypes: initialGate.missingSourceTypes,
+        selectedSourceLabels: contextPack.sourceChunks.map((source) => source.sourceLabel),
+        selectedSourceIds: contextPack.sourceChunks.map((source) => source.sourceId)
+      })
+    : null;
+  let hardRetrievalDiagnostics = createHardRetrievalDiagnostics(contextPack, initialGate, null, undefined, {
+    mode: hardRetrievalMode,
+    coverage: initialCoverage
+  });
 
-  if (initialGate.sourceGateApplied && !initialGate.sourceSufficient && initialGate.retrievalRetryRecommended) {
-    retrievalRetryUsed = true;
-    const expandedContextPack = timings.timeSync("contextBuildMs", () =>
-      buildChatContextPack(filing, questionIntent, { mode: "expanded", retryReason: "source_gate_failed" })
-    );
-    const expandedGate = evaluateSourceGate({
+  if (
+    hardRetrievalMode !== "off" &&
+    initialGate.sourceGateApplied &&
+    !initialGate.sourceSufficient &&
+    initialGate.retrievalRetryRecommended
+  ) {
+    const sector = normalizeSector(null, filing.ticker, filing.companyName);
+    const initialSlots = extractEvidenceSlots({
+      filing,
+      sources: contextPack.sourceChunks,
+      sourceGateResult: initialGate
+    });
+    const hardPlan = buildHardIntentRetrievalPlan({
       ticker: filing.ticker,
       companyName: filing.companyName,
+      sector,
       questionIntent,
       question,
-      selectedSources: expandedContextPack.sourceChunks,
-      metrics: expandedContextPack.metrics.length > 0 ? expandedContextPack.metrics : filing.metrics
+      sourceGateResult: initialGate,
+      sourceGateMissingSourceTypes: initialGate.missingSourceTypes,
+      selectedSourceLabels: contextPack.sourceChunks.map((source) => source.sourceLabel),
+      selectedSourceIds: contextPack.sourceChunks.map((source) => source.sourceId),
+      selectedSources: contextPack.sourceChunks,
+      filingKey: filing.filingKey,
+      filingType: filing.formType
     });
-    retrievalRetryOutcome = expandedGate.sourceSufficient ||
-      expandedGate.missingSourceTypes.length < initialGate.missingSourceTypes.length ||
-      expandedGate.identifiedDrivers.length > initialGate.identifiedDrivers.length
-      ? "improved"
-      : "no_improvement";
-    contextPack = expandedContextPack;
-    sourceGateResult = expandedGate;
-    logChatContextSelection(filing, contextPack);
+    if (hardRetrievalMode === "diagnostic") {
+      hardRetrievalDiagnostics = createHardRetrievalDiagnostics(contextPack, initialGate, hardPlan, undefined, {
+        mode: hardRetrievalMode,
+        coverage: initialCoverage
+      });
+    } else if (hardPlan.shouldRetryRetrieval) {
+      retrievalRetryUsed = true;
+      const beforeLabels = contextPack.sourceChunks.map((source) => source.sourceLabel);
+      const retrievalResult = timings.timeSync("contextBuildMs", () =>
+        applyHardIntentRetrievalPlan(filing, contextPack, hardPlan, initialGate.hardIntent!)
+      );
+      const expandedContextPack = retrievalResult.contextPack;
+      const expandedGate = evaluateSourceGate({
+        ticker: filing.ticker,
+        companyName: filing.companyName,
+        questionIntent,
+        question,
+        selectedSources: expandedContextPack.sourceChunks,
+        metrics: expandedContextPack.metrics.length > 0 ? expandedContextPack.metrics : filing.metrics
+      });
+      const expandedSlots = extractEvidenceSlots({
+        filing,
+        sources: expandedContextPack.sourceChunks,
+        sourceGateResult: expandedGate
+      });
+      retrievalRetryOutcome = expandedGate.sourceSufficient ||
+        expandedGate.missingSourceTypes.length < initialGate.missingSourceTypes.length ||
+        expandedGate.identifiedDrivers.length > initialGate.identifiedDrivers.length ||
+        expandedSlots.companyExplainedDrivers.length > initialSlots.companyExplainedDrivers.length ||
+        expandedSlots.marginDrivers.length > initialSlots.marginDrivers.length
+        ? "improved"
+        : "no_improvement";
+      contextPack = expandedContextPack;
+      sourceGateResult = expandedGate;
+      hardRetrievalDiagnostics = createHardRetrievalDiagnostics(
+        contextPack,
+        initialGate,
+        hardPlan,
+        {
+          addedSources: retrievalResult.addedSources,
+          outcome: retrievalRetryOutcome,
+          afterGate: expandedGate,
+          beforeSlots: initialSlots,
+          afterSlots: expandedSlots,
+          beforeLabels
+        },
+        {
+          mode: hardRetrievalMode,
+          coverage: initialCoverage
+        }
+      );
+      logChatContextSelection(filing, contextPack);
+    } else {
+      hardRetrievalDiagnostics = createHardRetrievalDiagnostics(contextPack, initialGate, hardPlan, undefined, {
+        mode: hardRetrievalMode,
+        coverage: initialCoverage
+      });
+    }
   }
 
   if (sourceGateResult.sourceGateApplied && !sourceGateResult.sourceSufficient) {
@@ -91,7 +179,8 @@ export async function buildValidatedModelAnswer({
         retrievalRetryOutcome,
         evidenceFallbackUsed: true,
         fallbackKind: "evidence_slot",
-        genericFallbackPhraseDetected: evidenceFallback.genericFallbackPhraseDetected
+        genericFallbackPhraseDetected: evidenceFallback.genericFallbackPhraseDetected,
+        hardRetrievalDiagnostics
       }
     );
     return {
@@ -145,7 +234,8 @@ export async function buildValidatedModelAnswer({
           retrievalRetryOutcome,
           evidenceFallbackUsed: true,
           fallbackKind: "evidence_slot",
-          genericFallbackPhraseDetected: evidenceFallback.genericFallbackPhraseDetected
+          genericFallbackPhraseDetected: evidenceFallback.genericFallbackPhraseDetected,
+          hardRetrievalDiagnostics
         }
       );
       return {
@@ -181,7 +271,8 @@ export async function buildValidatedModelAnswer({
         geminiCalled: modelResponse.geminiCalled ?? true,
         geminiSucceeded: modelResponse.geminiSucceeded ?? false,
         fallbackReason: modelResponse.fallbackReason,
-        llmUsage: modelResponse.llmUsage
+        llmUsage: modelResponse.llmUsage,
+        geminiApiError: modelResponse.geminiApiError
       },
       sourceGateResult,
       evidenceSlots,
@@ -194,7 +285,8 @@ export async function buildValidatedModelAnswer({
           : modelResponse.fallbackReason === "gemini_api_error"
             ? "api_error"
             : "evidence_slot",
-        genericFallbackPhraseDetected: evidenceFallback.genericFallbackPhraseDetected
+        genericFallbackPhraseDetected: evidenceFallback.genericFallbackPhraseDetected,
+        hardRetrievalDiagnostics
       }
     );
     sourceValidation = validateModelSources(modelResponse, contextPack, filing);
@@ -209,7 +301,8 @@ export async function buildValidatedModelAnswer({
       retrievalRetryOutcome,
       evidenceFallbackUsed: false,
       fallbackKind: modelResponse.usedRemoteModel === true ? "none" : "legacy_template",
-      genericFallbackPhraseDetected: false
+      genericFallbackPhraseDetected: false,
+      hardRetrievalDiagnostics
     });
   }
   const retryReason = chooseRetryReason({
@@ -321,7 +414,9 @@ function attachQualityControl(
     NonNullable<GeminiChatAnswer["qualityControl"]>,
     "retrievalRetryUsed" | "retrievalRetryOutcome" | "evidenceFallbackUsed" | "fallbackKind" | "genericFallbackPhraseDetected"
   >
+    & { hardRetrievalDiagnostics?: HardRetrievalDiagnostics }
 ): GeminiChatAnswer {
+  const hardRetrievalDiagnostics = options.hardRetrievalDiagnostics ?? createHardRetrievalDiagnosticsFromGate(sourceGateResult);
   return {
     ...modelResponse,
     qualityControl: {
@@ -337,8 +432,108 @@ function attachQualityControl(
       driverSlotsCount: evidenceSlots.companyExplainedDrivers.length,
       marginDriverSlotsCount: evidenceSlots.marginDrivers.length,
       followupTargetFound: sourceGateResult.followupTargetFound,
-      genericFallbackPhraseDetected: options.genericFallbackPhraseDetected
+      genericFallbackPhraseDetected: options.genericFallbackPhraseDetected,
+      ...hardRetrievalDiagnostics
     }
+  };
+}
+
+type HardRetrievalDiagnostics = Pick<
+  NonNullable<GeminiChatAnswer["qualityControl"]>,
+  | "hardRetrievalPlanUsed"
+  | "hardRetrievalQueries"
+  | "hardRetrievalQueryPurposes"
+  | "hardRetrievalMissingSourceTypes"
+  | "hardRetrievalAddedSourceCount"
+  | "hardRetrievalAddedSourceLabels"
+  | "hardRetrievalAddedSourceIds"
+  | "hardRetrievalOutcome"
+  | "sourceGateSufficientBeforeHardRetrieval"
+  | "sourceGateSufficientAfterHardRetrieval"
+  | "driverSlotsCountBeforeHardRetrieval"
+  | "driverSlotsCountAfterHardRetrieval"
+  | "marginDriverSlotsCountBeforeHardRetrieval"
+  | "marginDriverSlotsCountAfterHardRetrieval"
+  | "selectedSourceLabelsBeforeHardRetrieval"
+  | "selectedSourceLabelsAfterHardRetrieval"
+  | "hardRetrievalMode"
+  | "hardSourceCoverageScore"
+  | "hardSourceCoverageMissing"
+  | "hardSourceCoverageSectorKpiHits"
+  | "hardSourceCoverageHasMdaRevenueDiscussion"
+  | "hardSourceCoverageHasSegmentResults"
+  | "hardSourceCoverageHasSectorKpiWindow"
+>;
+
+function createHardRetrievalDiagnostics(
+  contextPack: ChatContextPack,
+  beforeGate: SourceGateResult,
+  plan: HardIntentRetrievalPlan | null,
+  result?: {
+    addedSources: ChatContextPack["sourceChunks"];
+    outcome: "improved" | "no_improvement" | "not_used";
+    afterGate: SourceGateResult;
+    beforeSlots: EvidenceSlots;
+    afterSlots: EvidenceSlots;
+    beforeLabels: string[];
+  },
+  options: {
+    mode: HardIntentRetrievalMode;
+    coverage: HardIntentSourceCoverage | null;
+  } = { mode: "diagnostic", coverage: null }
+): HardRetrievalDiagnostics {
+  return {
+    hardRetrievalPlanUsed: Boolean(plan?.shouldRetryRetrieval),
+    hardRetrievalQueries: plan?.queries.map((query) => query.query) ?? [],
+    hardRetrievalQueryPurposes: plan?.queries.map((query) => query.purpose) ?? [],
+    hardRetrievalMissingSourceTypes: plan?.queries.flatMap((query) => query.missingSourceTypes) ?? beforeGate.missingSourceTypes,
+    hardRetrievalAddedSourceCount: result?.addedSources.length ?? 0,
+    hardRetrievalAddedSourceLabels: result?.addedSources.map((source) => source.sourceLabel) ?? [],
+    hardRetrievalAddedSourceIds: result?.addedSources.map((source) => source.sourceId) ?? [],
+    hardRetrievalOutcome: result?.outcome ?? "not_used",
+    sourceGateSufficientBeforeHardRetrieval: beforeGate.sourceGateApplied ? beforeGate.sourceSufficient : null,
+    sourceGateSufficientAfterHardRetrieval: result?.afterGate.sourceGateApplied ? result.afterGate.sourceSufficient : null,
+    driverSlotsCountBeforeHardRetrieval: result?.beforeSlots.companyExplainedDrivers.length ?? null,
+    driverSlotsCountAfterHardRetrieval: result?.afterSlots.companyExplainedDrivers.length ?? null,
+    marginDriverSlotsCountBeforeHardRetrieval: result?.beforeSlots.marginDrivers.length ?? null,
+    marginDriverSlotsCountAfterHardRetrieval: result?.afterSlots.marginDrivers.length ?? null,
+    selectedSourceLabelsBeforeHardRetrieval: result?.beforeLabels ?? contextPack.sourceChunks.map((source) => source.sourceLabel),
+    selectedSourceLabelsAfterHardRetrieval: result ? contextPack.sourceChunks.map((source) => source.sourceLabel) : [],
+    hardRetrievalMode: options.mode,
+    hardSourceCoverageScore: options.coverage?.coverageScore ?? null,
+    hardSourceCoverageMissing: options.coverage?.missingCoverage ?? [],
+    hardSourceCoverageSectorKpiHits: options.coverage?.sectorKpiHits ?? [],
+    hardSourceCoverageHasMdaRevenueDiscussion: options.coverage?.hasMdaRevenueDiscussion ?? null,
+    hardSourceCoverageHasSegmentResults: options.coverage?.hasSegmentResults ?? null,
+    hardSourceCoverageHasSectorKpiWindow: options.coverage?.hasSectorKpiWindow ?? null
+  };
+}
+
+function createHardRetrievalDiagnosticsFromGate(sourceGateResult: SourceGateResult): HardRetrievalDiagnostics {
+  return {
+    hardRetrievalPlanUsed: false,
+    hardRetrievalQueries: [],
+    hardRetrievalQueryPurposes: [],
+    hardRetrievalMissingSourceTypes: sourceGateResult.missingSourceTypes,
+    hardRetrievalAddedSourceCount: 0,
+    hardRetrievalAddedSourceLabels: [],
+    hardRetrievalAddedSourceIds: [],
+    hardRetrievalOutcome: "not_used",
+    sourceGateSufficientBeforeHardRetrieval: sourceGateResult.sourceGateApplied ? sourceGateResult.sourceSufficient : null,
+    sourceGateSufficientAfterHardRetrieval: null,
+    driverSlotsCountBeforeHardRetrieval: null,
+    driverSlotsCountAfterHardRetrieval: null,
+    marginDriverSlotsCountBeforeHardRetrieval: null,
+    marginDriverSlotsCountAfterHardRetrieval: null,
+    selectedSourceLabelsBeforeHardRetrieval: [],
+    selectedSourceLabelsAfterHardRetrieval: [],
+    hardRetrievalMode: "diagnostic",
+    hardSourceCoverageScore: null,
+    hardSourceCoverageMissing: [],
+    hardSourceCoverageSectorKpiHits: [],
+    hardSourceCoverageHasMdaRevenueDiscussion: null,
+    hardSourceCoverageHasSegmentResults: null,
+    hardSourceCoverageHasSectorKpiWindow: null
   };
 }
 

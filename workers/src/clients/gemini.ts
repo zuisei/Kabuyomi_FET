@@ -13,7 +13,7 @@ import {
   isRecord
 } from "./gemini/normalize";
 import { buildChatPrompt, buildQuoteTranslationPrompt, buildSummaryPrompt } from "./gemini/prompts";
-import { invokeGemini, resolveGeminiTranslationModel } from "./gemini/request";
+import { classifyGeminiError, invokeGemini, resolveGeminiTranslationModel } from "./gemini/request";
 import type {
   ChatFallbackReason,
   ChatPromptInput,
@@ -87,17 +87,28 @@ export async function generateChatAnswer(env: Env, input: ChatPromptInput): Prom
   }
 
   let invocation: Awaited<ReturnType<typeof invokeGemini>>;
+  const prompt = buildChatPrompt(input);
   try {
-    invocation = await invokeGemini(env, buildChatPrompt(input), "chat");
+    invocation = await invokeGemini(env, prompt, "chat");
   } catch (error) {
     const fallbackReason = isGeminiTimeout(error) ? "gemini_timeout" : "gemini_api_error";
+    const geminiApiError = {
+      ...classifyGeminiError(error),
+      geminiRequestPromptCharCount: prompt.length,
+      geminiRequestEstimatedTokens: Math.ceil(prompt.length / 4),
+      geminiRequestSourceCount: input.contextPack?.sourceChunks.length ?? null,
+      geminiRequestContextCharCount: input.contextPack?.sourceChunks.reduce((sum, source) => sum + source.text.length, 0) ?? null
+    };
     logEvent("gemini_fallback_used", { kind: "chat", reason: fallbackReason });
-    return attachChatDecisionMeta(localChatFallback(input), {
+    return {
+      ...attachChatDecisionMeta(localChatFallback(input), {
       geminiCalled: true,
       geminiSucceeded: false,
       fallbackReason,
       schemaValid: false
-    });
+      }),
+      geminiApiError
+    };
   }
 
   const normalized = normalizeChatResponse(invocation.data);
@@ -297,6 +308,10 @@ function didRecoverWithLocalFallback(remoteAnswer: GeminiChatAnswer, recovered: 
 }
 
 function isGeminiTimeout(error: unknown): boolean {
+  const classified = classifyGeminiError(error);
+  if (classified.geminiApiErrorKind === "timeout") {
+    return true;
+  }
   return (
     (error instanceof Error && error.name === "AbortError") ||
     (error instanceof DOMException && error.name === "AbortError") ||

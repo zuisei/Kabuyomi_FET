@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateChatAnswer, generateQuoteTranslation, generateSummary } from "../src/clients/gemini";
 import {
+  classifyGeminiError,
   DEFAULT_GEMINI_MODEL,
   DEFAULT_GEMINI_TRANSLATION_MODEL,
+  GeminiApiRequestError,
   resolveGeminiModel,
   resolveGeminiTranslationModel
 } from "../src/clients/gemini/request";
@@ -26,6 +28,52 @@ describe("resolveGeminiModel", () => {
 describe("resolveGeminiTranslationModel", () => {
   it("falls back to the repo default when GEMINI_TRANSLATION_MODEL is unset", () => {
     expect(resolveGeminiTranslationModel({} as never)).toBe(DEFAULT_GEMINI_TRANSLATION_MODEL);
+  });
+});
+
+describe("Gemini API error classification", () => {
+  it("classifies rate limit errors", () => {
+    const diagnostics = classifyGeminiError(new GeminiApiRequestError("rate limit", {
+      geminiApiErrorKind: "rate_limit",
+      geminiApiErrorStatus: 429,
+      geminiApiErrorCode: "RESOURCE_EXHAUSTED",
+      geminiApiErrorMessageSample: "quota exceeded",
+      geminiApiErrorRetryable: true,
+      geminiErrorOccurredBeforeResponse: false
+    }));
+
+    expect(diagnostics.geminiApiErrorKind).toBe("rate_limit");
+    expect(diagnostics.geminiApiErrorStatus).toBe(429);
+    expect(diagnostics.geminiApiErrorRetryable).toBe(true);
+  });
+
+  it("classifies auth and provider errors", () => {
+    const auth = classifyGeminiError(new GeminiApiRequestError("auth", {
+      geminiApiErrorKind: "auth_error",
+      geminiApiErrorStatus: 403,
+      geminiApiErrorCode: "PERMISSION_DENIED",
+      geminiApiErrorMessageSample: "invalid api key",
+      geminiApiErrorRetryable: false,
+      geminiErrorOccurredBeforeResponse: false
+    }));
+    const server = classifyGeminiError(new GeminiApiRequestError("server", {
+      geminiApiErrorKind: "provider_server_error",
+      geminiApiErrorStatus: 503,
+      geminiApiErrorCode: "UNAVAILABLE",
+      geminiApiErrorMessageSample: "unavailable",
+      geminiApiErrorRetryable: true,
+      geminiErrorOccurredBeforeResponse: false
+    }));
+
+    expect(auth.geminiApiErrorKind).toBe("auth_error");
+    expect(server.geminiApiErrorKind).toBe("provider_server_error");
+  });
+
+  it("classifies unknown error shapes without leaking long messages", () => {
+    const diagnostics = classifyGeminiError(new Error("x".repeat(500)));
+
+    expect(diagnostics.geminiApiErrorKind).toBe("unknown");
+    expect(diagnostics.geminiApiErrorMessageSample?.length).toBeLessThanOrEqual(180);
   });
 });
 

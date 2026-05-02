@@ -113,14 +113,36 @@ export function nextIndicatorsForSector(sector: SourceGateSector): string[] {
   switch (sector) {
     case "bank":
       return ["net interest income", "noninterest income", "provision for credit losses", "deposits", "credit quality", "segment results"];
+    case "capital_markets":
+      return ["investment banking", "trading", "asset management", "wealth management", "net interest income", "segment results"];
     case "energy":
       return ["commodity prices", "production volume", "upstream results", "refining margin", "chemical margin", "segment results"];
+    case "oilfield_services":
+      return ["drilling activity", "completion activity", "North America activity", "international activity", "oilfield services margins", "segment results"];
     case "industrial":
       return ["price realization", "sales volume", "orders", "backlog", "manufacturing cost", "SG&A", "R&D", "segment operating profit"];
     case "retail":
       return ["comparable sales", "traffic", "ticket", "eCommerce", "membership income", "advertising", "inventory", "gross margin", "segment results"];
+    case "consumer_staples":
+      return ["pricing", "volume", "foreign exchange", "organic sales", "gross margin", "commodity costs", "segment results"];
+    case "auto":
+      return ["deliveries", "vehicle pricing", "automotive gross margin", "production volume", "energy revenue", "segment results"];
     case "technology":
       return ["product revenue", "services revenue", "geographic revenue", "product launches", "channel inventory", "installed base", "gross margin"];
+    case "software":
+      return ["subscription revenue", "usage", "customers", "RPO", "deferred revenue", "retention", "gross margin"];
+    case "semiconductor_equipment":
+      return ["orders", "backlog", "wafer fab equipment demand", "China exposure", "customer demand", "gross margin"];
+    case "healthcare_medtech":
+      return ["procedure volume", "installed base", "systems placements", "instruments/accessories revenue", "recurring revenue", "gross margin"];
+    case "reit":
+      return ["occupancy", "same-store NOI", "senior housing", "medical office", "debt maturities", "interest rates"];
+    case "media":
+      return ["advertising revenue", "affiliate revenue", "retransmission", "content costs", "distribution revenue", "segment results"];
+    case "utility":
+      return ["rate cases", "regulated returns", "fuel cost", "load growth", "capex", "interest expense"];
+    case "mining":
+      return ["copper price", "gold price", "production volume", "unit costs", "mining operations", "commodity cycle"];
     case "general":
       return ["MD&A", "segment results", "revenue discussion", "profitability discussion"];
   }

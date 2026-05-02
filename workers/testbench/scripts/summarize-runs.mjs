@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { buildBenchmarkSummary } from "./benchmark-quality.mjs";
 
 const runPath = process.argv[2];
 
@@ -32,6 +33,7 @@ const answerFlags = countBy(
 );
 const invalidSourceRows = rows.filter((row) => row.sourceIdsValid === false);
 const ratedRows = rows.filter((row) => typeof row.answerRating === "number");
+const benchmarkSummary = buildBenchmarkSummary(rows);
 
 console.log(`# Testbench Summary`);
 console.log(`file: ${runPath}`);
@@ -41,6 +43,18 @@ console.log(`avg latency ms: ${average(rows.map((row) => row.latencyMs)).toFixed
 console.log(`p95 latency ms: ${percentile(rows.map((row) => row.latencyMs), 0.95).toFixed(0)}`);
 console.log(`avg source count: ${average(rows.map((row) => row.sourceCount)).toFixed(1)}`);
 console.log(`sourceIdsValid false: ${invalidSourceRows.length}`);
+console.log(`infra contaminated: ${benchmarkSummary.infraContaminated ? "yes" : "no"}`);
+console.log(`infra contamination reasons: ${benchmarkSummary.infraContaminationReasons.join(", ") || "none"}`);
+console.log(`rateLimitRows: ${benchmarkSummary.rateLimitRows}`);
+console.log(`qualityRows: ${benchmarkSummary.qualityRows}`);
+console.log(`qualityRowsExcluded: ${benchmarkSummary.qualityRowsExcluded}`);
+console.log(`rawFallbackTotal: ${benchmarkSummary.rawFallbackTotal}`);
+console.log(`qualityFallbackTotal: ${benchmarkSummary.qualityFallbackTotal}`);
+console.log(`qualityFallbackRate: ${(benchmarkSummary.qualityFallbackRate * 100).toFixed(1)}%`);
+console.log(`qualityQ03Q04Q06Fallback: ${benchmarkSummary.qualityQ03Q04Q06Fallback}`);
+console.log(`qualityMetricWithoutDriver: ${benchmarkSummary.qualityMetricWithoutDriver}`);
+console.log(`qualityTemporalityNotAssessed: ${benchmarkSummary.qualityTemporalityNotAssessed}`);
+console.log(`qualityEvasiveAnswer: ${benchmarkSummary.qualityEvasiveAnswer}`);
 
 if (ratedRows.length > 0) {
   console.log(`avg human rating: ${average(ratedRows.map((row) => row.answerRating)).toFixed(2)} (${ratedRows.length} rated)`);
@@ -50,6 +64,8 @@ printCounts("responsePath", responsePaths);
 printCounts("fallbackReason", fallbackReasons);
 printCounts("answerQualityFlags", answerFlags);
 printCounts("failureLabelsObserved", failureLabels);
+printObjectCounts("rawGeminiApiErrorBreakdown", benchmarkSummary.rawGeminiApiErrorBreakdown);
+printObjectCounts("rawFallbackKindBreakdown", benchmarkSummary.rawFallbackKindBreakdown);
 
 if (invalidSourceRows.length > 0) {
   console.log(`\n## Invalid Source ID Cases`);
@@ -74,6 +90,18 @@ function printCounts(title, counts) {
     return;
   }
   for (const [key, count] of counts) {
+    console.log(`- ${key}: ${count}`);
+  }
+}
+
+function printObjectCounts(title, counts) {
+  console.log(`\n## ${title}`);
+  const entries = Object.entries(counts);
+  if (entries.length === 0) {
+    console.log("- none");
+    return;
+  }
+  for (const [key, count] of entries) {
     console.log(`- ${key}: ${count}`);
   }
 }

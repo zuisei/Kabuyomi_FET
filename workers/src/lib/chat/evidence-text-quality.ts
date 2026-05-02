@@ -60,7 +60,14 @@ export function isDriverLikeEvidence(
     : /(net sales|revenue|sales|segment|geographic|product|volume|price|orders|backlog|traffic|ticket|net interest|noninterest|commodity|production)/i;
   const sectorTopic = sectorPattern(sector).test(normalized);
 
-  return (causal.test(normalized) && financialTopic.test(normalized)) || (sectorTopic && causal.test(normalized));
+  if ((causal.test(normalized) && financialTopic.test(normalized)) || (sectorTopic && causal.test(normalized))) {
+    return true;
+  }
+
+  // PR4 source selection uses this predicate as a sufficiency gate before Gemini.
+  // A complete MD&A paragraph with sector KPI + revenue/margin topic is useful
+  // context even when the causal verb is in an adjacent sentence.
+  return sectorTopic && normalized.length >= 80;
 }
 
 export function isUnsafeDriverEvidence(
@@ -76,14 +83,36 @@ function sectorPattern(sector: SourceGateSector): RegExp {
   switch (sector) {
     case "bank":
       return /(net interest income|noninterest income|provision for credit losses|wealth management|investment banking|trading|deposits|loans)/i;
+    case "capital_markets":
+      return /(investment banking|trading|asset management|wealth management|institutional securities|advisory|underwriting)/i;
     case "energy":
       return /(commodity|crude oil|natural gas|production volume|drilling|completion|upstream|refining|oilfield)/i;
+    case "oilfield_services":
+      return /(drilling|completion|oilfield services|north america|international activity|customer spending)/i;
     case "industrial":
       return /(price realization|sales volume|orders|backlog|dealer inventory|manufacturing cost|construction equipment|agriculture equipment)/i;
     case "retail":
       return /(comparable sales|traffic|ticket|ecommerce|membership|advertising|gross margin|inventory)/i;
+    case "consumer_staples":
+      return /(pricing|volume|foreign exchange|organic sales|gross margin|commodity costs|input costs|oral care|pet nutrition)/i;
+    case "auto":
+      return /(deliveries|automotive gross margin|vehicle pricing|production volume|average selling price|energy generation|services revenue)/i;
     case "technology":
       return /(product revenue|services revenue|subscription|usage|rpo|arr|customer growth|installed base|channel inventory)/i;
+    case "software":
+      return /(subscription revenue|usage|customers|rpo|remaining performance obligations|deferred revenue|retention|expansion)/i;
+    case "semiconductor_equipment":
+      return /(orders|backlog|wafer fab equipment|customer demand|china|semiconductor equipment)/i;
+    case "healthcare_medtech":
+      return /(procedure volume|installed base|systems placements|instruments|accessories|recurring revenue|healthcare utilization)/i;
+    case "reit":
+      return /(occupancy|same-store|net operating income|\bnoi\b|senior housing|medical office|rental revenue)/i;
+    case "media":
+      return /(advertising revenue|affiliate revenue|retransmission|subscriber|content costs|distribution)/i;
+    case "utility":
+      return /(rate case|regulated returns|fuel cost|load growth|weather|regulated operations|capex)/i;
+    case "mining":
+      return /(copper price|gold price|production volume|unit costs|mining operations|commodity prices)/i;
     case "general":
       return /(segment|revenue|margin|profitability|orders|backlog|pricing|volume)/i;
   }

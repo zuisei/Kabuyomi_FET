@@ -35,6 +35,31 @@ export type ChatFallbackReason =
 
 export type ChatRetryOutcome = "accepted" | "blocked" | "fallback" | "invalid_source_ids" | "no_valid_sources";
 
+export type GeminiApiErrorKind =
+  | "rate_limit"
+  | "auth_error"
+  | "bad_request"
+  | "payload_too_large"
+  | "context_too_large"
+  | "provider_server_error"
+  | "network_error"
+  | "timeout"
+  | "unknown";
+
+export interface GeminiApiErrorDiagnostics {
+  geminiApiErrorKind: GeminiApiErrorKind;
+  geminiApiErrorStatus?: number | null;
+  geminiApiErrorCode?: string | null;
+  geminiApiErrorMessageSample?: string | null;
+  geminiApiErrorRetryable: boolean;
+  geminiRequestPromptCharCount?: number | null;
+  geminiRequestEstimatedTokens?: number | null;
+  geminiRequestSourceCount?: number | null;
+  geminiRequestContextCharCount?: number | null;
+  geminiModelName?: string | null;
+  geminiErrorOccurredBeforeResponse?: boolean;
+}
+
 export interface ChatRetryDiagnostics {
   retryAttempted: boolean;
   retryAllowed: boolean;
@@ -64,6 +89,7 @@ export interface GeminiChatAnswer {
   retryReason?: ChatFallbackReason;
   retryDiagnostics?: ChatRetryDiagnostics;
   qualityControl?: ChatQualityControlDiagnostics;
+  geminiApiError?: GeminiApiErrorDiagnostics;
 }
 
 export interface GeminiInvocationUsage {
@@ -103,6 +129,29 @@ export interface ChatQualityControlDiagnostics {
   marginDriverSlotsCount: number;
   followupTargetFound: boolean | null;
   genericFallbackPhraseDetected: boolean;
+  hardRetrievalPlanUsed: boolean;
+  hardRetrievalQueries: string[];
+  hardRetrievalQueryPurposes: string[];
+  hardRetrievalMissingSourceTypes: string[];
+  hardRetrievalAddedSourceCount: number;
+  hardRetrievalAddedSourceLabels: string[];
+  hardRetrievalAddedSourceIds: string[];
+  hardRetrievalOutcome: "improved" | "no_improvement" | "not_used";
+  sourceGateSufficientBeforeHardRetrieval: boolean | null;
+  sourceGateSufficientAfterHardRetrieval: boolean | null;
+  driverSlotsCountBeforeHardRetrieval: number | null;
+  driverSlotsCountAfterHardRetrieval: number | null;
+  marginDriverSlotsCountBeforeHardRetrieval: number | null;
+  marginDriverSlotsCountAfterHardRetrieval: number | null;
+  selectedSourceLabelsBeforeHardRetrieval: string[];
+  selectedSourceLabelsAfterHardRetrieval: string[];
+  hardRetrievalMode: "off" | "diagnostic" | "active";
+  hardSourceCoverageScore: number | null;
+  hardSourceCoverageMissing: string[];
+  hardSourceCoverageSectorKpiHits: string[];
+  hardSourceCoverageHasMdaRevenueDiscussion: boolean | null;
+  hardSourceCoverageHasSegmentResults: boolean | null;
+  hardSourceCoverageHasSectorKpiWindow: boolean | null;
 }
 
 export interface ChatLanguageGuardDiagnostics {

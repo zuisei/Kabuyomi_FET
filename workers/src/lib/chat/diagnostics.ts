@@ -47,9 +47,44 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
   | "marginDriverSlotsCount"
   | "followupTargetFound"
   | "genericFallbackPhraseDetected"
+  | "hardRetrievalPlanUsed"
+  | "hardRetrievalQueries"
+  | "hardRetrievalQueryPurposes"
+  | "hardRetrievalMissingSourceTypes"
+  | "hardRetrievalAddedSourceCount"
+  | "hardRetrievalAddedSourceLabels"
+  | "hardRetrievalAddedSourceIds"
+  | "hardRetrievalOutcome"
+  | "sourceGateSufficientBeforeHardRetrieval"
+  | "sourceGateSufficientAfterHardRetrieval"
+  | "driverSlotsCountBeforeHardRetrieval"
+  | "driverSlotsCountAfterHardRetrieval"
+  | "marginDriverSlotsCountBeforeHardRetrieval"
+  | "marginDriverSlotsCountAfterHardRetrieval"
+  | "selectedSourceLabelsBeforeHardRetrieval"
+  | "selectedSourceLabelsAfterHardRetrieval"
+  | "hardRetrievalMode"
+  | "hardSourceCoverageScore"
+  | "hardSourceCoverageMissing"
+  | "hardSourceCoverageSectorKpiHits"
+  | "hardSourceCoverageHasMdaRevenueDiscussion"
+  | "hardSourceCoverageHasSegmentResults"
+  | "hardSourceCoverageHasSectorKpiWindow"
+  | "geminiApiErrorKind"
+  | "geminiApiErrorStatus"
+  | "geminiApiErrorCode"
+  | "geminiApiErrorMessageSample"
+  | "geminiApiErrorRetryable"
+  | "geminiRequestPromptCharCount"
+  | "geminiRequestEstimatedTokens"
+  | "geminiRequestSourceCount"
+  | "geminiRequestContextCharCount"
+  | "geminiModelName"
+  | "geminiErrorOccurredBeforeResponse"
 > {
   const diagnostics = modelResponse.retryDiagnostics;
   const qualityControl = modelResponse.qualityControl;
+  const geminiApiError = modelResponse.geminiApiError;
   return {
     retryAttempted: diagnostics?.retryAttempted ?? false,
     retryAllowed: diagnostics?.retryAllowed ?? false,
@@ -71,7 +106,41 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
     driverSlotsCount: qualityControl?.driverSlotsCount ?? 0,
     marginDriverSlotsCount: qualityControl?.marginDriverSlotsCount ?? 0,
     followupTargetFound: qualityControl?.followupTargetFound ?? null,
-    genericFallbackPhraseDetected: qualityControl?.genericFallbackPhraseDetected ?? false
+    genericFallbackPhraseDetected: qualityControl?.genericFallbackPhraseDetected ?? false,
+    hardRetrievalPlanUsed: qualityControl?.hardRetrievalPlanUsed ?? false,
+    hardRetrievalQueries: qualityControl?.hardRetrievalQueries ?? [],
+    hardRetrievalQueryPurposes: qualityControl?.hardRetrievalQueryPurposes ?? [],
+    hardRetrievalMissingSourceTypes: qualityControl?.hardRetrievalMissingSourceTypes ?? [],
+    hardRetrievalAddedSourceCount: qualityControl?.hardRetrievalAddedSourceCount ?? 0,
+    hardRetrievalAddedSourceLabels: qualityControl?.hardRetrievalAddedSourceLabels ?? [],
+    hardRetrievalAddedSourceIds: qualityControl?.hardRetrievalAddedSourceIds ?? [],
+    hardRetrievalOutcome: qualityControl?.hardRetrievalOutcome ?? "not_used",
+    sourceGateSufficientBeforeHardRetrieval: qualityControl?.sourceGateSufficientBeforeHardRetrieval ?? null,
+    sourceGateSufficientAfterHardRetrieval: qualityControl?.sourceGateSufficientAfterHardRetrieval ?? null,
+    driverSlotsCountBeforeHardRetrieval: qualityControl?.driverSlotsCountBeforeHardRetrieval ?? null,
+    driverSlotsCountAfterHardRetrieval: qualityControl?.driverSlotsCountAfterHardRetrieval ?? null,
+    marginDriverSlotsCountBeforeHardRetrieval: qualityControl?.marginDriverSlotsCountBeforeHardRetrieval ?? null,
+    marginDriverSlotsCountAfterHardRetrieval: qualityControl?.marginDriverSlotsCountAfterHardRetrieval ?? null,
+    selectedSourceLabelsBeforeHardRetrieval: qualityControl?.selectedSourceLabelsBeforeHardRetrieval ?? [],
+    selectedSourceLabelsAfterHardRetrieval: qualityControl?.selectedSourceLabelsAfterHardRetrieval ?? [],
+    hardRetrievalMode: qualityControl?.hardRetrievalMode ?? "diagnostic",
+    hardSourceCoverageScore: qualityControl?.hardSourceCoverageScore ?? null,
+    hardSourceCoverageMissing: qualityControl?.hardSourceCoverageMissing ?? [],
+    hardSourceCoverageSectorKpiHits: qualityControl?.hardSourceCoverageSectorKpiHits ?? [],
+    hardSourceCoverageHasMdaRevenueDiscussion: qualityControl?.hardSourceCoverageHasMdaRevenueDiscussion ?? null,
+    hardSourceCoverageHasSegmentResults: qualityControl?.hardSourceCoverageHasSegmentResults ?? null,
+    hardSourceCoverageHasSectorKpiWindow: qualityControl?.hardSourceCoverageHasSectorKpiWindow ?? null,
+    geminiApiErrorKind: geminiApiError?.geminiApiErrorKind ?? null,
+    geminiApiErrorStatus: geminiApiError?.geminiApiErrorStatus ?? null,
+    geminiApiErrorCode: geminiApiError?.geminiApiErrorCode ?? null,
+    geminiApiErrorMessageSample: geminiApiError?.geminiApiErrorMessageSample ?? null,
+    geminiApiErrorRetryable: geminiApiError?.geminiApiErrorRetryable ?? null,
+    geminiRequestPromptCharCount: geminiApiError?.geminiRequestPromptCharCount ?? null,
+    geminiRequestEstimatedTokens: geminiApiError?.geminiRequestEstimatedTokens ?? null,
+    geminiRequestSourceCount: geminiApiError?.geminiRequestSourceCount ?? null,
+    geminiRequestContextCharCount: geminiApiError?.geminiRequestContextCharCount ?? null,
+    geminiModelName: geminiApiError?.geminiModelName ?? null,
+    geminiErrorOccurredBeforeResponse: geminiApiError?.geminiErrorOccurredBeforeResponse ?? null
   };
 }
 
@@ -136,6 +205,38 @@ export function buildAnswerQualityFlags(
   }
   if (debug?.genericFallbackPhraseDetected === true) {
     flags.add("generic_fallback_phrase");
+  }
+  if (debug?.hardRetrievalPlanUsed === true) {
+    flags.add("hard_retrieval_used");
+  }
+  if (debug?.hardRetrievalOutcome === "improved") {
+    flags.add("hard_retrieval_improved");
+  }
+  if (debug?.hardRetrievalOutcome === "no_improvement") {
+    flags.add("hard_retrieval_no_improvement");
+  }
+  if ((debug?.hardRetrievalAddedSourceCount ?? 0) > 0) {
+    flags.add("hard_retrieval_added_driver_source");
+  }
+  if (debug?.hardRetrievalPlanUsed === true && (debug.hardRetrievalQueries?.length ?? 0) === 0) {
+    flags.add("hard_retrieval_query_builder_empty");
+  }
+  if (debug?.sourceGateSufficientBeforeHardRetrieval === false && debug?.sourceGateSufficientAfterHardRetrieval === true) {
+    flags.add("source_gate_sufficient_after_retrieval");
+  }
+  if (debug?.sourceGateSufficientBeforeHardRetrieval === false && debug?.sourceGateSufficientAfterHardRetrieval === false) {
+    flags.add("source_gate_still_insufficient_after_retrieval");
+  }
+  if ((debug?.hardSourceCoverageScore ?? 100) < 45) {
+    flags.add("hard_source_asset_coverage_low");
+  }
+  for (const missing of debug?.hardSourceCoverageMissing ?? []) {
+    if (/md&a revenue/i.test(missing)) flags.add("hard_source_asset_missing_mda_revenue");
+    if (/segment/i.test(missing)) flags.add("hard_source_asset_missing_segment_results");
+    if (/sector kpi/i.test(missing)) flags.add("hard_source_asset_missing_sector_kpi");
+  }
+  if (debug?.geminiApiErrorKind) {
+    flags.add(`gemini_api_error_${debug.geminiApiErrorKind}`);
   }
   if (debug?.responsePath === "fallback" && (debug.fallbackKind === undefined || debug.fallbackKind === "none")) {
     flags.add("fallback_kind_missing");
@@ -228,6 +329,40 @@ export function buildChatQualityPipelinePayload({
     marginDriverSlotsCount: answer.debug?.marginDriverSlotsCount ?? 0,
     followupTargetFound: answer.debug?.followupTargetFound ?? null,
     genericFallbackPhraseDetected: answer.debug?.genericFallbackPhraseDetected ?? false,
+    hardRetrievalPlanUsed: answer.debug?.hardRetrievalPlanUsed ?? false,
+    hardRetrievalQueries: answer.debug?.hardRetrievalQueries ?? [],
+    hardRetrievalQueryPurposes: answer.debug?.hardRetrievalQueryPurposes ?? [],
+    hardRetrievalMissingSourceTypes: answer.debug?.hardRetrievalMissingSourceTypes ?? [],
+    hardRetrievalAddedSourceCount: answer.debug?.hardRetrievalAddedSourceCount ?? 0,
+    hardRetrievalAddedSourceLabels: answer.debug?.hardRetrievalAddedSourceLabels ?? [],
+    hardRetrievalAddedSourceIds: answer.debug?.hardRetrievalAddedSourceIds ?? [],
+    hardRetrievalOutcome: answer.debug?.hardRetrievalOutcome ?? "not_used",
+    sourceGateSufficientBeforeHardRetrieval: answer.debug?.sourceGateSufficientBeforeHardRetrieval ?? null,
+    sourceGateSufficientAfterHardRetrieval: answer.debug?.sourceGateSufficientAfterHardRetrieval ?? null,
+    driverSlotsCountBeforeHardRetrieval: answer.debug?.driverSlotsCountBeforeHardRetrieval ?? null,
+    driverSlotsCountAfterHardRetrieval: answer.debug?.driverSlotsCountAfterHardRetrieval ?? null,
+    marginDriverSlotsCountBeforeHardRetrieval: answer.debug?.marginDriverSlotsCountBeforeHardRetrieval ?? null,
+    marginDriverSlotsCountAfterHardRetrieval: answer.debug?.marginDriverSlotsCountAfterHardRetrieval ?? null,
+    selectedSourceLabelsBeforeHardRetrieval: answer.debug?.selectedSourceLabelsBeforeHardRetrieval ?? [],
+    selectedSourceLabelsAfterHardRetrieval: answer.debug?.selectedSourceLabelsAfterHardRetrieval ?? [],
+    hardRetrievalMode: answer.debug?.hardRetrievalMode ?? "diagnostic",
+    hardSourceCoverageScore: answer.debug?.hardSourceCoverageScore ?? null,
+    hardSourceCoverageMissing: answer.debug?.hardSourceCoverageMissing ?? [],
+    hardSourceCoverageSectorKpiHits: answer.debug?.hardSourceCoverageSectorKpiHits ?? [],
+    hardSourceCoverageHasMdaRevenueDiscussion: answer.debug?.hardSourceCoverageHasMdaRevenueDiscussion ?? null,
+    hardSourceCoverageHasSegmentResults: answer.debug?.hardSourceCoverageHasSegmentResults ?? null,
+    hardSourceCoverageHasSectorKpiWindow: answer.debug?.hardSourceCoverageHasSectorKpiWindow ?? null,
+    geminiApiErrorKind: answer.debug?.geminiApiErrorKind ?? null,
+    geminiApiErrorStatus: answer.debug?.geminiApiErrorStatus ?? null,
+    geminiApiErrorCode: answer.debug?.geminiApiErrorCode ?? null,
+    geminiApiErrorMessageSample: answer.debug?.geminiApiErrorMessageSample ?? null,
+    geminiApiErrorRetryable: answer.debug?.geminiApiErrorRetryable ?? null,
+    geminiRequestPromptCharCount: answer.debug?.geminiRequestPromptCharCount ?? null,
+    geminiRequestEstimatedTokens: answer.debug?.geminiRequestEstimatedTokens ?? null,
+    geminiRequestSourceCount: answer.debug?.geminiRequestSourceCount ?? null,
+    geminiRequestContextCharCount: answer.debug?.geminiRequestContextCharCount ?? null,
+    geminiModelName: answer.debug?.geminiModelName ?? null,
+    geminiErrorOccurredBeforeResponse: answer.debug?.geminiErrorOccurredBeforeResponse ?? null,
     fallbackKindSource: answer.debug?.fallbackKindSource ?? null,
     responsePathFallbackButKindNone: answer.debug?.responsePathFallbackButKindNone ?? false,
     finalAnswerJapaneseRatio: answer.debug?.finalAnswerJapaneseRatio ?? null,
