@@ -1,4 +1,5 @@
 import type { FilingCacheRecord, SourceChunkRecord } from "../../env";
+import { formatMetricValue as formatSharedMetricValue } from "../metrics";
 import { isUnsafeDriverEvidence } from "./evidence-text-quality";
 import type { EvidenceDriver, EvidenceFact, HardFinancialIntent, SourceGateResult, SourceGateSector } from "./source-gate";
 import { normalizeSector } from "./source-gate";
@@ -230,11 +231,5 @@ function metricDisplayName(logicalName: string): string {
 }
 
 function formatMetricValue(value: number, unit: string): string {
-  if (unit === "USD" && Math.abs(value) >= 1_000_000_000) {
-    return `${(value / 1_000_000_000).toFixed(1)}億ドル`;
-  }
-  if (unit === "USD" && Math.abs(value) >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(1)}百万ドル`;
-  }
-  return `${value.toLocaleString("en-US")} ${unit}`;
+  return formatSharedMetricValue(value, unit);
 }

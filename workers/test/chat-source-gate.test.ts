@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Env, FilingCacheRecord, MetricSnapshot, SourceChunkRecord } from "../src/env";
-import { buildEvidenceFallbackAnswer, hasBannedPhrase } from "../src/lib/chat/evidence-fallback";
+import { buildEvidenceFallbackAnswer, hasBannedPhrase, joinMissingSourceLabels } from "../src/lib/chat/evidence-fallback";
 import { extractEvidenceSlots } from "../src/lib/chat/evidence-slots";
 import { buildValidatedModelAnswer } from "../src/lib/chat/model-attempt";
 import { evaluateSourceGate } from "../src/lib/chat/source-gate";
@@ -195,6 +195,45 @@ describe("hard-intent source gate", () => {
 });
 
 describe("evidence-slot fallback", () => {
+  it("uses the shared USD amount formatter for evidence-slot metric movement", () => {
+    const cases: Array<[number, string]> = [
+      [2_900_000_000, "29億ドル"],
+      [1_040_000_000, "10.4億ドル"],
+      [443_300_000, "4.4億ドル"],
+      [79_200_000, "79.2百万ドル"]
+    ];
+
+    for (const [value, expected] of cases) {
+      const filing = makeFiling("SWKS", "Skyworks Solutions, Inc.", [revenueMetric(value, value - 1_000_000, 1.2)], [
+        metricSource("S9", `売上高: ${value} USD / 比較値: ${value - 1_000_000} / YoY: 1.2%`)
+      ]);
+      const gate = evaluateSourceGate({
+        ticker: filing.ticker,
+        companyName: filing.companyName,
+        questionIntent: "yoy_change",
+        question: "売上成長の主な要因は？",
+        selectedSources: filing.sourceChunks,
+        metrics: filing.metrics
+      });
+      const slots = extractEvidenceSlots({ filing, sources: filing.sourceChunks, sourceGateResult: gate });
+      expect(slots.confirmedMetricMovement?.currentValue).toBe(expected);
+    }
+  });
+
+  it("dedupes missing source labels before rendering evidence fallback text", () => {
+    const rendered = joinMissingSourceLabels([
+      "MD&A",
+      "MD&A driver discussion",
+      "segment results",
+      "revenue discussion",
+      "MD&A revenue discussion",
+      "profitability discussion"
+    ]);
+
+    expect(rendered).toBe("MD&A、segment results、revenue discussion、profitability discussion");
+    expect(rendered).not.toContain("MD&AとMD&A");
+  });
+
   it("generates a safe JPM evidence fallback without inventing drivers", () => {
     const filing = makeFiling("JPM", "JPMorgan Chase & Co.", [revenueMetric(182_447_000_000, 177_556_000_000, 2.8)], [
       metricSource("S9", "売上高: 182447000000 USD / 比較値: 177556000000 / YoY: 2.8%")
@@ -221,6 +260,7 @@ describe("evidence-slot fallback", () => {
     expect(fallback.answer.answer).toContain("provision");
     expect(fallback.answer.answer).toContain("segment results");
     expect(fallback.answer.answer).toContain("会社固有の売上driverは十分に特定できていません");
+    expect(fallback.answer.answer).not.toContain("MD&AとMD&A");
     expect(fallback.answer.answer).not.toContain("主因はnet interest income");
     expect(hasBannedPhrase(fallback.answer.answer)).toBe(false);
   });
