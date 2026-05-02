@@ -25,6 +25,13 @@ SEC_FETCHER_BASE_URL = "https://kabuyomifet-production.up.railway.app"
 # Override GEMINI_MODEL only when testing or rolling a different remote model.
 GEMINI_TIMEOUT_MS = "12000"
 GEMINI_CHAT_TIMEOUT_MS = "7000"
+LLM_PROVIDER = "openai"
+OPENAI_CHAT_MODEL = "gpt-5-nano"
+OPENAI_PROMPT_ID = "pmpt_69f5f2f592b8819490c30cf43c4f0f770f3a1fc228661050"
+OPENAI_PROMPT_VERSION = "1"
+OPENAI_TIMEOUT_MS = "20000"
+OPENAI_REASONING_EFFORT = "minimal"
+OPENAI_MAX_COMPLETION_TOKENS = "1800"
 HARD_INTENT_TARGETED_RETRIEVAL_MODE = "diagnostic"
 SEC_FETCHER_TIMEOUT_MS = "25000"
 # Configure SEC_FETCHER_BASE_URL in .dev.vars for local wrangler dev
