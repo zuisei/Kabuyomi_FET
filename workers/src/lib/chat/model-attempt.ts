@@ -1,5 +1,5 @@
 import type { Env, FilingCacheRecord } from "../../env";
-import { generateChatAnswer } from "../../clients/gemini";
+import { generateModelChatAnswer } from "../../clients/llm/provider";
 import type { GeminiChatAnswer } from "../../clients/gemini/types";
 import { buildChatContextPack, type ChatContextPack } from "./context-pack";
 import { logChatContextSelection } from "./decision-log";
@@ -247,7 +247,7 @@ export async function buildValidatedModelAnswer({
   }
 
   let modelResponse = await timings.timeAsync("geminiFirstCallMs", () =>
-    generateChatAnswer(env, { filing, question, questionIntent, contextPack })
+    generateModelChatAnswer(env, { filing, question, questionIntent, contextPack })
   );
   let sourceValidation = validateModelSources(modelResponse, contextPack, filing);
   if (

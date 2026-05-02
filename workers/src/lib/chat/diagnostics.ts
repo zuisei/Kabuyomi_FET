@@ -81,10 +81,23 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
   | "geminiRequestContextCharCount"
   | "geminiModelName"
   | "geminiErrorOccurredBeforeResponse"
+  | "modelName"
+  | "modelProvider"
+  | "modelApiErrorKind"
+  | "modelApiErrorStatus"
+  | "modelApiErrorCode"
+  | "modelApiErrorMessageSample"
+  | "modelApiErrorRetryable"
+  | "modelRequestPromptCharCount"
+  | "modelRequestEstimatedTokens"
+  | "modelRequestSourceCount"
+  | "modelRequestContextCharCount"
+  | "modelErrorOccurredBeforeResponse"
 > {
   const diagnostics = modelResponse.retryDiagnostics;
   const qualityControl = modelResponse.qualityControl;
   const geminiApiError = modelResponse.geminiApiError;
+  const modelApiError = modelResponse.modelApiError;
   return {
     retryAttempted: diagnostics?.retryAttempted ?? false,
     retryAllowed: diagnostics?.retryAllowed ?? false,
@@ -140,7 +153,19 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
     geminiRequestSourceCount: geminiApiError?.geminiRequestSourceCount ?? null,
     geminiRequestContextCharCount: geminiApiError?.geminiRequestContextCharCount ?? null,
     geminiModelName: geminiApiError?.geminiModelName ?? null,
-    geminiErrorOccurredBeforeResponse: geminiApiError?.geminiErrorOccurredBeforeResponse ?? null
+    geminiErrorOccurredBeforeResponse: geminiApiError?.geminiErrorOccurredBeforeResponse ?? null,
+    modelName: modelResponse.modelName ?? modelResponse.llmUsage?.[0]?.model ?? null,
+    modelProvider: modelResponse.modelProvider ?? null,
+    modelApiErrorKind: modelApiError?.modelApiErrorKind ?? geminiApiError?.geminiApiErrorKind ?? null,
+    modelApiErrorStatus: modelApiError?.modelApiErrorStatus ?? geminiApiError?.geminiApiErrorStatus ?? null,
+    modelApiErrorCode: modelApiError?.modelApiErrorCode ?? geminiApiError?.geminiApiErrorCode ?? null,
+    modelApiErrorMessageSample: modelApiError?.modelApiErrorMessageSample ?? geminiApiError?.geminiApiErrorMessageSample ?? null,
+    modelApiErrorRetryable: modelApiError?.modelApiErrorRetryable ?? geminiApiError?.geminiApiErrorRetryable ?? null,
+    modelRequestPromptCharCount: modelApiError?.modelRequestPromptCharCount ?? geminiApiError?.geminiRequestPromptCharCount ?? null,
+    modelRequestEstimatedTokens: modelApiError?.modelRequestEstimatedTokens ?? geminiApiError?.geminiRequestEstimatedTokens ?? null,
+    modelRequestSourceCount: modelApiError?.modelRequestSourceCount ?? geminiApiError?.geminiRequestSourceCount ?? null,
+    modelRequestContextCharCount: modelApiError?.modelRequestContextCharCount ?? geminiApiError?.geminiRequestContextCharCount ?? null,
+    modelErrorOccurredBeforeResponse: modelApiError?.modelErrorOccurredBeforeResponse ?? geminiApiError?.geminiErrorOccurredBeforeResponse ?? null
   };
 }
 
@@ -238,6 +263,9 @@ export function buildAnswerQualityFlags(
   if (debug?.geminiApiErrorKind) {
     flags.add(`gemini_api_error_${debug.geminiApiErrorKind}`);
   }
+  if (debug?.modelApiErrorKind) {
+    flags.add(`model_api_error_${debug.modelApiErrorKind}`);
+  }
   if (debug?.responsePath === "fallback" && (debug.fallbackKind === undefined || debug.fallbackKind === "none")) {
     flags.add("fallback_kind_missing");
   }
@@ -300,6 +328,7 @@ export function buildChatQualityPipelinePayload({
     selectedSourceCharCount: answer.debug?.selectedSourceCharCount ?? selectedSourceChars,
     estimatedContextTokens: answer.debug?.estimatedContextTokens ?? estimateTokenCountFromChars(selectedSourceChars),
     modelName,
+    modelProvider: answer.debug?.modelProvider ?? null,
     latencyMs,
     selectedSourceIds: answer.debug?.selectedSourceIds ?? answer.sources.map((source) => source.sourceId),
     selectedSourceLabels: answer.debug?.selectedSourceLabels ?? answer.sources.map((source) => source.sourceLabel),
@@ -363,6 +392,16 @@ export function buildChatQualityPipelinePayload({
     geminiRequestContextCharCount: answer.debug?.geminiRequestContextCharCount ?? null,
     geminiModelName: answer.debug?.geminiModelName ?? null,
     geminiErrorOccurredBeforeResponse: answer.debug?.geminiErrorOccurredBeforeResponse ?? null,
+    modelApiErrorKind: answer.debug?.modelApiErrorKind ?? null,
+    modelApiErrorStatus: answer.debug?.modelApiErrorStatus ?? null,
+    modelApiErrorCode: answer.debug?.modelApiErrorCode ?? null,
+    modelApiErrorMessageSample: answer.debug?.modelApiErrorMessageSample ?? null,
+    modelApiErrorRetryable: answer.debug?.modelApiErrorRetryable ?? null,
+    modelRequestPromptCharCount: answer.debug?.modelRequestPromptCharCount ?? null,
+    modelRequestEstimatedTokens: answer.debug?.modelRequestEstimatedTokens ?? null,
+    modelRequestSourceCount: answer.debug?.modelRequestSourceCount ?? null,
+    modelRequestContextCharCount: answer.debug?.modelRequestContextCharCount ?? null,
+    modelErrorOccurredBeforeResponse: answer.debug?.modelErrorOccurredBeforeResponse ?? null,
     fallbackKindSource: answer.debug?.fallbackKindSource ?? null,
     responsePathFallbackButKindNone: answer.debug?.responsePathFallbackButKindNone ?? false,
     finalAnswerJapaneseRatio: answer.debug?.finalAnswerJapaneseRatio ?? null,

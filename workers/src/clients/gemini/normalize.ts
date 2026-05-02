@@ -54,7 +54,7 @@ export function normalizeChatResponse(payload: unknown): GeminiChatAnswer | null
   }
 
   const answer = firstString(payload.answer, payload.text, payload.response);
-  const sourceIds = normalizeSourceIds(payload.sourceIds ?? payload.sources ?? payload.citations ?? payload.sourceId);
+  const sourceIds = normalizeSourceIds(payload.sourceIds ?? payload.source_ids ?? payload.sources ?? payload.citations ?? payload.sourceId);
   const normalized = { answer, sourceIds };
   const normalizedParsed = ChatModelResponseSchema.safeParse(normalized);
   return normalizedParsed.success

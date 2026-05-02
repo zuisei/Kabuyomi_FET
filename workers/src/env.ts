@@ -9,6 +9,12 @@ export interface Env {
   GEMINI_TRANSLATION_MODEL?: string;
   GEMINI_TIMEOUT_MS?: string;
   GEMINI_CHAT_TIMEOUT_MS?: string;
+  LLM_PROVIDER?: "gemini-legacy" | "gemini" | "openai" | "disabled";
+  OPENAI_API_KEY?: string;
+  OPENAI_CHAT_MODEL?: string;
+  OPENAI_TIMEOUT_MS?: string;
+  OPENAI_REASONING_EFFORT?: "minimal" | "low" | "medium" | "high";
+  OPENAI_MAX_COMPLETION_TOKENS?: string;
   HARD_INTENT_TARGETED_RETRIEVAL_MODE?: "off" | "diagnostic" | "active";
   SEC_USER_AGENT: string;
   SEC_FETCHER_BASE_URL?: string;

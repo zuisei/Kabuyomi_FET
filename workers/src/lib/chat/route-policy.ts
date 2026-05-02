@@ -12,9 +12,19 @@ export function shouldLetModelTryBeforeDeterministic(
   deterministic: DeterministicChatAnswer | null
 ): boolean {
   return (
-    Boolean(env.GEMINI_API_KEY) &&
+    hasConfiguredChatModel(env) &&
     (deterministic?.strategy === "business_overview" || deterministic?.strategy === "revenue_drivers")
   );
+}
+
+function hasConfiguredChatModel(env: Env): boolean {
+  if (env.LLM_PROVIDER === "openai") {
+    return Boolean(env.OPENAI_API_KEY);
+  }
+  if (env.LLM_PROVIDER === "disabled") {
+    return false;
+  }
+  return Boolean(env.GEMINI_API_KEY);
 }
 
 export function chooseRetryReason({

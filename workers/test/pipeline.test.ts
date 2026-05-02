@@ -136,6 +136,58 @@ describe("buildChatResponse", () => {
     expect(response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S7", "S9"]));
   });
 
+  it("lets the OpenAI provider answer revenue-driver questions when selected", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url === "https://api.openai.com/v1/chat/completions") {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    answer:
+                      "売上成長の主因は、Americas の iPhone と Services の売上増です。数字だけではなく、本文のドライバー説明に基づく回答です。",
+                    sourceIds: ["S7", "S9"]
+                  })
+                }
+              }
+            ],
+            usage: {
+              prompt_tokens: 1000,
+              completion_tokens: 80,
+              total_tokens: 1080
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filing = makeDriverRichFiling();
+    const response = await buildChatResponse(
+      filing,
+      "売上成長の要因は？",
+      {
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key",
+        OPENAI_CHAT_MODEL: "gpt-5-nano"
+      } as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(response.responsePath).toBe("gemini");
+    expect(response.debug?.modelProvider).toBe("openai");
+    expect(response.debug?.modelName).toBe("gpt-5-nano");
+    expect(response.answer).toContain("iPhone");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S7", "S9"]));
+  });
+
   it("answers revenue sector questions deterministically with business buckets", async () => {
     const filing = makeRevenueBreakdownFiling();
 

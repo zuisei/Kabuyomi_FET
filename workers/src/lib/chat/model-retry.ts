@@ -1,5 +1,5 @@
 import type { Env, FilingCacheRecord } from "../../env";
-import { generateChatAnswer } from "../../clients/gemini";
+import { generateModelChatAnswer } from "../../clients/llm/provider";
 import type { ChatFallbackReason, GeminiChatAnswer } from "../../clients/gemini/types";
 import { logEvent } from "../logging";
 import { buildChatContextPack, type ChatContextPack } from "./context-pack";
@@ -44,7 +44,7 @@ export async function retryModelAnswer({
     selectedSourceIds: contextPack.sourceChunks.map((source) => source.sourceId),
     selectedSourceLabels: contextPack.sourceChunks.map((source) => source.sourceLabel)
   });
-  const modelResponse = await generateChatAnswer(env, {
+  const modelResponse = await generateModelChatAnswer(env, {
     filing,
     question,
     questionIntent,

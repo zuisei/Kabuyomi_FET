@@ -46,6 +46,8 @@ export type GeminiApiErrorKind =
   | "timeout"
   | "unknown";
 
+export type ChatModelProviderName = "gemini-legacy" | "gemini" | "openai" | "disabled";
+
 export interface GeminiApiErrorDiagnostics {
   geminiApiErrorKind: GeminiApiErrorKind;
   geminiApiErrorStatus?: number | null;
@@ -81,6 +83,23 @@ export interface GeminiChatAnswer {
   sourceIds: string[];
   usedRemoteModel?: boolean;
   llmUsage?: GeminiInvocationUsage[];
+  modelUsage?: GeminiInvocationUsage[];
+  modelProvider?: ChatModelProviderName;
+  modelName?: string | null;
+  modelApiError?: {
+    modelApiErrorKind: GeminiApiErrorKind;
+    modelApiErrorStatus?: number | null;
+    modelApiErrorCode?: string | null;
+    modelApiErrorMessageSample?: string | null;
+    modelApiErrorRetryable: boolean;
+    modelRequestPromptCharCount?: number | null;
+    modelRequestEstimatedTokens?: number | null;
+    modelRequestSourceCount?: number | null;
+    modelRequestContextCharCount?: number | null;
+    modelName?: string | null;
+    modelProvider: ChatModelProviderName;
+    modelErrorOccurredBeforeResponse?: boolean;
+  };
   geminiCalled?: boolean;
   geminiSucceeded?: boolean;
   fallbackReason?: ChatFallbackReason;

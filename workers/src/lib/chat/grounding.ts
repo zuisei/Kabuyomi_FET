@@ -32,6 +32,17 @@ export interface ChatResponseDebug {
   sourceIdsValid?: boolean;
   contextApplied?: boolean;
   modelName?: string | null;
+  modelProvider?: import("../../clients/gemini/types").ChatModelProviderName | null;
+  modelApiErrorKind?: import("../../clients/gemini/types").GeminiApiErrorKind | null;
+  modelApiErrorStatus?: number | null;
+  modelApiErrorCode?: string | null;
+  modelApiErrorMessageSample?: string | null;
+  modelApiErrorRetryable?: boolean | null;
+  modelRequestPromptCharCount?: number | null;
+  modelRequestEstimatedTokens?: number | null;
+  modelRequestSourceCount?: number | null;
+  modelRequestContextCharCount?: number | null;
+  modelErrorOccurredBeforeResponse?: boolean | null;
   contentMode?: "full" | "metrics_only";
   geminiCalled?: boolean;
   geminiSucceeded?: boolean;

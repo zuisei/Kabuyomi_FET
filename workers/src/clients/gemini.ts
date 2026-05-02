@@ -192,7 +192,8 @@ function attachLlmUsage(answer: GeminiChatAnswer, usage: GeminiChatAnswer["llmUs
   return usage && usage.length > 0
     ? {
         ...answer,
-        llmUsage: usage
+        llmUsage: usage,
+        modelUsage: usage
       }
     : answer;
 }

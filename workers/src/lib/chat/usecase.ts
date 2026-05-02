@@ -1,6 +1,8 @@
 import type { z } from "zod";
 import type { Env, FilingCacheRecord } from "../../env";
+import { resolveLlmProvider } from "../../clients/llm/provider";
 import { resolveGeminiModel } from "../../clients/gemini/request";
+import { resolveOpenAIChatModel } from "../../clients/llm/providers/openai/request";
 import { ChatRequestSchema } from "../contracts";
 import { consumeBillableCredits, refundBillableCredits } from "../credit-operation";
 import { enqueueContentUpgrade, isMetricsOnlyRecord, upgradeMetricsOnlyRecord } from "../filings/content-upgrade";
@@ -70,7 +72,7 @@ export async function answerChatUsecase({
   const answerQualityFlags = buildAnswerQualityFlags(answer, {
     contextApplied: resolvedQuestion !== payload.question
   });
-  const modelNameForLog = answer.debug?.geminiCalled === true || responsePath === "gemini" ? resolveGeminiModel(env) : null;
+  const modelNameForLog = answer.debug?.geminiCalled === true || responsePath === "gemini" ? resolveSelectedChatModelName(env, answer.debug?.modelName) : null;
 
   if (answer.chargeable === false) {
     try {
@@ -123,7 +125,7 @@ export async function answerChatUsecase({
     })
   );
 
-  const modelName = answer.responsePath === "gemini" ? resolveGeminiModel(env) : null;
+  const modelName = answer.responsePath === "gemini" ? resolveSelectedChatModelName(env, answer.debug?.modelName) : null;
   const body: Record<string, unknown> = {
     answer: formatChatAnswerForDisplay(answer.answer),
     sources: answer.sources,
@@ -145,6 +147,17 @@ export async function answerChatUsecase({
     };
   }
   return body;
+}
+
+function resolveSelectedChatModelName(env: Env, debugModelName?: string | null): string {
+  if (debugModelName) {
+    return debugModelName;
+  }
+  const provider = resolveLlmProvider(env);
+  if (provider === "openai") {
+    return resolveOpenAIChatModel(env);
+  }
+  return resolveGeminiModel(env);
 }
 
 interface ChatChargeResult {
