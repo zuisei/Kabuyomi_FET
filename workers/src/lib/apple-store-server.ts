@@ -22,7 +22,7 @@ interface AppStoreTransactionInfoResponse {
   signedTransactionInfo?: string;
 }
 
-interface DecodedTransactionPayload {
+interface ParsedTransactionPayload {
   transactionId?: string;
   originalTransactionId?: string;
   productId?: string;
@@ -45,12 +45,12 @@ export async function verifyCreditPurchaseWithApple(
   }
 
   if (request.signedTransactionInfo) {
-    const clientPayload = decodeJWSPayload(request.signedTransactionInfo);
+    const clientPayload = parseUnverifiedJWSPayload(request.signedTransactionInfo);
     ensureTransactionMatches("client", request, clientPayload, env.APPLE_BUNDLE_ID);
   }
 
   const signedTransactionInfo = await fetchSignedTransactionInfo(env, request.transactionId);
-  const applePayload = decodeJWSPayload(signedTransactionInfo);
+  const applePayload = parseAppleServerJWSPayload(signedTransactionInfo);
   ensureTransactionMatches("apple", request, applePayload, env.APPLE_BUNDLE_ID);
 
   if (applePayload.revocationDate) {
@@ -81,7 +81,7 @@ export async function verifySubscriptionWithApple(
 
   let transactionId = request.transactionId?.trim();
   if (request.signedTransactionInfo) {
-    const clientPayload = decodeJWSPayload(request.signedTransactionInfo);
+    const clientPayload = parseUnverifiedJWSPayload(request.signedTransactionInfo);
     ensureTransactionMatches(
       "client",
       { ...request, transactionId: transactionId ?? clientPayload.transactionId ?? "" },
@@ -97,7 +97,7 @@ export async function verifySubscriptionWithApple(
   }
 
   const signedTransactionInfo = await fetchSignedTransactionInfo(env, transactionId);
-  const applePayload = decodeJWSPayload(signedTransactionInfo);
+  const applePayload = parseAppleServerJWSPayload(signedTransactionInfo);
   ensureTransactionMatches("apple", { ...request, transactionId }, applePayload, env.APPLE_BUNDLE_ID);
   ensureSubscriptionIsActive(applePayload);
 
@@ -200,7 +200,7 @@ async function buildAppStoreServerToken(env: Env): Promise<string> {
 function ensureTransactionMatches(
   source: "client" | "apple",
   request: CreditPurchaseVerificationRequest | (SubscriptionVerificationRequest & { transactionId: string }),
-  payload: DecodedTransactionPayload,
+  payload: ParsedTransactionPayload,
   expectedBundleId?: string
 ): void {
   if (payload.transactionId !== request.transactionId) {
@@ -217,7 +217,7 @@ function ensureTransactionMatches(
   }
 }
 
-function ensureSubscriptionIsActive(payload: DecodedTransactionPayload): void {
+function ensureSubscriptionIsActive(payload: ParsedTransactionPayload): void {
   if (payload.revocationDate) {
     throw new AppError(409, "Subscription transaction has been revoked");
   }
@@ -229,14 +229,28 @@ function ensureSubscriptionIsActive(payload: DecodedTransactionPayload): void {
   }
 }
 
-function decodeJWSPayload(jws: string): DecodedTransactionPayload {
+// This parser intentionally does not verify the JWS signature. Client-provided
+// payloads are only an early consistency check; credit grants must still use
+// the server-fetched Apple transaction payload below.
+function parseUnverifiedJWSPayload(jws: string): ParsedTransactionPayload {
+  return parseJWSPayload(jws);
+}
+
+// The payload is fetched from Apple's App Store Server API using our server
+// credentials. Local JWS chain verification is still a future hardening step,
+// so keep this type as parsed payload rather than "verified" payload.
+function parseAppleServerJWSPayload(jws: string): ParsedTransactionPayload {
+  return parseJWSPayload(jws);
+}
+
+function parseJWSPayload(jws: string): ParsedTransactionPayload {
   const parts = jws.split(".");
   if (parts.length !== 3 || !parts[1]) {
     throw new AppError(400, "Invalid signed transaction info");
   }
 
   try {
-    return JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[1]))) as DecodedTransactionPayload;
+    return JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[1]))) as ParsedTransactionPayload;
   } catch (error) {
     throw new AppError(400, "Invalid signed transaction info", error instanceof Error ? error.message : String(error));
   }

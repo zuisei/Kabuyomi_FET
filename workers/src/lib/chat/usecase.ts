@@ -291,7 +291,7 @@ async function refundChat({
   filingKey: string;
 }): Promise<CreditMutationResult | Awaited<ReturnType<typeof refundChatQuota>>> {
   if (!creditBillingEnabled) {
-    return refundChatQuota(identity, env, config);
+    return refundChatQuota(identity, env, config, { operationId: creditOperationId });
   }
 
   return refundBillableCredits({

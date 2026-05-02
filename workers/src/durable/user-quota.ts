@@ -74,11 +74,20 @@ interface MonthlyGrantRecord {
   createdAt: string;
 }
 
+interface ChatRefundRecord {
+  operationId: string;
+  dateJST: string;
+  status: "applied" | "noop";
+  chatsUsedAfter: number;
+  createdAt: string;
+}
+
 const SAVED_TICKERS_KEY = "saved_tickers";
 const CREDIT_STATE_KEY = "credit_state";
 const CREDIT_OPERATION_PREFIX = "credit_operation:";
 const MONTHLY_GRANT_PREFIX = "monthly_grant:";
 const PURCHASE_TRANSACTION_PREFIX = "purchase_transaction:";
+const CHAT_REFUND_PREFIX = "chat_refund:";
 const CREDIT_OPERATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DAILY_KEY_PREFIX = "daily:";
 const LEGACY_DAILY_KEY_LIMIT = 30;
@@ -294,9 +303,42 @@ export class UserQuotaDO {
         didMutate = true;
       }
 
-      if (body.action === "refundChat" && dailyRecord.chatsUsed > 0) {
-        dailyRecord.chatsUsed -= 1;
-        didMutate = true;
+      let pendingChatRefund: ChatRefundRecord | undefined;
+      if (body.action === "refundChat") {
+        const operationId = body.operationId;
+        if (!operationId) {
+          return {
+            status: 400,
+            payload: { error: "Invalid quota payload", usage: currentUsage(), didMutate }
+          };
+        }
+
+        const existingRefund = await this.loadChatRefund(operationId);
+        if (existingRefund) {
+          await Promise.all([
+            this.state.storage.put(buildDailyKey(body.dateJST), dailyRecord),
+            this.state.storage.put(SAVED_TICKERS_KEY, savedTickerRecord),
+            this.state.storage.put(CREDIT_STATE_KEY, creditState),
+            monthlyGrant ? this.saveMonthlyGrant(monthlyGrant) : Promise.resolve()
+          ]);
+          return {
+            status: 200,
+            payload: { usage: currentUsage(), didMutate: false, monthlyGrant }
+          };
+        }
+
+        const now = new Date().toISOString();
+        if (dailyRecord.chatsUsed > 0) {
+          dailyRecord.chatsUsed -= 1;
+          didMutate = true;
+        }
+        pendingChatRefund = {
+          operationId,
+          dateJST: body.dateJST,
+          status: didMutate ? "applied" : "noop",
+          chatsUsedAfter: dailyRecord.chatsUsed,
+          createdAt: now
+        };
       }
 
       if (body.action === "checkStock") {
@@ -359,7 +401,8 @@ export class UserQuotaDO {
         this.state.storage.put(buildDailyKey(body.dateJST), dailyRecord),
         this.state.storage.put(SAVED_TICKERS_KEY, savedTickerRecord),
         this.state.storage.put(CREDIT_STATE_KEY, creditState),
-        monthlyGrant ? this.saveMonthlyGrant(monthlyGrant) : Promise.resolve()
+        monthlyGrant ? this.saveMonthlyGrant(monthlyGrant) : Promise.resolve(),
+        pendingChatRefund ? this.saveChatRefund(pendingChatRefund) : Promise.resolve()
       ]);
 
       return { status: 200, payload: { usage: currentUsage(), didMutate, monthlyGrant } };
@@ -727,6 +770,16 @@ export class UserQuotaDO {
     await this.state.storage.put(buildMonthlyGrantKey(grant.operationId), grant);
   }
 
+  private async loadChatRefund(operationId: string): Promise<ChatRefundRecord | undefined> {
+    return (await this.state.storage.get<ChatRefundRecord>(buildChatRefundKey(operationId))) as
+      | ChatRefundRecord
+      | undefined;
+  }
+
+  private async saveChatRefund(refund: ChatRefundRecord): Promise<void> {
+    await this.state.storage.put(buildChatRefundKey(refund.operationId), refund);
+  }
+
   private async pruneOldCreditOperations(nowIso: string): Promise<void> {
     const cutoffMs = Date.parse(nowIso) - CREDIT_OPERATION_RETENTION_MS;
     if (!Number.isFinite(cutoffMs)) {
@@ -849,6 +902,10 @@ function buildMonthlyGrantKey(operationId: string): string {
 
 function buildPurchaseTransactionKey(transactionId: string): string {
   return `${PURCHASE_TRANSACTION_PREFIX}${transactionId}`;
+}
+
+function buildChatRefundKey(operationId: string): string {
+  return `${CHAT_REFUND_PREFIX}${operationId}`;
 }
 
 function buildMonthlyGrantOperationId(plan: AccessPlan, periodStart: string, periodEnd: string): string {

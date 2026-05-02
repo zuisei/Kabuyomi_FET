@@ -364,7 +364,7 @@ describe("credit quota bridge", () => {
     );
 
     expect(usage.credits?.totalRemaining).toBe(30);
-    expect(db.db.prepare).toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE INTO monthly_grants"));
+    expect(db.db.prepare).toHaveBeenCalledWith(expect.stringContaining("ON CONFLICT(operation_id) DO NOTHING"));
     expect(db.db.prepare).toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE INTO credit_ledger"));
     expect(db.bind).toHaveBeenCalledWith(
       expect.any(String),
@@ -389,6 +389,112 @@ describe("credit quota bridge", () => {
       "free:2026-04-01T00:00:00+09:00:2026-05-01T00:00:00+09:00",
       expect.stringContaining('"status":"applied"'),
       "2026-04-25T00:00:00.000Z"
+    );
+  });
+
+  it("persists separate monthly grant audit rows for same-period plan upgrades", async () => {
+    const db = createDb();
+    const proIdentity: QuotaIdentity = {
+      ...identity,
+      plan: "pro"
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            usage: usagePayload(),
+            didMutate: true,
+            monthlyGrant: {
+              operationId: "monthly-grant:free:2026-04-01T00:00:00+09:00:2026-05-01T00:00:00+09:00",
+              plan: "free",
+              periodStart: "2026-04-01T00:00:00+09:00",
+              periodEnd: "2026-05-01T00:00:00+09:00",
+              creditsGranted: 30,
+              balanceAfter: 30,
+              monthlyBalanceAfter: 30,
+              purchasedBalanceAfter: 0,
+              createdAt: "2026-04-25T00:00:00.000Z"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            usage: {
+              ...usagePayload(),
+              plan: "pro",
+              credits: {
+                monthlyRemaining: 200,
+                monthlyLimit: 200,
+                purchasedRemaining: 0,
+                totalRemaining: 200,
+                resetsAt: "2026-05-01T00:00:00+09:00"
+              }
+            },
+            didMutate: true,
+            monthlyGrant: {
+              operationId: "monthly-grant:pro:2026-04-01T00:00:00+09:00:2026-05-01T00:00:00+09:00",
+              plan: "pro",
+              periodStart: "2026-04-01T00:00:00+09:00",
+              periodEnd: "2026-05-01T00:00:00+09:00",
+              creditsGranted: 170,
+              balanceAfter: 200,
+              monthlyBalanceAfter: 200,
+              purchasedBalanceAfter: 0,
+              createdAt: "2026-04-25T00:00:01.000Z"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      );
+    const env = {
+      DB: db.db,
+      USER_QUOTA: {
+        getByName: vi.fn().mockReturnValue({ fetch })
+      }
+    } as never;
+
+    await loadUsage(identity, env, DEFAULT_REMOTE_CONFIG);
+    const upgradedUsage = await loadUsage(proIdentity, env, DEFAULT_REMOTE_CONFIG);
+
+    expect(upgradedUsage.credits?.monthlyRemaining).toBe(200);
+    expect(db.db.prepare).toHaveBeenCalledWith(expect.stringContaining("ON CONFLICT(operation_id) DO NOTHING"));
+    expect(db.bind).toHaveBeenCalledWith(
+      expect.any(String),
+      identity.quotaSubject,
+      "free",
+      "2026-04-01T00:00:00+09:00",
+      "2026-05-01T00:00:00+09:00",
+      30,
+      "monthly-grant:free:2026-04-01T00:00:00+09:00:2026-05-01T00:00:00+09:00",
+      "2026-04-25T00:00:00.000Z"
+    );
+    expect(db.bind).toHaveBeenCalledWith(
+      expect.any(String),
+      identity.quotaSubject,
+      "pro",
+      "2026-04-01T00:00:00+09:00",
+      "2026-05-01T00:00:00+09:00",
+      170,
+      "monthly-grant:pro:2026-04-01T00:00:00+09:00:2026-05-01T00:00:00+09:00",
+      "2026-04-25T00:00:01.000Z"
+    );
+    expect(db.bind).toHaveBeenCalledWith(
+      expect.any(String),
+      identity.quotaSubject,
+      "monthly-grant:pro:2026-04-01T00:00:00+09:00:2026-05-01T00:00:00+09:00",
+      "monthly_grant",
+      170,
+      200,
+      200,
+      0,
+      "monthly_grant",
+      "pro:2026-04-01T00:00:00+09:00:2026-05-01T00:00:00+09:00",
+      expect.stringContaining('"status":"applied"'),
+      "2026-04-25T00:00:01.000Z"
     );
   });
 

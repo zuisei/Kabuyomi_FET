@@ -84,6 +84,85 @@ describe("apple store server verification", () => {
     });
   });
 
+  it("does not accept a client-provided JWS without Apple server verification", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "tx-forged",
+      originalTransactionId: "orig-tx-forged",
+      productId: "credit_pack_100",
+      bundleId: "app.kabuyomi.ios"
+    });
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: "not found" }), { status: 404 }));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      verifyCreditPurchaseWithApple(
+        {
+          APPLE_APP_STORE_ISSUER_ID: "issuer-id",
+          APPLE_APP_STORE_KEY_ID: "key-id",
+          APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+          APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+          APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
+        } as never,
+        {
+          productId: "credit_pack_100",
+          transactionId: "tx-forged",
+          originalTransactionId: "orig-tx-forged",
+          signedTransactionInfo
+        }
+      )
+    ).rejects.toMatchObject({
+      status: 400,
+      publicMessage: "Apple transaction could not be verified"
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the Apple server transaction payload as the authority for credit purchases", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const clientSignedTransactionInfo = fakeJws({
+      transactionId: "tx-100",
+      originalTransactionId: "orig-tx-100",
+      productId: "credit_pack_100",
+      bundleId: "app.kabuyomi.ios"
+    });
+    const appleSignedTransactionInfo = fakeJws({
+      transactionId: "tx-100",
+      originalTransactionId: "orig-tx-100",
+      productId: "credit_pack_300",
+      bundleId: "app.kabuyomi.ios"
+    });
+    const fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ signedTransactionInfo: appleSignedTransactionInfo }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      verifyCreditPurchaseWithApple(
+        {
+          APPLE_APP_STORE_ISSUER_ID: "issuer-id",
+          APPLE_APP_STORE_KEY_ID: "key-id",
+          APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+          APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+          APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
+        } as never,
+        {
+          productId: "credit_pack_100",
+          transactionId: "tx-100",
+          originalTransactionId: "orig-tx-100",
+          signedTransactionInfo: clientSignedTransactionInfo
+        }
+      )
+    ).rejects.toMatchObject({
+      status: 400,
+      publicMessage: "Purchase transaction product mismatch"
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("requires server-side Apple credentials", async () => {
     await expect(
       verifyCreditPurchaseWithApple(

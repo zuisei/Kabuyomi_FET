@@ -484,7 +484,9 @@ describe("handleChatRoute", () => {
     ).rejects.toThrow("Gemini unavailable");
 
     expect(mockConsumeChatQuota).toHaveBeenCalledWith(identity, expect.anything(), expect.anything());
-    expect(mockRefundChatQuota).toHaveBeenCalledWith(identity, expect.anything(), expect.anything());
+    expect(mockRefundChatQuota).toHaveBeenCalledWith(identity, expect.anything(), expect.anything(), {
+      operationId: expect.any(String)
+    });
   });
 
   it("refunds chat quota for non-chargeable historical preparation responses", async () => {
@@ -515,7 +517,9 @@ describe("handleChatRoute", () => {
     });
 
     expect(response?.status).toBe(200);
-    expect(mockRefundChatQuota).toHaveBeenCalledWith(identity, env, expect.anything());
+    expect(mockRefundChatQuota).toHaveBeenCalledWith(identity, env, expect.anything(), {
+      operationId: expect.any(String)
+    });
     await expect(response?.json()).resolves.toMatchObject({
       responsePath: "fallback",
       usage: {

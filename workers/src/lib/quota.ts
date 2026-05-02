@@ -50,8 +50,9 @@ export interface QuotaMutationResult {
   didMutate: boolean;
 }
 
-interface TickerQuotaOptions {
+interface QuotaMutationOptions {
   relatedTickers?: readonly string[];
+  operationId?: string;
 }
 
 export interface CreditReference {
@@ -194,7 +195,7 @@ export async function ensureStockQuotaAvailable(
   ticker: string,
   env: Env,
   config: RemoteConfig,
-  options: TickerQuotaOptions = {}
+  options: QuotaMutationOptions = {}
 ): Promise<UsageState> {
   return (await mutateUsage(identity, env, config, "checkStock", ticker, options)).usage;
 }
@@ -210,9 +211,10 @@ export async function consumeChatQuota(
 export async function refundChatQuota(
   identity: QuotaIdentity,
   env: Env,
-  config: RemoteConfig
+  config: RemoteConfig,
+  options: { operationId: string }
 ): Promise<UsageState> {
-  return (await mutateUsage(identity, env, config, "refundChat")).usage;
+  return (await mutateUsage(identity, env, config, "refundChat", undefined, options)).usage;
 }
 
 export async function ensureMonthlyCreditGrant(
@@ -376,7 +378,7 @@ export async function consumeStockQuota(
   ticker: string,
   env: Env,
   config: RemoteConfig,
-  options: TickerQuotaOptions = {}
+  options: QuotaMutationOptions = {}
 ): Promise<UsageState> {
   return (await mutateUsage(identity, env, config, "consumeStock", ticker, options)).usage;
 }
@@ -386,7 +388,7 @@ export async function consumeStockQuotaWithMutation(
   ticker: string,
   env: Env,
   config: RemoteConfig,
-  options: TickerQuotaOptions = {}
+  options: QuotaMutationOptions = {}
 ): Promise<QuotaMutationResult> {
   return mutateUsage(identity, env, config, "consumeStock", ticker, options);
 }
@@ -396,7 +398,7 @@ export async function refundStockQuota(
   ticker: string,
   env: Env,
   config: RemoteConfig,
-  options: TickerQuotaOptions = {}
+  options: QuotaMutationOptions = {}
 ): Promise<UsageState> {
   return (await mutateUsage(identity, env, config, "refundStock", ticker, options)).usage;
 }
@@ -406,7 +408,7 @@ export async function promoteSavedTickerAlias(
   ticker: string,
   env: Env,
   config: RemoteConfig,
-  options: TickerQuotaOptions = {}
+  options: QuotaMutationOptions = {}
 ): Promise<UsageState> {
   return (await mutateUsage(identity, env, config, "promoteTicker", ticker, options)).usage;
 }
@@ -416,7 +418,7 @@ export async function removeTickerFromSavedQuota(
   ticker: string,
   env: Env,
   config: RemoteConfig,
-  options: TickerQuotaOptions = {}
+  options: QuotaMutationOptions = {}
 ): Promise<UsageState> {
   return (await mutateUsage(identity, env, config, "removeTicker", ticker, options)).usage;
 }
@@ -427,7 +429,7 @@ export async function ensureCompanyAccessAllowed(
   previewTickers: readonly string[],
   env: Env,
   config: RemoteConfig,
-  options: TickerQuotaOptions = {}
+  options: QuotaMutationOptions = {}
 ): Promise<void> {
   if (identity.plan === "pro") {
     return;
@@ -506,7 +508,7 @@ async function mutateUsage(
     | "promoteTicker"
     | "ensureMonthlyCreditGrant",
   ticker?: string,
-  options: TickerQuotaOptions = {}
+  options: QuotaMutationOptions = {}
 ): Promise<QuotaMutationResult> {
   const stub = env.USER_QUOTA.getByName(identity.quotaSubject);
   const dateJST = buildQuotaDateJST();
@@ -525,7 +527,8 @@ async function mutateUsage(
       relatedTickers: normalizePreviewTickers(options.relatedTickers ?? []),
       chatLimit: limits.chatLimit,
       stockLimit: limits.stockLimit,
-      monthlyCreditLimit: limits.monthlyCreditLimit
+      monthlyCreditLimit: limits.monthlyCreditLimit,
+      operationId: options.operationId
     })
   });
 
@@ -875,7 +878,7 @@ async function markPurchaseTransactionGranted(env: Env, transactionId: string): 
 async function persistMonthlyGrant(env: Env, identity: QuotaIdentity, grant: MonthlyGrantResult): Promise<void> {
   try {
     await env.DB.prepare(
-      `INSERT OR IGNORE INTO monthly_grants (
+      `INSERT INTO monthly_grants (
         id,
         user_id,
         plan,
@@ -884,7 +887,8 @@ async function persistMonthlyGrant(env: Env, identity: QuotaIdentity, grant: Mon
         credits_granted,
         operation_id,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(operation_id) DO NOTHING`
     )
       .bind(
         crypto.randomUUID(),
