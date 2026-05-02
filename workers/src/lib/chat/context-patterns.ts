@@ -3,7 +3,7 @@ export function businessContextPattern(): RegExp {
 }
 
 export function revenueDriverPattern(): RegExp {
-  return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|increase(?:d)? due to|decrease(?:d)? due to|higher (?:net )?sales of|lower (?:net )?sales of|sales (?:increase|decrease)|revenue (?:increase|decrease)|net sales (?:increase|decrease)|subscription revenue|annual recurring revenue|\barr\b|new customers?|existing customers?|additional modules?|module adoption/i;
+  return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|increase(?:d)? due to|decrease(?:d)? due to|higher (?:net )?sales of|lower (?:net )?sales of|sales (?:increase|decrease)|sales and revenues|revenue (?:increase|decrease)|net sales (?:increase|decrease)|comparable sales|comparable store sales|same-store sales|comp sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership income|price realization|realizations?|pricing|sales volume|volume|crude oil|natural gas|commodity|refining margins?|subscription revenue|annual recurring revenue|\barr\b|new customers?|existing customers?|additional modules?|module adoption/i;
 }
 
 export function riskContextPattern(): RegExp {

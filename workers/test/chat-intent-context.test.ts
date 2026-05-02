@@ -284,6 +284,77 @@ describe("chat question intent and context packing", () => {
     expect(context.selectionDiagnostics.selectedSourceCharCount).toBeGreaterThan(driverText.length);
   });
 
+  it("prefers concrete revenue-driver windows over generic business ecommerce context", () => {
+    const genericBusinessText =
+      "Through innovation, we strive to continuously improve a customer-centric experience that integrates ecommerce and retail stores in an omnichannel offering. Net sales are discussed throughout this section, but this paragraph mainly describes the business model and customer experience rather than the reason sales changed.";
+    const driverText =
+      "Net sales increased primarily due to comparable sales growth, higher transactions, ecommerce sales growth, and membership income. The increase was partially offset by lower average ticket and foreign currency headwinds, so this paragraph gives the actual revenue drivers.";
+    const filing = {
+      ...makeIntentFiling(),
+      mdaText: [genericBusinessText, driverText].join(" "),
+      sourceChunks: [
+        {
+          sourceId: "S1",
+          sectionType: "md_a" as const,
+          sectionTitle: "Item 7",
+          sourceLabel: "10-K Item 7",
+          text: genericBusinessText,
+          startOffset: 0,
+          endOffset: genericBusinessText.length,
+          sortOrder: 1
+        },
+        {
+          sourceId: "S2",
+          sectionType: "md_a" as const,
+          sectionTitle: "Item 7",
+          sourceLabel: "10-K Item 7",
+          text: driverText,
+          startOffset: genericBusinessText.length + 1,
+          endOffset: genericBusinessText.length + 1 + driverText.length,
+          sortOrder: 2
+        },
+        ...makeIntentFiling().sourceChunks.filter((chunk) => chunk.sectionType === "xbrl_metric")
+      ]
+    };
+
+    const context = buildChatContextPack(filing, "yoy_change");
+
+    expect(context.sourceChunks[0]?.text).toContain("comparable sales growth");
+    expect(context.sourceChunks[0]?.text).toContain("membership income");
+    expect(context.sourceChunks[0]?.text).not.toBe(genericBusinessText);
+    expect(context.sourceChunks.slice(0, 2).some((chunk) => chunk.sourceId === "S2")).toBe(true);
+  });
+
+  it("recognizes energy commodity and realization language as revenue-driver context", () => {
+    const commodityText =
+      "Sales and revenues decreased primarily due to lower crude oil and natural gas realizations and weaker refining margins, partially offset by higher sales volumes. These commodity and volume factors explain the revenue decline.";
+    const filing = {
+      ...makeIntentFiling(),
+      ticker: "XOM",
+      companyName: "Exxon Mobil Corp",
+      mdaText: commodityText,
+      sourceChunks: [
+        {
+          sourceId: "S1",
+          sectionType: "md_a" as const,
+          sectionTitle: "Item 7",
+          sourceLabel: "10-K Item 7",
+          text: commodityText,
+          startOffset: 0,
+          endOffset: commodityText.length,
+          sortOrder: 1
+        },
+        ...makeIntentFiling().sourceChunks.filter((chunk) => chunk.sectionType === "xbrl_metric")
+      ]
+    };
+
+    const context = buildChatContextPack(filing, "yoy_change");
+
+    expect(context.sourceChunks[0]?.sourceId).toMatch(/^(S1|CTX)/);
+    expect(context.sourceChunks[0]?.text).toContain("lower crude oil and natural gas realizations");
+    expect(context.sourceChunks[0]?.text).toContain("refining margins");
+  });
+
   it("filters disaster risk windows out of revenue-growth context", () => {
     const riskText =
       "Natural disasters and other catastrophic events such as public health crises could affect our personnel, data centers, service providers, manufacturing vendors, and logistics providers. Climate change could increase the frequency or severity of these events, which could affect revenue timing.";

@@ -4,6 +4,7 @@ import {
   buildAnswerQualityFlags,
   buildChatQualityPipelinePayload,
   buildContextDebugFields,
+  buildModelAttemptDebugFields,
   estimateTokenCountFromChars,
   resolveChatResponsePath,
   selectedResponseSourceCharCount
@@ -103,7 +104,7 @@ describe("chat diagnostics helpers", () => {
       latencyMs: 42,
       selectedSourceIds: ["S1", "S2"],
       selectedSourceLabels: ["10-Q Part I Item 2", "10-Q XBRL 売上高"],
-      answerQualityFlags: ["context_rewritten", "fallback_path", "fallback:weak_grounding", "invalid_source_ids", "model_retry_used"],
+      answerQualityFlags: ["context_rewritten", "fallback_path", "fallback:weak_grounding", "invalid_source_ids", "model_retry_used", "fallback_kind_missing"],
       sourceIdsValid: false,
       geminiCalled: true,
       geminiSucceeded: true,
@@ -170,6 +171,57 @@ describe("chat diagnostics helpers", () => {
       selectedSourceIds: ["S1", "S2"],
       selectedSourceLabels: ["10-Q Part I Item 2", "10-Q XBRL 売上高"]
     });
+  });
+
+  it("extracts retry diagnostics and marks wasted retries", () => {
+    expect(
+      buildModelAttemptDebugFields({
+        answer: "fallback",
+        sourceIds: ["S1"],
+        retryDiagnostics: {
+          retryAttempted: true,
+          retryAllowed: true,
+          retryReason: "low_quality_answer",
+          retryBlockedReason: null,
+          retryOutcome: "fallback",
+          retryWasted: true,
+          firstCallFailureKind: "low_quality_answer"
+        }
+      })
+    ).toMatchObject({
+      retryAttempted: true,
+      retryAllowed: true,
+      retryBlockedReason: null,
+      retryOutcome: "fallback",
+      retryWasted: true,
+      firstCallFailureKind: "low_quality_answer",
+      sourceGateApplied: false,
+      sourceGateSufficient: null,
+      evidenceFallbackUsed: false,
+      fallbackKind: "none"
+    });
+
+    expect(
+      buildAnswerQualityFlags(
+        {
+          answer: "answer",
+          sources: [],
+          responsePath: "fallback",
+          debug: {
+            retryAttempted: true,
+            retryWasted: true,
+            retryBlockedReason: "hard_intent_retry_disabled"
+          }
+        },
+        { contextApplied: false }
+      )
+    ).toEqual([
+      "fallback_path",
+      "no_final_sources",
+      "retry_attempted",
+      "retry_wasted",
+      "retry_blocked:hard_intent_retry_disabled"
+    ]);
   });
 });
 

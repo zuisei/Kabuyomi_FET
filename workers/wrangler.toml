@@ -25,6 +25,7 @@ SEC_FETCHER_BASE_URL = "https://kabuyomifet-production.up.railway.app"
 # Override GEMINI_MODEL only when testing or rolling a different remote model.
 GEMINI_TIMEOUT_MS = "12000"
 GEMINI_CHAT_TIMEOUT_MS = "7000"
+HARD_INTENT_TARGETED_RETRIEVAL_MODE = "diagnostic"
 SEC_FETCHER_TIMEOUT_MS = "25000"
 # Configure SEC_FETCHER_BASE_URL in .dev.vars for local wrangler dev
 # Optionally set DEV_DETACHED_ACCESS_DEVICE_KEYS in deployed environments to allow DEBUG-only detached access for specific x-device-key values

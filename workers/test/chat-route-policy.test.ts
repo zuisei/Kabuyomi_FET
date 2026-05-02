@@ -7,6 +7,7 @@ import {
   fallbackReasonForMissingValidSourceIds,
   fallbackReasonForNoSources,
   retryContextMode,
+  retryBlockedReasonForQuestion,
   shouldLetModelTryBeforeDeterministic,
   shouldPreferDeterministicBusinessOverview,
   shouldRetryModelAnswer
@@ -59,6 +60,30 @@ describe("chat route policy helpers", () => {
     expect(retryContextMode("weak_grounding")).toBe("expanded");
     expect(retryContextMode("schema_invalid")).toBe("standard");
     expect(retryContextMode("gemini_timeout")).toBe("compact");
+  });
+
+  it("temporarily blocks retries for hard driver and durability intents", () => {
+    expect(
+      shouldRetryModelAnswer({ answer: "answer", sourceIds: ["S1"] }, "low_quality_answer", {
+        questionIntent: "yoy_change",
+        question: "売上成長の主な要因は？"
+      })
+    ).toBe(false);
+    expect(
+      retryBlockedReasonForQuestion("low_quality_answer", "yoy_change", "売上成長の主な要因は？")
+    ).toBe("hard_intent_retry_disabled");
+    expect(
+      shouldRetryModelAnswer({ answer: "answer", sourceIds: ["S1"] }, "low_quality_answer", {
+        questionIntent: "unknown",
+        question: "これは一時要因？それとも構造的な変化？"
+      })
+    ).toBe(false);
+    expect(
+      shouldRetryModelAnswer({ answer: "answer", sourceIds: ["S1"] }, "low_quality_answer", {
+        questionIntent: "business_overview",
+        question: "何の会社？"
+      })
+    ).toBe(true);
   });
 
   it("keeps fallback reason and usage merge behavior stable", () => {

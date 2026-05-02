@@ -10,9 +10,13 @@ export interface ChatSourceValidationResult {
 
 export function validateModelSources(
   modelResponse: GeminiChatAnswer,
-  contextPack: ChatContextPack
+  contextPack: ChatContextPack,
+  filing?: FilingCacheRecord
 ): ChatSourceValidationResult {
-  const validSourceIds = new Set(contextPack.sourceChunks.map((chunk) => chunk.sourceId));
+  const validSourceIds = new Set([
+    ...(modelResponse.usedRemoteModel === true || !filing ? [] : filing.sourceChunks.map((chunk) => chunk.sourceId)),
+    ...contextPack.sourceChunks.map((chunk) => chunk.sourceId)
+  ]);
   const approvedSourceIds = modelResponse.sourceIds.filter((sourceId) => validSourceIds.has(sourceId));
   return {
     approvedSourceIds,

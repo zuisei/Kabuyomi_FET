@@ -2,7 +2,7 @@ import type { Env } from "../../env";
 import { logEvent } from "../../lib/logging";
 import { parseJsonishText } from "./normalize";
 import { chatResponseJsonSchema, quoteTranslationResponseJsonSchema, summaryResponseJsonSchema } from "./prompts";
-import type { GeminiInvocationUsage } from "./types";
+import type { GeminiApiErrorDiagnostics, GeminiApiErrorKind, GeminiInvocationUsage } from "./types";
 
 export const DEFAULT_GEMINI_MODEL = "gemma-4-31b-it";
 export const DEFAULT_GEMINI_TRANSLATION_MODEL = "gemma-4-26b-a4b-it";
@@ -39,6 +39,16 @@ interface GeminiInvocationResult {
   data: unknown;
   usage: GeminiInvocationUsage[];
   failureReason?: "json_parse_failed";
+}
+
+export class GeminiApiRequestError extends Error {
+  readonly diagnostics: GeminiApiErrorDiagnostics;
+
+  constructor(message: string, diagnostics: GeminiApiErrorDiagnostics) {
+    super(message);
+    this.name = "GeminiApiRequestError";
+    this.diagnostics = diagnostics;
+  }
 }
 
 export async function invokeGemini(
@@ -132,31 +142,50 @@ export async function invokeGemini(
         reason: timedOut ? "timeout" : "network_error"
       });
       if (kind === "chat" && timedOut) {
-        throw error;
+        throw buildGeminiApiRequestError({
+          kind: "timeout",
+          model: attempt.model,
+          message: error instanceof Error ? error.message : "Gemini request timed out.",
+          prompt
+        });
       }
       if (attempts[index + 1]) {
         await waitBeforeGeminiRetry(index);
         continue;
       }
-      throw error;
+      throw buildGeminiApiRequestError({
+        kind: timedOut ? "timeout" : "network_error",
+        model: attempt.model,
+        message: error instanceof Error ? error.message : "Gemini network request failed.",
+        prompt
+      });
     } finally {
       clearTimeout(timeout);
     }
 
     if (!response.ok) {
       const bodyPreview = (await response.text()).slice(0, 240);
+      const classified = classifyGeminiHttpError(response.status, bodyPreview);
       logEvent("gemini_request_failed", {
         kind,
         model: attempt.model,
         status: response.status,
         includeSchema: attempt.includeSchema,
-        bodyPreview
+        bodyPreview,
+        errorKind: classified.kind
       });
       if (attempts[index + 1] && (attempt.includeSchema || RETRYABLE_GEMINI_STATUS_CODES.has(response.status))) {
         await waitBeforeGeminiRetry(index);
         continue;
       }
-      throw new Error(`Gemini request failed (${response.status})`);
+      throw buildGeminiApiRequestError({
+        kind: classified.kind,
+        status: response.status,
+        code: classified.code,
+        model: attempt.model,
+        message: bodyPreview || `Gemini request failed (${response.status})`,
+        prompt
+      });
     }
 
     const latencyMs = Date.now() - startedAt;
@@ -203,6 +232,103 @@ export async function invokeGemini(
     usage,
     failureReason: "json_parse_failed"
   };
+}
+
+export function classifyGeminiError(error: unknown): GeminiApiErrorDiagnostics {
+  if (error instanceof GeminiApiRequestError) {
+    return error.diagnostics;
+  }
+  const timedOut =
+    (error instanceof Error && error.name === "AbortError") ||
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && /timeout|timed out|aborted/i.test(error.message));
+  if (timedOut) {
+    return {
+      geminiApiErrorKind: "timeout",
+      geminiApiErrorMessageSample: sampleErrorMessage(error instanceof Error ? error.message : "timeout"),
+      geminiApiErrorRetryable: true,
+      geminiErrorOccurredBeforeResponse: true
+    };
+  }
+  return {
+    geminiApiErrorKind: "unknown",
+    geminiApiErrorMessageSample: sampleErrorMessage(error instanceof Error ? error.message : String(error)),
+    geminiApiErrorRetryable: false,
+    geminiErrorOccurredBeforeResponse: true
+  };
+}
+
+function buildGeminiApiRequestError({
+  kind,
+  status,
+  code,
+  model,
+  message,
+  prompt
+}: {
+  kind: GeminiApiErrorKind;
+  status?: number;
+  code?: string | null;
+  model: string;
+  message: string;
+  prompt: string;
+}): GeminiApiRequestError {
+  return new GeminiApiRequestError(`Gemini request failed: ${kind}`, {
+    geminiApiErrorKind: kind,
+    geminiApiErrorStatus: status ?? null,
+    geminiApiErrorCode: code ?? null,
+    geminiApiErrorMessageSample: sampleErrorMessage(message),
+    geminiApiErrorRetryable: isRetryableGeminiApiError(kind, status),
+    geminiRequestPromptCharCount: prompt.length,
+    geminiRequestEstimatedTokens: Math.ceil(prompt.length / 4),
+    geminiModelName: model,
+    geminiErrorOccurredBeforeResponse: status === undefined
+  });
+}
+
+function classifyGeminiHttpError(status: number, bodyPreview: string): { kind: GeminiApiErrorKind; code: string | null } {
+  const body = bodyPreview.toLowerCase();
+  const code = extractGeminiErrorCode(bodyPreview);
+  if (status === 401 || status === 403) {
+    return { kind: "auth_error", code };
+  }
+  if (status === 429) {
+    return { kind: "rate_limit", code };
+  }
+  if (status >= 500) {
+    return { kind: "provider_server_error", code };
+  }
+  if (status === 400) {
+    if (/token|context|input.*too.*long|prompt.*too.*long/.test(body)) {
+      return { kind: "context_too_large", code };
+    }
+    if (/payload|request.*too.*large|body.*too.*large|size/i.test(bodyPreview)) {
+      return { kind: "payload_too_large", code };
+    }
+    return { kind: "bad_request", code };
+  }
+  return { kind: "unknown", code };
+}
+
+function extractGeminiErrorCode(bodyPreview: string): string | null {
+  const statusMatch = bodyPreview.match(/"status"\s*:\s*"([^"]+)"/i);
+  if (statusMatch?.[1]) {
+    return statusMatch[1].slice(0, 80);
+  }
+  const codeMatch = bodyPreview.match(/"code"\s*:\s*"?([A-Za-z0-9_.-]+)"?/i);
+  return codeMatch?.[1]?.slice(0, 80) ?? null;
+}
+
+function isRetryableGeminiApiError(kind: GeminiApiErrorKind, status?: number): boolean {
+  return kind === "rate_limit" ||
+    kind === "provider_server_error" ||
+    kind === "network_error" ||
+    kind === "timeout" ||
+    (status !== undefined && RETRYABLE_GEMINI_STATUS_CODES.has(status));
+}
+
+function sampleErrorMessage(message: string): string {
+  return message.replace(/\s+/g, " ").trim().slice(0, 180);
 }
 
 export function resolveGeminiModel(env: Env): string {

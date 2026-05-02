@@ -133,7 +133,7 @@ describe("buildChatResponse", () => {
     expect(response.responsePath).toBe("gemini");
     expect(response.answer).toContain("iPhone");
     expect(response.answer).not.toContain("もう一段絞れます");
-    expect(response.sources.map((source) => source.sourceId)).toEqual(["S7", "S9"]);
+    expect(response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S7", "S9"]));
   });
 
   it("answers revenue sector questions deterministically with business buckets", async () => {
@@ -916,11 +916,13 @@ describe("buildChatResponse", () => {
     );
 
     expect(response.responsePath).toBe("fallback");
-    expect(response.answer).toContain("一時的");
-    expect(response.answer).toContain("断定");
-    expect(response.answer).toContain("iPhone");
+    expect(response.answer).toContain("前問の具体的なdriver");
+    expect(response.answer).toContain("分類しません");
+    expect(response.answer).toContain("MD&A");
     expect(response.answer).not.toContain("一般的な注意書き");
-    expect(response.sources.map((source) => source.sourceId)).toEqual(["S7", "S9"]);
+    expect(response.answer).not.toContain("本文の要因説明と並べると判断しやすくなります");
+    expect(response.answer).not.toContain("product revenueです");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S7", "S9"]));
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
   });
 
@@ -965,10 +967,12 @@ describe("buildChatResponse", () => {
     );
 
     expect(response.responsePath).toBe("fallback");
-    expect(response.answer).toContain("一時的");
-    expect(response.answer).toContain("断定");
-    expect(response.answer).toContain("iPhone");
+    expect(response.answer).toContain("前問の具体的なdriver");
+    expect(response.answer).toContain("分類しません");
+    expect(response.answer).toContain("MD&A");
     expect(response.answer).not.toContain("もう一段絞れます");
+    expect(response.answer).not.toContain("本文の要因説明と並べると判断しやすくなります");
+    expect(response.answer).not.toContain("product revenueです");
     expect(response.debug?.fallbackReason).toBe("low_quality_answer");
   });
 
@@ -1050,7 +1054,7 @@ describe("buildChatResponse", () => {
       geminiSucceeded: true,
       fallbackReason: "invalid_source_id",
       schemaValid: true,
-      sourceIdsValid: false,
+      sourceIdsValid: true,
       sourceCount: 2,
       promptTokenCount: 3000,
       candidatesTokenCount: 190,

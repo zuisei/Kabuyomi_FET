@@ -3,7 +3,7 @@ import { AppError } from "../errors";
 import { logErrorEvent, logEvent, logWarnEvent } from "../logging";
 import { DEFAULT_REMOTE_CONFIG, type RemoteConfig } from "../remote-config";
 import { resolveContentMode } from "./context-pack";
-import { buildContextDebugFields } from "./diagnostics";
+import { buildContextDebugFields, buildModelAttemptDebugFields } from "./diagnostics";
 import { logChatLlmUsage, logChatPathDecision } from "./decision-log";
 import { buildDeterministicMetricAnswer, shouldRecoverFromWeakModelSources } from "./deterministic";
 import { buildLocalFallbackResponse } from "./fallback-response";
@@ -197,6 +197,7 @@ export async function buildChatResponse(
         schemaValid: modelResponse.schemaValid ?? true,
         retryAttempt: modelResponse.retryAttempt ?? 0,
         retryReason: modelResponse.retryReason ?? null,
+        ...buildModelAttemptDebugFields(modelResponse),
         ...buildContextDebugFields(contextPack)
       }
     );
@@ -251,6 +252,7 @@ export async function buildChatResponse(
       logChatLlmUsage(modelResponse, filing, "fallback");
 
       const fallbackReason = fallbackReasonForNoSources(modelResponse, contentMode);
+      const repairedSourceIdsValid = recovered.sources.length > 0;
       const finalResponse = await finalize(
         recovered,
         "fallback",
@@ -258,13 +260,19 @@ export async function buildChatResponse(
           questionIntent,
           responsePath: "fallback",
           fallbackReason,
-          sourceIdsValid: false,
+          sourceIdsValid: repairedSourceIdsValid,
           contentMode,
           geminiCalled: modelResponse.geminiCalled ?? true,
           geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
           schemaValid: modelResponse.schemaValid ?? true,
+          fallbackKind: "context_unavailable",
+          fallbackKindSource: "orchestrator",
+          sourceRepairLabels: repairedSourceIdsValid
+            ? ["context_unavailable_fallback", "fallback_source_repaired", "source_ids_invalid_prevented"]
+            : ["context_unavailable_fallback", "no_final_sources"],
           retryAttempt: modelResponse.retryAttempt ?? 0,
           retryReason: modelResponse.retryReason ?? null,
+          ...buildModelAttemptDebugFields(modelResponse),
           ...buildContextDebugFields(contextPack)
         }
       );
@@ -276,7 +284,7 @@ export async function buildChatResponse(
         geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
         fallbackReason,
         schemaValid: modelResponse.schemaValid ?? true,
-        sourceIdsValid: false,
+        sourceIdsValid: repairedSourceIdsValid,
         sourceCount: finalResponse.sources.length,
         contentMode,
         contextPack,
@@ -293,6 +301,8 @@ export async function buildChatResponse(
       reason: "model_context_unavailable"
     });
     const responsePath = modelResponse.usedRemoteModel === true ? "gemini" : "fallback";
+    const repairedSources = mapSourceIdsToSecFilingSources([...fallbackValidSourceIds].slice(0, 2), sourceById);
+    const repairedSourceIdsValid = repairedSources.length > 0;
     logChatLlmUsage(modelResponse, filing, responsePath);
     logDecision({
       filing,
@@ -302,8 +312,8 @@ export async function buildChatResponse(
       geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
       fallbackReason: fallbackReasonForNoSources(modelResponse, contentMode),
       schemaValid: modelResponse.schemaValid ?? true,
-      sourceIdsValid: false,
-      sourceCount: 0,
+      sourceIdsValid: repairedSourceIdsValid,
+      sourceCount: repairedSources.length,
       contentMode,
       contextPack,
       retryAttempt: modelResponse.retryAttempt ?? 0,
@@ -313,7 +323,7 @@ export async function buildChatResponse(
     return finalize(
       {
         answer: modelResponse.answer,
-        sources: [],
+        sources: repairedSources,
         responsePath
       },
       responsePath,
@@ -321,13 +331,19 @@ export async function buildChatResponse(
         questionIntent,
         responsePath,
         fallbackReason: fallbackReasonForNoSources(modelResponse, contentMode),
-        sourceIdsValid: false,
+        sourceIdsValid: repairedSourceIdsValid,
         contentMode,
         geminiCalled: modelResponse.geminiCalled ?? true,
         geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
         schemaValid: modelResponse.schemaValid ?? true,
+        fallbackKind: "context_unavailable",
+        fallbackKindSource: "orchestrator",
+        sourceRepairLabels: repairedSourceIdsValid
+          ? ["context_unavailable_fallback", "fallback_source_repaired", "source_ids_invalid_prevented"]
+          : ["context_unavailable_fallback", "no_final_sources"],
         retryAttempt: modelResponse.retryAttempt ?? 0,
         retryReason: modelResponse.retryReason ?? null,
+        ...buildModelAttemptDebugFields(modelResponse),
         ...buildContextDebugFields(contextPack)
       },
       { includeWebSupplement: false, attachSourceUrls: false }
@@ -357,6 +373,7 @@ export async function buildChatResponse(
       logChatLlmUsage(modelResponse, filing, "fallback");
 
       const fallbackReason = fallbackReasonForMissingValidSourceIds(modelResponse, contentMode);
+      const repairedSourceIdsValid = recovered.sources.length > 0;
       const finalResponse = await finalize(
         recovered,
         "fallback",
@@ -364,13 +381,19 @@ export async function buildChatResponse(
           questionIntent,
           responsePath: "fallback",
           fallbackReason,
-          sourceIdsValid: false,
+          sourceIdsValid: repairedSourceIdsValid,
           contentMode,
           geminiCalled: modelResponse.geminiCalled ?? true,
           geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
           schemaValid: modelResponse.schemaValid ?? true,
+          fallbackKind: "context_unavailable",
+          fallbackKindSource: "orchestrator",
+          sourceRepairLabels: repairedSourceIdsValid
+            ? ["fallback_source_repaired", "source_ids_invalid_prevented"]
+            : ["no_final_sources"],
           retryAttempt: modelResponse.retryAttempt ?? 0,
           retryReason: modelResponse.retryReason ?? null,
+          ...buildModelAttemptDebugFields(modelResponse),
           ...buildContextDebugFields(contextPack)
         }
       );
@@ -382,7 +405,7 @@ export async function buildChatResponse(
         geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
         fallbackReason,
         schemaValid: modelResponse.schemaValid ?? true,
-        sourceIdsValid: false,
+        sourceIdsValid: repairedSourceIdsValid,
         sourceCount: finalResponse.sources.length,
         contentMode,
         contextPack,
@@ -446,8 +469,11 @@ export async function buildChatResponse(
           geminiCalled: modelResponse.geminiCalled ?? true,
           geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
           schemaValid: modelResponse.schemaValid ?? true,
+          fallbackKind: "weak_grounding",
+          fallbackKindSource: "orchestrator",
           retryAttempt: modelResponse.retryAttempt ?? 0,
           retryReason: modelResponse.retryReason ?? null,
+          ...buildModelAttemptDebugFields(modelResponse),
           ...buildContextDebugFields(contextPack)
         }
       );
@@ -498,6 +524,7 @@ export async function buildChatResponse(
       schemaValid: modelResponse.schemaValid ?? true,
       retryAttempt: modelResponse.retryAttempt ?? 0,
       retryReason: modelResponse.retryReason ?? null,
+      ...buildModelAttemptDebugFields(modelResponse),
       ...buildContextDebugFields(contextPack)
     }
   );

@@ -269,10 +269,13 @@ function hasSelectedNarrative(selected: Map<string, SourceChunkRecord>): boolean
 }
 
 function orderSelectedSources(sourceChunks: SourceChunkRecord[], questionIntent: QuestionIntent): SourceChunkRecord[] {
+  if (shouldLeadWithDriverNarrative(questionIntent)) {
+    return [...sourceChunks].sort((a, b) => sourceOrderScore(b, questionIntent) - sourceOrderScore(a, questionIntent));
+  }
+
   if (
     questionIntent === "margin_profitability" ||
     questionIntent === "cash_flow" ||
-    questionIntent === "yoy_change" ||
     questionIntent === "historical_comparison"
   ) {
     return sourceChunks;
@@ -291,7 +294,8 @@ function sourceOrderScore(source: SourceChunkRecord, questionIntent: QuestionInt
     score += 40;
   }
   score += Math.min(30, Math.floor(normalizeWhitespace(source.text).length / 100));
-  score += intentSourceScore(source, questionIntent) > 0 ? 20 : 0;
+  const intentScore = intentSourceScore(source, questionIntent);
+  score += Math.min(80, Math.floor(intentScore / 3));
   return score;
 }
 
@@ -411,9 +415,9 @@ function intentSourceScore(source: SourceChunkRecord, questionIntent: QuestionIn
     case "yoy_change":
       return scoreMatches(haystack, [
         [revenueDriverPattern(), 120],
-        [/comparable store sales|same-store sales|traffic|ticket|pricing|rate increase|volume|occupancy|leasing|renewal|new stores?|store openings?|tariff|foreign exchange|currency|fuel|weather|customer demand|end-market demand/i, 85],
+        [/comparable sales|comparable store sales|same-store sales|comp sales|transactions?|traffic|ticket|pricing|price realization|realizations?|rate increase|volume|sales volume|occupancy|leasing|renewal|new stores?|store openings?|ecommerce|e-commerce|membership income|advertising|inventory|gross margin|tariff|foreign exchange|currency|fuel|weather|customer demand|end-market demand|commodity|crude oil|natural gas|refining margins?|upstream|downstream|chemical margins?|production volumes?|net interest income|noninterest income|provision for credit losses|deposits?|loans?|assets under management|backlog|dealer inventory|machinery|construction industries|resource industries|energy and transportation/i, 85],
         [/increase|decrease|higher|lower|compared|year over year|net sales|operating income|net income|demand|growth/i, 55]
-      ]);
+      ]) + driverSpecificityScore(haystack);
     case "stock_market_context":
     case "investment_view":
       return scoreMatches(haystack, [
@@ -468,10 +472,13 @@ function buildSupplementalContextChunks(
 
   const pattern = supplementalPattern(questionIntent);
   const windows = buildIntentTextWindows(text, pattern, questionIntent, profile.supplementalWindowChars, diagnostics);
-  const existingTexts = [...selected.values(), ...filing.sourceChunks]
+  const dedupSources = shouldLeadWithDriverNarrative(questionIntent)
+    ? [...selected.values()]
+    : [...selected.values(), ...filing.sourceChunks];
+  const existingTexts = dedupSources
     .filter((chunk) => isSubstantiveDedupSource(chunk, questionIntent))
     .map((chunk) => normalizeForDedup(chunk.text))
-    .filter((existing) => existing.length >= 160);
+    .filter((existing) => existing.length >= (shouldLeadWithDriverNarrative(questionIntent) ? 80 : 160));
   const result: SourceChunkRecord[] = [];
   let index = 1;
 
@@ -550,7 +557,7 @@ function supplementalPattern(questionIntent: QuestionIntent): RegExp {
     case "stock_market_context":
       return /risk|uncertain|outlook|guidance|demand|margin|cash flow|repurchase|dividend|competition|supply|regulation|customer|segment|geograph/gi;
     case "mda_summary":
-      return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|comparable store sales|same-store sales|traffic|ticket|pricing|rate increase|volume|occupancy|leasing|renewal|new stores?|store openings?|tariff|foreign exchange|currency|fuel|weather|customer demand|end-market demand|subscription revenue|annual recurring revenue|\barr\b|new customers?|existing customers?|additional modules?|module adoption|management'?s discussion|results of operations|net sales|gross margin|operating income|demand|expenses?|cash flow/gi;
+      return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|comparable sales|comparable store sales|same-store sales|comp sales|transactions?|traffic|ticket|pricing|price realization|realizations?|rate increase|volume|sales volume|occupancy|leasing|renewal|new stores?|store openings?|ecommerce|e-commerce|membership income|tariff|foreign exchange|currency|fuel|weather|customer demand|end-market demand|commodity|crude oil|natural gas|refining margins?|subscription revenue|annual recurring revenue|\barr\b|new customers?|existing customers?|additional modules?|module adoption|management'?s discussion|results of operations|net sales|gross margin|operating income|demand|expenses?|cash flow/gi;
     case "margin_profitability":
       return /margin|gross profit|operating income|net income|profitability|cost|pricing|expenses?/gi;
     case "cash_flow":
@@ -558,7 +565,7 @@ function supplementalPattern(questionIntent: QuestionIntent): RegExp {
     case "yoy_change":
     case "historical_comparison":
     case "unknown":
-      return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|comparable store sales|same-store sales|traffic|ticket|pricing|rate increase|volume|occupancy|leasing|renewal|new stores?|store openings?|tariff|foreign exchange|currency|fuel|weather|customer demand|end-market demand|subscription revenue|annual recurring revenue|\barr\b|new customers?|existing customers?|additional modules?|module adoption|increase|decrease|higher|lower|compared|net sales|operating income|net income|growth|demand/gi;
+      return /primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from|partially offset|offset by|comparable sales|comparable store sales|same-store sales|comp sales|transactions?|traffic|ticket|pricing|price realization|realizations?|rate increase|volume|sales volume|occupancy|leasing|renewal|new stores?|store openings?|ecommerce|e-commerce|membership income|advertising|inventory|gross margin|tariff|foreign exchange|currency|fuel|weather|customer demand|end-market demand|commodity|crude oil|natural gas|refining margins?|upstream|downstream|chemical margins?|production volumes?|net interest income|noninterest income|provision for credit losses|deposits?|loans?|assets under management|backlog|dealer inventory|machinery|construction industries|resource industries|energy and transportation|subscription revenue|annual recurring revenue|\barr\b|new customers?|existing customers?|additional modules?|module adoption|sales and revenues|increase|decrease|higher|lower|compared|net sales|operating income|net income|growth|demand/gi;
   }
 }
 
@@ -630,7 +637,7 @@ function clipToSourceExcerpt(text: string, maxChars: number): string {
 }
 
 function supplementalWindowScore(text: string, questionIntent: QuestionIntent): number {
-  return intentSourceScore(
+  const base = intentSourceScore(
     {
       sourceId: "score-only",
       sectionType: "md_a",
@@ -643,6 +650,48 @@ function supplementalWindowScore(text: string, questionIntent: QuestionIntent): 
     },
     questionIntent
   );
+  return questionIntent === "yoy_change" || questionIntent === "mda_summary"
+    ? base + driverSpecificityScore(text)
+    : base;
+}
+
+function driverSpecificityScore(text: string): number {
+  const haystack = text.toLowerCase();
+  let score = 0;
+  if (/primarily due to|driven by|attributable to|resulted from|because of|reflecting|benefited from/.test(haystack)) {
+    score += 90;
+  }
+  if (/partially offset|offset by/.test(haystack)) {
+    score += 35;
+  }
+  if (/comparable sales|comparable store sales|same-store sales|comp sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership income/.test(haystack)) {
+    score += 55;
+  }
+  if (/price realization|realizations?|pricing|rate increase|sales volume|\bvolume\b|foreign exchange|currency/.test(haystack)) {
+    score += 50;
+  }
+  if (/commodity|crude oil|natural gas|refining margins?|fuel|weather/.test(haystack)) {
+    score += 45;
+  }
+  if (/net interest income|noninterest income|provision for credit losses|deposits?|loans?|assets under management/.test(haystack)) {
+    score += 55;
+  }
+  if (/backlog|dealer inventory|machinery|construction industries|resource industries|energy and transportation/.test(haystack)) {
+    score += 50;
+  }
+  if (/inventory|gross margin|advertising|membership income|ecommerce|e-commerce/.test(haystack)) {
+    score += 45;
+  }
+  if (/sales and revenues|net sales|revenue|sales/.test(haystack) && /increase|decrease|higher|lower|growth|decline|compared/.test(haystack)) {
+    score += 30;
+  }
+  if (/customer demand|end-market demand|market demand|new customers?|existing customers?|additional modules?|module adoption|annual recurring revenue|\barr\b|subscription revenue/.test(haystack)) {
+    score += 45;
+  }
+  if (/customer-centric experience|our stores|our brands|we operate|we provide|we offer/.test(haystack) && !/primarily due to|driven by|attributable to|resulted from|because of|partially offset|offset by/.test(haystack)) {
+    score -= 30;
+  }
+  return score;
 }
 
 function expandSelectedSourceChunks(

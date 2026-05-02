@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateChatAnswer, generateQuoteTranslation, generateSummary } from "../src/clients/gemini";
 import {
+  classifyGeminiError,
   DEFAULT_GEMINI_MODEL,
   DEFAULT_GEMINI_TRANSLATION_MODEL,
+  GeminiApiRequestError,
   resolveGeminiModel,
   resolveGeminiTranslationModel
 } from "../src/clients/gemini/request";
@@ -26,6 +28,52 @@ describe("resolveGeminiModel", () => {
 describe("resolveGeminiTranslationModel", () => {
   it("falls back to the repo default when GEMINI_TRANSLATION_MODEL is unset", () => {
     expect(resolveGeminiTranslationModel({} as never)).toBe(DEFAULT_GEMINI_TRANSLATION_MODEL);
+  });
+});
+
+describe("Gemini API error classification", () => {
+  it("classifies rate limit errors", () => {
+    const diagnostics = classifyGeminiError(new GeminiApiRequestError("rate limit", {
+      geminiApiErrorKind: "rate_limit",
+      geminiApiErrorStatus: 429,
+      geminiApiErrorCode: "RESOURCE_EXHAUSTED",
+      geminiApiErrorMessageSample: "quota exceeded",
+      geminiApiErrorRetryable: true,
+      geminiErrorOccurredBeforeResponse: false
+    }));
+
+    expect(diagnostics.geminiApiErrorKind).toBe("rate_limit");
+    expect(diagnostics.geminiApiErrorStatus).toBe(429);
+    expect(diagnostics.geminiApiErrorRetryable).toBe(true);
+  });
+
+  it("classifies auth and provider errors", () => {
+    const auth = classifyGeminiError(new GeminiApiRequestError("auth", {
+      geminiApiErrorKind: "auth_error",
+      geminiApiErrorStatus: 403,
+      geminiApiErrorCode: "PERMISSION_DENIED",
+      geminiApiErrorMessageSample: "invalid api key",
+      geminiApiErrorRetryable: false,
+      geminiErrorOccurredBeforeResponse: false
+    }));
+    const server = classifyGeminiError(new GeminiApiRequestError("server", {
+      geminiApiErrorKind: "provider_server_error",
+      geminiApiErrorStatus: 503,
+      geminiApiErrorCode: "UNAVAILABLE",
+      geminiApiErrorMessageSample: "unavailable",
+      geminiApiErrorRetryable: true,
+      geminiErrorOccurredBeforeResponse: false
+    }));
+
+    expect(auth.geminiApiErrorKind).toBe("auth_error");
+    expect(server.geminiApiErrorKind).toBe("provider_server_error");
+  });
+
+  it("classifies unknown error shapes without leaking long messages", () => {
+    const diagnostics = classifyGeminiError(new Error("x".repeat(500)));
+
+    expect(diagnostics.geminiApiErrorKind).toBe("unknown");
+    expect(diagnostics.geminiApiErrorMessageSample?.length).toBeLessThanOrEqual(180);
   });
 });
 
@@ -1093,6 +1141,281 @@ describe("Gemini local chat fallback", () => {
     expect(response.answer).not.toContain("分かりません");
   });
 
+  it("uses MD&A driver language for revenue-driver fallback answers", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "売上成長の主な要因は？",
+      filing: {
+        filingKey: "v1:0000000000:000000000000000101",
+        ticker: "TEST",
+        companyName: "Test Corp",
+        cik: "0000000000",
+        formType: "10-K",
+        filedAt: "2026-04-14",
+        periodOfReport: "2025-12-31",
+        primaryDocumentUrl: "https://example.com",
+        mdaText: "",
+        mdaTokenCount: 0,
+        metrics: [
+          {
+            logicalName: "revenue",
+            tagUsed: "Revenues",
+            value: 67590000000,
+            unit: "USD",
+            periodEnd: "2025-12-31",
+            comparisonValue: 64820000000,
+            yoyPercent: 4.3
+          }
+        ],
+        generatedAt: "2026-04-14T00:00:00.000Z",
+        extractorVersion: "v1",
+        promptVersion: "v1",
+        summary: { verdict: "", highlights: [], changes: [] },
+        sourceChunks: [
+          {
+            sourceId: "S4",
+            sectionType: "md_a",
+            sectionTitle: "Item 7",
+            sourceLabel: "10-K Item 7",
+            text: "Sales and revenues increased compared with the prior year, primarily due to higher sales volume and favorable price realization.",
+            startOffset: 0,
+            endOffset: 124,
+            sortOrder: 4
+          },
+          {
+            sourceId: "S9",
+            sectionType: "xbrl_metric",
+            sectionTitle: "売上高",
+            sourceLabel: "XBRL 売上高 (Revenues)",
+            text: "売上高: 67590000000 USD / 比較値: 64820000000 / YoY: 4.3%",
+            startOffset: 0,
+            endOffset: 0,
+            tagName: "Revenues",
+            sortOrder: 9
+          }
+        ]
+      }
+    });
+
+    expect(response.sourceIds).toEqual(["S9", "S4"]);
+    expect(response.answer).toContain("売上高は 675.9億ドル");
+    expect(response.answer).toContain("販売数量の増加");
+    expect(response.answer).toContain("価格実現の改善");
+    expect(response.answer).not.toContain("直接要因は明示されていません");
+  });
+
+  it("recovers remote revenue-driver refusals when driver context is available", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer:
+                        "売上高は前年比4.7%増加しました。売上成長の具体的な要因については、提出資料の本文中で説明されていません。",
+                      sourceIds: ["S4"]
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        })
+      })
+    );
+
+    const response = await generateChatAnswer({ GEMINI_API_KEY: "test-key" } as never, {
+      question: "売上成長の主な要因は？",
+      filing: {
+        filingKey: "v1:0000000000:000000000000000103",
+        ticker: "WMT",
+        companyName: "Walmart Inc.",
+        cik: "0000000000",
+        formType: "10-K",
+        filedAt: "2026-04-14",
+        periodOfReport: "2026-01-31",
+        primaryDocumentUrl: "https://example.com",
+        mdaText: "",
+        mdaTokenCount: 0,
+        metrics: [
+          {
+            logicalName: "revenue",
+            tagUsed: "Revenues",
+            value: 713163000000,
+            unit: "USD",
+            periodEnd: "2026-01-31",
+            comparisonValue: 680985000000,
+            yoyPercent: 4.7
+          }
+        ],
+        generatedAt: "2026-04-14T00:00:00.000Z",
+        extractorVersion: "v1",
+        promptVersion: "v1",
+        summary: { verdict: "", highlights: [], changes: [] },
+        sourceChunks: [
+          {
+            sourceId: "S4",
+            sectionType: "md_a",
+            sectionTitle: "Item 7",
+            sourceLabel: "10-K Item 7",
+            text:
+              "Net sales increased across Walmart U.S., Walmart International and Sam's Club. The discussion also references comparable sales, ecommerce, membership income, traffic and average ticket as sales drivers.",
+            startOffset: 0,
+            endOffset: 196,
+            sortOrder: 4
+          },
+          {
+            sourceId: "S9",
+            sectionType: "xbrl_metric",
+            sectionTitle: "売上高",
+            sourceLabel: "XBRL 売上高 (Revenues)",
+            text: "売上高: 713163000000 USD / 比較値: 680985000000 / YoY: 4.7%",
+            startOffset: 0,
+            endOffset: 0,
+            tagName: "Revenues",
+            sortOrder: 9
+          }
+        ]
+      }
+    });
+
+    expect(response.fallbackReason).toBe("low_quality_answer");
+    expect(response.answer).toContain("売上高は 7,131.6億ドル");
+    expect(response.answer).toContain("既存店売上");
+    expect(response.answer).toContain("Walmart U.S.");
+    expect(response.answer).not.toContain("説明されていません");
+    expect(response.sourceIds).toEqual(expect.arrayContaining(["S4", "S9"]));
+  });
+
+  it("keeps durability fallback focused on the selected driver instead of a generic next-step answer", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "その要因は一時的？それとも続きそう？",
+      filing: {
+        filingKey: "v1:0000000000:000000000000000102",
+        ticker: "TEST",
+        companyName: "Test Corp",
+        cik: "0000000000",
+        formType: "10-K",
+        filedAt: "2026-04-14",
+        periodOfReport: "2025-12-31",
+        primaryDocumentUrl: "https://example.com",
+        mdaText: "",
+        mdaTokenCount: 0,
+        metrics: [
+          {
+            logicalName: "revenue",
+            tagUsed: "Revenues",
+            value: 713160000000,
+            unit: "USD",
+            periodEnd: "2025-12-31",
+            comparisonValue: 681420000000,
+            yoyPercent: 4.7
+          }
+        ],
+        generatedAt: "2026-04-14T00:00:00.000Z",
+        extractorVersion: "v1",
+        promptVersion: "v1",
+        summary: { verdict: "", highlights: [], changes: [] },
+        sourceChunks: [
+          {
+            sourceId: "CTX1",
+            sectionType: "md_a",
+            sectionTitle: "Filing context",
+            sourceLabel: "10-K Filing context",
+            text: "Net sales increased primarily due to higher comparable sales, eCommerce sales growth and membership income, partially offset by currency headwinds.",
+            startOffset: 0,
+            endOffset: 147,
+            sortOrder: 1
+          },
+          {
+            sourceId: "S9",
+            sectionType: "xbrl_metric",
+            sectionTitle: "売上高",
+            sourceLabel: "XBRL 売上高 (Revenues)",
+            text: "売上高: 713160000000 USD / 比較値: 681420000000 / YoY: 4.7%",
+            startOffset: 0,
+            endOffset: 0,
+            tagName: "Revenues",
+            sortOrder: 9
+          }
+        ]
+      }
+    });
+
+    expect(response.sourceIds).toEqual(["CTX1", "S9"]);
+    expect(response.answer).toContain("既存店売上の増加");
+    expect(response.answer).toContain("eコマース売上");
+    expect(response.answer).toContain("価格、数量、需要、コスト、mix");
+    expect(response.answer).not.toContain("提出資料の本文に、この要因に近い説明があります");
+  });
+
+  it("summarizes margin fallback causes from profitability context", async () => {
+    const response = await generateChatAnswer({} as never, {
+      question: "利益率が悪化した理由は？",
+      filing: {
+        filingKey: "v1:0000000000:000000000000000103",
+        ticker: "TEST",
+        companyName: "Test Corp",
+        cik: "0000000000",
+        formType: "10-K",
+        filedAt: "2026-04-14",
+        periodOfReport: "2025-12-31",
+        primaryDocumentUrl: "https://example.com",
+        mdaText: "",
+        mdaTokenCount: 0,
+        metrics: [
+          {
+            logicalName: "operatingIncome",
+            tagUsed: "OperatingIncomeLoss",
+            value: 29830000000,
+            unit: "USD",
+            periodEnd: "2025-12-31",
+            comparisonValue: 29360000000,
+            yoyPercent: 1.6
+          }
+        ],
+        generatedAt: "2026-04-14T00:00:00.000Z",
+        extractorVersion: "v1",
+        promptVersion: "v1",
+        summary: { verdict: "", highlights: [], changes: [] },
+        sourceChunks: [
+          {
+            sourceId: "CTX2",
+            sectionType: "md_a",
+            sectionTitle: "Profitability context",
+            sourceLabel: "10-K Profitability context",
+            text: "Gross margin was pressured by product mix, higher merchandise costs, inventory shrink and increased operating expenses.",
+            startOffset: 0,
+            endOffset: 112,
+            sortOrder: 2
+          },
+          {
+            sourceId: "S12",
+            sectionType: "xbrl_metric",
+            sectionTitle: "営業利益",
+            sourceLabel: "XBRL 営業利益 (OperatingIncomeLoss)",
+            text: "営業利益: 29830000000 USD / 比較値: 29360000000 / YoY: 1.6%",
+            startOffset: 0,
+            endOffset: 0,
+            tagName: "OperatingIncomeLoss",
+            sortOrder: 12
+          }
+        ]
+      }
+    });
+
+    expect(response.sourceIds).toEqual(["S12", "CTX2"]);
+    expect(response.answer).toContain("営業利益は 298.3億ドル");
+    expect(response.answer).toContain("商品構成・事業構成");
+    expect(response.answer).toContain("在庫・ロス");
+    expect(response.answer).not.toContain("本文全体と数字を並べる");
+  });
+
   it("treats red-ink cause questions as profit questions instead of revenue questions", async () => {
     const response = await generateChatAnswer({} as never, {
       question: "赤字の原因は？",
@@ -1533,7 +1856,9 @@ describe("Gemini local chat fallback", () => {
     });
 
     expect(response.sourceIds).toEqual([]);
-    expect(response.answer).toBe("この決算資料の範囲では確認できません。");
+    expect(response.answer).toContain("利益率の方向は確認できます");
+    expect(response.answer).toContain("具体的なdriverは十分に特定できません");
+    expect(response.answer).not.toBe("この決算資料の範囲では確認できません。");
   });
 
   it("recovers to closest filing facts when Gemini declines a broader question", async () => {
