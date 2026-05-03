@@ -11,6 +11,7 @@ final class SubscriptionStore {
     static let shared = SubscriptionStore()
 
     static let subscriptionProductIDs = BillingCatalog.subscriptionTiers.compactMap(\.productID)
+    static let recognizedSubscriptionProductIDs = BillingCatalog.recognizedSubscriptionTiers.compactMap(\.productID)
     static let creditPackProductIDs = ["credit_pack_100", "credit_pack_300", "credit_pack_700"]
 
     private let quotaSubjectKey = "kabuyomi.quotaSubject"
@@ -307,7 +308,7 @@ final class SubscriptionStore {
     }
 
     private func subscriptionProduct(id productId: String) async throws -> Product {
-        guard Self.isSubscriptionProduct(productId) else {
+        guard Self.isPurchasableSubscriptionProduct(productId) else {
             throw SubscriptionStoreError.productNotFound
         }
 
@@ -441,6 +442,10 @@ final class SubscriptionStore {
     }
 
     private static func isSubscriptionProduct(_ productId: String) -> Bool {
+        recognizedSubscriptionProductIDs.contains(productId)
+    }
+
+    private static func isPurchasableSubscriptionProduct(_ productId: String) -> Bool {
         subscriptionProductIDs.contains(productId)
     }
 

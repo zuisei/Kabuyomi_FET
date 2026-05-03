@@ -1857,7 +1857,7 @@ describe("Gemini local chat fallback", () => {
 
     expect(response.sourceIds).toEqual([]);
     expect(response.answer).toContain("利益率の方向は確認できます");
-    expect(response.answer).toContain("具体的なdriverは十分に特定できません");
+    expect(response.answer).toContain("具体的な要因は十分に特定できません");
     expect(response.answer).not.toBe("この決算資料の範囲では確認できません。");
   });
 

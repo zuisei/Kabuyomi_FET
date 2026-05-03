@@ -56,7 +56,7 @@ export function hasBannedPhrase(answer: string): boolean {
     /本文全体と数字を並べると/.test(answer) ||
     /数字を並べると.*見えてきます/.test(answer) ||
     /この資料の範囲では確認できません(?!.*(不足|source|説明|指標|KPI|MD&A))/.test(answer) ||
-    /一時的とは断定しにくいです(?!.*(driver|要因|不足|未特定|不明))/.test(answer);
+    /一時的とは断定しにくいです(?!.*(要因|不足|未特定|不明))/.test(answer);
 }
 
 function buildRevenueDriverFallback(sourceGateResult: SourceGateResult, evidenceSlots: EvidenceSlots): string {
@@ -68,13 +68,13 @@ function buildRevenueDriverFallback(sourceGateResult: SourceGateResult, evidence
   if (metric) {
     parts.push(`${metric.metricName}は${metric.currentValue ?? "確認できます"}${metric.changePct ? `で、${metric.comparisonBasis ?? "比較"}${metric.changePct}です` : "です"}。`);
   } else {
-    parts.push("売上の増減方向は、選択sourceだけでは十分に整理できていません。");
+    parts.push("売上の増減方向は、選択された資料だけでは十分に整理できていません。");
   }
 
   if (safeDrivers.length > 0) {
-    parts.push(`会社が説明する主なdriverは、${safeDrivers.join(" / ")}です。`);
+    parts.push(`会社が説明する主な売上要因は、${safeDrivers.join(" / ")}です。`);
   } else {
-    parts.push(`ただし、取得できたsourceでは、会社固有の売上driverは十分に特定できていません。不足しているのは ${missingSourceText} です。`);
+    parts.push(`ただし、取得できた資料では、会社固有の売上要因は十分に特定できていません。不足しているのは ${missingSourceText} です。`);
     parts.push(`主因を見るには、${nextIndicatorText} を追加確認する必要があります。`);
   }
   return parts.join("");
@@ -85,15 +85,15 @@ function buildDriverDurabilityFallback(sourceGateResult: SourceGateResult, evide
   if (sourceGateResult.followupTargetFound === false || safeDrivers.length === 0) {
     const nextIndicatorText = joinMissingSourceLabels(["MD&A", ...evidenceSlots.sectorSpecificNextIndicators.slice(0, 5)]);
     return [
-      "前問の具体的なdriverが十分に特定できていません。",
-      "そのため、選択sourceだけで一時要因か継続要因かは分類しません。",
+      "前問の具体的な要因が十分に特定できていません。",
+      "そのため、選択された資料だけで一時要因か継続要因かは分類しません。",
       `判断には、${nextIndicatorText} の追加確認が必要です。`
     ].join("");
   }
 
   const durable = safeFactTexts(evidenceSlots.durabilityEvidence.potentiallyDurable).slice(0, 2);
   const temporary = safeFactTexts(evidenceSlots.durabilityEvidence.likelyTemporary).slice(0, 2);
-  const parts = [`前問のdriverは、${safeDrivers.join(" / ")}です。`];
+  const parts = [`前問の要因は、${safeDrivers.join(" / ")}です。`];
   if (temporary.length > 0) {
     parts.push(`一時性を見る材料は、${temporary.join(" / ")} です。`);
   }
@@ -114,13 +114,13 @@ function buildMarginDurabilityFallback(sourceGateResult: SourceGateResult, evide
     if (metric) {
       parts.push(`確認できているのは、${metric.metricName}が${metric.currentValue ?? "報告されている"}${metric.changePct ? `、${metric.comparisonBasis ?? "比較"}${metric.changePct}` : ""}という点です。`);
     }
-    parts.push("ただし、利益率変化の具体的なdriverは十分に特定できていません。");
-    parts.push("そのため、選択sourceだけで一時要因か構造的変化かは分類しません。");
+    parts.push("ただし、利益率変化の具体的な要因は十分に特定できていません。");
+    parts.push("そのため、選択された資料だけで一時要因か構造的変化かは分類しません。");
     parts.push(`判断には、${joinMissingSourceLabels([...sourceGateResult.missingSourceTypes, ...evidenceSlots.sectorSpecificNextIndicators].slice(0, 6))} の説明が必要です。`);
     return parts.join("");
   }
 
-  parts.push(`利益率driverとして確認できるのは、${safeMarginDrivers.join(" / ")}です。`);
+  parts.push(`利益率要因として確認できるのは、${safeMarginDrivers.join(" / ")}です。`);
   if (evidenceSlots.durabilityEvidence.likelyTemporary.length === 0 && evidenceSlots.durabilityEvidence.potentiallyDurable.length === 0) {
     parts.push(`一時要因か構造変化かの判断には、${joinMissingSourceLabels(evidenceSlots.sectorSpecificNextIndicators.slice(0, 5))} の継続確認が必要です。`);
   }
@@ -175,7 +175,7 @@ function sourceIdsForFallback(
 function cleanBannedPhrases(answer: string): string {
   let cleaned = answer;
   for (const phrase of BANNED_PHRASES) {
-    cleaned = cleaned.replaceAll(phrase, "具体的な不足sourceを確認する必要があります");
+    cleaned = cleaned.replaceAll(phrase, "具体的に不足している資料を確認する必要があります");
   }
   return cleaned.replace(/\s+/g, " ").trim();
 }

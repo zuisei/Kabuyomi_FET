@@ -298,9 +298,17 @@ enum ChatResponsePath: String, Decodable, Hashable {
     case deterministic
     case fallback
     case gemini
+    case openai
+    case unknown
 
     var usesRemoteModel: Bool {
-        self == .gemini
+        self == .gemini || self == .openai
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: rawValue) ?? .unknown
     }
 }
 

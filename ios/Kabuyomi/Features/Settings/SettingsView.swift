@@ -7,7 +7,15 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            KabuyomiTheme.background.ignoresSafeArea()
+            Rectangle()
+                .fill(KabuyomiTheme.paper.opacity(0.001))
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {}
+
+            KabuyomiTheme.background
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
             VStack(spacing: 0) {
                 HStack(alignment: .center) {
@@ -32,7 +40,6 @@ struct SettingsView: View {
 
                 ScrollView {
                     VStack(spacing: 16) {
-                        planCard
                         creditCard
                         #if DEBUG
                         devCard
@@ -53,26 +60,41 @@ struct SettingsView: View {
     private var creditCard: some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    Image(systemName: "creditcard.fill")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
-                    Text("クレジット")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
+                HStack {
                     Spacer()
+                    Button {
+                        Task {
+                            await appModel.refreshCreditUsage()
+                        }
+                    } label: {
+                        if appModel.isUsageRefreshing {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(width: 16, height: 16)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 15, weight: .bold))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .padding(9)
+                    .background(Circle().fill(KabuyomiTheme.fill(for: .secondary)))
+                    .disabled(appModel.isUsageRefreshing)
+                    .accessibilityLabel("credit残高を更新")
                 }
+                .frame(height: 28)
 
                 if let credits = appModel.usage?.credits {
                     VStack(spacing: 10) {
                         CreditMetricRow(title: "残高", value: "\(credits.totalRemaining) credits")
-                        CreditMetricRow(title: "月間プラン", value: "\(credits.monthlyRemaining) / \(credits.monthlyLimit)")
+                        CreditMetricRow(title: "Free付与", value: "\(credits.monthlyRemaining) / \(credits.monthlyLimit)")
                         if credits.purchasedRemaining > 0 {
                             CreditMetricRow(title: "購入分", value: "\(credits.purchasedRemaining)")
                         }
                     }
 
-                    Text("AIチャットは1回あたり \(appModel.chatCreditCost) creditsです。月間creditは \(formattedResetDate(credits.resetsAt)) にリセットされます。")
+                    Text("Free初回付与は50 creditsです。通常chatは1回あたり \(appModel.chatCreditCost) creditsで、25 chat分使えます。Free付与分は \(formattedResetDate(credits.resetsAt)) にリセットされます。")
                         .font(.footnote)
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 } else if appModel.isUsageSynchronizing {
@@ -85,11 +107,26 @@ struct SettingsView: View {
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
-                Label("月額プランのcreditでAIチャットを利用できます", systemImage: "checkmark.seal.fill")
-                    .font(.system(.footnote, design: .rounded, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                MiniCreditPackRow(
+                    product: miniCreditPackProduct,
+                    isPurchasing: appModel.billingActionInFlight,
+                    purchase: { productId in
+                        Task {
+                            await appModel.purchaseCreditPack(productId: productId)
+                        }
+                    }
+                )
             }
         }
+        .task {
+            await appModel.refreshCreditUsage()
+            await appModel.loadCreditPackProducts(showErrors: false)
+        }
+    }
+
+    private var miniCreditPackProduct: CreditPackProduct {
+        appModel.creditPackProducts.first { $0.id == "credit_pack_100" }
+            ?? CreditPackProduct(id: "credit_pack_100", credits: 100, displayPrice: nil, isAvailable: false)
     }
 
     private func formattedResetDate(_ rawValue: String) -> String {
@@ -105,105 +142,6 @@ struct SettingsView: View {
         formatter.timeZone = TimeZone(identifier: "Asia/Tokyo")
         formatter.setLocalizedDateFormatFromTemplate("M月d日")
         return formatter.string(from: date)
-    }
-
-    private var planCard: some View {
-        card {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("プラン")
-                    .font(.system(.headline, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-
-                HStack {
-                    Label(appModel.currentPlanBadgeTitle, systemImage: appModel.currentPlanBadgeSystemImage)
-                        .font(.system(.caption2, design: .rounded, weight: .semibold))
-                        .foregroundStyle(appModel.currentPlanBadgeUsesAccent ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
-                    Spacer()
-                }
-
-                Text("月間credit付きプランに登録すると、AIチャットで使えるcreditが毎月付与されます。")
-                    .font(.footnote)
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
-
-                if subscriptionsAreUnavailable {
-                    SubscriptionUnavailableNotice(
-                        message: appModel.subscriptionProductLoadErrorMessage,
-                        retry: {
-                            Task {
-                                await appModel.loadSubscriptionProducts(showErrors: true)
-                            }
-                        }
-                    )
-                } else if appModel.subscriptionProductLoadState == .loading {
-                    Text("月額プランをApp Storeから確認中です。")
-                        .font(.footnote)
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
-
-                if appModel.usage == nil && appModel.isUsageSynchronizing {
-                    Text("利用状況を同期中です。")
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                } else if appModel.usage == nil {
-                    Text("利用状況を読み込み中です。")
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
-
-                VStack(spacing: 10) {
-                    BillingTierRow(
-                        tier: BillingCatalog.free,
-                        isCurrent: appModel.currentBillingTier.plan == BillingCatalog.free.plan
-                    )
-                    ForEach(appModel.subscriptionProducts) { product in
-                        Button {
-                            Task {
-                                await appModel.purchaseSubscription(productId: product.id)
-                            }
-                        } label: {
-                            SubscriptionPlanRow(
-                                product: product,
-                                isCurrent: appModel.currentBillingTier.plan == product.tier.plan,
-                                isLoadingProducts: appModel.subscriptionProductLoadState == .loading
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(
-                            appModel.billingActionInFlight
-                                || appModel.currentBillingTier.plan == product.tier.plan
-                                || !product.isAvailable
-                        )
-                        .opacity(product.isAvailable ? 1 : 0.72)
-                    }
-                }
-
-                HStack(spacing: 10) {
-                    Button {
-                        Task {
-                            await appModel.restorePurchases()
-                        }
-                    } label: {
-                        Text("購入を復元")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(appModel.billingActionInFlight)
-                }
-
-                Text("購読はApp Storeのアカウント設定からいつでも管理できます。")
-                    .font(.footnote)
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
-            }
-        }
-        .task {
-            await appModel.loadSubscriptionProducts(showErrors: false)
-        }
-    }
-
-    private var subscriptionsAreUnavailable: Bool {
-        appModel.subscriptionProductLoadState == .unavailable
-            || appModel.subscriptionProductLoadState == .failed
     }
 
     #if DEBUG
@@ -379,7 +317,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("ローカルデータ")
                     .font(.system(.headline, design: .rounded, weight: .bold))
-                Text("保存銘柄、取得済みの決算資料、チャット履歴をこの端末から削除します。credit残高と購読状態に使う端末識別情報は維持されます。")
+                Text("保存銘柄、取得済みの決算資料、チャット履歴をこの端末から削除します。credit残高に使う端末識別情報は維持されます。")
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
                 Button("データをリセット", role: .destructive) {
@@ -400,19 +338,27 @@ struct SettingsView: View {
         [
             LegalSection(
                 title: "収集する情報",
-                body: "Kabuyomi は、匿名の device key、利用回数、購読状態の最小情報、エラー診断の最小ログを扱います。無料プランでは広告表示のため、Google AdMob SDK が広告識別子などの情報を扱う場合があります。氏名、メールアドレス、証券口座情報、保有資産情報は前提にしていません。"
+                body: "Kabuyomi は、匿名の device key、検索履歴、保存銘柄、閲覧した企業・提出書類、利用回数、credit 残高、購入復元に必要な最小情報、エラー診断の最小ログを扱います。氏名、メールアドレス、証券口座情報、保有資産情報、銀行口座情報はアプリの利用に必要としません。"
             ),
             LegalSection(
-                title: "AI 利用時に送信する情報",
-                body: "AI チャットを有効化した場合、質問文、対象企業の決算資料メタデータ、抽出済み MD&A、抽出済み XBRL 指標を外部 AI モデルに送信します。個人情報や機密情報は入力しないでください。"
+                title: "OpenAI API 利用時に送信する情報",
+                body: "AI チャットや引用文翻訳を利用する場合、質問文、翻訳対象の引用文、対象企業の SEC 提出資料メタデータ、抽出済み MD&A、抽出済み XBRL 指標、根拠として使う資料断片を OpenAI API などの外部 AI サービスに送信することがあります。個人情報、証券口座情報、未公開情報、第三者の機密情報は入力しないでください。"
             ),
             LegalSection(
                 title: "第三者サービス",
-                body: "API と利用制限管理には Cloudflare、SEC の決算資料取得には SEC と sec-fetcher、AI 応答には外部 AI モデル、無料プランの広告表示には Google AdMob を利用します。一部の技術ログはサービス品質確認のために記録されます。"
+                body: "API 配信、キャッシュ、利用制限管理には Cloudflare、SEC の決算資料取得には SEC EDGAR、AI 応答と翻訳には OpenAI API などの外部 AI サービス、無料プランの広告表示には Google AdMob、アプリ内課金と購入復元には Apple App Store / StoreKit を利用します。"
+            ),
+            LegalSection(
+                title: "広告と購入",
+                body: "無料プランでは Google AdMob によるバナー広告を表示する場合があります。追加 credit の購入、返金、請求、購入復元は Apple ID と App Store の仕組みに従います。"
             ),
             LegalSection(
                 title: "保存期間",
-                body: "ローカルの保存銘柄、取得済みの決算資料、チャット履歴はアプリ内に保存され、設定画面の「データをリセット」で削除できます。サーバー側の決算資料キャッシュは再利用と運用確認のため保持されます。"
+                body: "ローカルの保存銘柄、取得済みの決算資料、チャット履歴は設定画面の「データをリセット」で削除できます。サーバー側では、利用制限、credit 台帳、購入重複防止、運用監査、障害調査に必要な最小限の記録と、SEC 提出資料キャッシュを保持します。"
+            ),
+            LegalSection(
+                title: "国外処理",
+                body: "Cloudflare、OpenAI、Google、Apple などの第三者サービスでは、日本国外を含む地域でデータが処理・保存される場合があります。"
             )
         ]
     }
@@ -421,11 +367,11 @@ struct SettingsView: View {
         [
             LegalSection(
                 title: "サービスの性質",
-                body: "Kabuyomi は SEC EDGAR の公開提出書類を日本語で読みやすくするための情報提供アプリです。投資助言、売買推奨、株価予測、アナリスト予想比較は提供しません。"
+                body: "Kabuyomi は SEC EDGAR の公開提出書類を日本語で読みやすくし、根拠付きの要約、指標表示、AI チャット、引用文翻訳を提供するリサーチ支援アプリです。投資助言、売買推奨、株価予測、証券口座連携、利益保証は提供しません。"
             ),
             LegalSection(
                 title: "利用の前提",
-                body: "仕様、UI、利用制限、出力品質は改善のため変更されることがあります。要約やチャットには誤りや省略が含まれる可能性があるため、必ず原文も確認してください。"
+                body: "要約、AI チャット、翻訳、指標抽出には誤り、欠落、遅延、解釈の違いが含まれる可能性があります。重要な判断を行う場合は、必ず SEC 原文、企業の公式資料、専門家の助言を確認してください。"
             ),
             LegalSection(
                 title: "禁止事項",
@@ -434,6 +380,18 @@ struct SettingsView: View {
             LegalSection(
                 title: "免責",
                 body: "Kabuyomi の情報を用いた投資判断は利用者自身の責任で行ってください。アプリの不具合や停止によって生じる損失について、補償を前提としていません。"
+            ),
+            LegalSection(
+                title: "Apple 標準 EULA",
+                body: "Kabuyomi の利用には Apple の Licensed Application End User License Agreement（Standard EULA）が適用されます。Terms of Use: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
+            ),
+            LegalSection(
+                title: "credit購入",
+                body: "v1.0 では買い切りの追加 credit を App Store のアプリ内課金として提供します。購入、返金、請求、購入履歴、購入復元は Apple ID と App Store の仕組みに従います。サブスクリプションは v1.1 以降で実装を検討しています。"
+            ),
+            LegalSection(
+                title: "外部サービス",
+                body: "Kabuyomi は Cloudflare、SEC EDGAR、OpenAI API、Google AdMob、Apple StoreKit などの外部サービスを利用します。外部サービスの停止、仕様変更、制限、障害により、一部機能が利用できない場合があります。"
             )
         ]
     }
@@ -497,141 +455,49 @@ private enum LegalDocumentKind: String, Identifiable {
     }
 }
 
-private struct BillingTierRow: View {
-    let tier: BillingTier
-    let isCurrent: Bool
+private struct MiniCreditPackRow: View {
+    let product: CreditPackProduct
+    let isPurchasing: Bool
+    let purchase: (String) -> Void
+
+    private var displayPrice: String {
+        product.displayPrice ?? "¥200"
+    }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(tier.title)
-                    .font(.system(.body, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                Text(tier.summary)
-                    .font(.footnote)
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
-            }
-
-            Spacer()
-
-            if isCurrent {
-                Text("現在")
-                    .font(.system(.caption, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(KabuyomiTheme.fill(for: isCurrent ? .secondary : .muted))
-        )
-    }
-}
-
-private struct SubscriptionPlanRow: View {
-    let product: SubscriptionProduct
-    let isCurrent: Bool
-    let isLoadingProducts: Bool
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(product.tier.title)
-                    .font(.system(.body, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                Text(product.tier.summary)
-                    .font(.footnote)
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 5) {
-                if isCurrent {
-                    Text("現在")
-                        .font(.system(.caption, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
-                } else if let displayPrice = product.displayPrice {
-                    Text(displayPrice)
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
-                } else if isLoadingProducts {
-                    Text("App Store確認中")
-                        .font(.system(.caption, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                } else if !product.isAvailable {
-                    Text("再読込待ち")
-                        .font(.system(.caption, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.negative)
-                } else {
-                    Text("App Store確認中")
-                        .font(.system(.caption, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
-
-                Image(systemName: rowIconName)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(rowIconColor)
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(KabuyomiTheme.fill(for: isCurrent ? .secondary : .muted))
-        )
-    }
-
-    private var rowIconName: String {
-        if isCurrent {
-            return "checkmark.circle.fill"
-        }
-        return product.isAvailable ? "chevron.right" : "arrow.clockwise"
-    }
-
-    private var rowIconColor: Color {
-        if isCurrent {
-            return KabuyomiTheme.accentDeep
-        }
-        return product.isAvailable ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative
-    }
-}
-
-private struct SubscriptionUnavailableNotice: View {
-    let message: String?
-    let retry: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.negative)
-                    .padding(.top, 1)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("月額プランを読み込めませんでした")
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+        Button {
+            purchase(product.id)
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Mini")
+                        .font(.system(.body, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.ink)
-                    Text(message ?? "App Storeの商品情報を取得できないため、この画面から月額プランへ登録できません。通信状況を確認して再読み込みしてください。")
+                    Text("100 credits / 通常chat 50回分")
                         .font(.footnote)
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
-            }
 
-            Button(action: retry) {
-                Label("再読み込み", systemImage: "arrow.clockwise")
-                    .frame(maxWidth: .infinity)
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 5) {
+                    Text(displayPrice)
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                    Text(product.isAvailable ? "追加" : "App Store確認中")
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(product.isAvailable ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative)
+                }
             }
-            .buttonStyle(.bordered)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(KabuyomiTheme.fill(for: .muted))
+            )
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(KabuyomiTheme.negative.opacity(0.10))
-        )
+        .buttonStyle(.plain)
+        .disabled(isPurchasing || !product.isAvailable)
+        .opacity(product.isAvailable ? 1 : 0.72)
     }
 }
 

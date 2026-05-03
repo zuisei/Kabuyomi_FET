@@ -188,6 +188,63 @@ describe("buildChatResponse", () => {
     expect(response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S7", "S9"]));
   });
 
+  it("guards OpenAI model answers that include invalid sourceIds", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url === "https://api.openai.com/v1/chat/completions") {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    answer:
+                      "RevenueFromContractWithCustomerExcludingAssessedTax は増加しました。売上driverは製品需要です。",
+                    sourceIds: ["S7", "BAD_SOURCE"]
+                  })
+                }
+              }
+            ],
+            usage: {
+              prompt_tokens: 1000,
+              completion_tokens: 80,
+              total_tokens: 1080
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filing = makeDriverRichFiling();
+    const response = await buildChatResponse(
+      filing,
+      "売上成長の要因は？",
+      {
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key",
+        OPENAI_CHAT_MODEL: "gpt-5-nano"
+      } as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.debug?.sourceIdsValid).toBe(true);
+    expect(response.debug?.fallbackKind).not.toBe("none");
+    expect(response.debug?.fallbackCategory).toBe("answer_quality_guard");
+    expect(response.debug?.fallbackUserReason).toBe("invalid_sources");
+    expect(response.debug?.guardLabels).toEqual(expect.arrayContaining(["invalid_sources"]));
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["source_ids_invalid_prevented"]));
+    expect(response.answer).not.toContain("RevenueFromContractWithCustomerExcludingAssessedTax");
+    expect(response.answer).not.toContain("売上driver");
+    expect(response.sources.length).toBeGreaterThan(0);
+    expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+  });
+
   it("answers revenue sector questions deterministically with business buckets", async () => {
     const filing = makeRevenueBreakdownFiling();
 
@@ -426,10 +483,12 @@ describe("buildChatResponse", () => {
 
     expect(response.answer).toContain("Apple Inc.は");
     expect(response.answer).toContain("iPhone");
-    expect(response.answer).toContain("Services");
+    expect(response.answer).toContain("サービス");
+    expect(response.answer).not.toContain("Services");
     expect(response.answer).not.toContain("historically experienced higher net sales");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S8"]);
     expect(response.responsePath).toBe("deterministic");
+    expect(response.debug?.sourceIdsValid).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -968,7 +1027,7 @@ describe("buildChatResponse", () => {
     );
 
     expect(response.responsePath).toBe("fallback");
-    expect(response.answer).toContain("前問の具体的なdriver");
+    expect(response.answer).toContain("前問の具体的な要因");
     expect(response.answer).toContain("分類しません");
     expect(response.answer).toContain("経営陣による業績説明");
     expect(response.answer).not.toContain("一般的な注意書き");
@@ -1019,7 +1078,7 @@ describe("buildChatResponse", () => {
     );
 
     expect(response.responsePath).toBe("fallback");
-    expect(response.answer).toContain("前問の具体的なdriver");
+    expect(response.answer).toContain("前問の具体的な要因");
     expect(response.answer).toContain("分類しません");
     expect(response.answer).toContain("経営陣による業績説明");
     expect(response.answer).not.toContain("もう一段絞れます");

@@ -57,12 +57,14 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "Avoid parenthetical English unless it is necessary to disambiguate a proper noun or official product name.",
     "Do not use markdown in the answer text. Do not use **bold**, bullet markers, numbered lists, or headings.",
     "Do not include inline source citations like [S1] or [S2, S4] inside the answer text. SourceIds belong only in the sourceIds field.",
+    "In the user-facing answer, do not write internal English words such as source, selected source, or source type. Use natural Japanese such as 根拠資料, 該当箇所, or 選択された資料.",
     "Do not quote SEC section headings or boilerplate such as Item 2, Management's Discussion and Analysis, Available Information, or forward-looking statement warnings unless the user explicitly asks about filing structure.",
     "If a cited source chunk is mostly boilerplate or legal cautionary language, ignore it and answer from a more substantive filing-backed fact when possible.",
     "Do not just copy or lightly paraphrase a source chunk.",
     "Many users are investors. For investor-style questions, prioritize what investors usually care about: guidance and outlook, demand trends, segment or regional drivers, pricing and margins, cash-flow quality, capital allocation such as buybacks or dividends, and key risks.",
     "For prompts such as なんの企業, 何の会社, どんな会社, 何をしている会社, なにで稼いでんの, 何で儲けている, or つまり何屋なの, answer the business overview first in 2 to 4 natural Japanese sentences: what the company sells, who it serves, and how it earns revenue. Start with the company name or ticker as the subject; never start the answer with a Japanese particle such as は, が, を, に, or で. Do not lead with revenue, net income, margins, or YoY metrics unless the user asked for those metrics.",
-    "For business overview questions, metrics are secondary context only. If Business, Segment, Revenue Note, or MD&A business description evidence is insufficient, say that the selected sources do not sufficiently identify the business model instead of answering from revenue numbers alone.",
+    "For business overview questions, metrics are secondary context only. If Business, Segment, Revenue Note, or MD&A business description evidence is insufficient, say in natural Japanese that the selected materials do not sufficiently identify the business model instead of answering from revenue numbers alone.",
+    "For questions about what management emphasizes, MD&A emphasis, or company-side commentary, answer the emphasized management discussion first. Never answer this with only a revenue metric.",
     "Do not convert USD filing metrics into Japanese yen. Never output 円, 万円, 億円, 百万円, or mixed forms such as 千 USD. For USD figures, use Japanese dollar units such as 10.4億ドル or 79.2百万ドル only when the provided metric value supports that number.",
     "For questions about 事業, セクター, セグメント, 売上内訳, or 売上の柱, answer with the major revenue buckets or business lines in plain Japanese first.",
     "For business_overview, revenue_breakdown, and risk_factors, use the Factual pack before using raw source excerpts. Treat geography revenue as secondary unless the Factual pack has no segment, product, or service revenue categories.",
@@ -233,7 +235,7 @@ export function answerFormatInstruction(intent: NonNullable<ChatPromptInput["que
     case "risk_factors":
       return "Cover, in this order: 主要リスク3つ以内, 影響, 根拠, まだ数字に出ているか。";
     case "mda_summary":
-      return "Cover, in this order: 質問への直接回答, 会社コメントまたは本文の要点, 数字とのつながり, まだ断定できない点。For short cause/durability follow-ups, start with whether the filing supports a temporary, continuing, or uncertain read.";
+      return "Cover, in this order: 質問への直接回答, 経営陣の説明または本文の要点, 数字とのつながり, まだ断定できない点。For management-emphasis questions, do not answer with only revenue metrics. For short cause/durability follow-ups, start with whether the filing supports a temporary, continuing, or uncertain read.";
     case "yoy_change":
       return "Cover, in this order: 一番大きい変化, 主要数値, 本文で説明されている要因, 追加確認が必要な点。";
     case "historical_comparison":

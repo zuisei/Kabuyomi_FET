@@ -605,28 +605,28 @@ describe("worker routing", () => {
       referenceId: "chat-quality-v1-20260426",
       deviceKey: "eval-chat-quality-v1",
       creditsGranted: 500,
-      creditsRemaining: 530,
+      creditsRemaining: 550,
       didMutate: true,
       usage: {
         credits: {
-          monthlyRemaining: 30,
+          monthlyRemaining: 50,
           purchasedRemaining: 500,
-          totalRemaining: 530
+          totalRemaining: 550
         }
       }
     });
     expect(second.status).toBe(200);
     await expect(second.json()).resolves.toMatchObject({
       creditsGranted: 500,
-      creditsRemaining: 530,
+      creditsRemaining: 550,
       didMutate: false
     });
     expect(usage.status).toBe(200);
     await expect(usage.json()).resolves.toMatchObject({
       credits: {
-        monthlyRemaining: 30,
+        monthlyRemaining: 50,
         purchasedRemaining: 500,
-        totalRemaining: 530
+        totalRemaining: 550
       }
     });
   });

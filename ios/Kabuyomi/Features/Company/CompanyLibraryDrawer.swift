@@ -195,7 +195,7 @@ struct ConversationLibraryDrawer: View {
 
                 DrawerDockButton(
                     title: "Settings",
-                    subtitle: "プランと設定",
+                    subtitle: "creditと設定",
                     systemImage: "gearshape",
                     action: openSettings
                 )

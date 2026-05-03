@@ -33,8 +33,8 @@ enum BillingCatalog {
         plan: "free",
         title: "無料",
         stockLimit: 3,
-        chatLimit: 10,
-        monthlyCredits: 30,
+        chatLimit: 25,
+        monthlyCredits: 50,
         productID: nil
     )
     static let lite = BillingTier(
@@ -62,6 +62,7 @@ enum BillingCatalog {
         productID: "app.kabuyomi.pro_max.monthly"
     )
     static let subscriptionTiers = [lite, pro, proMax]
+    static let recognizedSubscriptionTiers = subscriptionTiers
 
     // Keep detachable offers outside the standard free/pro ladder.
     // If an unlimited SKU returns later, isolate it here instead of widening the
@@ -82,7 +83,7 @@ enum BillingCatalog {
     }
 
     static func tier(forProductID productID: String) -> BillingTier? {
-        subscriptionTiers.first { $0.productID == productID }
+        recognizedSubscriptionTiers.first { $0.productID == productID }
     }
 
     static func displayLabel(for plan: String) -> String {

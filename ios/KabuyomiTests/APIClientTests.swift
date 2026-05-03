@@ -462,6 +462,73 @@ final class APIClientTests: XCTestCase {
         XCTAssertNil(response.modelName)
     }
 
+    func testSendChatDecodesOpenAIResponsePath() async throws {
+        let client = makeClient(context: standardContext) { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/chat")
+            XCTAssertEqual(request.httpMethod, "POST")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "answer": "売上の主な要因です。",
+                    "sources": [],
+                    "responsePath": "openai",
+                    "modelName": "gpt-5-nano",
+                    "usage": [
+                        "plan": "free",
+                        "chatsUsed": 1,
+                        "chatLimit": 10,
+                        "stocksUsed": 1,
+                        "stockLimit": 3,
+                        "dateJST": "2026-04-18"
+                    ]
+                ])
+            )
+        }
+
+        let response = try await client.sendChat(
+            filingKey: "v1:AAPL:0000320193-24-000001",
+            question: "今回の変化は？"
+        )
+
+        XCTAssertEqual(response.responsePath, .openai)
+        XCTAssertEqual(response.modelName, "gpt-5-nano")
+        XCTAssertEqual(response.responsePath?.usesRemoteModel, true)
+    }
+
+    func testSendChatDoesNotFailOnUnknownResponsePath() async throws {
+        let client = makeClient(context: standardContext) { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/chat")
+            XCTAssertEqual(request.httpMethod, "POST")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "answer": "回答です。",
+                    "sources": [],
+                    "responsePath": "future_provider",
+                    "modelName": "future-model",
+                    "usage": [
+                        "plan": "free",
+                        "chatsUsed": 1,
+                        "chatLimit": 10,
+                        "stocksUsed": 1,
+                        "stockLimit": 3,
+                        "dateJST": "2026-04-18"
+                    ]
+                ])
+            )
+        }
+
+        let response = try await client.sendChat(
+            filingKey: "v1:AAPL:0000320193-24-000001",
+            question: "今回の変化は？"
+        )
+
+        XCTAssertEqual(response.responsePath, .unknown)
+        XCTAssertEqual(response.modelName, "future-model")
+    }
+
     func testGrantCreditPurchaseSendsDeviceHeaderAndStoreKitTransaction() async throws {
         let client = makeClient(context: standardContext) { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/credits/purchase-grant")

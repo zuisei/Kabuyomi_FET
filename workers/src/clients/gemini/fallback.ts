@@ -414,47 +414,47 @@ function buildNonHardFallbackAnswer(
   switch (intent) {
     case "business_model":
       return {
-        answer: `事業内容や収益内訳は、選択されたsourceだけでは十分に特定できません。確認すべきsourceは Business、Segment Information、Revenue Note、MD&A business discussion です。売上などの数値だけから事業モデルは断定しません。`,
+        answer: `選択された資料だけでは、この会社の収益源を十分に特定できません。売上高などの数字は確認できますが、それだけでは「何で稼いでいる会社か」は判断しません。確認すべき箇所は、事業内容、セグメント情報、売上内訳、MD&Aの事業説明です。`,
         sourceIds
       };
     case "segment_driver":
       return {
-        answer: `${metricObservation ? `${metricObservation} ` : ""}全社売上の増減は確認できますが、セグメント・地域別の強弱はこのsourceでは十分に分解できません。確認すべきsourceは Segment results、Geographic revenue、Product/category revenue、業種固有のsegment KPIです。`,
+        answer: `${metricObservation ? `${metricObservation} ` : ""}全社売上の増減は確認できますが、セグメント・地域別の強弱はこの資料では十分に分解できません。確認すべき箇所は、セグメント実績、地域別売上、製品・カテゴリ別売上、業種固有のセグメントKPIです。`,
         sourceIds
       };
     case "liquidity_debt":
       return {
-        answer: `選択されたsourceでは、資金繰りや負債を判断するための cash、debt、liquidity、maturity、cash flow の説明が不足しています。したがって、懸念の有無は断定しません。確認すべきsourceは Balance Sheet、Debt Note、Liquidity MD&A、Cash Flow Statement です。`,
+        answer: `選択された資料だけでは、資金繰りや負債を判断するための現金、負債、流動性、満期、キャッシュフローの説明が不足しています。したがって、懸念の有無は断定しません。確認すべき箇所は、貸借対照表、負債の注記、流動性の説明、キャッシュフロー計算書です。`,
         sourceIds
       };
     case "risk_summary":
       return {
-        answer: `このsourceだけでは、filing固有の重要リスクを十分に絞れません。確認すべきsourceは、リスク要因セクション、MD&Aのリスク説明、業種固有リスクの説明です。一般的なリスク記述だけから重要リスクは断定しません。`,
+        answer: `この資料だけでは、SEC資料固有の重要リスクを十分に絞れません。確認すべき箇所は、リスク要因セクション、MD&Aのリスク説明、業種固有リスクの説明です。一般的なリスク記述だけから重要リスクは断定しません。`,
         sourceIds
       };
     case "watch_points":
       return {
-        answer: `次回見るべき点は、現時点で不足しているsourceに基づくと、1) セグメント別実績、2) 売上driverの説明、3) 資金繰りまたはリスクの説明です。具体的なdriverはこのsourceだけでは特定しません。`,
+        answer: `次回見るべき点は、現時点で不足している資料に基づくと、1) セグメント別実績、2) 売上要因の説明、3) 資金繰りまたはリスクの説明です。具体的な要因はこの資料だけでは特定しません。`,
         sourceIds
       };
     case "margin_driver":
       return {
-        answer: `${metricObservation ? `${metricObservation} ` : ""}利益率の方向は確認できますが、改善/悪化の具体的なdriverは十分に特定できません。判断には、コスト、mix、pricing、営業費用、provision、restructuring、impairment、segment margin の説明が必要です。`,
+        answer: `${metricObservation ? `${metricObservation} ` : ""}利益率の方向は確認できますが、改善/悪化の具体的な要因は十分に特定できません。判断には、コスト、mix、pricing、営業費用、provision、restructuring、impairment、segment margin の説明が必要です。`,
         sourceIds
       };
     case "prior_filing_delta":
       return {
-        answer: `${metricObservation ? `${metricObservation} ` : ""}前年同期比の増減は確認できますが、前回決算との差分には previous filing evidence が必要です。確認すべきsourceは previous filing、prior filing MD&A、prior period XBRL です。`,
+        answer: `${metricObservation ? `${metricObservation} ` : ""}前年同期比の増減は確認できますが、前回決算との差分には過去の提出資料との比較が必要です。確認すべき箇所は、前回の提出資料、前回のMD&A、前期のXBRL数値です。`,
         sourceIds
       };
     case "revenue_driver":
       return {
-        answer: `${metricObservation ? `${metricObservation} ` : ""}売上の増減は確認できますが、会社固有の売上driverは十分に特定できません。確認すべきsourceは ${missingText} です。`,
+        answer: `${metricObservation ? `${metricObservation} ` : ""}売上の増減は確認できますが、会社固有の売上要因は十分に特定できません。確認すべき箇所は ${missingText} です。`,
         sourceIds
       };
     case "unknown":
       return {
-        answer: `選択されたsourceだけでは、この質問に直接答えるための具体的な説明を十分に確認できません。確認すべきsourceは ${missingText} です。`,
+        answer: `選択された資料だけでは、この質問に直接答えるための具体的な説明を十分に確認できません。確認すべき箇所は ${missingText} です。`,
         sourceIds
       };
   }
@@ -469,7 +469,7 @@ function missingSourceTypesForNonHard(
   }
   switch (intent) {
     case "business_model":
-      return ["Business", "Segment Information", "Revenue Note", "MD&A business discussion"];
+      return ["事業内容", "セグメント情報", "売上内訳", "MD&Aの事業説明"];
     case "segment_driver":
       return ["Segment results", "Geographic revenue", "Product/category revenue", "sector-specific segment KPIs"];
     case "liquidity_debt":
@@ -477,7 +477,7 @@ function missingSourceTypesForNonHard(
     case "risk_summary":
       return ["リスク要因セクション", "MD&Aのリスク説明", "業種固有リスクの説明"];
     case "watch_points":
-      return ["セグメント別実績", "売上driverの説明", "資金繰りまたはリスクの説明"];
+      return ["セグメント別実績", "売上要因の説明", "資金繰りまたはリスクの説明"];
     case "margin_driver":
       return ["cost discussion", "mix", "pricing", "operating expenses", "provision", "restructuring", "impairment", "segment margin"];
     case "prior_filing_delta":

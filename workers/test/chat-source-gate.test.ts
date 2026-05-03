@@ -259,7 +259,7 @@ describe("evidence-slot fallback", () => {
     expect(fallback.answer.answer).toContain("noninterest income");
     expect(fallback.answer.answer).toContain("provision");
     expect(fallback.answer.answer).toContain("segment results");
-    expect(fallback.answer.answer).toContain("会社固有の売上driverは十分に特定できていません");
+    expect(fallback.answer.answer).toContain("会社固有の売上要因は十分に特定できていません");
     expect(fallback.answer.answer).not.toContain("MD&AとMD&A");
     expect(fallback.answer.answer).not.toContain("主因はnet interest income");
     expect(hasBannedPhrase(fallback.answer.answer)).toBe(false);
@@ -297,7 +297,7 @@ describe("evidence-slot fallback", () => {
     expect(result.modelResponse.qualityControl?.fallbackKind).not.toBe("legacy_template");
     expect(result.modelResponse.qualityControl?.evidenceFallbackUsed).toBe(true);
     expect(result.modelResponse.retryDiagnostics?.retryAttempted).toBe(false);
-    expect(result.modelResponse.answer).toContain("会社固有の売上driverは十分に特定できていません");
+    expect(result.modelResponse.answer).toContain("会社固有の売上要因は十分に特定できていません");
   });
 
   it("replaces local revenue-driver legacy fallback with evidence_slot for RKLB-like hard intents", async () => {

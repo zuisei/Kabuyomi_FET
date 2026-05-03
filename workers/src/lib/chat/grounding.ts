@@ -4,6 +4,33 @@ import { AppError } from "../errors";
 export type ChatSourceKind = "sec_filing" | "historical_filing" | "web_supplement";
 export type ChatSourceStrength = "filing_primary" | "supplement_article" | "supplement_snippet";
 export type ChatResponsePath = "historical" | "deterministic" | "fallback" | "gemini" | "openai";
+export type FallbackCategory =
+  | "none"
+  | "model_error"
+  | "source_insufficient"
+  | "answer_quality_guard"
+  | "language_guard"
+  | "sanitation_guard"
+  | "company_resolution_error";
+
+export type FallbackUserReason =
+  | "none"
+  | "model_unavailable"
+  | "model_timeout"
+  | "model_rate_limited"
+  | "model_schema_invalid"
+  | "business_model_sources_missing"
+  | "management_discussion_sources_missing"
+  | "revenue_driver_sources_missing"
+  | "liquidity_sources_missing"
+  | "risk_sources_missing"
+  | "answer_too_metric_only"
+  | "generic_watch_points"
+  | "wrong_sector_wording"
+  | "raw_english_detected"
+  | "malformed_currency_detected"
+  | "invalid_sources"
+  | "company_not_resolved";
 
 export interface ChatEvidenceSource {
   sourceId: string;
@@ -27,6 +54,11 @@ export interface ChatResponseDebug {
   questionIntent?: string;
   responsePath?: ChatResponsePath;
   fallbackReason?: string | null;
+  fallbackCategory?: FallbackCategory;
+  fallbackUserReason?: FallbackUserReason;
+  missingEvidence?: string[];
+  missingEvidenceLabelsJa?: string[];
+  guardLabels?: string[];
   sourceCount?: number;
   sourceIds?: string[];
   sourceIdsValid?: boolean;

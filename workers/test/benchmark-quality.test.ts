@@ -89,6 +89,31 @@ describe("benchmark infra and quality metric separation", () => {
     expect(summary.qualityFallbackTotal).toBe(0);
   });
 
+  it("summarizes fallback taxonomy breakdowns without removing old fallback fields", () => {
+    const summary = quality.buildBenchmarkSummary([
+      makeRow({
+        responsePath: "fallback",
+        fallbackKind: "evidence_slot",
+        fallbackReason: "low_quality_answer",
+        fallbackCategory: "source_insufficient",
+        fallbackUserReason: "revenue_driver_sources_missing"
+      }),
+      makeRow({
+        responsePath: "fallback",
+        fallbackKind: "language_guard_fallback",
+        fallbackReason: "low_quality_answer",
+        fallbackCategory: "language_guard",
+        fallbackUserReason: "raw_english_detected"
+      })
+    ]);
+
+    expect(summary.rawFallbackReasonBreakdown.low_quality_answer).toBe(2);
+    expect(summary.fallbackCategoryBreakdown.source_insufficient).toBe(1);
+    expect(summary.fallbackCategoryBreakdown.language_guard).toBe(1);
+    expect(summary.fallbackUserReasonBreakdown.revenue_driver_sources_missing).toBe(1);
+    expect(summary.fallbackUserReasonBreakdown.raw_english_detected).toBe(1);
+  });
+
   it("keeps active hard retrieval disabled by default", () => {
     expect(resolveHardIntentRetrievalMode(undefined)).not.toBe("active");
   });

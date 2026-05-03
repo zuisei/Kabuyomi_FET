@@ -81,6 +81,11 @@ for (const row of rows) {
     sources: Array.isArray(payload.sources) ? payload.sources : [],
     responsePath: payload.responsePath ?? payload.debug?.responsePath ?? null,
     fallbackReason: payload.fallbackReason ?? payload.debug?.fallbackReason ?? null,
+    fallbackCategory: payload.debug?.fallbackCategory ?? null,
+    fallbackUserReason: payload.debug?.fallbackUserReason ?? null,
+    missingEvidence: payload.debug?.missingEvidence ?? [],
+    missingEvidenceLabelsJa: payload.debug?.missingEvidenceLabelsJa ?? [],
+    guardLabels: payload.debug?.guardLabels ?? [],
     modelName: payload.modelName ?? payload.debug?.modelName ?? null,
     modelProvider: payload.debug?.modelProvider ?? null,
     promptTokenCount: payload.promptTokenCount ?? null,
@@ -520,6 +525,7 @@ async function safeJson(response) {
 function normalizeHttpErrorPayload(payload, status) {
   const errorCode = typeof payload?.error === "string" ? payload.error : `http_${status}`;
   const kind = classifyHttpErrorStatus(status, errorCode);
+  const companyResolutionError = isCompanyResolutionError(errorCode, payload);
   return {
     answer: "",
     sources: [],
@@ -529,6 +535,11 @@ function normalizeHttpErrorPayload(payload, status) {
       responsePath: "fallback",
       fallbackReason: errorCode,
       fallbackKind: kind === "rate_limit" ? "api_error" : "unknown_fallback",
+      fallbackCategory: companyResolutionError ? "company_resolution_error" : "model_error",
+      fallbackUserReason: companyResolutionError ? "company_not_resolved" : kind === "rate_limit" ? "model_rate_limited" : "model_unavailable",
+      missingEvidence: [],
+      missingEvidenceLabelsJa: [],
+      guardLabels: [`http_${status}`],
       geminiApiErrorKind: kind,
       geminiApiErrorStatus: status,
       geminiApiErrorCode: errorCode,
@@ -540,6 +551,11 @@ function normalizeHttpErrorPayload(payload, status) {
       benchmarkHttpErrorCode: errorCode
     }
   };
+}
+
+function isCompanyResolutionError(errorCode, payload) {
+  const text = `${errorCode} ${JSON.stringify(payload ?? {})}`.toLowerCase();
+  return /company|ticker_not_found|no_supported_filing|filing_not_found|company_not_resolved/.test(text);
 }
 
 function classifyHttpErrorStatus(status, errorCode) {

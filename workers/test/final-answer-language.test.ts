@@ -61,6 +61,8 @@ describe("Japanese-only final answer guard", () => {
 
     expect(response.responsePath).toBe("fallback");
     expect(response.debug?.fallbackKind).toBe("language_guard_fallback");
+    expect(response.debug?.fallbackCategory).toBe("language_guard");
+    expect(response.debug?.fallbackUserReason).toBe("raw_english_detected");
     expect(response.debug?.finalAnswerLanguageLabels).toEqual(expect.arrayContaining([
       "final_answer_language_violation",
       "answer_rewritten_to_japanese_fallback"
@@ -75,7 +77,7 @@ describe("Japanese-only final answer guard", () => {
     ]));
     expect(response.debug?.originalAnswerBeforeLanguageGuardLength).toBeGreaterThan(0);
     expect(response.debug?.originalAnswerBeforeLanguageGuardSample).not.toContain("Operating within the financial services industry");
-    expect(response.answer).toContain("前問の具体的なdriver");
+    expect(response.answer).toContain("前問の具体的な要因");
     expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
   });
 
@@ -141,6 +143,8 @@ describe("Japanese-only final answer guard", () => {
     expect(response.responsePath).toBe("fallback");
     expect(response.debug?.fallbackKind).toBe("non_hard_model_timeout");
     expect(response.debug?.responsePathFallbackButKindNone).toBe(false);
+    expect(response.answer).not.toContain("source");
+    expect(response.answer).toContain("選択された資料");
   });
 
   it("replaces business-model api_error revenue snapshots with source-insufficient fallback text", async () => {
@@ -172,11 +176,15 @@ describe("Japanese-only final answer guard", () => {
 
     expect(response.responsePath).toBe("fallback");
     expect(response.debug?.fallbackKind).toBe("api_error");
-    expect(response.answer).toContain("事業内容や収益源");
+    expect(response.debug?.fallbackCategory).toBe("source_insufficient");
+    expect(response.debug?.fallbackUserReason).toBe("business_model_sources_missing");
+    expect(response.debug?.missingEvidenceLabelsJa).toEqual(expect.arrayContaining(["事業内容", "セグメント情報", "売上内訳"]));
+    expect(response.answer).toContain("この会社の収益源");
     expect(response.answer).toContain("事業内容");
     expect(response.answer).toContain("セグメント情報");
-    expect(response.answer).toContain("売上注記");
-    expect(response.answer).toContain("売上高だけでは");
+    expect(response.answer).toContain("売上内訳");
+    expect(response.answer).toContain("それだけでは");
+    expect(response.answer).not.toContain("source");
     expect(response.answer).not.toBe("売上高は 10.4億ドル で、前年同期比 3.1%減 です。");
     expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
   });
@@ -210,13 +218,16 @@ describe("Japanese-only final answer guard", () => {
 
     expect(response.responsePath).toBe("fallback");
     expect(response.debug?.fallbackKind).toBe("api_error");
+    expect(response.debug?.fallbackCategory).toBe("source_insufficient");
+    expect(response.debug?.fallbackUserReason).toBe("business_model_sources_missing");
     expect(response.debug?.sourceIdsValid).toBe(true);
     expect(response.debug?.languageGuardChecked).toBe(true);
-    expect(response.answer).toContain("事業内容や収益源");
+    expect(response.answer).toContain("この会社の収益源");
     expect(response.answer).toContain("事業内容");
     expect(response.answer).toContain("セグメント情報");
-    expect(response.answer).toContain("売上注記");
-    expect(response.answer).toContain("売上高だけでは");
+    expect(response.answer).toContain("売上内訳");
+    expect(response.answer).toContain("それだけでは");
+    expect(response.answer).not.toContain("source");
     expect(response.answer).not.toMatch(/^売上高は/);
   });
 
@@ -249,8 +260,11 @@ describe("Japanese-only final answer guard", () => {
     });
 
     expect(response.debug?.fallbackKind).toBe("api_error");
-    expect(response.answer).toContain("事業内容や収益源");
-    expect(response.answer).toContain("経営陣による業績説明");
+    expect(response.debug?.fallbackCategory).toBe("source_insufficient");
+    expect(response.debug?.fallbackUserReason).toBe("business_model_sources_missing");
+    expect(response.answer).toContain("この会社の収益源");
+    expect(response.answer).toContain("MD&Aの事業説明");
+    expect(response.answer).not.toContain("source");
     expect(response.answer).not.toMatch(/^売上高は/);
   });
 
@@ -284,6 +298,8 @@ describe("Japanese-only final answer guard", () => {
 
     expect(response.debug?.fallbackKind).toBe("api_error");
     expect(response.debug?.languageGuardChecked).toBe(true);
+    expect(response.debug?.fallbackCategory).toBe("model_error");
+    expect(response.debug?.fallbackUserReason).toBe("model_rate_limited");
     expect(response.answer).toBe("売上高は 10.4億ドル で、前年同期比 3.1%減 です。");
   });
 
@@ -318,9 +334,12 @@ describe("Japanese-only final answer guard", () => {
     expect(response.responsePath).toBe("openai");
     expect(response.debug?.sourceIdsValid).toBe(true);
     expect(response.debug?.fallbackKind).toBe("none");
+    expect(response.debug?.fallbackCategory).toBe("answer_quality_guard");
+    expect(response.debug?.fallbackUserReason).toBe("answer_too_metric_only");
     expect(response.debug?.modelProvider).toBe("openai");
-    expect(response.answer).toContain("事業内容や収益源");
-    expect(response.answer).toContain("売上高だけでは");
+    expect(response.answer).toContain("この会社の収益源");
+    expect(response.answer).toContain("それだけでは");
+    expect(response.answer).not.toContain("source");
     expect(response.answer).not.toMatch(/^(この会社は)?主に?売上/);
     expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
   });
@@ -354,8 +373,78 @@ describe("Japanese-only final answer guard", () => {
     });
 
     expect(response.answer).toContain("アナログ/RF半導体");
+    expect(response.answer).toContain("今回の資料だけでは");
+    expect(response.answer).not.toContain("source");
     expect(response.answer).not.toContain("売上高だけでは");
     expect(response.debug?.fallbackKind).toBe("none");
+  });
+
+  it("removes raw source wording from user-facing final answers", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "この会社は何で儲けている？",
+      response: {
+        answer: "選択されたsourceだけでは、事業内容を確認できません。追加のsource typeが必要です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "business_model",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: false,
+        schemaValid: true,
+        fallbackKind: "low_quality"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("選択された資料");
+    expect(response.answer).toContain("資料の種類");
+    expect(response.answer).not.toContain("source");
+  });
+
+  it("naturalizes AAPL-like business line labels and removes weak revenue-bucket filler", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "この会社は何で儲けている？",
+      response: {
+        answer: "Appleは、iPhone、Mac、iPad、Wearables, Home and Accessories, Servicesで稼ぐ会社です。売上区分としては、全社売上高も確認できます。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "business_overview",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("ウェアラブル、ホーム、アクセサリ");
+    expect(response.answer).toContain("サービス");
+    expect(response.answer).not.toContain("Wearables");
+    expect(response.answer).not.toContain("Home and Accessories");
+    expect(response.answer).not.toContain("Services");
+    expect(response.answer).not.toContain("全社売上高も確認できます");
   });
 
   it("removes weird USD/JPY mixed unit sentences from business-model answers", async () => {
@@ -422,6 +511,8 @@ describe("Japanese-only final answer guard", () => {
     });
 
     expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackCategory).toBe("answer_quality_guard");
+    expect(response.debug?.fallbackUserReason).toBe("answer_too_metric_only");
     expect(response.answer).toBe("この会社は主に半導体関連のソリューションを提供し、売上は主に製品の販売から稼いでいます。");
     expect(response.answer).not.toContain("総売上高");
     expect(response.answer).not.toContain("純利益");
@@ -531,6 +622,8 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).toContain("資金繰りや負債の懸念を直接判断するには不足");
     expect(response.answer).toContain("キャッシュフロー計算書");
     expect(response.answer).toContain("負債の注記");
+    expect(response.debug?.fallbackCategory).toBe("source_insufficient");
+    expect(response.debug?.fallbackUserReason).toBe("liquidity_sources_missing");
     expect(response.answer).not.toContain("規制、競争、顧客データ保護");
   });
 
@@ -565,6 +658,8 @@ describe("Japanese-only final answer guard", () => {
 
     expect(response.responsePath).toBe("fallback");
     expect(response.debug?.fallbackKind).toBe("language_guard_fallback");
+    expect(response.debug?.fallbackCategory).toBe("language_guard");
+    expect(response.debug?.fallbackUserReason).toBe("raw_english_detected");
     expect(response.answer).toContain("リスク要因");
     expect(response.answer).toContain("MD&Aのリスク説明");
     expect(response.answer).not.toContain("Risk Factors");
@@ -603,9 +698,46 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).toContain("601.0億ドル");
     expect(response.answer).toContain("3.8億ドル");
     expect(response.answer).toContain("前年同期の比較値");
+    expect(response.debug?.fallbackCategory).toBe("sanitation_guard");
+    expect(response.debug?.fallbackUserReason).toBe("malformed_currency_detected");
     expect(response.answer).not.toContain("601,0億ドル");
     expect(response.answer).not.toContain("379,600,000 USD");
     expect(response.answer).not.toContain("前年同468,?");
+  });
+
+  it("removes raw XBRL tags and mixed driver wording from final answers", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "売上成長、または減収の主な要因は？",
+      response: {
+        answer: "RevenueFromContractWithCustomerExcludingAssessedTax は増加しましたが、会社固有の売上driverは十分に特定できていません。具体的なdriverを見るには追加確認が必要です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "revenue_driver",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("売上高");
+    expect(response.answer).toContain("売上要因");
+    expect(response.answer).toContain("具体的な要因");
+    expect(response.answer).not.toContain("RevenueFromContractWithCustomerExcludingAssessedTax");
+    expect(response.answer).not.toContain("driver");
   });
 
   it("rewrites liquidity/debt answers that start as generic risk summaries", async () => {
@@ -638,6 +770,8 @@ describe("Japanese-only final answer guard", () => {
 
     expect(response.answer).toContain("キャッシュフロー計算書");
     expect(response.answer).toContain("満期スケジュール");
+    expect(response.debug?.fallbackCategory).toBe("source_insufficient");
+    expect(response.debug?.fallbackUserReason).toBe("liquidity_sources_missing");
     expect(response.answer).not.toMatch(/^主要リスク/);
     expect(response.answer).not.toContain("顧客データ保護");
   });
@@ -673,6 +807,8 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).toContain("会社固有のポイント");
     expect(response.answer).toContain("セグメント実績");
     expect(response.answer).toContain("キャッシュフロー・流動性");
+    expect(response.debug?.fallbackCategory).toBe("answer_quality_guard");
+    expect(response.debug?.fallbackUserReason).toBe("generic_watch_points");
     expect(response.answer).not.toContain("379,600,000 USD");
     expect(response.answer).not.toContain("前年同468,?");
   });
@@ -709,6 +845,8 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).toContain("セグメント実績");
     expect(response.answer).toContain("売上説明");
     expect(response.answer).toContain("キャッシュフロー・流動性");
+    expect(response.debug?.fallbackCategory).toBe("answer_quality_guard");
+    expect(response.debug?.fallbackUserReason).toBe("generic_watch_points");
     expect(response.answer).not.toContain("純利益の推移");
   });
 
@@ -742,6 +880,8 @@ describe("Japanese-only final answer guard", () => {
 
     expect(response.answer).toContain("会社固有のポイント");
     expect(response.answer).toContain("一般的な売上・利益・コストだけでは");
+    expect(response.debug?.fallbackCategory).toBe("answer_quality_guard");
+    expect(response.debug?.fallbackUserReason).toBe("generic_watch_points");
     expect(response.answer).not.toContain("営業利益と利益率の推移");
   });
 
@@ -778,6 +918,77 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).toContain("Life Sciences");
     expect(response.answer).toContain("Medication Management Solutions");
     expect(response.answer).not.toContain("会社固有のポイントを3つに絞るには不足");
+  });
+
+  it("does not answer management-emphasis questions with revenue-only metrics", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "経営陣が強調している論点は？",
+      response: {
+        answer: "売上高は1,437.6億ドルで、前年同期比15.7%増です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "mda_summary",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("経営陣が強調している論点");
+    expect(response.answer).toContain("MD&A");
+    expect(response.answer).toContain("業績説明");
+    expect(response.answer).toContain("セグメント実績");
+    expect(response.answer).toContain("見通し・リスク");
+    expect(response.answer).toContain("売上高だけでは");
+    expect(response.debug?.fallbackCategory).toBe("answer_quality_guard");
+    expect(response.debug?.fallbackUserReason).toBe("answer_too_metric_only");
+    expect(response.answer).not.toBe("売上高は1,437.6億ドルで、前年同期比15.7%増です。");
+  });
+
+  it("keeps normal revenue snapshot metrics", async () => {
+    const filing = makeFiling();
+    const answer = "売上高は1,437.6億ドルで、前年同期比15.7%増です。";
+    const response = await finalizeChatResponse({
+      filing,
+      question: "売上高はどうだった？",
+      response: {
+        answer,
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "revenue_snapshot",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toBe(answer);
   });
 });
 

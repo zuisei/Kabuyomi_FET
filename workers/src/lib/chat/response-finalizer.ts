@@ -11,13 +11,28 @@ import {
   ensureFilingGroundedResponse,
   type ChatResponseDebug,
   type ChatResponsePayload,
-  type ChatResponsePath
+  type ChatResponsePath,
+  type FallbackCategory,
+  type FallbackUserReason
 } from "./grounding";
 import type { ChatTimingTracker } from "./timing";
 import { maybeAppendWebSupplement } from "./web-supplement";
 import { hasBannedPhrase } from "./evidence-fallback";
 
 type ChatResponseDebugInput = Omit<ChatResponseDebug, "sourceCount" | "sourceIds">;
+
+type FallbackTaxonomy = {
+  fallbackCategory: FallbackCategory;
+  fallbackUserReason: FallbackUserReason;
+  missingEvidence?: string[];
+  missingEvidenceLabelsJa?: string[];
+  guardLabels?: string[];
+};
+
+type AnswerCleanupResult = {
+  answer: string;
+  taxonomy?: Partial<FallbackTaxonomy>;
+};
 
 export async function finalizeChatResponse({
   filing,
@@ -58,7 +73,8 @@ export async function finalizeChatResponse({
     ? timings.timeSync("groundingMs", () => attachCurrentFilingSourceUrls(supplemented, filing.primaryDocumentUrl))
     : supplemented;
   const normalizedFallbackKind = normalizeFallbackKind(responsePath, debug);
-  const uxCleanedAnswer = cleanAnswerForQuestion(responseWithUrls.answer, responsePath, normalizedFallbackKind, question, debug.questionIntent);
+  const cleanup = cleanAnswerForQuestion(responseWithUrls.answer, responsePath, normalizedFallbackKind, question, debug.questionIntent);
+  const uxCleanedAnswer = cleanup.answer;
   const originalAnswerBeforeLanguageGuard = uxCleanedAnswer;
   const languageCheck = checkFinalAnswerJapaneseOnly(uxCleanedAnswer);
   const bannedPhraseDetected = hasBannedPhrase(uxCleanedAnswer);
@@ -86,6 +102,14 @@ export async function finalizeChatResponse({
     ...(bannedPhraseStillDetected ? ["generic_fallback_phrase"] : []),
     "answer_rewritten_to_japanese_fallback"
   ];
+  const fallbackTaxonomy = classifyFallbackTaxonomy({
+    debug,
+    responsePath: finalResponsePath,
+    fallbackKind: responsePathFallbackButKindNone ? "unknown_fallback" : finalFallbackKind,
+    cleanup,
+    finalAnswerSafe,
+    languageLabels: finalAnswerLanguageLabels
+  });
 
   return attachChatDebug(
     {
@@ -97,6 +121,11 @@ export async function finalizeChatResponse({
       ...debug,
       responsePath: finalResponsePath,
       fallbackReason: finalAnswerSafe ? debug.fallbackReason : debug.fallbackReason ?? "low_quality_answer",
+      fallbackCategory: fallbackTaxonomy.fallbackCategory,
+      fallbackUserReason: fallbackTaxonomy.fallbackUserReason,
+      missingEvidence: fallbackTaxonomy.missingEvidence ?? [],
+      missingEvidenceLabelsJa: fallbackTaxonomy.missingEvidenceLabelsJa ?? [],
+      guardLabels: fallbackTaxonomy.guardLabels ?? [],
       fallbackKind: responsePathFallbackButKindNone ? "unknown_fallback" : finalFallbackKind,
       fallbackKindSource: finalAnswerSafe ? debug.fallbackKindSource ?? "finalizer" : "language_guard",
       responsePathFallbackButKindNone,
@@ -120,7 +149,12 @@ export async function finalizeChatResponse({
   );
 }
 
-const BUSINESS_MODEL_SOURCE_INSUFFICIENT_FALLBACK = "事業内容や収益源は、選択されたsourceだけでは十分に特定できません。確認すべきsourceは事業内容、セグメント情報、売上注記、経営陣による業績説明の事業説明です。売上高だけでは、この会社が何で儲けているかは判断しません。";
+const BUSINESS_MODEL_SOURCE_INSUFFICIENT_FALLBACK = "選択された資料だけでは、この会社の収益源を十分に特定できません。売上高などの数字は確認できますが、それだけでは「何で稼いでいる会社か」は判断しません。確認すべき箇所は、事業内容、セグメント情報、売上内訳、MD&Aの事業説明です。";
+const BUSINESS_MODEL_MISSING_EVIDENCE = ["事業内容", "セグメント情報", "売上内訳", "MD&Aの事業説明"];
+const MANAGEMENT_MISSING_EVIDENCE = ["MD&A", "業績説明", "セグメント実績", "見通し・リスクの説明"];
+const REVENUE_DRIVER_MISSING_EVIDENCE = ["MD&A", "セグメント実績", "売上説明"];
+const LIQUIDITY_MISSING_EVIDENCE = ["キャッシュフロー計算書", "流動性の説明", "負債の注記", "借入枠", "満期スケジュール"];
+const RISK_MISSING_EVIDENCE = ["リスク要因", "MD&Aのリスク説明", "見通し・リスクの説明"];
 
 function cleanAnswerForQuestion(
   answer: string,
@@ -128,7 +162,7 @@ function cleanAnswerForQuestion(
   fallbackKind: ChatFallbackKind,
   question: string,
   questionIntent?: string | null
-): string {
+): AnswerCleanupResult {
   const normalizedAnswer = sanitizeFinalUserFacingAnswer(answer);
   if (isLiquidityDebtQuestion(question, questionIntent)) {
     return cleanLiquidityDebtAnswer(normalizedAnswer);
@@ -136,20 +170,65 @@ function cleanAnswerForQuestion(
   if (isWatchPointsQuestion(question, questionIntent)) {
     return cleanWatchPointsAnswer(normalizedAnswer);
   }
+  if (isManagementFocusQuestion(question, questionIntent)) {
+    return cleanManagementFocusAnswer(normalizedAnswer);
+  }
   if (isBusinessModelQuestion(question, questionIntent)) {
     return cleanBusinessModelAnswer(normalizedAnswer, responsePath, fallbackKind);
   }
-  return normalizedAnswer;
+  if (hasMalformedCurrencyForTaxonomy(answer)) {
+    return {
+      answer: normalizedAnswer,
+      taxonomy: {
+        fallbackCategory: "sanitation_guard",
+        fallbackUserReason: "malformed_currency_detected",
+        guardLabels: ["malformed_currency_detected"]
+      }
+    };
+  }
+  return { answer: normalizedAnswer };
 }
 
-const LIQUIDITY_DEBT_SOURCE_INSUFFICIENT_FALLBACK = "選択されたsourceだけでは、資金繰りや負債の懸念を直接判断するには不足しています。確認すべきsourceは、キャッシュフロー計算書、流動性の説明、負債の注記、借入枠、満期スケジュールです。現時点では、一般的なリスク要因だけから資金繰りの悪化を断定しません。";
+const LIQUIDITY_DEBT_SOURCE_INSUFFICIENT_FALLBACK = "選択された資料だけでは、資金繰りや負債の懸念を直接判断するには不足しています。確認すべき箇所は、キャッシュフロー計算書、流動性の説明、負債の注記、借入枠、満期スケジュールです。現時点では、一般的なリスク要因だけから資金繰りの悪化を断定しません。";
+
+const MANAGEMENT_FOCUS_SOURCE_INSUFFICIENT_FALLBACK = "選択された資料だけでは、経営陣が強調している論点を十分に特定できません。確認すべき箇所は、MD&A（経営陣による業績説明）、業績説明、セグメント実績、見通し・リスクの説明です。売上高だけでは、経営陣の強調点とは判断しません。";
+
+function sourceInsufficientCleanup(
+  answer: string,
+  fallbackUserReason: Extract<FallbackUserReason, `${string}_sources_missing`>,
+  missingEvidenceLabelsJa: string[],
+  guardLabels: string[]
+): AnswerCleanupResult {
+  return {
+    answer,
+    taxonomy: {
+      fallbackCategory: "source_insufficient",
+      fallbackUserReason,
+      missingEvidence: missingEvidenceLabelsJa.map((label) => sourceLabelToEvidenceKey(label)),
+      missingEvidenceLabelsJa,
+      guardLabels
+    }
+  };
+}
 
 function sanitizeFinalUserFacingAnswer(answer: string): string {
-  return normalizeFallbackSourceLabels(normalizeAwkwardModelLanguage(answer));
+  return normalizeInternalSourceWording(normalizeBusinessLineLabels(normalizeFallbackSourceLabels(normalizeAwkwardModelLanguage(answer))));
 }
 
 function normalizeAwkwardModelLanguage(answer: string): string {
   return answer
+    .replace(/\bRevenueFromContractWithCustomerExcludingAssessedTax\b/g, "売上高")
+    .replace(/\b[A-Z][A-Za-z0-9]+(?:[A-Z][A-Za-z0-9]+){2,}\b/g, (tag: string) => {
+      if (KNOWN_XBRL_TAG_LABELS[tag]) {
+        return KNOWN_XBRL_TAG_LABELS[tag];
+      }
+      return looksLikeXbrlTag(tag) ? "指標" : tag;
+    })
+    .replace(/売上\s*driver/g, "売上要因")
+    .replace(/具体的な\s*driver/g, "具体的な要因")
+    .replace(/driverが十分に特定/g, "要因が十分に特定")
+    .replace(/前問の\s*driver/g, "前問の要因")
+    .replace(/利益率\s*driver/g, "利益率要因")
     .replace(/([0-9]+(?:,[0-9])+)億ドル/g, (_match, raw: string) => `${raw.replace(/,/g, ".")}億ドル`)
     .replace(/([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?)\s*USD/g, (_match, raw: string) => {
       const value = Number.parseFloat(raw.replace(/,/g, ""));
@@ -177,6 +256,18 @@ function normalizeAwkwardModelLanguage(answer: string): string {
     .replace(/\bcash flow\b/g, "キャッシュフロー");
 }
 
+const KNOWN_XBRL_TAG_LABELS: Record<string, string> = {
+  RevenueFromContractWithCustomerExcludingAssessedTax: "売上高",
+  Revenues: "売上高",
+  NetIncomeLoss: "純利益",
+  OperatingIncomeLoss: "営業利益"
+};
+
+function looksLikeXbrlTag(value: string): boolean {
+  return /(?:Revenue|Income|Loss|Assets|Liabilities|Equity|Cash|Expense|Expenses|Debt|Stockholders|Contract|Customer|AssessedTax)/.test(value) &&
+    /[a-z][A-Z]/.test(value);
+}
+
 function normalizeFallbackSourceLabels(answer: string): string {
   return answer
     .replace(/\bMD&A risk discussion\b/gi, "MD&Aのリスク説明")
@@ -197,7 +288,35 @@ function normalizeFallbackSourceLabels(answer: string): string {
     .replace(/\bDebt Note\b/gi, "負債の注記")
     .replace(/\bLiquidity MD&A\b/g, "流動性の説明")
     .replace(/\bCash Flow Statement\b/g, "キャッシュフロー計算書")
-    .replace(/\bMD&A\b(?!の)/g, "経営陣による業績説明");
+    .replace(/\bMD&A\b(?![の（])/g, "経営陣による業績説明");
+}
+
+function normalizeInternalSourceWording(answer: string): string {
+  return answer
+    .replace(/選択された\s*source/g, "選択された資料")
+    .replace(/この\s*source/g, "この資料")
+    .replace(/取得できた\s*source/g, "取得できた資料")
+    .replace(/確認すべき\s*source\s*は/g, "確認すべき箇所は")
+    .replace(/不足している\s*source\s*type/g, "不足している資料の種類")
+    .replace(/source\s*type/g, "資料の種類")
+    .replace(/source\s*だけ/g, "資料だけ")
+    .replace(/source\s*では/g, "資料では")
+    .replace(/source\s*は/g, "資料は")
+    .replace(/source\s*を/g, "資料を")
+    .replace(/source\s*の/g, "資料の")
+    .replace(/source/g, "資料");
+}
+
+function normalizeBusinessLineLabels(answer: string): string {
+  return answer
+    .replace(/\bWearables,\s*Home and Accessories(?:,\s*|、)Services\b/g, "ウェアラブル、ホーム、アクセサリ、サービス")
+    .replace(/\bWearables,\s*Home and Accessories\b/g, "ウェアラブル、ホーム、アクセサリ")
+    .replace(/\bWearables\b/g, "ウェアラブル")
+    .replace(/\bHome and Accessories\b/g, "ホーム、アクセサリ")
+    .replace(/売上区分としては、?全社売上高も確認できます。?/g, "")
+    .replace(/全社売上高も確認できます。?/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function formatUsdAmount(value: number): string {
@@ -227,7 +346,7 @@ function isLiquidityDebtQuestion(question: string, questionIntent?: string | nul
   return /(資金繰り|負債|債務|借入|流動性|liquidity|debt|maturity|cashflow|cash flow)/i.test(question.replace(/\s+/g, ""));
 }
 
-function cleanLiquidityDebtAnswer(answer: string): string {
+function cleanLiquidityDebtAnswer(answer: string): AnswerCleanupResult {
   const hasLiquidityEvidence = /(cash|キャッシュ|現金|資金|liquidity|流動性|debt|負債|債務|借入|credit facility|信用枠|revolver|社債|maturit|満期|leverage|レバレッジ|deposit|預金|capital ratio|自己資本|operating cash flow|営業キャッシュフロー|キャッシュフロー)/i.test(answer);
   const genericRiskShape = /(主要リスク|リスク要因|規制|競争|顧客|データ|市場環境|サプライチェーン)/.test(answer) &&
     !/(cash|キャッシュ|現金|資金|liquidity|流動性|debt|負債|債務|借入|credit facility|信用枠|maturit|満期|leverage|レバレッジ|deposit|預金|capital ratio|自己資本|operating cash flow|営業キャッシュフロー|キャッシュフロー)/i.test(answer);
@@ -236,9 +355,14 @@ function cleanLiquidityDebtAnswer(answer: string): string {
     !/(現金|借入残高|負債残高|満期スケジュール|借入枠|信用枠|キャッシュフロー計算書|営業キャッシュフロー|預金|自己資本比率)/.test(answer);
 
   if (genericRiskShape || riskSummaryLead || !hasLiquidityEvidence) {
-    return LIQUIDITY_DEBT_SOURCE_INSUFFICIENT_FALLBACK;
+    return sourceInsufficientCleanup(
+      LIQUIDITY_DEBT_SOURCE_INSUFFICIENT_FALLBACK,
+      "liquidity_sources_missing",
+      LIQUIDITY_MISSING_EVIDENCE,
+      ["liquidity_debt_sources_missing"]
+    );
   }
-  return answer;
+  return { answer };
 }
 
 function isWatchPointsQuestion(question: string, questionIntent?: string | null): boolean {
@@ -248,11 +372,20 @@ function isWatchPointsQuestion(question: string, questionIntent?: string | null)
   return /(次回決算|次に見る|見るべき|ポイント|watchpoints?|nextquarter|nextfiling)/i.test(question.replace(/\s+/g, ""));
 }
 
-function cleanWatchPointsAnswer(answer: string): string {
+function cleanWatchPointsAnswer(answer: string): AnswerCleanupResult {
   if (!isGenericWatchPointsAnswer(answer)) {
-    return answer;
+    return { answer };
   }
-  return "選択されたsourceだけでは、次回決算で見るべき会社固有のポイントを3つに絞るには不足しています。確認すべきsourceは、経営陣による業績説明、セグメント実績、売上説明、利益率・採算性の説明、キャッシュフロー・流動性です。一般的な売上・利益・コストだけでは、この会社固有の注目点とは判断しません。";
+  return {
+    answer: "選択された資料だけでは、次回決算で見るべき会社固有のポイントを3つに絞るには不足しています。確認すべき箇所は、経営陣による業績説明、セグメント実績、売上説明、利益率・採算性の説明、キャッシュフロー・流動性です。一般的な売上・利益・コストだけでは、この会社固有の注目点とは判断しません。",
+    taxonomy: {
+      fallbackCategory: "answer_quality_guard",
+      fallbackUserReason: "generic_watch_points",
+      missingEvidence: ["management_discussion", "segment_results", "revenue_discussion", "profitability_discussion", "cash_flow_liquidity"],
+      missingEvidenceLabelsJa: ["経営陣による業績説明", "セグメント実績", "売上説明", "利益率・採算性の説明", "キャッシュフロー・流動性"],
+      guardLabels: ["generic_watch_points"]
+    }
+  };
 }
 
 function isGenericWatchPointsAnswer(answer: string): boolean {
@@ -263,26 +396,103 @@ function isGenericWatchPointsAnswer(answer: string): boolean {
   return (genericItems >= 3 && !specificSignals.test(answer)) || (genericItems >= 2 && hasMalformedMetric);
 }
 
-function cleanBusinessModelAnswer(answer: string, responsePath: ChatResponsePath, fallbackKind: ChatFallbackKind): string {
+function cleanBusinessModelAnswer(answer: string, responsePath: ChatResponsePath, fallbackKind: ChatFallbackKind): AnswerCleanupResult {
   if (
     responsePath === "fallback" &&
     ["api_error", "low_quality", "weak_grounding", "non_hard_model_timeout", "legacy_template", "unknown_fallback"].includes(fallbackKind) &&
     isMetricSnapshotOnly(answer)
   ) {
-    return BUSINESS_MODEL_SOURCE_INSUFFICIENT_FALLBACK;
+    return sourceInsufficientCleanup(
+      BUSINESS_MODEL_SOURCE_INSUFFICIENT_FALLBACK,
+      "business_model_sources_missing",
+      BUSINESS_MODEL_MISSING_EVIDENCE,
+      ["business_model_metric_snapshot_replaced"]
+    );
   }
 
-  const withoutForbiddenUnits = removeForbiddenCurrencyUnitSentences(answer);
+  const naturalized = normalizeBusinessLineLabels(answer);
+  const withoutForbiddenUnits = removeForbiddenCurrencyUnitSentences(naturalized);
   const withoutMetricSnapshots = removeBusinessModelMetricSnapshotSentences(withoutForbiddenUnits);
   if (!withoutMetricSnapshots.trim()) {
-    return BUSINESS_MODEL_SOURCE_INSUFFICIENT_FALLBACK;
+    return sourceInsufficientCleanup(
+      BUSINESS_MODEL_SOURCE_INSUFFICIENT_FALLBACK,
+      "business_model_sources_missing",
+      BUSINESS_MODEL_MISSING_EVIDENCE,
+      ["business_model_metric_sentences_removed"]
+    );
   }
 
   if (isMetricHeavyBusinessModelAnswer(withoutMetricSnapshots)) {
-    return BUSINESS_MODEL_SOURCE_INSUFFICIENT_FALLBACK;
+    return {
+      answer: BUSINESS_MODEL_SOURCE_INSUFFICIENT_FALLBACK,
+      taxonomy: {
+        fallbackCategory: "answer_quality_guard",
+        fallbackUserReason: "answer_too_metric_only",
+        missingEvidence: ["business", "segment_information", "revenue_note", "mda_business_discussion"],
+        missingEvidenceLabelsJa: BUSINESS_MODEL_MISSING_EVIDENCE,
+        guardLabels: ["business_model_metric_heavy"]
+      }
+    };
   }
 
-  return withoutMetricSnapshots;
+  if (withoutMetricSnapshots !== withoutForbiddenUnits) {
+    return {
+      answer: withoutMetricSnapshots,
+      taxonomy: {
+        fallbackCategory: "answer_quality_guard",
+        fallbackUserReason: "answer_too_metric_only",
+        missingEvidence: ["business", "segment_information", "revenue_note", "mda_business_discussion"],
+        missingEvidenceLabelsJa: BUSINESS_MODEL_MISSING_EVIDENCE,
+        guardLabels: ["business_model_metric_snapshot_sentence_removed"]
+      }
+    };
+  }
+
+  if (hasMalformedCurrencyForTaxonomy(answer)) {
+    return {
+      answer: withoutMetricSnapshots,
+      taxonomy: {
+        fallbackCategory: "sanitation_guard",
+        fallbackUserReason: "malformed_currency_detected",
+        guardLabels: ["malformed_currency_detected"]
+      }
+    };
+  }
+
+  return { answer: withoutMetricSnapshots };
+}
+
+function isManagementFocusQuestion(question: string, questionIntent?: string | null): boolean {
+  if (questionIntent === "management_focus" || questionIntent === "mda_emphasis") {
+    return true;
+  }
+  const normalized = question.replace(/\s+/g, "").toLowerCase();
+  return /(経営陣.*強調|会社側.*強調|md&a.*強調|強調している論点|強調してる論点|強調されてること|強調されていること|management.*emphas|mda.*emphas)/i.test(normalized);
+}
+
+function cleanManagementFocusAnswer(answer: string): AnswerCleanupResult {
+  if (isMetricSnapshotOnly(answer) || isMetricOnlyManagementFocusAnswer(answer)) {
+    return {
+      answer: MANAGEMENT_FOCUS_SOURCE_INSUFFICIENT_FALLBACK,
+      taxonomy: {
+        fallbackCategory: "answer_quality_guard",
+        fallbackUserReason: "answer_too_metric_only",
+        missingEvidence: ["mda", "results_of_operations", "segment_results", "outlook_risk_discussion"],
+        missingEvidenceLabelsJa: MANAGEMENT_MISSING_EVIDENCE,
+        guardLabels: ["management_focus_metric_only"]
+      }
+    };
+  }
+  return { answer };
+}
+
+function isMetricOnlyManagementFocusAnswer(answer: string): boolean {
+  const normalized = answer.replace(/\s+/g, "");
+  const hasManagementSignal = /(経営陣|会社側|強調|MD&A|経営陣による業績説明|業績説明|セグメント|需要|見通し|リスク|利益率|製品|サービス|顧客|供給|コスト|価格|数量)/.test(normalized);
+  const metricLead = /^(売上高|収益|営業利益|純利益|利益率|マージン)は[-0-9.,]+(?:兆|億|百万)?ドル/.test(normalized);
+  const metricHeavy = /(売上高|営業利益|純利益|前年同期比|前年比|億ドル|百万ドル|%)/g;
+  const metricHits = normalized.match(metricHeavy)?.length ?? 0;
+  return metricLead || (!hasManagementSignal && metricHits >= 2);
 }
 
 function isBusinessModelQuestion(question: string, questionIntent?: string | null): boolean {
@@ -357,6 +567,204 @@ function hasForbiddenCurrencyUnit(text: string): boolean {
   return /(?:千\s*USD|千USD|百万円|億円|万円|[0-9０-９.,，]+億[0-9０-９.,，千百十]*千\s*USD|[0-9０-９.,，]+億[0-9０-９.,，千百十]*百万円|[0-9０-９.,，]+億[0-9０-９.,，千百十]*万円|[0-9０-９.,，]+\s*円)/.test(text);
 }
 
+function hasMalformedCurrencyForTaxonomy(text: string): boolean {
+  return hasForbiddenCurrencyUnit(text) ||
+    /(?:百万\s*USD|億\s*USD|億USD|千\s*USD|千USD|[0-9]{1,3}(?:,[0-9]{3})+\s*USD|[0-9]+,[0-9]+億ドル|前年同[0-9.,?，]+)/.test(text);
+}
+
+function classifyFallbackTaxonomy({
+  debug,
+  responsePath,
+  fallbackKind,
+  cleanup,
+  finalAnswerSafe,
+  languageLabels
+}: {
+  debug: ChatResponseDebugInput;
+  responsePath: ChatResponsePath;
+  fallbackKind: ChatFallbackKind;
+  cleanup: AnswerCleanupResult;
+  finalAnswerSafe: boolean;
+  languageLabels: string[];
+}): FallbackTaxonomy {
+  if (!finalAnswerSafe) {
+    return {
+      fallbackCategory: "language_guard",
+      fallbackUserReason: "raw_english_detected",
+      guardLabels: languageLabels.length > 0 ? languageLabels : ["language_guard"]
+    };
+  }
+
+  const cleanupTaxonomy = normalizePartialTaxonomy(cleanup.taxonomy);
+  if (cleanupTaxonomy) {
+    return cleanupTaxonomy;
+  }
+
+  const modelErrorKind = debug.modelApiErrorKind ?? debug.geminiApiErrorKind ?? null;
+  if (modelErrorKind) {
+    return {
+      fallbackCategory: "model_error",
+      fallbackUserReason: modelErrorKindToUserReason(modelErrorKind),
+      guardLabels: [`model_api_error:${modelErrorKind}`]
+    };
+  }
+
+  if (debug.sourceIdsValid === false || debug.fallbackReason === "invalid_source_id") {
+    return {
+      fallbackCategory: "answer_quality_guard",
+      fallbackUserReason: "invalid_sources",
+      guardLabels: ["invalid_sources"]
+    };
+  }
+
+  if (debug.fallbackReason === "schema_invalid" || debug.fallbackReason === "json_parse_failed") {
+    return {
+      fallbackCategory: "model_error",
+      fallbackUserReason: "model_schema_invalid",
+      guardLabels: [debug.fallbackReason]
+    };
+  }
+
+  if (responsePath !== "fallback" && fallbackKind === "none") {
+    return { fallbackCategory: "none", fallbackUserReason: "none" };
+  }
+
+  if (responsePath === "fallback") {
+    if (debug.fallbackReason === "gemini_timeout" || fallbackKind === "non_hard_model_timeout" || fallbackKind === "hard_model_timeout_evidence") {
+      return {
+        fallbackCategory: "model_error",
+        fallbackUserReason: "model_timeout",
+        guardLabels: ["model_timeout"]
+      };
+    }
+    if (debug.fallbackReason === "gemini_api_error" || fallbackKind === "api_error") {
+      return {
+        fallbackCategory: "model_error",
+        fallbackUserReason: "model_unavailable",
+        guardLabels: ["model_api_error"]
+      };
+    }
+    if (debug.evidenceFallbackUsed || fallbackKind === "evidence_slot" || debug.sourceGateApplied) {
+      return sourceInsufficientTaxonomyForIntent(debug.questionIntent, debug.sourceGateMissingSourceTypes);
+    }
+  }
+
+  return { fallbackCategory: "none", fallbackUserReason: "none" };
+}
+
+function normalizePartialTaxonomy(taxonomy?: Partial<FallbackTaxonomy>): FallbackTaxonomy | null {
+  if (!taxonomy?.fallbackCategory && !taxonomy?.fallbackUserReason) {
+    return null;
+  }
+  return {
+    fallbackCategory: taxonomy.fallbackCategory ?? "none",
+    fallbackUserReason: taxonomy.fallbackUserReason ?? "none",
+    missingEvidence: taxonomy.missingEvidence ?? taxonomy.missingEvidenceLabelsJa?.map((label) => sourceLabelToEvidenceKey(label)),
+    missingEvidenceLabelsJa: taxonomy.missingEvidenceLabelsJa,
+    guardLabels: taxonomy.guardLabels
+  };
+}
+
+function modelErrorKindToUserReason(kind: NonNullable<ChatResponseDebug["modelApiErrorKind"]>): FallbackUserReason {
+  switch (kind) {
+    case "rate_limit":
+      return "model_rate_limited";
+    case "timeout":
+      return "model_timeout";
+    case "bad_request":
+    case "payload_too_large":
+    case "context_too_large":
+      return "model_schema_invalid";
+    case "auth_error":
+    case "provider_server_error":
+    case "network_error":
+    case "unknown":
+    default:
+      return "model_unavailable";
+  }
+}
+
+function sourceInsufficientTaxonomyForIntent(questionIntent?: string | null, missingSourceTypes: string[] = []): FallbackTaxonomy {
+  if (questionIntent === "business_model" || questionIntent === "business_overview") {
+    return sourceInsufficientTaxonomy("business_model_sources_missing", BUSINESS_MODEL_MISSING_EVIDENCE, missingSourceTypes);
+  }
+  if (questionIntent === "management_focus" || questionIntent === "mda_emphasis") {
+    return sourceInsufficientTaxonomy("management_discussion_sources_missing", MANAGEMENT_MISSING_EVIDENCE, missingSourceTypes);
+  }
+  if (questionIntent === "liquidity_debt" || questionIntent === "cash_flow") {
+    return sourceInsufficientTaxonomy("liquidity_sources_missing", LIQUIDITY_MISSING_EVIDENCE, missingSourceTypes);
+  }
+  if (questionIntent === "risk_factors") {
+    return sourceInsufficientTaxonomy("risk_sources_missing", RISK_MISSING_EVIDENCE, missingSourceTypes);
+  }
+  return sourceInsufficientTaxonomy("revenue_driver_sources_missing", REVENUE_DRIVER_MISSING_EVIDENCE, missingSourceTypes);
+}
+
+function sourceInsufficientTaxonomy(
+  fallbackUserReason: Extract<FallbackUserReason, `${string}_sources_missing`>,
+  fallbackLabelsJa: string[],
+  missingSourceTypes: string[]
+): FallbackTaxonomy {
+  const labelsJa = missingSourceTypes.length > 0
+    ? dedupeStrings(missingSourceTypes.map((label) => normalizeMissingEvidenceLabelJa(label)))
+    : fallbackLabelsJa;
+  return {
+    fallbackCategory: "source_insufficient",
+    fallbackUserReason,
+    missingEvidence: labelsJa.map((label) => sourceLabelToEvidenceKey(label)),
+    missingEvidenceLabelsJa: labelsJa,
+    guardLabels: ["source_insufficient"]
+  };
+}
+
+function normalizeMissingEvidenceLabelJa(label: string): string {
+  const normalized = label.trim();
+  const lower = normalized.toLowerCase();
+  if ((lower.includes("mda") || lower.includes("md&a")) && lower.includes("risk")) {
+    return "MD&Aのリスク説明";
+  }
+  if (lower.includes("mda") || lower.includes("md&a") || normalized.includes("経営陣")) {
+    return "MD&A";
+  }
+  if (lower.includes("segment")) {
+    return "セグメント実績";
+  }
+  if (lower.includes("revenue")) {
+    return "売上説明";
+  }
+  if (lower.includes("profitability") || lower.includes("margin")) {
+    return "利益率・採算性の説明";
+  }
+  if (lower.includes("cash") || lower.includes("liquidity")) {
+    return "キャッシュフロー・流動性";
+  }
+  if (lower.includes("debt")) {
+    return "負債の説明";
+  }
+  if (lower.includes("risk")) {
+    return "リスク要因";
+  }
+  if (lower.includes("sector")) {
+    return "業種固有KPI";
+  }
+  return normalizeFallbackSourceLabels(normalized);
+}
+
+function sourceLabelToEvidenceKey(label: string): string {
+  return label
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/md&a/g, "mda")
+    .replace(/[・、／/（）()]+/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "");
+}
+
+function dedupeStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter((value) => value.trim().length > 0)));
+}
+
 function sampleUnsafeAnswer(answer: string): string {
   return answer
     .replace(/[A-Za-z][A-Za-z0-9’'&,()/-]+(?:\s+[A-Za-z0-9’'&,()/-]+){5,}/g, "[english omitted]")
@@ -377,7 +785,7 @@ function cleanBannedFinalAnswer(answer: string, questionIntent?: string | null):
   if (/この資料の範囲では確認できません/.test(cleaned)) {
     const replacement = questionIntent === "liquidity_debt"
       ? "debt note や liquidity discussion の追加確認が必要です"
-      : "不足しているsource typeの追加確認が必要です";
+      : "不足している資料の種類の追加確認が必要です";
     cleaned = cleaned.replace(/この資料の範囲では確認できません/g, replacement);
   }
 

@@ -25,19 +25,20 @@ describe("remote config", () => {
     expect(config.dailyRefreshEnabled).toBe(false);
     expect(config.webSupplementEnabled).toBe(false);
     expect(config.creditBillingEnabled).toBe(true);
+    expect(config.freeDailyChatLimit).toBe(25);
     expect(config.planCredits).toEqual({
-      free: 30,
+      free: 50,
       lite: 150,
       pro: 500,
       pro_max: 1200
     });
-    expect(config.freeMonthlyCreditLimit).toBe(30);
+    expect(config.freeMonthlyCreditLimit).toBe(50);
     expect(config.liteMonthlyCreditLimit).toBe(150);
     expect(config.proMonthlyCreditLimit).toBe(500);
     expect(config.proMaxMonthlyCreditLimit).toBe(1200);
   });
 
-  it("normalizes plan credit limits from the compact planCredits map", async () => {
+  it("normalizes plan credit limits from the compact planCredits map and keeps Free at least 50", async () => {
     const config = await loadRemoteConfig({
       KABUYOMI_CACHE: {
         get: async () => ({
@@ -52,18 +53,30 @@ describe("remote config", () => {
     } as never);
 
     expect(config.planCredits).toEqual({
-      free: 25,
+      free: 50,
       lite: 175,
       pro: 600,
       pro_max: 1500
     });
-    expect(config.freeMonthlyCreditLimit).toBe(25);
+    expect(config.freeMonthlyCreditLimit).toBe(50);
     expect(config.liteMonthlyCreditLimit).toBe(175);
     expect(config.proMonthlyCreditLimit).toBe(600);
     expect(config.proMaxMonthlyCreditLimit).toBe(1500);
   });
 
-  it("keeps legacy monthly credit config fields as fallbacks", async () => {
+  it("keeps legacy Free chat limit at least 25", async () => {
+    const config = await loadRemoteConfig({
+      KABUYOMI_CACHE: {
+        get: async () => ({
+          freeDailyChatLimit: 10
+        })
+      }
+    } as never);
+
+    expect(config.freeDailyChatLimit).toBe(25);
+  });
+
+  it("keeps legacy monthly credit config fields as fallbacks and keeps Free at least 50", async () => {
     const config = await loadRemoteConfig({
       KABUYOMI_CACHE: {
         get: async () => ({
@@ -76,7 +89,7 @@ describe("remote config", () => {
     } as never);
 
     expect(config.planCredits).toEqual({
-      free: 20,
+      free: 50,
       lite: 120,
       pro: 450,
       pro_max: 900
@@ -182,8 +195,8 @@ describe("remote config", () => {
     const first = await loadRemoteConfig(env);
     const second = await loadRemoteConfig(env);
 
-    expect(first.freeDailyChatLimit).toBe(3);
-    expect(second.freeDailyChatLimit).toBe(3);
+    expect(first.freeDailyChatLimit).toBe(25);
+    expect(second.freeDailyChatLimit).toBe(25);
     expect(get).toHaveBeenCalledTimes(1);
   });
 
@@ -209,8 +222,8 @@ describe("remote config", () => {
     vi.setSystemTime(new Date("2026-04-25T00:01:01.000Z"));
     const second = await loadRemoteConfig(env);
 
-    expect(first.freeDailyChatLimit).toBe(3);
-    expect(second.freeDailyChatLimit).toBe(7);
+    expect(first.freeDailyChatLimit).toBe(25);
+    expect(second.freeDailyChatLimit).toBe(25);
     expect(get).toHaveBeenCalledTimes(2);
   });
 });

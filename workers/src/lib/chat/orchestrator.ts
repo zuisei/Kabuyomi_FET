@@ -197,7 +197,7 @@ export async function buildChatResponse(
         questionIntent,
         responsePath: "deterministic",
         fallbackReason: modelResponse.fallbackReason ?? "deterministic_repair",
-        sourceIdsValid: modelSourceIdsValid,
+        sourceIdsValid: deterministic.response.sources.length > 0,
         contentMode,
         geminiCalled: modelResponse.geminiCalled ?? true,
         geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
@@ -216,7 +216,7 @@ export async function buildChatResponse(
       geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
       fallbackReason: modelResponse.fallbackReason ?? "deterministic_repair",
       schemaValid: modelResponse.schemaValid ?? true,
-      sourceIdsValid: modelSourceIdsValid,
+      sourceIdsValid: finalResponse.sources.length > 0,
       sourceCount: finalResponse.sources.length,
       contentMode,
       contextPack,
@@ -234,6 +234,76 @@ export async function buildChatResponse(
       reason: "filtered_invalid_source_ids",
       droppedSourceCount: modelResponse.sourceIds.length - approvedSourceIds.length
     });
+  }
+
+  if (!modelSourceIdsValid && approvedSourceIds.length > 0) {
+    const recovered = await timings.timeAsync("fallbackBuildMs", () => buildLocalFallbackResponse({
+      filing,
+      question,
+      env,
+      validSourceIds: fallbackValidSourceIds,
+      contextPack
+    }));
+    const fallbackResponse = recovered ?? {
+      answer: "選択された資料だけでは、この回答の根拠を安全に確認できません。回答に使う資料IDが不正だったため、確認できる資料だけに基づく回答へ切り替えます。",
+      sources: mapSourceIdsToSecFilingSources(approvedSourceIds.slice(0, 2), sourceById)
+    };
+    const repairedSourceIdsValid = fallbackResponse.sources.length > 0;
+
+    logWarnEvent("chat_grounding_repair_used", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      reason: "invalid_source_ids_guarded_fallback",
+      recoveredByLocalFallback: recovered != null
+    });
+    logEvent("chat_path_selected", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      path: "fallback",
+      reason: "invalid_source_id"
+    });
+    logChatLlmUsage(modelResponse, filing, "fallback");
+
+    const finalResponse = await finalize(
+      fallbackResponse,
+      "fallback",
+      {
+        questionIntent,
+        responsePath: "fallback",
+        fallbackReason: "invalid_source_id",
+        sourceIdsValid: repairedSourceIdsValid,
+        contentMode,
+        geminiCalled: modelResponse.geminiCalled ?? true,
+        geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+        schemaValid: modelResponse.schemaValid ?? true,
+        fallbackKind: recovered ? "evidence_slot" : "weak_grounding",
+        fallbackKindSource: "orchestrator",
+        sourceRepairLabels: repairedSourceIdsValid
+          ? ["invalid_sources", "fallback_source_repaired", "source_ids_invalid_prevented"]
+          : ["invalid_sources", "no_final_sources"],
+        retryAttempt: modelResponse.retryAttempt ?? 0,
+        retryReason: modelResponse.retryReason ?? null,
+        ...buildModelAttemptDebugFields(modelResponse),
+        ...buildContextDebugFields(contextPack)
+      }
+    );
+    logDecision({
+      filing,
+      questionIntent,
+      responsePath: "fallback",
+      geminiCalled: modelResponse.geminiCalled ?? true,
+      geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+      fallbackReason: "invalid_source_id",
+      schemaValid: modelResponse.schemaValid ?? true,
+      sourceIdsValid: repairedSourceIdsValid,
+      sourceCount: finalResponse.sources.length,
+      contentMode,
+      contextPack,
+      retryAttempt: modelResponse.retryAttempt ?? 0,
+      retryReason: modelResponse.retryReason ?? null,
+      llmUsage: modelResponse.llmUsage
+    });
+    return finalResponse;
   }
 
   if (approvedSourceIds.length === 0 && modelResponse.answer === CONTEXT_UNAVAILABLE_ANSWER) {

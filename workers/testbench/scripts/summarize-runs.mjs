@@ -23,6 +23,14 @@ const fallbackReasons = countBy(
   rows.filter((row) => row.fallbackReason),
   (row) => row.fallbackReason
 );
+const fallbackCategories = countBy(
+  rows.filter((row) => row.fallbackCategory),
+  (row) => row.fallbackCategory
+);
+const fallbackUserReasons = countBy(
+  rows.filter((row) => row.fallbackUserReason),
+  (row) => row.fallbackUserReason
+);
 const failureLabels = countBy(
   rows.flatMap((row) => observedFailureLabels(row)),
   (label) => label
@@ -62,10 +70,14 @@ if (ratedRows.length > 0) {
 
 printCounts("responsePath", responsePaths);
 printCounts("fallbackReason", fallbackReasons);
+printCounts("fallbackCategory", fallbackCategories);
+printCounts("fallbackUserReason", fallbackUserReasons);
 printCounts("answerQualityFlags", answerFlags);
 printCounts("failureLabelsObserved", failureLabels);
 printObjectCounts("rawGeminiApiErrorBreakdown", benchmarkSummary.rawGeminiApiErrorBreakdown);
 printObjectCounts("rawFallbackKindBreakdown", benchmarkSummary.rawFallbackKindBreakdown);
+printObjectCounts("fallbackCategoryBreakdown", benchmarkSummary.fallbackCategoryBreakdown);
+printObjectCounts("fallbackUserReasonBreakdown", benchmarkSummary.fallbackUserReasonBreakdown);
 
 if (invalidSourceRows.length > 0) {
   console.log(`\n## Invalid Source ID Cases`);

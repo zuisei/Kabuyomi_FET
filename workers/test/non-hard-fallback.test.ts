@@ -19,12 +19,13 @@ describe("non-hard deterministic fallback cleanup", () => {
       })
     });
 
-    expect(response.answer).toContain("Balance Sheet");
-    expect(response.answer).toContain("Debt Note");
-    expect(response.answer).toContain("Liquidity MD&A");
-    expect(response.answer).toContain("Cash Flow Statement");
+    expect(response.answer).toContain("貸借対照表");
+    expect(response.answer).toContain("負債の注記");
+    expect(response.answer).toContain("流動性の説明");
+    expect(response.answer).toContain("キャッシュフロー計算書");
     expect(response.answer).toContain("懸念の有無は断定しません");
     expect(response.answer).not.toContain("懸念はありません");
+    expect(response.answer).not.toContain("source");
   });
 
   it("keeps irrelevant risk snippets from becoming a risk summary", async () => {
@@ -38,7 +39,7 @@ describe("non-hard deterministic fallback cleanup", () => {
       })
     });
 
-    expect(response.answer).toContain("filing固有の重要リスクを十分に絞れません");
+    expect(response.answer).toContain("SEC資料固有の重要リスクを十分に絞れません");
     expect(response.answer).toContain("リスク要因セクション");
     expect(response.answer).toContain("MD&Aのリスク説明");
     expect(response.answer).not.toContain("景気や需要の不確実性");
@@ -55,9 +56,10 @@ describe("non-hard deterministic fallback cleanup", () => {
     });
 
     expect(response.answer).toContain("1) セグメント別実績");
-    expect(response.answer).toContain("2) 売上driverの説明");
+    expect(response.answer).toContain("2) 売上要因の説明");
     expect(response.answer).toContain("3) 資金繰りまたはリスクの説明");
-    expect(response.answer).toContain("具体的なdriverはこのsourceだけでは特定しません");
+    expect(response.answer).toContain("具体的な要因はこの資料だけでは特定しません");
+    expect(response.answer).not.toContain("source");
   });
 
   it("does not explain business model from revenue metrics only", async () => {
@@ -70,11 +72,12 @@ describe("non-hard deterministic fallback cleanup", () => {
       })
     });
 
-    expect(response.answer).toContain("事業内容や収益内訳");
-    expect(response.answer).toContain("Business");
-    expect(response.answer).toContain("Segment Information");
-    expect(response.answer).toContain("Revenue Note");
+    expect(response.answer).toContain("この会社の収益源");
+    expect(response.answer).toContain("事業内容");
+    expect(response.answer).toContain("セグメント情報");
+    expect(response.answer).toContain("売上内訳");
     expect(response.answer).not.toContain("儲けています");
+    expect(response.answer).not.toContain("source");
   });
 
   it("formats USD amounts consistently in Japanese fallback units", () => {
@@ -96,9 +99,10 @@ describe("non-hard deterministic fallback cleanup", () => {
 
     expect(response.answer).toContain("全社売上の増減は確認できます");
     expect(response.answer).toContain("セグメント・地域別の強弱");
-    expect(response.answer).toContain("Segment results");
-    expect(response.answer).toContain("Geographic revenue");
-    expect(response.answer).toContain("Product/category revenue");
+    expect(response.answer).toContain("セグメント実績");
+    expect(response.answer).toContain("地域別売上");
+    expect(response.answer).toContain("製品・カテゴリ別売上");
+    expect(response.answer).not.toContain("source");
   });
 
   it("does not treat margin movement as a margin driver", async () => {
@@ -112,7 +116,7 @@ describe("non-hard deterministic fallback cleanup", () => {
     });
 
     expect(response.answer).toContain("利益率の方向は確認できます");
-    expect(response.answer).toContain("具体的なdriverは十分に特定できません");
+    expect(response.answer).toContain("具体的な要因は十分に特定できません");
     expect(response.answer).toContain("コスト");
     expect(response.answer).toContain("segment margin");
   });
@@ -128,7 +132,9 @@ describe("non-hard deterministic fallback cleanup", () => {
     });
 
     expect(response.answer).toContain("前年同期比の増減は確認できます");
-    expect(response.answer).toContain("previous filing evidence");
+    expect(response.answer).toContain("過去の提出資料との比較");
+    expect(response.answer).toContain("前回の提出資料");
+    expect(response.answer).not.toContain("previous filing evidence");
     expect(response.answer).not.toContain("前回決算との差は20.0%");
   });
 

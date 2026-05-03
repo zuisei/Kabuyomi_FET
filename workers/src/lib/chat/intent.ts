@@ -52,7 +52,7 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
   }
 
   if (
-    /(md&a|managementdiscussion|経営者による説明|経営陣|会社コメント|managementcommentary|業績説明|本文要約|ガイダンス|見通し|outlook|guidance)/.test(
+    /(md&a|managementdiscussion|経営者による説明|経営陣|会社側.*強調|会社コメント|強調している論点|強調してる論点|強調されてること|強調されていること|managementcommentary|業績説明|本文要約|ガイダンス|見通し|outlook|guidance)/.test(
       normalized
     )
   ) {

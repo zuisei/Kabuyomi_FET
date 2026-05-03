@@ -155,7 +155,7 @@ struct ComposerBar: View {
             Spacer(minLength: 0)
 
             if !hasEnoughCredits {
-                Button("プラン") {
+                Button("追加") {
                     openCreditOptions()
                 }
                 .font(.system(.caption2, design: .rounded, weight: .bold))

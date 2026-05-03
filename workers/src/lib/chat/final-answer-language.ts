@@ -116,22 +116,22 @@ export function buildJapaneseLanguageGuardFallback({
   const missing = joinItems(missingSourceTypes.length > 0 ? missingSourceTypes : sourceTypesForIntent(questionIntent));
 
   if (effectiveIntent === "revenue_driver") {
-    return `売上の増減は確認できますが、選択されたsourceでは会社固有の売上driverを十分に特定できません。主因を見るには、${missing} の説明を追加確認する必要があります。`;
+    return `売上の増減は確認できますが、選択された資料では会社固有の売上driverを十分に特定できません。主因を見るには、${missing} の説明を追加確認する必要があります。`;
   }
 
   if (effectiveIntent === "driver_durability_followup") {
-    return `前問の具体的なdriverを十分に特定できていないため、このsourceだけで一時要因か継続要因かは分類しません。判断には、${missing} の継続確認が必要です。`;
+    return `前問の具体的なdriverを十分に特定できていないため、この資料だけで一時要因か継続要因かは分類しません。判断には、${missing} の継続確認が必要です。`;
   }
 
   if (effectiveIntent === "margin_durability_followup") {
-    return "利益率の方向は確認できますが、具体的なmargin driverは十分に特定できません。そのため、このsourceだけで一時要因か構造的変化かは分類しません。判断には、cost、mix、pricing、expenses、provision、segment margin などの説明が必要です。";
+    return "利益率の方向は確認できますが、具体的なmargin driverは十分に特定できません。そのため、この資料だけで一時要因か構造的変化かは分類しません。判断には、コスト、製品構成、価格、営業費用、引当金、セグメント利益率などの説明が必要です。";
   }
 
   if (fallbackKind === "context_unavailable") {
-    return `選択されたsourceだけでは、この質問に直接答えるための具体的な説明を十分に確認できません。追加で必要なのは ${missing} です。`;
+    return `選択された資料だけでは、この質問に直接答えるための具体的な説明を十分に確認できません。追加で必要なのは ${missing} です。`;
   }
 
-  return `選択されたsourceだけでは、この質問に直接答えるための具体的な説明を十分に確認できません。確認できる範囲に限定すると、追加で必要なのは ${missing} です。`;
+  return `選択された資料だけでは、この質問に直接答えるための具体的な説明を十分に確認できません。確認できる範囲に限定すると、追加で必要なのは ${missing} です。`;
 }
 
 function maskAllowedEnglishTerms(answer: string): string {
@@ -242,26 +242,26 @@ function sourceTypesForIntent(questionIntent?: string | null): string[] {
   switch (questionIntent) {
     case "liquidity_debt":
     case "cash_flow":
-      return ["Balance Sheet", "Debt Note", "Liquidity MD&A", "Cash Flow Statement"];
+      return ["貸借対照表", "負債の注記", "流動性の説明", "キャッシュフロー計算書"];
     case "risk_summary":
     case "risk_factors":
-      return ["Risk Factors", "MD&A risk discussion", "業種固有risk discussion"];
+      return ["リスク要因", "MD&Aのリスク説明", "業種固有リスクの説明"];
     case "watch_points":
     case "mda_summary":
-      return ["MD&A", "segment results", "revenue driver discussion", "liquidity or risk discussion"];
+      return ["MD&A", "セグメント実績", "売上driverの説明", "流動性またはリスクの説明"];
     case "segment_driver":
     case "segment_analysis":
     case "revenue_breakdown":
       return ["Segment results", "Geographic revenue", "Product/category revenue"];
     case "business_model":
     case "business_overview":
-      return ["Business", "Segment Information", "Revenue Note", "MD&A business discussion"];
+      return ["事業内容", "セグメント情報", "売上内訳", "MD&Aの事業説明"];
     case "margin_driver":
     case "margin_profitability":
       return ["cost discussion", "mix", "pricing", "operating expenses", "provision", "segment margin"];
     case "prior_filing_delta":
     case "historical_comparison":
-      return ["previous filing evidence", "prior filing MD&A", "prior period XBRL"];
+      return ["前回の提出資料", "前回のMD&A", "前期のXBRL数値"];
     default:
       return ["MD&A", "segment results", "revenue discussion", "業種固有KPI"];
   }

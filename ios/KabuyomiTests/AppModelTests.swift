@@ -335,7 +335,7 @@ final class AppModelTests: XCTestCase {
         let didSend = await model.sendChat(question: "売上高は？", ticker: "AAPL")
 
         XCTAssertFalse(didSend)
-        XCTAssertEqual(model.activeAlert?.message, "creditが不足しています。設定のプラン画面で月額プランを確認してください。")
+        XCTAssertEqual(model.activeAlert?.message, "creditが不足しています。設定のクレジット画面で追加creditを確認してください。")
     }
 
     func testPurchaseCreditPackBlocksWhenCreditBillingIsDisabled() async {
@@ -366,7 +366,7 @@ final class AppModelTests: XCTestCase {
 
         await model.purchaseCreditPack(productId: "credit_pack_100")
 
-        XCTAssertEqual(model.activeAlert?.message, "追加credit購入は現在利用できません。月額プランから利用してください。")
+        XCTAssertEqual(model.activeAlert?.message, "追加credit購入は現在利用できません。時間をおいてからもう一度お試しください。")
         XCTAssertFalse(model.billingActionInFlight)
     }
 

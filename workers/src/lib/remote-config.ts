@@ -37,6 +37,8 @@ interface CreditBillingIdentity {
 
 const CURRENT_EXTRACTOR_VERSION = "v6";
 const REMOTE_CONFIG_MEMORY_TTL_MS = 60 * 1000;
+const MIN_FREE_DAILY_CHAT_LIMIT = 25;
+const MIN_FREE_MONTHLY_CREDIT_LIMIT = 50;
 
 interface RemoteConfigMemoryCache {
   config: RemoteConfig;
@@ -47,7 +49,7 @@ let remoteConfigMemoryCaches = new WeakMap<KVNamespace, RemoteConfigMemoryCache>
 
 export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   freeStockLimit: 3,
-  freeDailyChatLimit: 10,
+  freeDailyChatLimit: 25,
   proStockLimit: 20,
   proDailyChatLimit: 50,
   adsEnabled: true,
@@ -55,12 +57,12 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   webSupplementEnabled: false,
   creditBillingEnabled: true,
   planCredits: {
-    free: 30,
+    free: 50,
     lite: 150,
     pro: 500,
     pro_max: 1200
   },
-  freeMonthlyCreditLimit: 30,
+  freeMonthlyCreditLimit: 50,
   liteMonthlyCreditLimit: 150,
   proMonthlyCreditLimit: 500,
   proMaxMonthlyCreditLimit: 1200,
@@ -132,6 +134,10 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
       typeof payload.creditBillingEnabled === "boolean"
         ? payload.creditBillingEnabled
         : DEFAULT_REMOTE_CONFIG.creditBillingEnabled,
+    freeDailyChatLimit: Math.max(
+      MIN_FREE_DAILY_CHAT_LIMIT,
+      normalizeNonNegativeInteger(payload.freeDailyChatLimit, DEFAULT_REMOTE_CONFIG.freeDailyChatLimit)
+    ),
     planCredits,
     freeMonthlyCreditLimit: planCredits.free,
     liteMonthlyCreditLimit: planCredits.lite,
@@ -195,7 +201,7 @@ function normalizePlanCredits(
 ): Record<CreditPlan, number> {
   const rawPlanCredits = rawValue && typeof rawValue === "object" ? (rawValue as Partial<Record<CreditPlan, unknown>>) : {};
   return {
-    free: normalizeNonNegativeInteger(rawPlanCredits.free, fallback.free),
+    free: Math.max(MIN_FREE_MONTHLY_CREDIT_LIMIT, normalizeNonNegativeInteger(rawPlanCredits.free, fallback.free)),
     lite: normalizeNonNegativeInteger(rawPlanCredits.lite, fallback.lite),
     pro: normalizeNonNegativeInteger(rawPlanCredits.pro, fallback.pro),
     pro_max: normalizeNonNegativeInteger(rawPlanCredits.pro_max, fallback.pro_max)

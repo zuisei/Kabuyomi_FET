@@ -156,6 +156,14 @@ export function buildBenchmarkSummary(rows, options = {}) {
       decoratedRows.filter((row) => row.fallbackReason),
       (row) => row.fallbackReason
     ),
+    fallbackCategoryBreakdown: countBy(
+      decoratedRows.filter((row) => row.fallbackCategory),
+      (row) => row.fallbackCategory
+    ),
+    fallbackUserReasonBreakdown: countBy(
+      decoratedRows.filter((row) => row.fallbackUserReason),
+      (row) => row.fallbackUserReason
+    ),
     rawGeminiApiErrorBreakdown: countBy(
       decoratedRows.filter((row) => row.geminiApiErrorKind),
       (row) => row.geminiApiErrorKind

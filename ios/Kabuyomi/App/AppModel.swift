@@ -276,7 +276,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             if !Self.isRunningTests {
                 await self.subscriptionStore.refreshEntitlements(reason: "bootstrap")
                 await self.syncBillingState(showErrors: false)
-                await self.loadSubscriptionProducts(showErrors: false)
+                await self.loadCreditPackProducts(showErrors: false)
                 await self.recoverUnfinishedCreditPurchases(showErrors: false)
             }
             await self.refreshUsage()
@@ -347,7 +347,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 let products = try await subscriptionStore.subscriptionProducts()
                 subscriptionProducts = products
 
-                if products.allSatisfy(\.isAvailable) {
+                if products.contains(where: \.isAvailable) {
                     subscriptionProductLoadState = .loaded
                     return
                 }
@@ -382,7 +382,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         guard !billingActionInFlight else { return }
         guard isCreditBillingEnabled else {
             activeAlert = AppAlertState(
-                message: "追加credit購入は現在利用できません。月額プランから利用してください。",
+                message: "追加credit購入は現在利用できません。時間をおいてからもう一度お試しください。",
                 kind: .dismissOnly
             )
             return
@@ -426,6 +426,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 }
             }
         }
+    }
+
+    func refreshCreditUsage() async {
+        await refreshUsage()
     }
 
     #if DEBUG
@@ -762,7 +766,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             message: """
 保存済みデータと会話履歴をこの端末から削除します。
 取得済みの決算資料も消え、画面の状態は最初からやり直す状態に戻ります。
-credit残高と購読状態に使う端末識別情報は維持されます。
+credit残高に使う端末識別情報は維持されます。
 """,
             kind: .resetConfirmation
         )
@@ -770,7 +774,7 @@ credit残高と購読状態に使う端末識別情報は維持されます。
 
     func requestCreditOptions() {
         activeAlert = AppAlertState(
-            message: "creditが不足しています。設定のプラン画面で月額プランを確認してください。",
+            message: "creditが不足しています。設定のクレジット画面で追加creditを確認してください。",
             kind: .dismissOnly
         )
     }
@@ -1232,7 +1236,7 @@ credit残高と購読状態に使う端末識別情報は維持されます。
         }
 
         if rawMessage.contains("insufficient_credits") || rawMessage.contains("creditが不足") {
-            return "creditが不足しています。設定のプラン画面で月額プランを確認してください。"
+            return "creditが不足しています。設定のクレジット画面で追加creditを確認してください。"
         }
 
         if rawMessage.contains("Apple transaction verification") || rawMessage.contains("Apple transaction could not be verified") {
@@ -1313,10 +1317,61 @@ credit残高と購読状態に使う端末識別情報は維持されます。
         if source != .refresh {
             usageMutationGeneration += 1
         }
-        let effectiveUsage = mergeUsageSavedTickersIfNeeded(usage, source: source)
+        let effectiveUsage = normalizeV1FreeCreditUsage(mergeUsageSavedTickersIfNeeded(usage, source: source))
         self.usage = effectiveUsage
         guard let serverTickers = effectiveUsage.savedTickers else { return }
         reconcileSavedTickers(with: serverTickers)
+    }
+
+    private func normalizeV1FreeCreditUsage(_ usage: UsagePayload) -> UsagePayload {
+        guard BillingCatalog.tier(for: usage.plan).plan == BillingCatalog.free.plan else {
+            return usage
+        }
+
+        let normalizedChatLimit = max(usage.chatLimit, BillingCatalog.free.chatLimit)
+        guard let credits = usage.credits else {
+            guard normalizedChatLimit != usage.chatLimit else { return usage }
+            return UsagePayload(
+                plan: usage.plan,
+                chatsUsed: usage.chatsUsed,
+                chatLimit: normalizedChatLimit,
+                stocksUsed: usage.stocksUsed,
+                stockLimit: usage.stockLimit,
+                dateJST: usage.dateJST,
+                savedTickers: usage.savedTickers,
+                accessMode: usage.accessMode,
+                credits: nil,
+                creditBillingEnabled: usage.creditBillingEnabled
+            )
+        }
+
+        let normalizedMonthlyLimit = max(credits.monthlyLimit, BillingCatalog.free.monthlyCredits)
+        let limitDelta = normalizedMonthlyLimit - credits.monthlyLimit
+        let normalizedMonthlyRemaining = max(0, min(normalizedMonthlyLimit, credits.monthlyRemaining + limitDelta))
+        let normalizedCredits = CreditUsagePayload(
+            monthlyRemaining: normalizedMonthlyRemaining,
+            monthlyLimit: normalizedMonthlyLimit,
+            purchasedRemaining: credits.purchasedRemaining,
+            totalRemaining: normalizedMonthlyRemaining + credits.purchasedRemaining,
+            resetsAt: credits.resetsAt
+        )
+
+        guard normalizedChatLimit != usage.chatLimit || normalizedCredits != credits else {
+            return usage
+        }
+
+        return UsagePayload(
+            plan: usage.plan,
+            chatsUsed: usage.chatsUsed,
+            chatLimit: normalizedChatLimit,
+            stocksUsed: usage.stocksUsed,
+            stockLimit: usage.stockLimit,
+            dateJST: usage.dateJST,
+            savedTickers: usage.savedTickers,
+            accessMode: usage.accessMode,
+            credits: normalizedCredits,
+            creditBillingEnabled: usage.creditBillingEnabled
+        )
     }
 
     private func mergeUsageSavedTickersIfNeeded(_ usage: UsagePayload, source: UsageUpdateSource) -> UsagePayload {
@@ -1844,5 +1899,9 @@ credit残高と購読状態に使う端末識別情報は維持されます。
 
     var isUsageSynchronizing: Bool {
         usage == nil && usageLoadState == .loading
+    }
+
+    var isUsageRefreshing: Bool {
+        usageLoadState == .loading
     }
 }

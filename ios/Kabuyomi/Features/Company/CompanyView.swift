@@ -99,6 +99,7 @@ struct CompanyView: View {
     @State private var activePanel: CompanySidePanel?
     @State private var librarySearchTask: Task<Void, Never>?
     @State private var settingsPresented = false
+    @State private var settingsDismissInputShield = false
     @State private var searchPresented = false
     @State private var selectedSource: LocalMessageSourceRef?
     @State private var panelDrag: CompanyPanelDrag?
@@ -216,7 +217,11 @@ struct CompanyView: View {
 
                 mainContent
                     .blur(radius: panelAtmosphereProgress(screenWidth: proxy.size.width) * 9)
-                    .disabled(panelVisibilityProgress(screenWidth: proxy.size.width) > 0.01)
+                    .disabled(
+                        panelVisibilityProgress(screenWidth: proxy.size.width) > 0.01
+                            || settingsPresented
+                            || settingsDismissInputShield
+                    )
                     .accessibilityHidden(activePanel != nil)
 
                 if panelVisibilityProgress(screenWidth: proxy.size.width) > 0.01 {
@@ -305,6 +310,14 @@ struct CompanyView: View {
                     )
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
+
+                if settingsPresented || settingsDismissInputShield {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .ignoresSafeArea()
+                        .onTapGesture {}
+                        .accessibilityHidden(true)
+                }
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -356,6 +369,10 @@ struct CompanyView: View {
         .fullScreenCover(isPresented: $settingsPresented) {
             SettingsView()
                 .interactiveDismissDisabled(true)
+        }
+        .onChange(of: settingsPresented) { _, isPresented in
+            guard !isPresented else { return }
+            shieldSettingsDismissInput()
         }
         .sheet(isPresented: $searchPresented) {
             SearchView()
@@ -804,6 +821,14 @@ struct CompanyView: View {
         Task {
             try? await Task.sleep(for: .milliseconds(180))
             settingsPresented = true
+        }
+    }
+
+    private func shieldSettingsDismissInput() {
+        settingsDismissInputShield = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            settingsDismissInputShield = false
         }
     }
 

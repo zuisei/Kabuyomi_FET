@@ -51,6 +51,13 @@ describe("chat question intent and context packing", () => {
     expect(classifyQuestionIntent("利益率が悪化した理由は？")).toBe("margin_profitability");
   });
 
+  it("classifies management-emphasis questions as MD&A-style context requests", () => {
+    expect(classifyQuestionIntent("経営陣が強調している論点は？")).toBe("mda_summary");
+    expect(classifyQuestionIntent("経営陣は何を強調してる？")).toBe("mda_summary");
+    expect(classifyQuestionIntent("会社側が強調してるポイントは？")).toBe("mda_summary");
+    expect(classifyQuestionIntent("MD&Aで強調されてることは？")).toBe("mda_summary");
+  });
+
   it("prioritizes meaningful business narrative over numeric-only chunks", () => {
     const filing = {
       ...makeIntentFiling(),
