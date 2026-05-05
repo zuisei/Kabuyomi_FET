@@ -30,9 +30,9 @@ describe("billing catalog", () => {
   });
 
   it("resolves consumable credit pack products", () => {
-    expect(resolveCreditPackCredits("credit_pack_100")).toBe(100);
-    expect(resolveCreditPackCredits("credit_pack_300")).toBe(300);
-    expect(resolveCreditPackCredits("credit_pack_700")).toBe(700);
+    expect(resolveCreditPackCredits("kabuyomi.credits.100")).toBe(100);
+    expect(resolveCreditPackCredits("kabuyomi.credits.300")).toBeNull();
+    expect(resolveCreditPackCredits("kabuyomi.credits.700")).toBeNull();
     expect(resolveCreditPackCredits("unknown_pack")).toBeNull();
   });
 });

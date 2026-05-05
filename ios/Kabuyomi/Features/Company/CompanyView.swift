@@ -454,11 +454,11 @@ struct CompanyView: View {
     private var composerPlaceholder: String {
         guard company != nil else {
             if isCurrentCompanyLoading {
-                return "\(currentTicker) を読み込み中..."
+                return "\(currentTicker) を読み込み中…"
             }
 
             if companyLoadState?.status == .preparing {
-                return "決算資料を準備中..."
+                return "決算資料を準備中…"
             }
 
             return "\(currentTicker) を開けませんでした。左上から別の銘柄を選択してください"

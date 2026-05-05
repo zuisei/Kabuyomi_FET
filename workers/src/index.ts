@@ -9,6 +9,7 @@ import { isAppError } from "./lib/errors";
 import { logErrorEvent, logEvent } from "./lib/logging";
 import { loadRemoteConfig } from "./lib/remote-config";
 import { json, notFound, serverError, unavailable } from "./lib/response";
+import { handleAdMobRewardRoutes } from "./routes/admob-rewards";
 import { handleBillingSyncRoute } from "./routes/billing-sync";
 import { handleChatRoute } from "./routes/chat";
 import { handleCompanyRoute } from "./routes/company";
@@ -45,6 +46,7 @@ const apiRoutes: RouteHandler[] = [
   handleCreditPurchaseGrantRoute,
   handleTranslateQuoteRoute,
   handleUsageRoute,
+  handleAdMobRewardRoutes,
   handleBillingSyncRoute
 ];
 

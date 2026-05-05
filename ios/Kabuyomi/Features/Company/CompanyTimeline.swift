@@ -193,7 +193,7 @@ func buildPendingAssistantViewState(
 
     if elapsed < 1.1 {
         return PendingAssistantViewState(
-            badge: "Thinking",
+            badge: "整理中",
             title: "質問の軸を整理しています",
             detail: isHistorical
                 ? "比較する期間と論点を先に揃えています。"
@@ -203,7 +203,7 @@ func buildPendingAssistantViewState(
 
     if elapsed < 2.6 {
         return PendingAssistantViewState(
-            badge: "Searching",
+            badge: "検索中",
             title: isHistorical ? "比較に必要な提出資料を探しています" : "関連箇所を探しています",
             detail: isHistorical
                 ? pendingHistoryDetail(formType: formType)
@@ -212,7 +212,7 @@ func buildPendingAssistantViewState(
     }
 
     return PendingAssistantViewState(
-        badge: "Drafting",
+        badge: "作成中",
         title: isHistorical ? "比較しやすい形に整えています" : "返答を短くまとめています",
         detail: isHistorical
             ? "数字と本文の差分をつないで、読みやすい順に並べています。"
@@ -602,11 +602,11 @@ struct ConversationLoadingState: View {
 
     private var titleText: String {
         if isPreparingState {
-            return "決算資料を準備中..."
+            return "決算資料を準備中…"
         }
 
         if isLoading {
-            return "\(ticker) の会話を準備中..."
+            return "\(ticker) の会話を準備中…"
         }
 
         if showsRetryableState {

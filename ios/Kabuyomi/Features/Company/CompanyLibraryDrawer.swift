@@ -95,7 +95,7 @@ struct ConversationLibraryDrawer: View {
             DrawerDivider()
 
             DrawerQuickActionRow(
-                title: "Search",
+                title: "銘柄検索",
                 subtitle: "検索画面を開く",
                 systemImage: "magnifyingglass",
                 action: openSearch
@@ -109,7 +109,7 @@ struct ConversationLibraryDrawer: View {
     private var savedSection: some View {
         if !savedCompanies.isEmpty {
             DrawerSection(
-                title: "Watchlist",
+                title: "保存リスト",
                 subtitle: "保存した銘柄",
                 priority: .standard
             ) {
@@ -225,7 +225,7 @@ struct ConversationLibraryDrawer: View {
                 HStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("検索中...")
+                    Text("検索中…")
                         .font(.system(.footnote, design: .rounded))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
@@ -338,7 +338,7 @@ private struct DrawerEmptyWatchlistHint: View {
                     .background(Circle().fill(KabuyomiTheme.accentMist.opacity(0.9)))
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Watchlistはまだ空です")
+                    Text("保存リストはまだ空です")
                         .font(.system(.subheadline, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.ink)
                     Text("保存した銘柄がここに並びます。")

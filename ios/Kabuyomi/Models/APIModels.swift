@@ -432,6 +432,8 @@ struct UsagePayload: Decodable, Hashable {
 struct CreditUsagePayload: Decodable, Hashable {
     let monthlyRemaining: Int
     let monthlyLimit: Int
+    let rewardedAdRemaining: Int?
+    let rewardedAdExpiresAt: String?
     let purchasedRemaining: Int
     let totalRemaining: Int
     let resetsAt: String
@@ -439,6 +441,22 @@ struct CreditUsagePayload: Decodable, Hashable {
     var hasChatCredit: Bool {
         totalRemaining >= 1
     }
+}
+
+struct AdMobRewardIntentResponse: Decodable, Hashable {
+    let rewardIntentId: String
+    let customData: String
+    let rewardCredits: Int
+    let dailyRemaining: Int
+}
+
+struct AdMobRewardStatusResponse: Decodable, Hashable {
+    let rewardIntentId: String
+    let status: String
+    let rewardCredits: Int
+    let creditsRemaining: Int
+    let dailyRemaining: Int
+    let usage: UsagePayload
 }
 
 struct BillingSyncRequest: Encodable {
@@ -458,6 +476,7 @@ struct CreditPurchaseGrantRequest: Encodable {
 }
 
 struct CreditPurchaseGrantResponse: Decodable {
+    let status: String?
     let transactionId: String
     let productId: String
     let creditsGranted: Int

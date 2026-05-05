@@ -33,6 +33,7 @@ OPENAI_TIMEOUT_MS = "20000"
 OPENAI_REASONING_EFFORT = "minimal"
 OPENAI_MAX_COMPLETION_TOKENS = "1800"
 HARD_INTENT_TARGETED_RETRIEVAL_MODE = "diagnostic"
+ADMOB_REWARDED_AD_UNIT_ID = "ca-app-pub-1248492954379402/7202804414"
 SEC_FETCHER_TIMEOUT_MS = "25000"
 # Configure SEC_FETCHER_BASE_URL in .dev.vars for local wrangler dev
 # Optionally set DEV_DETACHED_ACCESS_DEVICE_KEYS in deployed environments to allow DEBUG-only detached access for specific x-device-key values

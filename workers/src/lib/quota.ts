@@ -88,6 +88,16 @@ export interface EvalCreditGrantResult {
   creditsRemaining: number;
 }
 
+export interface RewardedAdCreditGrantResult {
+  usage: UsageState;
+  didMutate: boolean;
+  operationId: string;
+  rewardIntentId: string;
+  transactionId: string;
+  creditsGranted: number;
+  creditsRemaining: number;
+}
+
 export class InsufficientCreditsError extends AppError {
   constructor(
     readonly creditsRequired: number,
@@ -99,11 +109,13 @@ export class InsufficientCreditsError extends AppError {
 
 interface CreditOperationResult {
   operationId: string;
-  type: "consume" | "refund" | "monthly_grant" | "purchase_grant" | "eval_grant";
+  type: "consume" | "refund" | "monthly_grant" | "purchase_grant" | "eval_grant" | "admob_rewarded_grant";
   status: "applied" | "insufficient" | "noop";
   delta: number;
   balanceAfter: number;
   monthlyBalanceAfter: number;
+  rewardedAdBalanceAfter?: number;
+  rewardedAdExpiresAt?: string;
   purchasedBalanceAfter: number;
   originalOperationId?: string;
   referenceType?: string;
@@ -368,6 +380,37 @@ export async function grantEvalCredits(
     didMutate: result.didMutate,
     operationId,
     referenceId: options.referenceId,
+    creditsGranted: options.credits,
+    creditsRemaining: result.creditsRemaining
+  };
+}
+
+export async function grantRewardedAdCredits(
+  identity: QuotaIdentity,
+  env: Env,
+  config: RemoteConfig,
+  options: {
+    rewardIntentId: string;
+    transactionId: string;
+    credits: number;
+    expiresAt: string;
+  }
+): Promise<RewardedAdCreditGrantResult> {
+  const operationId = buildRewardedAdOperationId(options.transactionId);
+  const result = await mutateRewardedAdCreditGrant(identity, env, config, {
+    operationId,
+    credits: options.credits,
+    rewardIntentId: options.rewardIntentId,
+    transactionId: options.transactionId,
+    expiresAt: options.expiresAt
+  });
+
+  return {
+    usage: result.usage,
+    didMutate: result.didMutate,
+    operationId,
+    rewardIntentId: options.rewardIntentId,
+    transactionId: options.transactionId,
     creditsGranted: options.credits,
     creditsRemaining: result.creditsRemaining
   };
@@ -803,6 +846,88 @@ async function mutateEvalCreditGrant(
   };
 }
 
+async function mutateRewardedAdCreditGrant(
+  identity: QuotaIdentity,
+  env: Env,
+  config: RemoteConfig,
+  options: {
+    operationId: string;
+    credits: number;
+    rewardIntentId: string;
+    transactionId: string;
+    expiresAt: string;
+  }
+): Promise<
+  QuotaMutationResult & {
+    creditOperation?: CreditOperationResult;
+    creditsRemaining: number;
+  }
+> {
+  const stub = env.USER_QUOTA.getByName(identity.quotaSubject);
+  const dateJST = buildQuotaDateJST();
+  const limits = resolveIdentityLimits(identity, config);
+  const response = await stub.fetch("https://do/quota", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      action: "grantRewardedAdCredit",
+      quotaSubject: identity.quotaSubject,
+      plan: identity.plan,
+      accessMode: identity.accessMode,
+      dateJST,
+      chatLimit: limits.chatLimit,
+      stockLimit: limits.stockLimit,
+      monthlyCreditLimit: limits.monthlyCreditLimit,
+      operationId: options.operationId,
+      credits: options.credits,
+      promoExpiresAt: options.expiresAt,
+      referenceType: "admob_rewarded",
+      referenceId: options.rewardIntentId,
+      transactionId: options.transactionId
+    })
+  });
+
+  const payload = (await response.json()) as UsageEnvelope & { error?: string };
+  if (!response.ok || !payload.usage) {
+    logEvent("quota_denial", {
+      action: "grantRewardedAdCredit",
+      quotaSubject: identity.quotaSubject,
+      plan: identity.plan,
+      reason: payload.error ?? "Rewarded ad credit grant failed"
+    });
+    throw new AppError(response.status, payload.error ?? "Rewarded ad credit grant failed");
+  }
+
+  if (payload.monthlyGrant) {
+    await persistMonthlyGrant(env, identity, payload.monthlyGrant);
+  }
+  if (payload.creditOperation && payload.creditOperation.delta !== 0) {
+    await persistCreditLedgerEntry(env, identity, payload.creditOperation);
+  }
+
+  const creditsRemaining = payload.creditsRemaining ?? payload.usage.credits?.totalRemaining ?? 0;
+  logEvent("rewarded_ad_credit_granted", {
+    userId: identity.quotaSubject,
+    operationId: options.operationId,
+    rewardIntentId: options.rewardIntentId,
+    transactionId: options.transactionId,
+    status: payload.creditOperation?.status ?? "unknown",
+    delta: payload.creditOperation?.delta ?? 0,
+    creditsRemaining
+  });
+
+  return {
+    usage: payload.usage,
+    didMutate: payload.didMutate === true,
+    creditOperation: payload.creditOperation,
+    creditsRemaining
+  };
+}
+
+function buildRewardedAdOperationId(transactionId: string): string {
+  return `admob-reward:${transactionId}`;
+}
+
 async function ensurePurchaseTransactionRow(
   identity: QuotaIdentity,
   env: Env,
@@ -966,7 +1091,10 @@ async function persistCreditLedgerEntry(
         operation.referenceId ?? null,
         JSON.stringify({
           status: operation.status,
-          originalOperationId: operation.originalOperationId ?? null
+          originalOperationId: operation.originalOperationId ?? null,
+          rewardedAdBalanceAfter: operation.rewardedAdBalanceAfter ?? null,
+          rewardedAdExpiresAt: operation.rewardedAdExpiresAt ?? null,
+          creditSource: operation.type === "admob_rewarded_grant" ? "admob_rewarded" : null
         }),
         operation.createdAt
       )
@@ -980,7 +1108,7 @@ async function persistCreditLedgerEntry(
   }
 }
 
-function buildQuotaDateJST(): string {
+export function buildQuotaDateJST(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Tokyo",
     year: "numeric",

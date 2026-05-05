@@ -56,6 +56,18 @@ function createQuotaState() {
   };
 }
 
+function fakeJws(payload: Record<string, unknown>): string {
+  return `${base64UrlEncodeJSON({ alg: "ES256", kid: "apple" })}.${base64UrlEncodeJSON(payload)}.signature`;
+}
+
+function base64UrlEncodeJSON(value: unknown): string {
+  let binary = "";
+  for (const byte of new TextEncoder().encode(JSON.stringify(value))) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
 function createEvalGrantEnv() {
   const quota = new UserQuotaDO(createQuotaState() as never);
   const dbRun = vi.fn().mockResolvedValue({});
@@ -381,8 +393,12 @@ describe("worker routing", () => {
           "x-device-key": "device-123"
         },
         body: JSON.stringify({
-          productId: "credit_pack_100",
-          transactionId: "tx-100"
+          productId: "kabuyomi.credits.100",
+          transactionId: "tx-100",
+          signedTransactionInfo: fakeJws({
+            transactionId: "tx-100",
+            productId: "kabuyomi.credits.100"
+          })
         })
       }),
       {
@@ -399,17 +415,23 @@ describe("worker routing", () => {
     });
   });
 
-  it("does not require the internal token on the public StoreKit credit grant route", async () => {
+  it.each(["/v1/ios/purchases/credits/complete", "/v1/credits/purchase-grant"])(
+    "does not require the internal token on the public StoreKit credit grant route %s",
+    async (path) => {
     const response = await worker.fetch(
-      new Request("https://kabuyomi.test/v1/credits/purchase-grant", {
+      new Request(`https://kabuyomi.test${path}`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
           "x-device-key": "device-123"
         },
         body: JSON.stringify({
-          productId: "credit_pack_100",
-          transactionId: "tx-100"
+          productId: "kabuyomi.credits.100",
+          transactionId: "tx-100",
+          signedTransactionInfo: fakeJws({
+            transactionId: "tx-100",
+            productId: "kabuyomi.credits.100"
+          })
         })
       }),
       {
@@ -423,6 +445,34 @@ describe("worker routing", () => {
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
       error: "Apple transaction verification is not configured"
+    });
+    }
+  );
+
+  it("rejects public StoreKit credit grants without signed transaction info", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/ios/purchases/credits/complete", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          productId: "kabuyomi.credits.100",
+          transactionId: "tx-100"
+        })
+      }),
+      {
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid credit purchase payload"
     });
   });
 

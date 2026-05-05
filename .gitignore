@@ -11,6 +11,8 @@ workers/.dev.vars.*
 sec-fetcher/.env
 .claude
 artifacts
+test-results/
+KABUYOMI_CONTEXT.md
 AGENTS.md
 CURRENT_SLICE.md
 WORKERS_AGENT_CHAT_RECOVERY.md

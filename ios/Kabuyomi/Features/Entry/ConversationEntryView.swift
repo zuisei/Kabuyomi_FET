@@ -58,6 +58,8 @@ struct ConversationEntryView: View {
                 actionCard
                 searchButton
             }
+            .frame(maxWidth: 640, alignment: .leading)
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, 20)
             .padding(.top, 18)
             .padding(.bottom, 24)
@@ -66,87 +68,96 @@ struct ConversationEntryView: View {
     }
 
     private var introContent: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Spacer(minLength: 18)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Kabuyomi")
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.84)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Kabuyomi")
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.84)
+                    Text("米国株のSEC資料を日本語で質問")
+                        .font(.system(.headline, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                Text("米国株リサーチと会話する")
-                    .font(.system(.headline, design: .rounded, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
-            }
+                    Text("公開提出資料の内容確認を助けるアプリです。投資助言や売買推奨は行いません。")
+                        .font(.system(.footnote, design: .rounded, weight: .medium))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 18)
 
-            VStack(spacing: 0) {
-                introRow(
-                    title: "決算を読む",
-                    subtitle: "SEC資料から要点を確認",
-                    systemImage: "doc.text.magnifyingglass"
-                )
-                introDivider
-                introRow(
-                    title: "そのまま聞く",
-                    subtitle: "根拠つきでチャット",
-                    systemImage: "bubble.left.and.text.bubble.right"
-                )
-                introDivider
-                introRow(
-                    title: "銘柄を保存",
-                    subtitle: "Watchlistからすぐ戻れる",
-                    systemImage: "bookmark"
-                )
-            }
-            .padding(.vertical, 8)
-            .kabuyomiCard(.primary, radius: 22)
+                VStack(spacing: 0) {
+                    introRow(
+                        title: "決算を読む",
+                        subtitle: "10-K / 10-Q の要点を確認",
+                        systemImage: "doc.text.magnifyingglass"
+                    )
+                    introDivider
+                    introRow(
+                        title: "そのまま聞く",
+                        subtitle: "根拠資料つきで質問",
+                        systemImage: "bubble.left.and.text.bubble.right"
+                    )
+                    introDivider
+                    introRow(
+                        title: "銘柄を保存",
+                        subtitle: "保存リストからすぐ戻れる",
+                        systemImage: "bookmark"
+                    )
+                }
+                .padding(.vertical, 8)
+                .kabuyomiCard(.primary, radius: 22)
 
-            Spacer(minLength: 10)
-
-            VStack(spacing: 12) {
-                Button {
-                    withAnimation(.easeOut(duration: 0.22)) {
-                        hasSeenEntryIntro = true
-                    }
-                } label: {
-                    Label("始める", systemImage: "arrow.right")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 54)
-                        .background(
-                            Capsule()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [KabuyomiTheme.accentDeep, KabuyomiTheme.accent],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
+                VStack(spacing: 12) {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.22)) {
+                            hasSeenEntryIntro = true
+                        }
+                    } label: {
+                        Label("銘柄を選んで質問する", systemImage: "arrow.right")
+                            .font(.system(.headline, design: .rounded, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(minHeight: 54)
+                            .background(
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [KabuyomiTheme.accentDeep, KabuyomiTheme.accent],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
                                     )
-                                )
-                        )
-                        .shadow(color: KabuyomiTheme.accentDeep.opacity(0.22), radius: 14, x: 0, y: 9)
-                }
-                .buttonStyle(.plain)
+                            )
+                            .shadow(color: KabuyomiTheme.accentDeep.opacity(0.22), radius: 14, x: 0, y: 9)
+                    }
+                    .buttonStyle(.plain)
 
-                Button {
-                    hasSeenEntryIntro = true
-                    searchPresented = true
-                } label: {
-                    Text("銘柄を検索して始める")
-                        .font(.system(.footnote, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                        .kabuyomiGlass(radius: 23, tint: Color.white.opacity(0.26), stroke: Color.white.opacity(0.6))
+                    Button {
+                        hasSeenEntryIntro = true
+                        searchPresented = true
+                    } label: {
+                        Text("ティッカーや会社名で検索")
+                            .font(.system(.footnote, design: .rounded, weight: .bold))
+                            .foregroundStyle(KabuyomiTheme.accentDeep)
+                            .frame(maxWidth: .infinity)
+                            .frame(minHeight: 46)
+                            .kabuyomiGlass(radius: 23, tint: Color.white.opacity(0.26), stroke: Color.white.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+                .padding(.bottom, 30)
             }
+            .frame(maxWidth: 560, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 24)
         .padding(.top, 24)
-        .padding(.bottom, 30)
+        .scrollBounceBehavior(.basedOnSize)
     }
 
     private func introRow(title: String, subtitle: String, systemImage: String) -> some View {
@@ -164,15 +175,17 @@ struct ConversationEntryView: View {
                 Text(title)
                     .font(.system(.subheadline, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(subtitle)
                     .font(.system(.caption, design: .rounded, weight: .semibold))
                     .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
-        .frame(height: 58)
+        .frame(minHeight: 58)
     }
 
     private var introDivider: some View {
@@ -301,6 +314,7 @@ struct ConversationEntryView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("決算を開く")
                             .font(.system(.body, design: .rounded, weight: .bold))
+                            .fixedSize(horizontal: false, vertical: true)
                         Text(selectedCompany.ticker)
                             .font(.system(.caption, design: .rounded, weight: .bold))
                             .opacity(0.72)
@@ -315,6 +329,7 @@ struct ConversationEntryView: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
                 .frame(maxWidth: .infinity)
+                .frame(minHeight: 58)
                 .background(
                     RoundedRectangle(cornerRadius: 19, style: .continuous)
                         .fill(

@@ -7,12 +7,20 @@ final class AppModelTests: XCTestCase {
         super.setUp()
         Self.clearKabuyomiDefaults()
         DeviceIdentityStore().reset()
+        #if DEBUG
+        AdMobConfig.setRewardedCreditSSVSmokeModeEnabled(false)
+        AdMobConfig.setTestDeviceIdentifiers([])
+        #endif
     }
 
     override func tearDown() {
         MockAppModelURLProtocol.requestHandler = nil
         Self.clearKabuyomiDefaults()
         DeviceIdentityStore().reset()
+        #if DEBUG
+        AdMobConfig.setRewardedCreditSSVSmokeModeEnabled(false)
+        AdMobConfig.setTestDeviceIdentifiers([])
+        #endif
         super.tearDown()
     }
 
@@ -320,6 +328,8 @@ final class AppModelTests: XCTestCase {
             credits: CreditUsagePayload(
                 monthlyRemaining: 0,
                 monthlyLimit: 30,
+                rewardedAdRemaining: nil,
+                rewardedAdExpiresAt: nil,
                 purchasedRemaining: 0,
                 totalRemaining: 0,
                 resetsAt: "2026-05-01T00:00:00+09:00"
@@ -352,6 +362,8 @@ final class AppModelTests: XCTestCase {
             credits: CreditUsagePayload(
                 monthlyRemaining: 30,
                 monthlyLimit: 30,
+                rewardedAdRemaining: nil,
+                rewardedAdExpiresAt: nil,
                 purchasedRemaining: 0,
                 totalRemaining: 30,
                 resetsAt: "2026-05-01T00:00:00+09:00"
@@ -364,10 +376,15 @@ final class AppModelTests: XCTestCase {
             throw URLError(.badServerResponse)
         }
 
-        await model.purchaseCreditPack(productId: "credit_pack_100")
+        await model.purchaseCreditPack(productId: "kabuyomi.credits.100")
 
         XCTAssertEqual(model.activeAlert?.message, "追加credit購入は現在利用できません。時間をおいてからもう一度お試しください。")
         XCTAssertFalse(model.billingActionInFlight)
+    }
+
+    func testMiniConsumableUsesProductionStoreKitProductId() {
+        XCTAssertEqual(SubscriptionStore.miniCreditProductID, "kabuyomi.credits.100")
+        XCTAssertEqual(SubscriptionStore.creditPackProductIDs, ["kabuyomi.credits.100"])
     }
 
     func testResetLocalDataClearsRecentStateAndKeepsDeviceIdentity() async throws {
@@ -1761,18 +1778,385 @@ final class AppModelTests: XCTestCase {
         )
     }
 
-    private func makeAppModel(persistence: PersistenceController = PersistenceController(inMemory: true)) -> AppModel {
+    func testRewardedAdCreditSuccessRefreshesBalance() async throws {
+        let rewardedAdService = MockRewardedAdService(result: true)
         MockAppModelURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            let data = try TestFixtures.jsonData([
-                "plan": "free",
-                "chatsUsed": 0,
-                "chatLimit": 10,
-                "stocksUsed": 0,
-                "stockLimit": 3,
-                "dateJST": "2026-04-18"
-            ])
-            return (response, data)
+            switch request.url?.path {
+            case "/v1/usage":
+                return (response, try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30))
+            case "/v1/admob/reward-intents":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "customData": "intent-1.nonce",
+                        "rewardCredits": 2,
+                        "dailyRemaining": 3
+                    ])
+                )
+            case "/v1/admob/reward-status":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "status": "granted",
+                        "rewardCredits": 2,
+                        "creditsRemaining": 32,
+                        "dailyRemaining": 2,
+                        "usage": try Self.creditUsageObject(rewardedAdRemaining: 2, totalRemaining: 32)
+                    ])
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let model = makeAppModel(rewardedAdService: rewardedAdService)
+        await model.refreshCreditUsage()
+        await model.earnRewardedAdCredits()
+
+        XCTAssertEqual(rewardedAdService.presentedCustomData, "intent-1.nonce")
+        XCTAssertEqual(model.rewardedAdCreditState, .idle)
+        XCTAssertEqual(model.rewardedAdStatusMessage, "2クレジットを獲得しました。")
+        XCTAssertEqual(model.creditUsage?.rewardedAdRemaining, 2)
+        XCTAssertEqual(model.creditUsage?.totalRemaining, 52)
+        XCTAssertEqual(model.rewardedAdLastDebugReason, "granted")
+        XCTAssertTrue(model.rewardedAdDeveloperDiagnosticLine.contains("API: custom"))
+        XCTAssertTrue(model.rewardedAdDeveloperDiagnosticLine.contains("AdUnit:"))
+    }
+
+    func testRewardedAdDismissedWithoutRewardDoesNotPollOrGrant() async {
+        let rewardedAdService = MockRewardedAdService(result: false)
+        let statusRequestCounter = ThreadSafeCounter()
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch request.url?.path {
+            case "/v1/usage":
+                return (response, try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30))
+            case "/v1/admob/reward-intents":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "customData": "intent-1.nonce",
+                        "rewardCredits": 2,
+                        "dailyRemaining": 3
+                    ])
+                )
+            case "/v1/admob/reward-status":
+                _ = statusRequestCounter.incrementAndGet()
+                throw URLError(.badServerResponse)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let model = makeAppModel(rewardedAdService: rewardedAdService)
+        await model.refreshCreditUsage()
+        await model.earnRewardedAdCredits()
+
+        XCTAssertEqual(rewardedAdService.presentedCustomData, "intent-1.nonce")
+        XCTAssertEqual(statusRequestCounter.count, 0)
+        XCTAssertEqual(model.rewardedAdCreditState, .idle)
+        XCTAssertEqual(model.rewardedAdStatusMessage, RewardedAdServiceError.dismissedWithoutReward.localizedDescription)
+        XCTAssertEqual(model.creditUsage?.totalRemaining, 50)
+        XCTAssertEqual(model.rewardedAdLastDebugReason, "ad_dismissed_without_reward")
+    }
+
+    func testRewardedAdPresentFailureMapsAlreadyPresenting() async {
+        let rewardedAdService = MockRewardedAdService(error: RewardedAdServiceError.presentFailedAlreadyPresenting)
+        let statusRequestCounter = ThreadSafeCounter()
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch request.url?.path {
+            case "/v1/usage":
+                return (response, try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30))
+            case "/v1/admob/reward-intents":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "customData": "intent-1.nonce",
+                        "rewardCredits": 2,
+                        "dailyRemaining": 3
+                    ])
+                )
+            case "/v1/admob/reward-status":
+                _ = statusRequestCounter.incrementAndGet()
+                throw URLError(.badServerResponse)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let model = makeAppModel(rewardedAdService: rewardedAdService)
+        await model.refreshCreditUsage()
+        await model.earnRewardedAdCredits()
+
+        XCTAssertEqual(rewardedAdService.presentedCustomData, "intent-1.nonce")
+        XCTAssertEqual(statusRequestCounter.count, 0)
+        XCTAssertEqual(model.rewardedAdCreditState, .idle)
+        XCTAssertEqual(model.rewardedAdStatusMessage, RewardedAdServiceError.presentFailedAlreadyPresenting.localizedDescription)
+        XCTAssertEqual(model.rewardedAdLastDebugReason, "rewarded_ad_present_failed_already_presenting")
+    }
+
+    func testRewardedAdPendingSSVFailureUsesPreciseDebugReason() async {
+        let rewardedAdService = MockRewardedAdService(error: RewardedAdServiceError.ssvNotReceivedOrRewardStatusPending)
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch request.url?.path {
+            case "/v1/usage":
+                return (response, try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30))
+            case "/v1/admob/reward-intents":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "customData": "intent-1.nonce",
+                        "rewardCredits": 2,
+                        "dailyRemaining": 3
+                    ])
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let model = makeAppModel(rewardedAdService: rewardedAdService)
+        await model.refreshCreditUsage()
+        await model.earnRewardedAdCredits()
+
+        XCTAssertEqual(rewardedAdService.presentedCustomData, "intent-1.nonce")
+        XCTAssertEqual(model.rewardedAdCreditState, .idle)
+        XCTAssertEqual(model.rewardedAdLastDebugReason, "ssv_not_received_or_reward_status_pending_google_demo_ad_unit_does_not_verify_production_ssv")
+        XCTAssertEqual(model.rewardedAdStatusMessage, "DEBUGのGoogleデモ広告では本番SSVが届かないため、クレジット付与確認はできません。Xcode scheme に KABUYOMI_ADMOB_TEST_DEVICE_IDS を設定し、SSV smoke mode をONにしてください。")
+        XCTAssertFalse(model.rewardedAdStatusMessage?.contains("広告を表示できませんでした") ?? true)
+    }
+
+    #if DEBUG
+    func testRewardedAdProductionAPIWithDemoAdUnitBlocksBeforeRewardIntent() async {
+        AdMobConfig.setRewardedCreditSSVSmokeModeEnabled(false)
+        AdMobConfig.setTestDeviceIdentifiers([])
+        let rewardedAdService = MockRewardedAdService(result: true)
+        let rewardIntentCounter = ThreadSafeCounter()
+        MockAppModelURLProtocol.requestHandler = { request in
+            if request.url?.path == "/v1/admob/reward-intents" {
+                _ = rewardIntentCounter.incrementAndGet()
+            }
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            if request.url?.path == "/v1/usage" {
+                return (response, try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30))
+            }
+            throw URLError(.badServerResponse)
+        }
+
+        let model = makeAppModel(
+            rewardedAdService: rewardedAdService,
+            baseURL: APIBaseURLResolver.productionURL
+        )
+        await model.refreshCreditUsage()
+
+        await model.earnRewardedAdCredits()
+
+        XCTAssertNil(rewardedAdService.presentedCustomData)
+        XCTAssertEqual(rewardIntentCounter.count, 0)
+        XCTAssertEqual(AdMobConfig.rewardedCreditAdUnitID, AdMobConfig.testRewardedCreditAdUnitID)
+        XCTAssertEqual(AdMobConfig.rewardedCreditAdUnitKind, "demo")
+        XCTAssertEqual(AdMobConfig.rewardedCreditSSVSmokeModeStatus, "off_demo_ad_unit")
+        XCTAssertEqual(AdMobConfig.rewardedAdRuntimeMode, .debugDemo)
+        XCTAssertEqual(model.rewardedAdCreditState, .idle)
+        XCTAssertEqual(model.rewardedAdLastDebugReason, AdMobConfig.debugDemoAdUnitCannotVerifyProductionSSVReason)
+        XCTAssertEqual(model.rewardedAdStatusMessage, "DEBUGのGoogleデモ広告では本番SSVが届かないため、クレジット付与確認はできません。Xcode scheme に KABUYOMI_ADMOB_TEST_DEVICE_IDS を設定し、SSV smoke mode をONにしてください。")
+    }
+
+    func testRewardedAdSSVSmokeModeRequiresGoogleTestDeviceMode() {
+        AdMobConfig.setRewardedCreditSSVSmokeModeEnabled(true)
+        AdMobConfig.setTestDeviceIdentifiers([])
+
+        XCTAssertEqual(AdMobConfig.rewardedCreditAdUnitID, AdMobConfig.testRewardedCreditAdUnitID)
+        XCTAssertEqual(AdMobConfig.rewardedCreditAdUnitKind, "demo")
+        XCTAssertEqual(AdMobConfig.rewardedCreditSSVSmokeModeStatus, "blocked_no_test_device_id")
+        XCTAssertEqual(AdMobConfig.rewardedAdRuntimeMode, .debugSmokeBlockedNoTestDevice)
+    }
+
+    func testRewardedAdSSVSmokeModeWithoutTestDeviceBlocksBeforeRewardIntent() async {
+        AdMobConfig.setRewardedCreditSSVSmokeModeEnabled(true)
+        AdMobConfig.setTestDeviceIdentifiers([])
+        let rewardedAdService = MockRewardedAdService(result: true)
+        let rewardIntentCounter = ThreadSafeCounter()
+        MockAppModelURLProtocol.requestHandler = { request in
+            if request.url?.path == "/v1/admob/reward-intents" {
+                _ = rewardIntentCounter.incrementAndGet()
+            }
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            if request.url?.path == "/v1/usage" {
+                return (response, try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30))
+            }
+            throw URLError(.badServerResponse)
+        }
+
+        let model = makeAppModel(
+            rewardedAdService: rewardedAdService,
+            baseURL: APIBaseURLResolver.productionURL
+        )
+        await model.refreshCreditUsage()
+
+        await model.earnRewardedAdCredits()
+
+        XCTAssertNil(rewardedAdService.presentedCustomData)
+        XCTAssertEqual(rewardIntentCounter.count, 0)
+        XCTAssertTrue(model.rewardedAdDeveloperDiagnosticLine.contains("AdUnit: demo"))
+        XCTAssertTrue(model.rewardedAdDeveloperDiagnosticLine.contains("SSV smoke: blocked_no_test_device_id"))
+        XCTAssertEqual(model.rewardedAdLastDebugReason, AdMobConfig.debugDemoAdUnitCannotVerifyProductionSSVReason)
+    }
+
+    func testRewardedAdSSVSmokeModeUsesProductionAdUnitWithTestDeviceMode() {
+        AdMobConfig.setRewardedCreditSSVSmokeModeEnabled(true)
+        AdMobConfig.setTestDeviceIdentifiers(["test-device-id"])
+
+        XCTAssertEqual(AdMobConfig.rewardedCreditAdUnitID, AdMobConfig.productionRewardedCreditAdUnitID)
+        XCTAssertEqual(AdMobConfig.rewardedCreditAdUnitKind, "prod_ssv_smoke")
+        XCTAssertEqual(AdMobConfig.rewardedCreditSSVSmokeModeStatus, "on_test_device")
+        XCTAssertEqual(AdMobConfig.rewardedAdRuntimeMode, .debugSmokeProductionTestDevice)
+    }
+
+    func testRewardedAdProductionSSVSmokeModeAllowsRewardIntentWithTestDeviceMode() async throws {
+        AdMobConfig.setRewardedCreditSSVSmokeModeEnabled(true)
+        AdMobConfig.setTestDeviceIdentifiers(["test-device-id"])
+        let rewardedAdService = MockRewardedAdService(result: true)
+        let rewardIntentCounter = ThreadSafeCounter()
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch request.url?.path {
+            case "/v1/usage":
+                return (response, try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30))
+            case "/v1/admob/reward-intents":
+                _ = rewardIntentCounter.incrementAndGet()
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "customData": "intent-1.nonce",
+                        "rewardCredits": 2,
+                        "dailyRemaining": 3
+                    ])
+                )
+            case "/v1/admob/reward-status":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "status": "granted",
+                        "rewardCredits": 2,
+                        "creditsRemaining": 32,
+                        "dailyRemaining": 2,
+                        "usage": try Self.creditUsageObject(rewardedAdRemaining: 2, totalRemaining: 32)
+                    ])
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let model = makeAppModel(
+            rewardedAdService: rewardedAdService,
+            baseURL: APIBaseURLResolver.productionURL
+        )
+        await model.refreshCreditUsage()
+
+        await model.earnRewardedAdCredits()
+
+        XCTAssertEqual(rewardIntentCounter.count, 1)
+        XCTAssertEqual(rewardedAdService.presentedCustomData, "intent-1.nonce")
+        XCTAssertEqual(model.rewardedAdLastDebugReason, "granted")
+        XCTAssertTrue(model.rewardedAdDeveloperDiagnosticLine.contains("AdUnit: prod_ssv_smoke"))
+        XCTAssertTrue(model.rewardedAdDeveloperDiagnosticLine.contains("SSV smoke: on_test_device"))
+    }
+
+    func testRewardedAdTestDeviceIdentifiersAreTrimmedDedupedAndMasked() {
+        AdMobConfig.setTestDeviceIdentifiers([" test-device-1 ", "", "test-device-2", "test-device-1"])
+
+        XCTAssertEqual(AdMobConfig.testDeviceIdentifiers, ["test-device-1", "test-device-2"])
+        XCTAssertEqual(AdMobConfig.testDeviceModeDiagnostic, "configured(2)")
+    }
+    #endif
+
+    func testRewardedAdDailyCapDisablesGrantFlow() async {
+        let rewardedAdService = MockRewardedAdService(result: true)
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch request.url?.path {
+            case "/v1/usage":
+                return (response, try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30))
+            case "/v1/admob/reward-intents":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "customData": "intent-1.nonce",
+                        "rewardCredits": 2,
+                        "dailyRemaining": 0
+                    ])
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let model = makeAppModel(rewardedAdService: rewardedAdService)
+        await model.refreshCreditUsage()
+        await model.earnRewardedAdCredits()
+
+        XCTAssertNil(rewardedAdService.presentedCustomData)
+        XCTAssertEqual(model.rewardedAdCreditState, .dailyCapReached)
+        XCTAssertEqual(model.rewardedAdStatusMessage, "本日の広告報酬上限に達しました。")
+        XCTAssertEqual(model.rewardedAdLastDebugReason, "daily_cap_reached")
+    }
+
+    func testRewardedAdCreditBillingDisabledReturnsBeforeRewardIntentRequest() async {
+        let rewardedAdService = MockRewardedAdService(result: true)
+        let requestCounter = ThreadSafeCounter()
+        MockAppModelURLProtocol.requestHandler = { request in
+            if request.url?.path == "/v1/admob/reward-intents" {
+                _ = requestCounter.incrementAndGet()
+            }
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            if request.url?.path == "/v1/usage" {
+                return (response, try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30, creditBillingEnabled: false))
+            }
+            throw URLError(.badServerResponse)
+        }
+
+        let model = makeAppModel(rewardedAdService: rewardedAdService)
+        await model.refreshCreditUsage()
+
+        await model.earnRewardedAdCredits()
+
+        XCTAssertNil(rewardedAdService.presentedCustomData)
+        XCTAssertEqual(requestCounter.count, 0)
+        XCTAssertEqual(model.rewardedAdLastDebugReason, "credit_billing_disabled")
+        XCTAssertEqual(model.rewardedAdCreditState, .idle)
+    }
+
+    private func makeAppModel(
+        persistence: PersistenceController = PersistenceController(inMemory: true),
+        rewardedAdService: RewardedAdServing = MockRewardedAdService(result: false),
+        baseURL: URL = URL(string: "https://example.com")!
+    ) -> AppModel {
+        if MockAppModelURLProtocol.requestHandler == nil {
+            MockAppModelURLProtocol.requestHandler = { request in
+                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                let data = try TestFixtures.jsonData([
+                    "plan": "free",
+                    "chatsUsed": 0,
+                    "chatLimit": 10,
+                    "stocksUsed": 0,
+                    "stockLimit": 3,
+                    "dateJST": "2026-04-18"
+                ])
+                return (response, data)
+            }
         }
 
         let configuration = URLSessionConfiguration.ephemeral
@@ -1781,16 +2165,21 @@ final class AppModelTests: XCTestCase {
         let deviceIdentity = DeviceIdentityStore()
 
         return AppModel(
-            apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
+            apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity, baseURL: baseURL),
             persistence: persistence,
-            deviceIdentity: deviceIdentity
+            deviceIdentity: deviceIdentity,
+            rewardedAdService: rewardedAdService
         )
     }
 
-    private func makeAPIClient(session: URLSession, deviceIdentity: DeviceIdentityStore) -> APIClient {
+    private func makeAPIClient(
+        session: URLSession,
+        deviceIdentity: DeviceIdentityStore,
+        baseURL: URL = URL(string: "https://example.com")!
+    ) -> APIClient {
         return APIClient(
             session: session,
-            baseURL: URL(string: "https://example.com")!,
+            baseURL: baseURL,
             deviceIdentity: deviceIdentity
         )
     }
@@ -1825,6 +2214,43 @@ final class AppModelTests: XCTestCase {
         }
 
         return data.isEmpty ? nil : data
+    }
+
+    private nonisolated static func creditUsageData(
+        rewardedAdRemaining: Int,
+        totalRemaining: Int,
+        creditBillingEnabled: Bool = true
+    ) throws -> Data {
+        try TestFixtures.jsonData(creditUsageObject(
+            rewardedAdRemaining: rewardedAdRemaining,
+            totalRemaining: totalRemaining,
+            creditBillingEnabled: creditBillingEnabled
+        ))
+    }
+
+    private nonisolated static func creditUsageObject(
+        rewardedAdRemaining: Int,
+        totalRemaining: Int,
+        creditBillingEnabled: Bool = true
+    ) throws -> [String: Any] {
+        [
+            "plan": "free",
+            "chatsUsed": 0,
+            "chatLimit": 10,
+            "stocksUsed": 0,
+            "stockLimit": 3,
+            "dateJST": "2026-05-03",
+            "credits": [
+                "monthlyRemaining": 30,
+                "monthlyLimit": 30,
+                "rewardedAdRemaining": rewardedAdRemaining,
+                "rewardedAdExpiresAt": "2026-06-02T00:00:00.000Z",
+                "purchasedRemaining": 0,
+                "totalRemaining": totalRemaining,
+                "resetsAt": "2026-06-01T00:00:00+09:00"
+            ],
+            "creditBillingEnabled": creditBillingEnabled
+        ]
     }
 }
 
@@ -1899,4 +2325,24 @@ private final class MockAppModelURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {}
+}
+
+@MainActor
+private final class MockRewardedAdService: RewardedAdServing {
+    let result: Bool
+    let error: Error?
+    var presentedCustomData: String?
+
+    init(result: Bool = false, error: Error? = nil) {
+        self.result = result
+        self.error = error
+    }
+
+    func presentRewardedAd(customData: String) async throws -> Bool {
+        presentedCustomData = customData
+        if let error {
+            throw error
+        }
+        return result
+    }
 }

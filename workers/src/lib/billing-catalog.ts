@@ -11,11 +11,10 @@ export interface PlanLimits {
 export const LITE_PRODUCT_IDS = new Set(["app.kabuyomi.lite.monthly"]);
 export const PRO_PRODUCT_IDS = new Set(["app.kabuyomi.pro.monthly"]);
 export const PRO_MAX_PRODUCT_IDS = new Set(["app.kabuyomi.pro_max.monthly"]);
+export const MINI_CREDIT_PRODUCT_ID = "kabuyomi.credits.100";
 
 export const CREDIT_PACK_PRODUCTS = {
-  credit_pack_100: 100,
-  credit_pack_300: 300,
-  credit_pack_700: 700
+  [MINI_CREDIT_PRODUCT_ID]: 100
 } as const;
 
 export type CreditPackProductId = keyof typeof CREDIT_PACK_PRODUCTS;

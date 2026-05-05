@@ -18,6 +18,8 @@ export interface Env {
   OPENAI_REASONING_EFFORT?: "minimal" | "low" | "medium" | "high";
   OPENAI_MAX_COMPLETION_TOKENS?: string;
   HARD_INTENT_TARGETED_RETRIEVAL_MODE?: "off" | "diagnostic" | "active";
+  ADMOB_REWARDED_AD_UNIT_ID?: string;
+  ADMOB_SSV_PUBLIC_KEYS_URL?: string;
   SEC_USER_AGENT: string;
   SEC_FETCHER_BASE_URL?: string;
   SEC_FETCHER_SHARED_SECRET?: string;
@@ -135,6 +137,8 @@ export interface UsageState {
 export interface CreditUsageState {
   monthlyRemaining: number;
   monthlyLimit: number;
+  rewardedAdRemaining?: number;
+  rewardedAdExpiresAt?: string | null;
   purchasedRemaining: number;
   totalRemaining: number;
   resetsAt: string;

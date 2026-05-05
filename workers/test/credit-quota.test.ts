@@ -3,6 +3,7 @@ import {
   consumeCredit,
   grantEvalCredits,
   grantPurchasedCredits,
+  grantRewardedAdCredits,
   InsufficientCreditsError,
   loadUsage,
   refundCredit,
@@ -65,7 +66,7 @@ describe("credit quota bridge", () => {
   it("records and grants purchased credits once for a consumable transaction", async () => {
     const db = createPurchaseDb({
       user_id: identity.quotaSubject,
-      product_id: "credit_pack_100",
+      product_id: "kabuyomi.credits.100",
       transaction_id: "tx-100",
       original_transaction_id: "orig-tx-100",
       credits_granted: 100,
@@ -107,7 +108,7 @@ describe("credit quota bridge", () => {
       } as never,
       DEFAULT_REMOTE_CONFIG,
       {
-        productId: "credit_pack_100",
+        productId: "kabuyomi.credits.100",
         transactionId: "tx-100",
         originalTransactionId: "orig-tx-100",
         purchasedAt: "2026-04-25T00:00:00.000Z"
@@ -124,7 +125,7 @@ describe("credit quota bridge", () => {
     expect(db.bind).toHaveBeenCalledWith(
       expect.any(String),
       identity.quotaSubject,
-      "credit_pack_100",
+      "kabuyomi.credits.100",
       "tx-100",
       "orig-tx-100",
       100,
@@ -213,20 +214,109 @@ describe("credit quota bridge", () => {
     );
   });
 
+  it("records rewarded ad grants as promotional ledger entries", async () => {
+    const db = createDb();
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          usage: {
+            ...usagePayload(),
+            credits: {
+              monthlyRemaining: 30,
+              monthlyLimit: 30,
+              rewardedAdRemaining: 2,
+              rewardedAdExpiresAt: "2026-05-16T00:00:00.000Z",
+              purchasedRemaining: 0,
+              totalRemaining: 32,
+              resetsAt: "2026-05-01T00:00:00+09:00"
+            }
+          },
+          didMutate: true,
+          creditsRemaining: 32,
+          creditOperation: {
+            operationId: "admob-reward:tx-admob-1",
+            type: "admob_rewarded_grant",
+            status: "applied",
+            delta: 2,
+            balanceAfter: 32,
+            monthlyBalanceAfter: 30,
+            rewardedAdBalanceAfter: 2,
+            rewardedAdExpiresAt: "2026-05-16T00:00:00.000Z",
+            purchasedBalanceAfter: 0,
+            referenceType: "admob_rewarded",
+            referenceId: "intent-1",
+            createdAt: "2026-04-16T00:00:00.000Z"
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    const result = await grantRewardedAdCredits(
+      identity,
+      {
+        DB: db.db,
+        USER_QUOTA: {
+          getByName: vi.fn().mockReturnValue({ fetch })
+        }
+      } as never,
+      DEFAULT_REMOTE_CONFIG,
+      {
+        rewardIntentId: "intent-1",
+        transactionId: "tx-admob-1",
+        credits: 2,
+        expiresAt: "2026-05-16T00:00:00.000Z"
+      }
+    );
+
+    expect(result.operationId).toBe("admob-reward:tx-admob-1");
+    expect(result.creditsGranted).toBe(2);
+    expect(result.creditsRemaining).toBe(32);
+    expect(db.db.prepare).toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE INTO credit_ledger"));
+    expect(db.bind).toHaveBeenCalledWith(
+      expect.any(String),
+      identity.quotaSubject,
+      "admob-reward:tx-admob-1",
+      "admob_rewarded_grant",
+      2,
+      32,
+      30,
+      0,
+      "admob_rewarded",
+      "intent-1",
+      expect.stringContaining('"creditSource":"admob_rewarded"'),
+      "2026-04-16T00:00:00.000Z"
+    );
+    expect(db.bind).toHaveBeenCalledWith(
+      expect.any(String),
+      identity.quotaSubject,
+      "admob-reward:tx-admob-1",
+      "admob_rewarded_grant",
+      2,
+      32,
+      30,
+      0,
+      "admob_rewarded",
+      "intent-1",
+      expect.stringContaining('"rewardedAdExpiresAt":"2026-05-16T00:00:00.000Z"'),
+      "2026-04-16T00:00:00.000Z"
+    );
+  });
+
   it("does not grant credits again when the transaction is already granted", async () => {
     const db = createPurchaseDb({
       user_id: identity.quotaSubject,
-      product_id: "credit_pack_300",
-      transaction_id: "tx-300",
+      product_id: "kabuyomi.credits.100",
+      transaction_id: "tx-100-granted",
       original_transaction_id: null,
-      credits_granted: 300,
+      credits_granted: 100,
       status: "granted",
       purchased_at: null,
       created_at: "2026-04-25T00:00:00.000Z",
       updated_at: "2026-04-25T00:00:01.000Z"
     });
     const fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ usage: usagePayload(300), didMutate: false }), {
+      new Response(JSON.stringify({ usage: usagePayload(100), didMutate: false }), {
         status: 200,
         headers: { "content-type": "application/json" }
       })
@@ -242,14 +332,14 @@ describe("credit quota bridge", () => {
       } as never,
       DEFAULT_REMOTE_CONFIG,
       {
-        productId: "credit_pack_300",
-        transactionId: "tx-300"
+        productId: "kabuyomi.credits.100",
+        transactionId: "tx-100-granted"
       }
     );
 
     expect(result.didMutate).toBe(false);
-    expect(result.creditsGranted).toBe(300);
-    expect(result.creditsRemaining).toBe(330);
+    expect(result.creditsGranted).toBe(100);
+    expect(result.creditsRemaining).toBe(130);
     expect(fetch).toHaveBeenCalledOnce();
     expect(db.db.prepare).not.toHaveBeenCalledWith(expect.stringContaining("UPDATE purchase_transactions"));
     expect(db.db.prepare).not.toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE INTO credit_ledger"));
@@ -283,7 +373,7 @@ describe("credit quota bridge", () => {
   it("rejects a reused transaction id with a different credit pack", async () => {
     const db = createPurchaseDb({
       user_id: identity.quotaSubject,
-      product_id: "credit_pack_100",
+      product_id: "legacy.credit_pack_100",
       transaction_id: "tx-reused",
       original_transaction_id: null,
       credits_granted: 100,
@@ -302,11 +392,11 @@ describe("credit quota bridge", () => {
             getByName: vi.fn()
           }
         } as never,
-        DEFAULT_REMOTE_CONFIG,
-        {
-          productId: "credit_pack_700",
+      DEFAULT_REMOTE_CONFIG,
+      {
+          productId: "kabuyomi.credits.100",
           transactionId: "tx-reused"
-        }
+      }
       )
     ).rejects.toMatchObject({
       status: 409,

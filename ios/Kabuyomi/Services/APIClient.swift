@@ -14,23 +14,27 @@ struct QuotaRequestContext {
 
 enum APIEnvironment: String {
     case production
+    #if DEBUG
     case test
+    #endif
 
     var displayName: String {
         switch self {
         case .production:
             return "Production API"
+        #if DEBUG
         case .test:
             return "Test API"
+        #endif
         }
     }
 }
 
 enum APIBaseURLResolver {
     static let productionURL = URL(string: "https://kabuyomi-api.dznqjmctk7.workers.dev")!
+    #if DEBUG
     static let testURL = URL(string: "https://kabuyomi-api-test.dznqjmctk7.workers.dev")!
 
-    #if DEBUG
     static let debugEnvironmentDefaultsKey = "kabuyomi.apiEnvironment"
 
     static var selectedDebugEnvironment: APIEnvironment {
@@ -51,11 +55,10 @@ enum APIBaseURLResolver {
             return baseURL
         }
 
+        #if DEBUG
         if let configuredURL = configuredBaseURL() {
             return configuredURL
         }
-
-        #if DEBUG
         return url(for: selectedDebugEnvironment)
         #else
         return productionURL
@@ -63,12 +66,16 @@ enum APIBaseURLResolver {
     }
 
     static func url(for environment: APIEnvironment) -> URL {
+        #if DEBUG
         switch environment {
         case .production:
             return productionURL
         case .test:
             return testURL
         }
+        #else
+        productionURL
+        #endif
     }
 
     private static func parsedURL(from rawValue: String) -> URL? {
@@ -83,6 +90,7 @@ enum APIBaseURLResolver {
         return url
     }
 
+    #if DEBUG
     private static func configuredBaseURL() -> URL? {
         if let override = ProcessInfo.processInfo.environment["KABUYOMI_API_BASE_URL"],
            let url = parsedURL(from: override) {
@@ -96,6 +104,7 @@ enum APIBaseURLResolver {
 
         return nil
     }
+    #endif
 }
 
 @MainActor
@@ -130,6 +139,31 @@ struct APIClient {
 
     var baseURLDisplayString: String {
         baseURL.absoluteString
+    }
+
+    var baseURLKindDisplayString: String {
+        if baseURL == APIBaseURLResolver.productionURL {
+            return "prod"
+        }
+        #if DEBUG
+        if baseURL == APIBaseURLResolver.testURL {
+            return "test"
+        }
+        #endif
+        return "custom"
+    }
+
+    var adMobRewardIntentURLDisplayString: String {
+        baseURL.appending(path: "/v1/admob/reward-intents").absoluteString
+    }
+
+    func adMobRewardStatusURLDisplayString(rewardIntentId: String) -> String {
+        var components = URLComponents(
+            url: baseURL.appending(path: "/v1/admob/reward-status"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "id", value: rewardIntentId)]
+        return (components?.url ?? baseURL.appending(path: "/v1/admob/reward-status")).absoluteString
     }
 
     func search(query: String) async throws -> [SearchItem] {
@@ -242,10 +276,31 @@ struct APIClient {
 
     func grantCreditPurchase(_ request: CreditPurchaseGrantRequest) async throws -> CreditPurchaseGrantResponse {
         try await sendRequest(
-            path: "/v1/credits/purchase-grant",
+            path: "/v1/ios/purchases/credits/complete",
             method: "POST",
             headers: requestHeaders(),
             body: request
+        )
+    }
+
+    func createAdMobRewardIntent() async throws -> AdMobRewardIntentResponse {
+        try await sendRequest(
+            path: "/v1/admob/reward-intents",
+            method: "POST",
+            headers: requestHeaders(),
+            body: EmptyRequestBody()
+        )
+    }
+
+    func fetchAdMobRewardStatus(rewardIntentId: String) async throws -> AdMobRewardStatusResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "/v1/admob/reward-status"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "id", value: rewardIntentId)]
+        return try await sendRequest(
+            headers: requestHeaders(),
+            url: components?.url ?? baseURL.appending(path: "/v1/admob/reward-status")
         )
     }
 
@@ -319,7 +374,10 @@ struct APIClient {
                     remaining: payload?.creditsRemaining ?? 0
                 )
             }
-            throw APIError.server(payload?.error ?? "HTTP \(httpResponse.statusCode)")
+            throw APIError.serverStatus(
+                statusCode: httpResponse.statusCode,
+                message: payload?.error ?? "HTTP \(httpResponse.statusCode)"
+            )
         }
 
         return try JSONDecoder().decode(ResponseType.self, from: data)
@@ -342,9 +400,12 @@ private struct APIErrorPayload: Decodable {
     let creditsRemaining: Int?
 }
 
+private struct EmptyRequestBody: Encodable {}
+
 enum APIError: LocalizedError, Equatable {
     case invalidResponse
     case server(String)
+    case serverStatus(statusCode: Int, message: String)
     case insufficientCredits(required: Int, remaining: Int)
 
     var errorDescription: String? {
@@ -353,6 +414,8 @@ enum APIError: LocalizedError, Equatable {
             "レスポンスを解釈できませんでした。"
         case .server(let message):
             message
+        case .serverStatus(let statusCode, let message):
+            "HTTP \(statusCode): \(message)"
         case .insufficientCredits(let required, let remaining):
             "creditが不足しています。必要: \(required)、残り: \(remaining)"
         }

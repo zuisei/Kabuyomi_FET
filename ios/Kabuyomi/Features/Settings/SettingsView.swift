@@ -55,6 +55,9 @@ struct SettingsView: View {
                 .scrollBounceBehavior(.basedOnSize, axes: .vertical)
             }
         }
+        .onAppear {
+            appModel.logRewardedAdSettingsViewed()
+        }
     }
 
     private var creditCard: some View {
@@ -89,6 +92,9 @@ struct SettingsView: View {
                     VStack(spacing: 10) {
                         CreditMetricRow(title: "残高", value: "\(credits.totalRemaining) credits")
                         CreditMetricRow(title: "Free付与", value: "\(credits.monthlyRemaining) / \(credits.monthlyLimit)")
+                        if let rewardedAdRemaining = credits.rewardedAdRemaining, rewardedAdRemaining > 0 {
+                            CreditMetricRow(title: "広告報酬", value: "\(rewardedAdRemaining)")
+                        }
                         if credits.purchasedRemaining > 0 {
                             CreditMetricRow(title: "購入分", value: "\(credits.purchasedRemaining)")
                         }
@@ -116,6 +122,23 @@ struct SettingsView: View {
                         }
                     }
                 )
+                if !miniCreditPackProduct.isAvailable,
+                   let message = appModel.creditPackProductLoadErrorMessage {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.negative)
+                }
+
+                RewardedAdCreditButton(
+                    state: appModel.rewardedAdCreditState,
+                    message: appModel.rewardedAdStatusMessage,
+                    earn: {
+                        appModel.logRewardedAdButtonTapped()
+                        Task {
+                            await appModel.earnRewardedAdCredits()
+                        }
+                    }
+                )
             }
         }
         .task {
@@ -125,8 +148,8 @@ struct SettingsView: View {
     }
 
     private var miniCreditPackProduct: CreditPackProduct {
-        appModel.creditPackProducts.first { $0.id == "credit_pack_100" }
-            ?? CreditPackProduct(id: "credit_pack_100", credits: 100, displayPrice: nil, isAvailable: false)
+        appModel.creditPackProducts.first { $0.id == SubscriptionStore.miniCreditProductID }
+            ?? CreditPackProduct(id: SubscriptionStore.miniCreditProductID, credits: 100, displayPrice: nil, isAvailable: false)
     }
 
     private func formattedResetDate(_ rawValue: String) -> String {
@@ -177,6 +200,19 @@ struct SettingsView: View {
                     }
                 }
 
+                Toggle(isOn: Binding(
+                    get: { appModel.rewardedAdSSVSmokeModeEnabled },
+                    set: { appModel.setRewardedAdSSVSmokeModeEnabled($0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("SSV smoke mode")
+                            .font(.system(.body, design: .rounded, weight: .semibold))
+                        Text("OFF では DEBUG は Google デモ広告unitを使います。広告表示は確認できますが、本番SSV credit付与は確認できません。ON は KABUYOMI_ADMOB_TEST_DEVICE_IDS が必要です。")
+                            .font(.footnote)
+                            .foregroundStyle(KabuyomiTheme.inkMuted)
+                    }
+                }
+
                 VStack(alignment: .leading, spacing: 8) {
                     Text("現在の API 接続先")
                         .font(.system(.footnote, design: .rounded, weight: .bold))
@@ -198,6 +234,26 @@ struct SettingsView: View {
                         .font(.system(.footnote, design: .monospaced, weight: .medium))
                         .foregroundStyle(KabuyomiTheme.ink)
                         .textSelection(.enabled)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("広告報酬診断")
+                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                    Text(appModel.rewardedAdDeveloperDiagnosticLine)
+                        .font(.system(.footnote, design: .monospaced, weight: .medium))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                        .textSelection(.enabled)
+                    if !appModel.usesTestAPI && !appModel.rewardedAdSSVSmokeModeEnabled {
+                        Text("本番API + Googleデモ広告unitのため、credit付与フローは開始前にブロックします。")
+                            .font(.footnote)
+                            .foregroundStyle(KabuyomiTheme.negative)
+                    }
+                    if appModel.rewardedAdSSVSmokeModeEnabled && !appModel.rewardedAdTestDeviceModeConfigured {
+                        Text("SSV smoke mode は ON ですが、Google Mobile Ads test device ID が未設定のため、本番広告unitには切り替えません。")
+                            .font(.footnote)
+                            .foregroundStyle(KabuyomiTheme.negative)
+                    }
                 }
 
                 Text(devModeStatusText)
@@ -350,7 +406,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "広告と購入",
-                body: "無料プランでは Google AdMob によるバナー広告を表示する場合があります。追加 credit の購入、返金、請求、購入復元は Apple ID と App Store の仕組みに従います。"
+                body: "無料プランでは Google AdMob による広告を表示する場合があります。広告視聴による credit 付与は、サーバー側で完了確認できた場合に反映されます。追加 credit の購入、返金、請求、購入復元は Apple ID と App Store の仕組みに従います。"
             ),
             LegalSection(
                 title: "保存期間",
@@ -461,7 +517,7 @@ private struct MiniCreditPackRow: View {
     let purchase: (String) -> Void
 
     private var displayPrice: String {
-        product.displayPrice ?? "¥200"
+        product.displayPrice ?? "価格確認中"
     }
 
     var body: some View {
@@ -473,7 +529,7 @@ private struct MiniCreditPackRow: View {
                     Text("Mini")
                         .font(.system(.body, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.ink)
-                    Text("100 credits / 通常chat 50回分")
+                    Text("100クレジット / 約50回分の質問")
                         .font(.footnote)
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
@@ -484,7 +540,7 @@ private struct MiniCreditPackRow: View {
                     Text(displayPrice)
                         .font(.system(.subheadline, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.accentDeep)
-                    Text(product.isAvailable ? "追加" : "App Store確認中")
+                    Text(product.isAvailable ? "App Storeで購入" : "App Store確認中")
                         .font(.system(.caption, design: .rounded, weight: .bold))
                         .foregroundStyle(product.isAvailable ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative)
                 }
@@ -498,6 +554,71 @@ private struct MiniCreditPackRow: View {
         .buttonStyle(.plain)
         .disabled(isPurchasing || !product.isAvailable)
         .opacity(product.isAvailable ? 1 : 0.72)
+    }
+}
+
+private struct RewardedAdCreditButton: View {
+    let state: RewardedAdCreditState
+    let message: String?
+    let earn: () -> Void
+
+    private var isDisabled: Bool {
+        switch state {
+        case .idle:
+            false
+        case .loading, .presenting, .pendingGrant, .dailyCapReached:
+            true
+        }
+    }
+
+    private var title: String {
+        switch state {
+        case .idle:
+            "広告を見て2クレジット獲得"
+        case .loading:
+            "広告を読み込み中…"
+        case .presenting:
+            "広告を表示しています…"
+        case .pendingGrant:
+            "報酬を確認中…"
+        case .dailyCapReached:
+            "本日の広告報酬上限に達しました"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: earn) {
+                HStack(spacing: 10) {
+                    if state == .loading || state == .pendingGrant {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "play.rectangle.fill")
+                            .font(.system(size: 16, weight: .bold))
+                    }
+                    Text(title)
+                        .font(.system(.body, design: .rounded, weight: .bold))
+                    Spacer()
+                }
+                .foregroundStyle(isDisabled ? KabuyomiTheme.inkMuted : KabuyomiTheme.paper)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(isDisabled ? KabuyomiTheme.fill(for: .muted) : AnyShapeStyle(KabuyomiTheme.accentDeep))
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isDisabled)
+
+            if let message, !message.isEmpty {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(state == .dailyCapReached ? KabuyomiTheme.negative : KabuyomiTheme.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 

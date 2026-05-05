@@ -63,7 +63,7 @@ struct SearchView: View {
     @ViewBuilder
     private var searchContent: some View {
         if appModel.searchIsLoading {
-            ProgressView("検索中...")
+            ProgressView("検索中…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         } else if let searchErrorMessage = appModel.searchErrorMessage {
             SearchErrorState(message: searchErrorMessage) {
@@ -244,7 +244,7 @@ private struct SearchHomeState: View {
                     SearchEmptyState()
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Recent Research")
+                        Text("最近開いた銘柄")
                             .font(.system(.headline, design: .rounded, weight: .bold))
                             .foregroundStyle(KabuyomiTheme.accentDeep)
                             .padding(.horizontal, 4)
@@ -269,6 +269,7 @@ private struct SearchHomeState: View {
                                                 .font(.system(.caption, design: .rounded, weight: .semibold))
                                                 .foregroundStyle(KabuyomiTheme.inkMuted)
                                                 .lineLimit(1)
+                                                .minimumScaleFactor(0.86)
                                         }
 
                                         Spacer()
@@ -375,6 +376,7 @@ private struct SearchResultCard: View {
         }
         .padding(16)
         .kabuyomiCard(.primary, radius: 24)
+        .accessibilityElement(children: .contain)
     }
 
     private var saveButtonTitle: String {
@@ -417,6 +419,8 @@ private struct SearchResultCard: View {
         Text(title)
             .font(.system(.caption, design: .rounded, weight: .semibold))
             .foregroundStyle(tint)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(

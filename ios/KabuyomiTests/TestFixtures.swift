@@ -122,6 +122,8 @@ enum TestFixtures {
             credits: CreditUsagePayload(
                 monthlyRemaining: 30,
                 monthlyLimit: 30,
+                rewardedAdRemaining: nil,
+                rewardedAdExpiresAt: nil,
                 purchasedRemaining: 0,
                 totalRemaining: 30,
                 resetsAt: "2026-05-01T00:00:00+09:00"

@@ -72,7 +72,7 @@ export const InternalCreditPurchaseGrantRequestSchema = CreditPurchaseGrantBaseR
 });
 
 export const CreditPurchaseGrantRequestSchema = CreditPurchaseGrantBaseRequestSchema.extend({
-  signedTransactionInfo: z.string().trim().min(1).max(16_384).optional()
+  signedTransactionInfo: z.string().trim().min(1).max(16_384)
 });
 
 export const EvalCreditGrantRequestSchema = z.object({
@@ -80,6 +80,8 @@ export const EvalCreditGrantRequestSchema = z.object({
   credits: z.number().int().min(1).max(1_000),
   referenceId: z.string().trim().min(1).max(64)
 });
+
+export const AdMobRewardIntentRequestSchema = z.object({}).passthrough();
 
 export const QuotaRequestSchema = z.object({
   action: z.enum([
@@ -97,7 +99,8 @@ export const QuotaRequestSchema = z.object({
     "consumeCredit",
     "refundCredit",
     "grantPurchasedCredit",
-    "grantEvalCredit"
+    "grantEvalCredit",
+    "grantRewardedAdCredit"
   ]),
   quotaSubject: z.string().trim().min(1),
   plan: z.enum(["free", "lite", "pro", "pro_max"]),
@@ -111,6 +114,7 @@ export const QuotaRequestSchema = z.object({
   originalOperationId: z.string().trim().min(1).max(128).optional(),
   creditsRequired: z.number().int().min(1).max(100).optional(),
   credits: z.number().int().min(1).max(1_000).optional(),
+  promoExpiresAt: z.string().trim().min(1).max(64).optional(),
   purchaseCredits: z.number().int().min(1).max(10_000).optional(),
   productId: z.string().trim().min(1).max(128).optional(),
   transactionId: z.string().trim().min(1).max(256).optional(),

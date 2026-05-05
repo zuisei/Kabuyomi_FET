@@ -27,6 +27,7 @@ export const handleInternalCreditPurchaseGrantRoute: RouteHandler = async ({ req
   const result = await grantPurchasedCredits(identity, env, config, payload);
 
   return json({
+    status: result.didMutate ? "granted" : "already_granted",
     transactionId: result.transactionId,
     productId: result.productId,
     creditsGranted: result.creditsGranted,

@@ -1006,7 +1006,7 @@ describe("UserQuotaDO", () => {
       monthlyCreditLimit: 30,
       operationId: "purchase:tx-100",
       transactionId: "tx-100",
-      productId: "credit_pack_100",
+      productId: "kabuyomi.credits.100",
       originalTransactionId: "orig-tx-100",
       purchasedAt: "2026-04-16T00:00:00.000Z",
       purchaseCredits: 100
@@ -1109,6 +1109,112 @@ describe("UserQuotaDO", () => {
       usage: {
         credits: {
           totalRemaining: 28
+        }
+      }
+    });
+  });
+
+  it("grants rewarded ad credits into a promotional bucket idempotently", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+
+    const first = await postQuota(quota, {
+      action: "grantRewardedAdCredit",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30,
+      operationId: "admob-reward:tx-1",
+      credits: 2,
+      promoExpiresAt: "2026-05-16T00:00:00.000Z",
+      referenceType: "admob_rewarded",
+      referenceId: "intent-1"
+    });
+    const duplicate = await postQuota(quota, {
+      action: "grantRewardedAdCredit",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30,
+      operationId: "admob-reward:tx-1",
+      credits: 2,
+      promoExpiresAt: "2026-05-16T00:00:00.000Z",
+      referenceType: "admob_rewarded",
+      referenceId: "intent-1"
+    });
+
+    await expect(first.json()).resolves.toMatchObject({
+      didMutate: true,
+      creditOperation: {
+        type: "admob_rewarded_grant",
+        delta: 2,
+        rewardedAdBalanceAfter: 2,
+        rewardedAdExpiresAt: "2026-05-16T00:00:00.000Z"
+      },
+      usage: {
+        credits: {
+          monthlyRemaining: 30,
+          rewardedAdRemaining: 2,
+          purchasedRemaining: 0,
+          totalRemaining: 32
+        }
+      }
+    });
+    await expect(duplicate.json()).resolves.toMatchObject({
+      didMutate: false,
+      usage: {
+        credits: {
+          rewardedAdRemaining: 2,
+          totalRemaining: 32
+        }
+      }
+    });
+  });
+
+  it("consumes rewarded ad credits before paid credits after monthly credits are exhausted", async () => {
+    const quota = new UserQuotaDO(
+      createState({
+        credit_state: {
+          plan: "free",
+          periodStart: "2026-04-01T00:00:00+09:00",
+          periodEnd: "2026-05-01T00:00:00+09:00",
+          monthlyRemaining: 0,
+          monthlyLimit: 30,
+          rewardedAdRemaining: 2,
+          rewardedAdExpiresAt: "2026-05-16T00:00:00.000Z",
+          purchasedRemaining: 10,
+          updatedAt: "2026-04-16T00:00:00.000Z"
+        }
+      }) as never
+    );
+
+    const response = await postQuota(quota, {
+      action: "consumeCredit",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30,
+      operationId: "chat-op-1",
+      creditsRequired: 2,
+      referenceType: "chat",
+      referenceId: "filing-1"
+    });
+
+    await expect(response.json()).resolves.toMatchObject({
+      creditOperation: {
+        consumedRewardedAd: 2,
+        consumedPurchased: 0
+      },
+      usage: {
+        credits: {
+          rewardedAdRemaining: 0,
+          purchasedRemaining: 10,
+          totalRemaining: 10
         }
       }
     });

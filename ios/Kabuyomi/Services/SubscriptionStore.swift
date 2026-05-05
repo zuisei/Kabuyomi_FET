@@ -12,7 +12,9 @@ final class SubscriptionStore {
 
     static let subscriptionProductIDs = BillingCatalog.subscriptionTiers.compactMap(\.productID)
     static let recognizedSubscriptionProductIDs = BillingCatalog.recognizedSubscriptionTiers.compactMap(\.productID)
-    static let creditPackProductIDs = ["credit_pack_100", "credit_pack_300", "credit_pack_700"]
+    static let miniCreditProductID = "kabuyomi.credits.100"
+    static let creditPackProductIDs = [miniCreditProductID]
+    private static let creditPackProductLoadTimeoutNanoseconds: UInt64 = 10_000_000_000
 
     private let quotaSubjectKey = "kabuyomi.quotaSubject"
     private let planKey = "kabuyomi.plan"
@@ -143,7 +145,7 @@ final class SubscriptionStore {
         case .success(let verification):
             guard case .verified(let transaction) = verification else {
                 logger.error("credit_purchase_result=unverified product_id=\(productId, privacy: .public)")
-                return nil
+                throw SubscriptionStoreError.purchaseUnverified
             }
 
             logger.notice(
@@ -157,11 +159,11 @@ final class SubscriptionStore {
 
         case .pending:
             logger.notice("credit_purchase_result=pending product_id=\(productId, privacy: .public)")
-            return nil
+            throw SubscriptionStoreError.purchasePending
 
         @unknown default:
             logger.error("credit_purchase_result=unknown product_id=\(productId, privacy: .public)")
-            return nil
+            throw SubscriptionStoreError.purchaseUnknown
         }
     }
 
@@ -290,7 +292,7 @@ final class SubscriptionStore {
                     )
                     if Self.isCreditPackProduct(transaction.productID) {
                         self.logger.notice(
-                            "transaction_update=credit_pack_pending_server_grant product_id=\(transaction.productID, privacy: .public) transaction_id=\(String(transaction.id), privacy: .public)"
+                            "transaction_update=mini_credit_pending_server_grant product_id=\(transaction.productID, privacy: .public) transaction_id=\(String(transaction.id), privacy: .public)"
                         )
                         NotificationCenter.default.post(name: .kabuyomiSubscriptionStateDidChange, object: nil)
                         continue
@@ -355,9 +357,51 @@ final class SubscriptionStore {
             return cachedCreditPackProducts
         }
 
-        let products = try await Product.products(for: Self.creditPackProductIDs)
+        logger.notice(
+            "mini_iap_product_load_started product_ids=\(Self.creditPackProductIDs.joined(separator: ","), privacy: .public)"
+        )
+
+        let products: [Product]
+        do {
+            products = try await productsWithTimeout(
+                for: Self.creditPackProductIDs,
+                timeoutNanoseconds: Self.creditPackProductLoadTimeoutNanoseconds
+            )
+        } catch SubscriptionStoreError.productLoadTimedOut {
+            logger.error("mini_iap_product_load_timed_out timeout_seconds=10")
+            throw SubscriptionStoreError.productLoadTimedOut
+        } catch {
+            logger.error("mini_iap_product_load_failed error=\(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+
+        if products.isEmpty {
+            logger.error("mini_iap_product_load_empty product_ids=\(Self.creditPackProductIDs.joined(separator: ","), privacy: .public)")
+        } else {
+            logger.notice("mini_iap_product_load_succeeded count=\(products.count, privacy: .public)")
+        }
+
         cachedCreditPackProducts = products
         return products
+    }
+
+    private func productsWithTimeout(for productIDs: [String], timeoutNanoseconds: UInt64) async throws -> [Product] {
+        try await withThrowingTaskGroup(of: [Product].self) { group in
+            group.addTask {
+                try await Product.products(for: productIDs)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                throw SubscriptionStoreError.productLoadTimedOut
+            }
+
+            guard let products = try await group.next() else {
+                group.cancelAll()
+                throw SubscriptionStoreError.productNotFound
+            }
+            group.cancelAll()
+            return products
+        }
     }
 
     private func storeSubscriptionState(
@@ -426,12 +470,8 @@ final class SubscriptionStore {
 
     private static func credits(for productId: String) -> Int {
         switch productId {
-        case "credit_pack_100":
+        case miniCreditProductID:
             return 100
-        case "credit_pack_300":
-            return 300
-        case "credit_pack_700":
-            return 700
         default:
             return 0
         }
@@ -527,11 +567,21 @@ private struct BillingSyncSnapshot: Equatable {
 
 enum SubscriptionStoreError: LocalizedError {
     case productNotFound
+    case productLoadTimedOut
+    case purchaseUnverified
+    case purchasePending
+    case purchaseUnknown
 
     var errorDescription: String? {
         switch self {
-        case .productNotFound:
-            "商品情報を取得できませんでした。App Store Connectの設定反映後に再度お試しください。"
+        case .productNotFound, .productLoadTimedOut:
+            "クレジット商品を読み込めませんでした。少し時間をおいて再試行してください。"
+        case .purchaseUnverified:
+            "購入を確認できませんでした。少し時間をおいて再試行してください。"
+        case .purchasePending:
+            "購入が保留中です。承認後にクレジットが反映されます。"
+        case .purchaseUnknown:
+            "購入を完了できませんでした。少し時間をおいて再試行してください。"
         }
     }
 }

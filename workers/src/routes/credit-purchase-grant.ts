@@ -8,7 +8,9 @@ import type { RouteHandler } from "./types";
 const CREDIT_PURCHASE_GRANT_PAYLOAD_MAX_BYTES = 20_480;
 
 export const handleCreditPurchaseGrantRoute: RouteHandler = async ({ request, url, env, config }) => {
-  if (!(request.method === "POST" && url.pathname === "/v1/credits/purchase-grant")) {
+  const isCreditPurchaseCompleteRoute =
+    url.pathname === "/v1/ios/purchases/credits/complete" || url.pathname === "/v1/credits/purchase-grant";
+  if (!(request.method === "POST" && isCreditPurchaseCompleteRoute)) {
     return null;
   }
 
@@ -27,6 +29,7 @@ export const handleCreditPurchaseGrantRoute: RouteHandler = async ({ request, ur
   });
 
   return json({
+    status: result.didMutate ? "granted" : "already_granted",
     transactionId: result.transactionId,
     productId: result.productId,
     creditsGranted: result.creditsGranted,

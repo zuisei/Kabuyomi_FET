@@ -531,14 +531,14 @@ final class APIClientTests: XCTestCase {
 
     func testGrantCreditPurchaseSendsDeviceHeaderAndStoreKitTransaction() async throws {
         let client = makeClient(context: standardContext) { request in
-            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/credits/purchase-grant")
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/ios/purchases/credits/complete")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
             XCTAssertNil(request.value(forHTTPHeaderField: "x-internal-token"))
 
             let body = try XCTUnwrap(Self.requestBodyData(from: request))
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
-            XCTAssertEqual(json["productId"], "credit_pack_100")
+            XCTAssertEqual(json["productId"], "kabuyomi.credits.100")
             XCTAssertEqual(json["transactionId"], "tx-100")
             XCTAssertEqual(json["originalTransactionId"], "orig-tx-100")
             XCTAssertEqual(json["signedTransactionInfo"], "signed-jws")
@@ -547,7 +547,7 @@ final class APIClientTests: XCTestCase {
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                 try TestFixtures.jsonData([
                     "transactionId": "tx-100",
-                    "productId": "credit_pack_100",
+                    "productId": "kabuyomi.credits.100",
                     "creditsGranted": 100,
                     "creditsRemaining": 130,
                     "transactionStatus": "granted",
@@ -574,7 +574,7 @@ final class APIClientTests: XCTestCase {
 
         let response = try await client.grantCreditPurchase(
             CreditPurchaseGrantRequest(
-                productId: "credit_pack_100",
+                productId: "kabuyomi.credits.100",
                 transactionId: "tx-100",
                 originalTransactionId: "orig-tx-100",
                 purchasedAt: "2026-04-26T00:00:00.000Z",
@@ -585,6 +585,75 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(response.creditsGranted, 100)
         XCTAssertEqual(response.creditsRemaining, 130)
         XCTAssertEqual(response.usage.credits?.purchasedRemaining, 100)
+    }
+
+    func testCreateAdMobRewardIntentSendsDeviceHeaderAndDecodesResponse() async throws {
+        let client = makeClient(context: standardContext) { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/admob/reward-intents")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "rewardIntentId": "intent-1",
+                    "customData": "intent-1.nonce",
+                    "rewardCredits": 2,
+                    "dailyRemaining": 3
+                ])
+            )
+        }
+
+        let response = try await client.createAdMobRewardIntent()
+
+        XCTAssertEqual(response.rewardIntentId, "intent-1")
+        XCTAssertEqual(response.customData, "intent-1.nonce")
+        XCTAssertEqual(response.rewardCredits, 2)
+        XCTAssertEqual(response.dailyRemaining, 3)
+    }
+
+    func testFetchAdMobRewardStatusDecodesPromotionalCreditUsage() async throws {
+        let client = makeClient(context: standardContext) { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/admob/reward-status?id=intent-1")
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "rewardIntentId": "intent-1",
+                    "status": "granted",
+                    "rewardCredits": 2,
+                    "creditsRemaining": 32,
+                    "dailyRemaining": 2,
+                    "usage": [
+                        "plan": "free",
+                        "chatsUsed": 0,
+                        "chatLimit": 10,
+                        "stocksUsed": 0,
+                        "stockLimit": 3,
+                        "dateJST": "2026-04-26",
+                        "credits": [
+                            "monthlyRemaining": 30,
+                            "monthlyLimit": 30,
+                            "rewardedAdRemaining": 2,
+                            "rewardedAdExpiresAt": "2026-05-26T00:00:00.000Z",
+                            "purchasedRemaining": 0,
+                            "totalRemaining": 32,
+                            "resetsAt": "2026-05-01T00:00:00+09:00"
+                        ],
+                        "creditBillingEnabled": true
+                    ]
+                ])
+            )
+        }
+
+        let response = try await client.fetchAdMobRewardStatus(rewardIntentId: "intent-1")
+
+        XCTAssertEqual(response.status, "granted")
+        XCTAssertEqual(response.usage.credits?.rewardedAdRemaining, 2)
+        XCTAssertEqual(response.usage.credits?.totalRemaining, 32)
     }
 
     func testTranslateQuoteSendsDeviceHeaderAndDecodesResponse() async throws {

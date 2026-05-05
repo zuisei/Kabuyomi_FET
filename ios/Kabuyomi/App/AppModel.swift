@@ -41,6 +41,29 @@ enum SubscriptionProductLoadState {
     case failed
 }
 
+enum RewardedAdCreditState: Equatable {
+    case idle
+    case loading
+    case presenting
+    case pendingGrant
+    case dailyCapReached
+
+    var debugName: String {
+        switch self {
+        case .idle:
+            return "idle"
+        case .loading:
+            return "loading"
+        case .presenting:
+            return "presenting"
+        case .pendingGrant:
+            return "pending_grant"
+        case .dailyCapReached:
+            return "daily_cap_reached"
+        }
+    }
+}
+
 private enum UsageUpdateSource {
     case refresh
     case chat
@@ -80,6 +103,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     let persistence: PersistenceController
     let deviceIdentity: DeviceIdentityStore
     private let subscriptionStore: SubscriptionStore
+    private let rewardedAdService: RewardedAdServing
 
     var watchlist: [WatchlistCard] = []
     var recentCompanies: [WatchlistCard] = []
@@ -99,12 +123,17 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var companyIsLoading = false
     var chatIsSending = false
     var billingActionInFlight = false
+    var rewardedAdCreditState: RewardedAdCreditState = .idle
+    var rewardedAdStatusMessage: String?
+    var rewardedAdLastDebugReason: String = "none"
     var subscriptionProductLoadState: SubscriptionProductLoadState = .idle
     var subscriptionProductLoadErrorMessage: String?
     var subscriptionProducts: [SubscriptionProduct] = BillingCatalog.subscriptionTiers.map {
         SubscriptionProduct(tier: $0, displayPrice: nil, isAvailable: false)
     }
     var creditPackProducts: [CreditPackProduct] = []
+    var creditPackProductLoadErrorMessage: String?
+    var creditPackProductLoadInFlight = false
     var activeAlert: AppAlertState?
     var aiConsentGranted = UserDefaults.standard.bool(forKey: "kabuyomi.aiConsentGranted")
     var showStarterCompanies = UserDefaults.standard.object(forKey: "kabuyomi.showStarterCompanies") as? Bool ?? true
@@ -113,6 +142,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     #if DEBUG
     var devModeEnabled = UserDefaults.standard.bool(forKey: "kabuyomi.detachedAccess.devModeEnabled")
     var usesTestAPI = APIBaseURLResolver.selectedDebugEnvironment == .test
+    var rewardedAdSSVSmokeModeEnabled = AdMobConfig.isRewardedCreditSSVSmokeModeEnabled
     #endif
 
     private var searchGeneration = 0
@@ -137,12 +167,14 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         apiClient: APIClient,
         persistence: PersistenceController,
         deviceIdentity: DeviceIdentityStore,
-        subscriptionStore: SubscriptionStore = .shared
+        subscriptionStore: SubscriptionStore = .shared,
+        rewardedAdService: RewardedAdServing = GoogleRewardedAdService.shared
     ) {
         self.apiClient = apiClient
         self.persistence = persistence
         self.deviceIdentity = deviceIdentity
         self.subscriptionStore = subscriptionStore
+        self.rewardedAdService = rewardedAdService
         self.subscriptionStateObserver = NotificationCenter.default.addObserver(
             forName: .kabuyomiSubscriptionStateDidChange,
             object: nil,
@@ -165,7 +197,8 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             ),
             persistence: PersistenceController.shared,
             deviceIdentity: deviceIdentity,
-            subscriptionStore: .shared
+            subscriptionStore: .shared,
+            rewardedAdService: GoogleRewardedAdService.shared
         )
     }
 
@@ -225,9 +258,21 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         apiClient.baseURLDisplayString
     }
 
+    var currentAPIBaseURLKindDisplay: String {
+        apiClient.baseURLKindDisplayString
+    }
+
+    var rewardedAdDeveloperDiagnosticLine: String {
+        "API: \(apiClient.baseURLKindDisplayString) / AdUnit: \(AdMobConfig.rewardedCreditAdUnitKind) / SSV smoke: \(AdMobConfig.rewardedCreditSSVSmokeModeStatus) / TestDevice: \(AdMobConfig.testDeviceModeDiagnostic) / Last rewarded error: \(rewardedAdLastDebugReason)"
+    }
+
     #if DEBUG
     var currentAPIEnvironmentDisplayName: String {
         (usesTestAPI ? APIEnvironment.test : APIEnvironment.production).displayName
+    }
+
+    var rewardedAdTestDeviceModeConfigured: Bool {
+        AdMobConfig.isGoogleMobileAdsTestDeviceModeConfigured
     }
     #endif
 
@@ -260,6 +305,21 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     var currentDeviceKeyDisplay: String {
         deviceIdentity.deviceKey()
+    }
+
+    func logRewardedAdSettingsViewed() {
+        logRewardedAdDiagnostic("settings_view_appeared")
+    }
+
+    func logRewardedAdButtonTapped() {
+        let disabledReason = rewardedAdButtonDisabledReason()
+        logRewardedAdDiagnostic(
+            "rewarded_button_tapped",
+            fields: ["disabledReason": disabledReason ?? "none"]
+        )
+        if let disabledReason {
+            rewardedAdLastDebugReason = disabledReason
+        }
     }
 
     func bootstrap() async {
@@ -369,9 +429,22 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     func loadCreditPackProducts(showErrors: Bool = true) async {
+        guard !creditPackProductLoadInFlight else { return }
+
+        creditPackProductLoadInFlight = true
+        creditPackProductLoadErrorMessage = nil
+        defer { creditPackProductLoadInFlight = false }
+
         do {
-            creditPackProducts = try await subscriptionStore.creditPackProducts()
+            let products = try await subscriptionStore.creditPackProducts()
+            creditPackProducts = products
+            if products.contains(where: \.isAvailable) {
+                creditPackProductLoadErrorMessage = nil
+            } else {
+                creditPackProductLoadErrorMessage = "クレジット商品を読み込めませんでした。少し時間をおいて再試行してください。"
+            }
         } catch {
+            creditPackProductLoadErrorMessage = error.localizedDescription
             if showErrors {
                 handle(error)
             }
@@ -399,7 +472,9 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             storeUsage(response.usage, source: .refresh)
             await purchase.finish()
             activeAlert = AppAlertState(
-                message: "\(response.creditsGranted) creditsを追加しました。残高は \(response.creditsRemaining) creditsです。",
+                message: response.didMutate
+                    ? "\(response.creditsGranted)クレジットを追加しました。"
+                    : "この購入はすでに反映済みです。",
                 kind: .dismissOnly
             )
         } catch {
@@ -426,6 +501,292 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 }
             }
         }
+    }
+
+    func earnRewardedAdCredits() async {
+        logRewardedAdDiagnostic("earn_rewarded_ad_credits_entered")
+        guard rewardedAdCreditState == .idle else {
+            setRewardedAdDebugReason("early_return_state_\(rewardedAdCreditState.debugName)")
+            logRewardedAdDiagnostic(
+                "earn_rewarded_ad_credits_early_return",
+                fields: ["reason": rewardedAdLastDebugReason]
+            )
+            return
+        }
+        guard isCreditBillingEnabled else {
+            setRewardedAdDebugReason("credit_billing_disabled")
+            logRewardedAdDiagnostic(
+                "earn_rewarded_ad_credits_early_return",
+                fields: ["reason": rewardedAdLastDebugReason]
+            )
+            activeAlert = AppAlertState(
+                message: "広告報酬creditは現在利用できません。時間をおいてからもう一度お試しください。",
+                kind: .dismissOnly
+            )
+            return
+        }
+        #if DEBUG
+        if shouldBlockDebugProductionRewardIntentForDemoAdUnit() {
+            setRewardedAdDebugReason(AdMobConfig.debugDemoAdUnitCannotVerifyProductionSSVReason)
+            logRewardedAdDiagnostic(
+                "rewarded_flow_blocked",
+                fields: ["reason": rewardedAdLastDebugReason]
+            )
+            rewardedAdCreditState = .idle
+            rewardedAdStatusMessage = debugDemoAdUnitCannotVerifyProductionSSVMessage
+            return
+        }
+        #endif
+
+        rewardedAdStatusMessage = nil
+        rewardedAdCreditState = .loading
+        do {
+            logRewardedAdDiagnostic(
+                "create_reward_intent_started",
+                fields: ["requestURL": apiClient.adMobRewardIntentURLDisplayString]
+            )
+            let intent = try await apiClient.createAdMobRewardIntent()
+            logRewardedAdDiagnostic(
+                "create_reward_intent_succeeded",
+                fields: [
+                    "rewardIntentId": RewardedAdDiagnostics.redact(intent.rewardIntentId),
+                    "customDataPresent": String(!intent.customData.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
+                    "rewardCredits": String(intent.rewardCredits),
+                    "dailyRemaining": String(intent.dailyRemaining)
+                ]
+            )
+            guard intent.dailyRemaining > 0 else {
+                setRewardedAdDebugReason("daily_cap_reached")
+                logRewardedAdDiagnostic("reward_intent_daily_cap_reached")
+                rewardedAdCreditState = .dailyCapReached
+                rewardedAdStatusMessage = "本日の広告報酬上限に達しました。"
+                return
+            }
+
+            rewardedAdCreditState = .presenting
+            let didEarnReward = try await rewardedAdService.presentRewardedAd(customData: intent.customData)
+            guard didEarnReward else {
+                setRewardedAdDebugReason("ad_dismissed_without_reward")
+                logRewardedAdDiagnostic("rewarded_ad_dismissed_without_reward")
+                rewardedAdCreditState = .idle
+                rewardedAdStatusMessage = RewardedAdServiceError.dismissedWithoutReward.localizedDescription
+                return
+            }
+
+            rewardedAdCreditState = .pendingGrant
+            logRewardedAdDiagnostic(
+                "reward_status_polling_started",
+                fields: [
+                    "rewardIntentId": RewardedAdDiagnostics.redact(intent.rewardIntentId),
+                    "requestURL": apiClient.adMobRewardStatusURLDisplayString(rewardIntentId: intent.rewardIntentId)
+                ]
+            )
+            let status = try await pollRewardStatus(rewardIntentId: intent.rewardIntentId)
+            storeUsage(status.usage, source: .refresh)
+            rewardedAdCreditState = status.dailyRemaining <= 0 ? .dailyCapReached : .idle
+            rewardedAdStatusMessage = "\(status.rewardCredits)クレジットを獲得しました。"
+            setRewardedAdDebugReason("granted")
+            logRewardedAdDiagnostic(
+                "reward_status_granted",
+                fields: [
+                    "creditsRemaining": String(status.creditsRemaining),
+                    "dailyRemaining": String(status.dailyRemaining)
+                ]
+            )
+        } catch {
+            if rawMessage(for: error).contains("daily_cap_reached") {
+                setRewardedAdDebugReason("daily_cap_reached")
+                logRewardedAdDiagnostic(
+                    "rewarded_flow_failed",
+                    fields: ["reason": rewardedAdLastDebugReason, "error": sanitizedErrorMessage(error)]
+                )
+                rewardedAdCreditState = .dailyCapReached
+                rewardedAdStatusMessage = "本日の広告報酬上限に達しました。"
+                return
+            }
+            setRewardedAdDebugReason(debugReason(forRewardedAdError: error))
+            logRewardedAdDiagnostic(
+                "rewarded_flow_failed",
+                fields: ["reason": rewardedAdLastDebugReason, "error": sanitizedErrorMessage(error)]
+            )
+            rewardedAdCreditState = .idle
+            rewardedAdStatusMessage = presentableRewardedAdMessage(for: error)
+        }
+    }
+
+    private func pollRewardStatus(rewardIntentId: String) async throws -> AdMobRewardStatusResponse {
+        for attempt in 0..<6 {
+            if attempt > 0 {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            logRewardedAdDiagnostic(
+                "reward_status_poll_attempt",
+                fields: [
+                    "attempt": String(attempt + 1),
+                    "requestURL": apiClient.adMobRewardStatusURLDisplayString(rewardIntentId: rewardIntentId)
+                ]
+            )
+            let status = try await apiClient.fetchAdMobRewardStatus(rewardIntentId: rewardIntentId)
+            logRewardedAdDiagnostic(
+                "reward_status_poll_result",
+                fields: [
+                    "attempt": String(attempt + 1),
+                    "status": status.status,
+                    "dailyRemaining": String(status.dailyRemaining)
+                ]
+            )
+            if status.status == "granted" {
+                return status
+            }
+        }
+        setRewardedAdDebugReason(rewardStatusPendingDebugReason())
+        logRewardedAdDiagnostic(
+            "reward_status_poll_timeout",
+            fields: ["reason": rewardedAdLastDebugReason]
+        )
+        throw RewardedAdServiceError.ssvNotReceivedOrRewardStatusPending
+    }
+
+    private func presentableRewardedAdMessage(for error: Error) -> String {
+        if let rewardedError = error as? RewardedAdServiceError {
+            if rewardedError == .ssvNotReceivedOrRewardStatusPending {
+                #if DEBUG
+                if AdMobConfig.rewardedCreditAdUnitID == AdMobConfig.testRewardedCreditAdUnitID {
+                    return debugDemoAdUnitCannotVerifyProductionSSVMessage
+                }
+                #endif
+            }
+            return rewardedError.localizedDescription
+        }
+        let raw = rawMessage(for: error)
+        if raw.contains("daily_cap_reached") || raw.contains("Rewarded ad daily cap reached") {
+            return "本日の広告報酬上限に達しました。"
+        }
+        if raw.localizedCaseInsensitiveContains("no ad") {
+            return "現在広告を利用できません。少し時間をおいて再試行してください。"
+        }
+        return "広告報酬を付与できませんでした。通信状況を確認して再試行してください。"
+    }
+
+    private func setRewardedAdDebugReason(_ reason: String) {
+        rewardedAdLastDebugReason = reason
+    }
+
+    private func rewardedAdButtonDisabledReason() -> String? {
+        switch rewardedAdCreditState {
+        case .idle:
+            return nil
+        case .loading:
+            return "state_loading"
+        case .presenting:
+            return "state_presenting"
+        case .pendingGrant:
+            return "state_pending_grant"
+        case .dailyCapReached:
+            return "daily_cap_reached"
+        }
+    }
+
+    private func debugReason(forRewardedAdError error: Error) -> String {
+        if let rewardedError = error as? RewardedAdServiceError {
+            switch rewardedError {
+            case .noAdAvailable:
+                return "no_ad_available"
+            case .presentationUnavailable:
+                return "presentation_or_polling_unavailable"
+            case .presenterUnavailable:
+                return "rewarded_ad_presenter_unavailable"
+            case .presentFailedAlreadyPresenting:
+                return "rewarded_ad_present_failed_already_presenting"
+            case .ssvNotReceivedOrRewardStatusPending:
+                return rewardStatusPendingDebugReason()
+            case .dismissedWithoutReward:
+                return "dismissed_without_reward"
+            }
+        }
+
+        let raw = rawMessage(for: error)
+        if raw.contains("daily_cap_reached") || raw.contains("Rewarded ad daily cap reached") {
+            return "daily_cap_reached"
+        }
+        if raw.localizedCaseInsensitiveContains("no ad") {
+            return "no_ad_available"
+        }
+        if raw.localizedCaseInsensitiveContains("cancelled") {
+            return "cancelled"
+        }
+        if raw.localizedCaseInsensitiveContains("notConnectedToInternet") || raw.localizedCaseInsensitiveContains("offline") {
+            return "network_unavailable"
+        }
+        if raw.localizedCaseInsensitiveContains("timed out") {
+            return "network_timeout"
+        }
+        if raw.localizedCaseInsensitiveContains("HTTP 401") || raw.localizedCaseInsensitiveContains("unauthorized") {
+            return "auth_failed"
+        }
+        if raw.localizedCaseInsensitiveContains("HTTP 404") || raw.localizedCaseInsensitiveContains("not_found") {
+            return "reward_route_not_found"
+        }
+        return "unknown_error"
+    }
+
+    private func rewardStatusPendingDebugReason() -> String {
+        #if DEBUG
+        if AdMobConfig.rewardedCreditAdUnitID == AdMobConfig.testRewardedCreditAdUnitID {
+            return "ssv_not_received_or_reward_status_pending_google_demo_ad_unit_does_not_verify_production_ssv"
+        }
+        #endif
+        return "ssv_not_received_or_reward_status_pending"
+    }
+
+    #if DEBUG
+    private var debugDemoAdUnitCannotVerifyProductionSSVMessage: String {
+        "DEBUGのGoogleデモ広告では本番SSVが届かないため、クレジット付与確認はできません。Xcode scheme に KABUYOMI_ADMOB_TEST_DEVICE_IDS を設定し、SSV smoke mode をONにしてください。"
+    }
+
+    private func shouldBlockDebugProductionRewardIntentForDemoAdUnit() -> Bool {
+        apiClient.baseURLKindDisplayString == "prod" && AdMobConfig.blocksProductionRewardIntentWithCurrentDebugAdUnit
+    }
+    #endif
+
+    private func sanitizedErrorMessage(_ error: Error) -> String {
+        String(rawMessage(for: error).prefix(220))
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+    }
+
+    private func logRewardedAdDiagnostic(_ event: String, fields: [String: String] = [:]) {
+        let credits = usage?.credits
+        let deviceKey = deviceIdentity.deviceKey()
+        var mergedFields: [String: String] = [
+            "build": AdMobConfig.buildConfiguration,
+            "appVersion": appVersionDisplay,
+            "apiKind": apiClient.baseURLKindDisplayString,
+            "apiBaseURL": apiClient.baseURLDisplayString,
+            "adUnitKind": AdMobConfig.rewardedCreditAdUnitKind,
+            "adUnit": AdMobConfig.rewardedCreditAdUnitID,
+            "runtimeMode": AdMobConfig.rewardedAdRuntimeMode.rawValue,
+            "ssvSmokeMode": AdMobConfig.rewardedCreditSSVSmokeModeStatus,
+            "googleMobileAdsTestDeviceMode": String(AdMobConfig.isGoogleMobileAdsTestDeviceModeConfigured),
+            "googleMobileAdsTestDeviceIDs": AdMobConfig.testDeviceModeDiagnostic,
+            "state": rewardedAdCreditState.debugName,
+            "creditBillingEnabled": String(isCreditBillingEnabled),
+            "deviceKeyExists": String(!deviceKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
+            "deviceKey": RewardedAdDiagnostics.redact(deviceKey),
+            "mobileAdsInitialized": String(AdMobRuntimeState.mobileAdsInitialized),
+            "totalRemaining": credits.map { String($0.totalRemaining) } ?? "nil",
+            "monthlyRemaining": credits.map { String($0.monthlyRemaining) } ?? "nil",
+            "rewardedAdRemaining": credits?.rewardedAdRemaining.map(String.init) ?? "nil",
+            "dailyCapState": rewardedAdCreditState == .dailyCapReached ? "reached" : "not_reached"
+        ]
+        fields.forEach { mergedFields[$0.key] = $0.value }
+        RewardedAdDiagnostics.log(event, fields: mergedFields)
+    }
+
+    private var appVersionDisplay: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+        return "\(version)(\(build))"
     }
 
     func refreshCreditUsage() async {
@@ -455,6 +816,16 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         Task { [weak self] in
             await self?.refreshUsage()
         }
+    }
+
+    func setRewardedAdSSVSmokeModeEnabled(_ value: Bool) {
+        AdMobConfig.setRewardedCreditSSVSmokeModeEnabled(value)
+        rewardedAdSSVSmokeModeEnabled = value
+        setRewardedAdDebugReason(value ? "ssv_smoke_mode_enabled" : "ssv_smoke_mode_disabled")
+        logRewardedAdDiagnostic(
+            "ssv_smoke_mode_toggled",
+            fields: ["enabled": String(value)]
+        )
     }
     #endif
 
@@ -1239,12 +1610,19 @@ credit残高に使う端末識別情報は維持されます。
             return "creditが不足しています。設定のクレジット画面で追加creditを確認してください。"
         }
 
+        if rawMessage.contains("クレジット商品を読み込めません")
+            || rawMessage.contains("購入を確認できません")
+            || rawMessage.contains("購入が保留中")
+            || rawMessage.contains("購入は完了しましたが") {
+            return rawMessage
+        }
+
         if rawMessage.contains("Apple transaction verification") || rawMessage.contains("Apple transaction could not be verified") {
-            return "購入の検証に失敗しました。時間をおいてから、購入の復元または再同期を試してください。"
+            return "購入を確認できませんでした。少し時間をおいて再試行してください。"
         }
 
         if rawMessage.contains("Purchase transaction") {
-            return "購入情報を確認できませんでした。時間をおいてから、もう一度お試しください。"
+            return "購入は完了しましたが、クレジット付与確認がまだ完了していません。少し時間をおいて再試行してください。"
         }
 
         if rawMessage.contains("Watchlist limit exceeded") {
@@ -1305,6 +1683,8 @@ credit残高に使う端末識別情報は維持されます。
                 return "レスポンスを解釈できませんでした。"
             case .server(let message):
                 return message
+            case .serverStatus(let statusCode, let message):
+                return "HTTP \(statusCode): \(message)"
             case .insufficientCredits(let required, let remaining):
                 return "insufficient_credits required=\(required) remaining=\(remaining)"
             }
@@ -1351,8 +1731,10 @@ credit残高に使う端末識別情報は維持されます。
         let normalizedCredits = CreditUsagePayload(
             monthlyRemaining: normalizedMonthlyRemaining,
             monthlyLimit: normalizedMonthlyLimit,
+            rewardedAdRemaining: credits.rewardedAdRemaining,
+            rewardedAdExpiresAt: credits.rewardedAdExpiresAt,
             purchasedRemaining: credits.purchasedRemaining,
-            totalRemaining: normalizedMonthlyRemaining + credits.purchasedRemaining,
+            totalRemaining: normalizedMonthlyRemaining + (credits.rewardedAdRemaining ?? 0) + credits.purchasedRemaining,
             resetsAt: credits.resetsAt
         )
 

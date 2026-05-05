@@ -11,7 +11,7 @@ describe("apple store server verification", () => {
     const signedTransactionInfo = fakeJws({
       transactionId: "tx-100",
       originalTransactionId: "orig-tx-100",
-      productId: "credit_pack_100",
+      productId: "kabuyomi.credits.100",
       bundleId: "app.kabuyomi.ios"
     });
     const fetch = vi
@@ -34,7 +34,7 @@ describe("apple store server verification", () => {
         APPLE_APP_STORE_SERVER_ENVIRONMENT: "auto"
       } as never,
       {
-        productId: "credit_pack_100",
+        productId: "kabuyomi.credits.100",
         transactionId: "tx-100",
         originalTransactionId: "orig-tx-100",
         signedTransactionInfo
@@ -59,7 +59,7 @@ describe("apple store server verification", () => {
     const signedTransactionInfo = fakeJws({
       transactionId: "tx-100",
       originalTransactionId: "orig-tx-100",
-      productId: "credit_pack_300",
+      productId: "kabuyomi.credits.other",
       bundleId: "app.kabuyomi.ios"
     });
 
@@ -72,7 +72,7 @@ describe("apple store server verification", () => {
           APPLE_BUNDLE_ID: "app.kabuyomi.ios"
         } as never,
         {
-          productId: "credit_pack_100",
+          productId: "kabuyomi.credits.100",
           transactionId: "tx-100",
           originalTransactionId: "orig-tx-100",
           signedTransactionInfo
@@ -89,7 +89,7 @@ describe("apple store server verification", () => {
     const signedTransactionInfo = fakeJws({
       transactionId: "tx-forged",
       originalTransactionId: "orig-tx-forged",
-      productId: "credit_pack_100",
+      productId: "kabuyomi.credits.100",
       bundleId: "app.kabuyomi.ios"
     });
     const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: "not found" }), { status: 404 }));
@@ -105,7 +105,7 @@ describe("apple store server verification", () => {
           APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
         } as never,
         {
-          productId: "credit_pack_100",
+          productId: "kabuyomi.credits.100",
           transactionId: "tx-forged",
           originalTransactionId: "orig-tx-forged",
           signedTransactionInfo
@@ -123,13 +123,13 @@ describe("apple store server verification", () => {
     const clientSignedTransactionInfo = fakeJws({
       transactionId: "tx-100",
       originalTransactionId: "orig-tx-100",
-      productId: "credit_pack_100",
+      productId: "kabuyomi.credits.100",
       bundleId: "app.kabuyomi.ios"
     });
     const appleSignedTransactionInfo = fakeJws({
       transactionId: "tx-100",
       originalTransactionId: "orig-tx-100",
-      productId: "credit_pack_300",
+      productId: "kabuyomi.credits.other",
       bundleId: "app.kabuyomi.ios"
     });
     const fetch = vi.fn().mockResolvedValueOnce(
@@ -150,7 +150,7 @@ describe("apple store server verification", () => {
           APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
         } as never,
         {
-          productId: "credit_pack_100",
+          productId: "kabuyomi.credits.100",
           transactionId: "tx-100",
           originalTransactionId: "orig-tx-100",
           signedTransactionInfo: clientSignedTransactionInfo
@@ -170,7 +170,7 @@ describe("apple store server verification", () => {
           APPLE_BUNDLE_ID: "app.kabuyomi.ios"
         } as never,
         {
-          productId: "credit_pack_100",
+          productId: "kabuyomi.credits.100",
           transactionId: "tx-100"
         }
       )

@@ -29,20 +29,25 @@ interface CreditStateRecord {
   periodEnd: string;
   monthlyRemaining: number;
   monthlyLimit: number;
+  rewardedAdRemaining?: number;
+  rewardedAdExpiresAt?: string;
   purchasedRemaining: number;
   updatedAt: string;
 }
 
 interface CreditOperationRecord {
   operationId: string;
-  type: "consume" | "refund" | "purchase_grant" | "eval_grant";
+  type: "consume" | "refund" | "purchase_grant" | "eval_grant" | "admob_rewarded_grant";
   status: "applied" | "insufficient" | "noop";
   delta: number;
   balanceAfter: number;
   monthlyBalanceAfter: number;
+  rewardedAdBalanceAfter?: number;
+  rewardedAdExpiresAt?: string;
   purchasedBalanceAfter: number;
   creditsRequired?: number;
   consumedMonthly?: number;
+  consumedRewardedAd?: number;
   consumedPurchased?: number;
   originalOperationId?: string;
   referenceType?: string;
@@ -155,7 +160,7 @@ export class UserQuotaDO {
             monthlyGrant,
             error: creditResult.error,
             creditsRequired,
-            creditsRemaining: creditState.monthlyRemaining + creditState.purchasedRemaining
+            creditsRemaining: totalCreditRemaining(creditState)
           }
         };
       }
@@ -189,7 +194,7 @@ export class UserQuotaDO {
             didMutate: creditResult.didMutate,
             creditOperation: creditResult.operation,
             monthlyGrant,
-            creditsRemaining: creditState.monthlyRemaining + creditState.purchasedRemaining
+            creditsRemaining: totalCreditRemaining(creditState)
           }
         };
       }
@@ -225,7 +230,7 @@ export class UserQuotaDO {
             didMutate: creditResult.didMutate,
             creditOperation: creditResult.operation,
             monthlyGrant,
-            creditsRemaining: creditState.monthlyRemaining + creditState.purchasedRemaining
+            creditsRemaining: totalCreditRemaining(creditState)
           }
         };
       }
@@ -257,7 +262,41 @@ export class UserQuotaDO {
             didMutate: creditResult.didMutate,
             creditOperation: creditResult.operation,
             monthlyGrant,
-            creditsRemaining: creditState.monthlyRemaining + creditState.purchasedRemaining
+            creditsRemaining: totalCreditRemaining(creditState)
+          }
+        };
+      }
+
+      if (body.action === "grantRewardedAdCredit") {
+        const operationId = body.operationId;
+        const credits = body.credits;
+        const referenceId = body.referenceId;
+        const promoExpiresAt = body.promoExpiresAt;
+        if (!operationId || !credits || !referenceId || !promoExpiresAt) {
+          return {
+            status: 400,
+            payload: { error: "Invalid quota payload", usage: currentUsage(), didMutate }
+          };
+        }
+
+        const creditResult = await this.grantRewardedAdCredit({
+          creditState,
+          operationId,
+          credits,
+          referenceId,
+          promoExpiresAt
+        });
+        if (monthlyGrant) {
+          await this.saveMonthlyGrant(monthlyGrant);
+        }
+        return {
+          status: 200,
+          payload: {
+            usage: currentUsage(),
+            didMutate: creditResult.didMutate,
+            creditOperation: creditResult.operation,
+            monthlyGrant,
+            creditsRemaining: totalCreditRemaining(creditState)
           }
         };
       }
@@ -467,6 +506,8 @@ export class UserQuotaDO {
         periodEnd: period.periodEnd,
         monthlyRemaining: monthlyCreditLimit,
         monthlyLimit: monthlyCreditLimit,
+        rewardedAdRemaining: nonExpiredRewardedAdRemaining(existing, now),
+        rewardedAdExpiresAt: nonExpiredRewardedAdExpiresAt(existing, now),
         purchasedRemaining: existing?.purchasedRemaining ?? 0,
         updatedAt: now
       };
@@ -478,6 +519,7 @@ export class UserQuotaDO {
 
     const limitDelta = monthlyCreditLimit - existing.monthlyLimit;
     existing.plan = plan;
+    expireRewardedAdCreditsIfNeeded(existing, now);
     existing.monthlyLimit = monthlyCreditLimit;
     existing.monthlyRemaining = Math.max(0, Math.min(monthlyCreditLimit, existing.monthlyRemaining + limitDelta));
     existing.updatedAt = now;
@@ -510,7 +552,7 @@ export class UserQuotaDO {
       };
     }
 
-    const totalRemaining = creditState.monthlyRemaining + creditState.purchasedRemaining;
+    const totalRemaining = totalCreditRemaining(creditState);
     const now = new Date().toISOString();
     if (totalRemaining < creditsRequired) {
       const operation = buildCreditOperation({
@@ -534,8 +576,11 @@ export class UserQuotaDO {
     }
 
     const consumedMonthly = Math.min(creditState.monthlyRemaining, creditsRequired);
-    const consumedPurchased = creditsRequired - consumedMonthly;
+    const remainingAfterMonthly = creditsRequired - consumedMonthly;
+    const consumedRewardedAd = Math.min(creditState.rewardedAdRemaining ?? 0, remainingAfterMonthly);
+    const consumedPurchased = remainingAfterMonthly - consumedRewardedAd;
     creditState.monthlyRemaining -= consumedMonthly;
+    creditState.rewardedAdRemaining = Math.max(0, (creditState.rewardedAdRemaining ?? 0) - consumedRewardedAd);
     creditState.purchasedRemaining -= consumedPurchased;
     creditState.updatedAt = now;
     const operation = buildCreditOperation({
@@ -546,6 +591,7 @@ export class UserQuotaDO {
       creditState,
       creditsRequired,
       consumedMonthly,
+      consumedRewardedAd,
       consumedPurchased,
       referenceType,
       referenceId,
@@ -600,8 +646,10 @@ export class UserQuotaDO {
 
     const refundable = Math.min(credits, original.creditsRequired ?? 0);
     const monthlyRefund = Math.min(original.consumedMonthly ?? 0, refundable);
-    const purchasedRefund = Math.min(original.consumedPurchased ?? 0, refundable - monthlyRefund);
+    const rewardedAdRefund = Math.min(original.consumedRewardedAd ?? 0, refundable - monthlyRefund);
+    const purchasedRefund = Math.min(original.consumedPurchased ?? 0, refundable - monthlyRefund - rewardedAdRefund);
     creditState.monthlyRemaining = Math.min(creditState.monthlyLimit, creditState.monthlyRemaining + monthlyRefund);
+    creditState.rewardedAdRemaining = (creditState.rewardedAdRemaining ?? 0) + rewardedAdRefund;
     creditState.purchasedRemaining += purchasedRefund;
     creditState.updatedAt = now;
     original.refundedBy = refundOperationId;
@@ -610,7 +658,7 @@ export class UserQuotaDO {
       operationId: refundOperationId,
       type: "refund",
       status: "applied",
-      delta: monthlyRefund + purchasedRefund,
+      delta: monthlyRefund + rewardedAdRefund + purchasedRefund,
       creditState,
       originalOperationId,
       referenceType,
@@ -716,6 +764,46 @@ export class UserQuotaDO {
     return { didMutate: true, operation };
   }
 
+  private async grantRewardedAdCredit({
+    creditState,
+    operationId,
+    credits,
+    referenceId,
+    promoExpiresAt
+  }: {
+    creditState: CreditStateRecord;
+    operationId: string;
+    credits: number;
+    referenceId: string;
+    promoExpiresAt: string;
+  }): Promise<{ didMutate: boolean; operation: CreditOperationRecord }> {
+    const existing = await this.loadCreditOperation(operationId);
+    if (existing) {
+      return { didMutate: false, operation: existing };
+    }
+
+    const now = new Date().toISOString();
+    creditState.rewardedAdRemaining = (creditState.rewardedAdRemaining ?? 0) + credits;
+    creditState.rewardedAdExpiresAt = promoExpiresAt;
+    creditState.updatedAt = now;
+    const operation = buildCreditOperation({
+      operationId,
+      type: "admob_rewarded_grant",
+      status: "applied",
+      delta: credits,
+      creditState,
+      referenceType: "admob_rewarded",
+      referenceId,
+      createdAt: now
+    });
+    await Promise.all([
+      this.state.storage.put(CREDIT_STATE_KEY, creditState),
+      this.saveCreditOperation(operation)
+    ]);
+    await this.pruneOldCreditOperations(now);
+    return { didMutate: true, operation };
+  }
+
   private async loadCreditOperation(operationId: string): Promise<CreditOperationRecord | undefined> {
     return (await this.state.storage.get<CreditOperationRecord>(buildCreditOperationKey(operationId))) as
       | CreditOperationRecord
@@ -759,7 +847,7 @@ export class UserQuotaDO {
       periodStart: creditState.periodStart,
       periodEnd: creditState.periodEnd,
       creditsGranted,
-      balanceAfter: creditState.monthlyRemaining + creditState.purchasedRemaining,
+      balanceAfter: totalCreditRemaining(creditState),
       monthlyBalanceAfter: creditState.monthlyRemaining,
       purchasedBalanceAfter: creditState.purchasedRemaining,
       createdAt
@@ -849,14 +937,50 @@ function usagePayload(
 }
 
 function creditUsagePayload(creditState: CreditStateRecord) {
-  const totalRemaining = creditState.monthlyRemaining + creditState.purchasedRemaining;
+  const totalRemaining = totalCreditRemaining(creditState);
   return {
     monthlyRemaining: creditState.monthlyRemaining,
     monthlyLimit: creditState.monthlyLimit,
+    rewardedAdRemaining: creditState.rewardedAdRemaining ?? 0,
+    rewardedAdExpiresAt: creditState.rewardedAdExpiresAt ?? null,
     purchasedRemaining: creditState.purchasedRemaining,
     totalRemaining,
     resetsAt: creditState.periodEnd
   };
+}
+
+function totalCreditRemaining(creditState: CreditStateRecord): number {
+  return creditState.monthlyRemaining + (creditState.rewardedAdRemaining ?? 0) + creditState.purchasedRemaining;
+}
+
+function expireRewardedAdCreditsIfNeeded(creditState: CreditStateRecord, nowIso: string): void {
+  const expiresAt = creditState.rewardedAdExpiresAt;
+  if (!expiresAt || (creditState.rewardedAdRemaining ?? 0) <= 0) {
+    creditState.rewardedAdRemaining = Math.max(0, creditState.rewardedAdRemaining ?? 0);
+    return;
+  }
+  const expiresMs = Date.parse(expiresAt);
+  const nowMs = Date.parse(nowIso);
+  if (Number.isFinite(expiresMs) && Number.isFinite(nowMs) && expiresMs <= nowMs) {
+    creditState.rewardedAdRemaining = 0;
+    creditState.rewardedAdExpiresAt = undefined;
+  }
+}
+
+function nonExpiredRewardedAdRemaining(existing: CreditStateRecord | undefined, nowIso: string): number {
+  if (!existing) {
+    return 0;
+  }
+  expireRewardedAdCreditsIfNeeded(existing, nowIso);
+  return existing.rewardedAdRemaining ?? 0;
+}
+
+function nonExpiredRewardedAdExpiresAt(existing: CreditStateRecord | undefined, nowIso: string): string | undefined {
+  if (!existing) {
+    return undefined;
+  }
+  expireRewardedAdCreditsIfNeeded(existing, nowIso);
+  return existing.rewardedAdExpiresAt;
 }
 
 function normalizeTicker(value: string | undefined): string | null {
@@ -938,6 +1062,7 @@ function buildCreditOperation({
   creditState,
   creditsRequired,
   consumedMonthly,
+  consumedRewardedAd,
   consumedPurchased,
   originalOperationId,
   referenceType,
@@ -945,12 +1070,13 @@ function buildCreditOperation({
   createdAt
 }: {
   operationId: string;
-  type: "consume" | "refund" | "purchase_grant" | "eval_grant";
+  type: "consume" | "refund" | "purchase_grant" | "eval_grant" | "admob_rewarded_grant";
   status: "applied" | "insufficient" | "noop";
   delta: number;
   creditState: CreditStateRecord;
   creditsRequired?: number;
   consumedMonthly?: number;
+  consumedRewardedAd?: number;
   consumedPurchased?: number;
   originalOperationId?: string;
   referenceType?: string;
@@ -962,11 +1088,14 @@ function buildCreditOperation({
     type,
     status,
     delta,
-    balanceAfter: creditState.monthlyRemaining + creditState.purchasedRemaining,
+    balanceAfter: totalCreditRemaining(creditState),
     monthlyBalanceAfter: creditState.monthlyRemaining,
+    rewardedAdBalanceAfter: creditState.rewardedAdRemaining ?? 0,
+    rewardedAdExpiresAt: creditState.rewardedAdExpiresAt,
     purchasedBalanceAfter: creditState.purchasedRemaining,
     creditsRequired,
     consumedMonthly,
+    consumedRewardedAd,
     consumedPurchased,
     originalOperationId,
     referenceType,

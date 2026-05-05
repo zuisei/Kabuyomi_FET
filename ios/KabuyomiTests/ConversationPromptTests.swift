@@ -120,7 +120,7 @@ final class ConversationPromptTests: XCTestCase {
         )
     }
 
-    func testPendingAssistantViewStateStartsWithThinking() {
+    func testPendingAssistantViewStateStartsWithJapanesePreparingLabel() {
         let submittedAt = Date()
 
         let state = buildPendingAssistantViewState(
@@ -130,7 +130,7 @@ final class ConversationPromptTests: XCTestCase {
             formType: "10-K"
         )
 
-        XCTAssertEqual(state.badge, "Thinking")
+        XCTAssertEqual(state.badge, "整理中")
         XCTAssertEqual(state.title, "質問の軸を整理しています")
     }
 
@@ -144,7 +144,7 @@ final class ConversationPromptTests: XCTestCase {
             formType: "10-Q"
         )
 
-        XCTAssertEqual(state.badge, "Searching")
+        XCTAssertEqual(state.badge, "検索中")
         XCTAssertEqual(state.title, "比較に必要な提出資料を探しています")
         XCTAssertEqual(state.detail, "同四半期ベースで必要な過去年だけ補完しています。")
     }
