@@ -20,7 +20,7 @@ settings:
 packages:
   GoogleMobileAds:
     url: https://github.com/googleads/swift-package-manager-google-mobile-ads.git
-    from: 13.0.0
+    version: 13.2.0
 schemes:
   Kabuyomi:
     build:
@@ -73,6 +73,37 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         PRODUCT_NAME: Kabuyomi
         TARGETED_DEVICE_FAMILY: "1"
+    postBuildScripts:
+      - name: Generate Ad SDK dSYMs for Archive
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+
+          # Google distributes these SDKs as stripped binary frameworks through SPM.
+          # App Store symbol upload expects matching dSYM bundles in the archive.
+          if [ "${PLATFORM_NAME:-}" != "iphoneos" ]; then
+            exit 0
+          fi
+
+          if [ "${ACTION:-}" != "install" ] && [ -z "${ARCHIVE_PRODUCTS_PATH:-}" ]; then
+            exit 0
+          fi
+
+          frameworks_dir="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}"
+          dsym_dir="${DWARF_DSYM_FOLDER_PATH}"
+          mkdir -p "${dsym_dir}"
+
+          for framework in GoogleMobileAds UserMessagingPlatform; do
+            binary="${frameworks_dir}/${framework}.framework/${framework}"
+            output="${dsym_dir}/${framework}.framework.dSYM"
+
+            if [ ! -x "${binary}" ] || [ -d "${output}" ]; then
+              continue
+            fi
+
+            echo "Generating archive dSYM for ${framework}.framework"
+            dsymutil "${binary}" -o "${output}"
+          done
   KabuyomiTests:
     type: bundle.unit-test
     platform: iOS
