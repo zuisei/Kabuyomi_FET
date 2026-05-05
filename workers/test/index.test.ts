@@ -114,6 +114,25 @@ describe("worker routing", () => {
     expect(body).toContain("Google AdMob");
   });
 
+  it("serves the tokushoho page with explicit legal identity blockers", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/legal/tokushoho"),
+      {
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain("特定商取引法に基づく表記");
+    expect(body).toContain("TODO_FINAL_LEGAL_IDENTITY");
+    expect(body).toContain("kabuyomi.credits.100");
+    expect(body).toContain("paid credit は失効しません");
+  });
+
   it("serves legal pages even while maintenance mode is enabled", async () => {
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/legal/terms"),

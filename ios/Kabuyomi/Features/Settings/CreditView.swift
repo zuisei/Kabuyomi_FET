@@ -23,7 +23,9 @@ struct CreditView: View {
                     VStack(spacing: 16) {
                         balanceCard
                         purchaseCard
-                        rewardCard
+                        if shouldShowRewardedCreditUI {
+                            rewardCard
+                        }
                     }
                     .padding(20)
                     .padding(.top, 2)
@@ -32,7 +34,9 @@ struct CreditView: View {
             }
         }
         .onAppear {
-            appModel.logRewardedAdSettingsViewed()
+            if shouldShowRewardedCreditUI {
+                appModel.logRewardedAdSettingsViewed()
+            }
         }
         .task {
             await appModel.refreshCreditUsage()
@@ -75,7 +79,7 @@ struct CreditView: View {
                         Text("残高")
                             .font(.system(.headline, design: .rounded, weight: .bold))
                             .foregroundStyle(KabuyomiTheme.ink)
-                        Text("chat と広告報酬に使う credit")
+                        Text("chat と翻訳に使う credit")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
@@ -161,9 +165,13 @@ struct CreditView: View {
     private var rewardCard: some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
-                Text("広告報酬")
+                Text("広告報酬（任意）")
                     .font(.system(.headline, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.ink)
+                Text("広告を最後まで見るとfree/ad creditを2 credits獲得できます。1日3回まで、獲得から30日間有効です。広告を見なくても購入creditはそのまま使えます。")
+                    .font(.footnote)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
                 RewardedAdCreditButton(
                     state: appModel.rewardedAdCreditState,
                     message: appModel.rewardedAdStatusMessage,
@@ -181,6 +189,10 @@ struct CreditView: View {
     private var miniCreditPackProduct: CreditPackProduct {
         appModel.creditPackProducts.first { $0.id == SubscriptionStore.miniCreditProductID }
             ?? CreditPackProduct(id: SubscriptionStore.miniCreditProductID, credits: 100, displayPrice: nil, isAvailable: false)
+    }
+
+    private var shouldShowRewardedCreditUI: Bool {
+        true
     }
 
     private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {

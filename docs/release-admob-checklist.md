@@ -1,6 +1,6 @@
 # Rewarded AdMob Credits Release Checklist
 
-This checklist is for the installed TestFlight / App Store build. DEBUG smoke mode is a developer diagnostic path only and is not part of release readiness.
+This checklist is for the installed TestFlight / App Store build. DEBUG smoke mode is a developer diagnostic path only and is not part of release readiness. For v1 submission, the normal rewarded-credit UI is included and must use the production/TestFlight-safe SSV path.
 
 ## Pre-upload
 
@@ -10,9 +10,13 @@ This checklist is for the installed TestFlight / App Store build. DEBUG smoke mo
 - Release build does not expose SSV smoke mode controls.
 - Release build does not expose test device ID controls.
 - Release build does not use the Google demo rewarded ad unit.
-- Rewarded-ad credit feature is visible and enabled for eligible users.
+- Rewarded-ad credit feature is visible in the normal Release credit screen.
 - Reward amount is `+2 credits`.
+- Rewarded grants are capped at 3 valid grants per user per JST day.
+- Rewarded ad credits expire 30 days after grant.
 - Reward grant waits for AdMob server-side verification before credits are reflected.
+- Invalid signatures, invalid ad units, malformed callbacks, expired intents, and duplicate transactions do not grant extra credits.
+- Rewarded credits are free/ad credits and remain separate from paid credits.
 - Error messages distinguish ad display failure, ad unavailability/no-fill, and server confirmation timeout.
 - Full iOS test suite passes.
 - Release build passes.
@@ -48,11 +52,30 @@ This checklist is for the installed TestFlight / App Store build. DEBUG smoke mo
 - IPA export: pass with App Store Connect export options and Xcode-managed distribution signing.
 - App Store Connect upload: blocked unless App Store Connect upload credentials or an authenticated Xcode account with an associated provider are available.
 - Export options template: `ios/ExportOptions.appstore.template.plist`.
-- Production ad config scan: pass when the Release archive contains the production API and production rewarded ad unit, and does not contain demo/test/debug setup strings.
+- Production ad config scan: pass when the Release archive contains the production API, uses the production rewarded ad unit, exposes the normal rewarded-credit UI, and does not expose demo/test/debug setup strings.
 
 ## App Review Notes
 
-Rewarded ads are optional. Users can watch a rewarded ad to receive 2 in-app credits. Credits are used for AI chat requests. The app verifies rewarded ad completion through AdMob server-side verification before granting credits.
+App Review notes should say rewarded ads are optional, grant +2 free/ad credits after server-side Google AdMob SSV verification, are capped at 3 valid grants per day, expire 30 days after grant, and are never required to use paid credits. Do not describe rewarded ads as unlocking investment advice, buy/sell recommendations, premium recommendations, stock price forecasts, or target prices.
+
+## Manual Rewarded-Credit Verification
+
+1. Install the TestFlight or Release build.
+2. Open the credit/settings screen.
+3. Confirm the rewarded-credit UI is visible.
+4. Tap the rewarded-ad button.
+5. Confirm the ad loads and completes.
+6. Confirm `/v1/admob/reward-intents` created a pending reward intent.
+7. Confirm the Google SSV callback reached `/v1/admob/ssv`.
+8. Confirm exactly +2 credits were granted.
+9. Confirm `/v1/admob/reward-status?id=<intent>` shows `granted`.
+10. Confirm `/v1/usage` reflects the granted ad credits.
+11. Repeat until 3 valid grants have been made for the same JST day.
+12. Confirm the 4th grant is capped.
+13. Confirm a duplicate callback for the same transaction does not double grant.
+14. Confirm an invalid ad unit test rejects and does not grant.
+15. Confirm an invalid signature test rejects and does not grant.
+16. Confirm paid credit balance is not consumed before free/ad credits.
 
 ## Post-upload / Post-release Monitoring
 

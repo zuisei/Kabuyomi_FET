@@ -15,10 +15,11 @@ Kabuyomi is an iOS + Cloudflare Workers app for reading SEC filings in Japanese 
 - Main iOS flow is `AppRootView -> ConversationEntryView -> CompanyView`.
 - `SearchView` is now a utility sheet for ticker discovery, not the app root.
 - `CompanyView` is split into focused subcomponents under `ios/Kabuyomi/Features/Company/`.
-- Kabuyomi is currently a beta with a two-tier quota ladder: `free` (`3` saved tickers / `10` daily chats) and `pro` (`20` saved tickers / `50` daily chats).
-- StoreKit purchase / restore and Worker billing sync stay on the same `/v1/*` API surface. If a detachable offer such as unlimited returns later, keep it outside the core free/pro ladder.
-- Beta chat is filing-grounded by default. External web supplements stay off unless you intentionally re-enable them for testing via Worker remote config.
-- Future `pro` / upper-tier exploration may add AI-assisted web search and a news tab, but the product intent should stay "filing-first": web/news context should explain market reaction, recent developments, and follow-up questions around the filing, not replace SEC-sourced answers or turn the app into a generic news feed.
+- v1 submission scope is a Japanese SEC filing reader for U.S. stocks, limited to `10-K` / `10-Q`.
+- v1 chat is filing-grounded by default and must not be described as web search, investment advice, buy/sell recommendation, stock-price forecast, or target-price service.
+- v1 monetization is consumable credits only. The only visible paid IAP product is `kabuyomi.credits.100`, which grants 100 paid credits for ¥200.
+- Paid credits do not expire. Free/promotional credits and ad credits are separate from paid credits.
+- Subscriptions, Lite / Pro / Pro Max public plans, the ¥500 pack, App Attest, DeviceCheck, account systems, 8-K support, and web search are v1.1+ or later.
 - Workers routes live under `workers/src/routes/`; shared logic is split across `workers/src/lib/` and `workers/src/clients/gemini/`.
 
 ## Quick Start
@@ -60,16 +61,16 @@ open Kabuyomi.xcodeproj
 
 Unit tests live under `ios/KabuyomiTests/` and can be run with `xcodebuild test` after generating the project.
 
-## Current Beta Semantics
+## Current v1 Semantics
 
 - Saved tickers are persistent on the server. In `/v1/usage`, `stocksUsed` means the current saved ticker count, not "today's stock consumption".
 - Opening a ticker is independent from saving it. `/v1/company/{ticker}` and `/v1/chat` require a device identity, but they do not consume or require a saved ticker slot.
-- Daily quota currently applies only to chats and resets on JST day boundaries.
+- Free/promotional credit applies to chats and resets according to the server-provided reset time.
 - Free-plan quota identity currently trusts the client-provided `x-device-key`. That is acceptable for the current beta, but it is not abuse-resistant because rotating keys can evade the free limits; production hardening would need a server-issued identity or attestation.
 - `/v1/watchlist/add` saves a ticker. `/v1/watchlist/remove` removes it and returns updated usage.
 - `/v1/chat` returns `responsePath`; `modelName` is populated only when the answer actually used the remote Gemini path.
 - `resetLocalData()` is a full "start over" reset: local saved data and chat history are cleared, device identity is regenerated, and usage may come back in a new-user state.
-- `/v1/billing/sync` is fail-closed for active client claims until App Store server verification is added. Active `productId` claims return `403`; inactive sync clears to a free entitlement keyed by `originalTransactionId`.
+- `/v1/credits/purchase-grant` and `/v1/ios/purchases/credits/complete` require Worker-side App Store Server verification before granting paid credits.
 
 ## Storage And History
 

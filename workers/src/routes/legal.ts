@@ -15,7 +15,7 @@ const legalPages: LegalPage[] = [
   {
     path: "/legal/privacy",
     title: "Kabuyomi プライバシーポリシー",
-    updatedAt: "2026-05-03",
+    updatedAt: "2026-05-05",
     sections: [
       {
         title: "1. 収集する情報",
@@ -30,7 +30,7 @@ const legalPages: LegalPage[] = [
       {
         title: "3. 第三者サービス",
         body:
-          "Kabuyomi は、API 配信、キャッシュ、利用制限管理に Cloudflare、米国企業の開示資料取得に SEC EDGAR、AI 応答や翻訳に OpenAI API などの外部 AI サービス、無料プランの広告表示に Google AdMob、アプリ内課金と購入復元に Apple App Store / StoreKit を利用します。これらのサービスは、それぞれの規約およびプライバシーポリシーに基づいて情報を処理する場合があります。"
+          "Kabuyomi は、API 配信、キャッシュ、利用制限管理に Cloudflare、米国企業の 10-K / 10-Q 取得に SEC EDGAR、AI 応答や翻訳に OpenAI API などの外部 AI サービス、広告表示や広告報酬の検証に Google AdMob、アプリ内課金と購入復元に Apple App Store / StoreKit を利用します。これらのサービスは、それぞれの規約およびプライバシーポリシーに基づいて情報を処理する場合があります。"
       },
       {
         title: "4. 広告",
@@ -67,17 +67,17 @@ const legalPages: LegalPage[] = [
   {
     path: "/legal/terms",
     title: "Kabuyomi 利用条件",
-    updatedAt: "2026-05-03",
+    updatedAt: "2026-05-05",
     sections: [
       {
         title: "1. サービスの性質",
         body:
-          "Kabuyomi は SEC EDGAR の公開提出書類を日本語で読みやすくし、根拠付きの要約、指標表示、AI チャット、引用文翻訳を提供するリサーチ支援アプリです。投資助言、売買推奨、株価予測、証券口座連携、利益保証は提供しません。"
+          "Kabuyomi は SEC EDGAR の公開 10-K / 10-Q を日本語で読みやすくし、根拠付きの要約、指標表示、AI チャット、引用文翻訳を提供する SEC filing reader です。投資助言、売買推奨、株価予測、目標株価、証券口座連携、利益保証は提供しません。"
       },
       {
         title: "2. 利用の前提",
         body:
-          "要約、AI チャット、翻訳、指標抽出には誤り、欠落、遅延、解釈の違いが含まれる可能性があります。重要な判断を行う場合は、必ず SEC 原文、企業の公式資料、専門家の助言を確認してください。"
+          "要約、AI チャット、翻訳、指標抽出には誤り、欠落、遅延、解釈の違いが含まれる可能性があります。回答はアプリが利用できる SEC 提出資料に基づきます。重要な判断を行う場合は、必ず SEC 原文、企業の公式資料、必要に応じて資格を持つ専門家の助言を確認してください。投資判断は利用者自身の責任で行ってください。"
       },
       {
         title: "3. 禁止事項",
@@ -97,7 +97,7 @@ const legalPages: LegalPage[] = [
       {
         title: "6. credit購入について",
         body:
-          "v1.0 では買い切りの追加 credit を App Store のアプリ内課金として提供します。購入、返金、請求、購入履歴、購入復元は Apple ID と App Store の仕組みに従います。購入した credit はアプリ内の AI チャットや引用文翻訳など、Kabuyomi が指定する機能に利用できます。サブスクリプションは v1.1 以降で実装を検討しています。"
+          "v1.0 では買い切りの追加 credit を App Store のアプリ内課金として提供します。表示する paid credit 商品は kabuyomi.credits.100 のみで、100 paid credits を ¥200 で付与します。paid credit は失効しません。free/promotional credit と ad credit は paid credit と分けて管理され、表示された期限がある場合はその期限に従います。購入、返金、請求、購入履歴、購入復元は Apple ID と App Store の仕組みおよび適用法に従います。"
       },
       {
         title: "7. 外部サービス",
@@ -107,6 +107,63 @@ const legalPages: LegalPage[] = [
       {
         title: "8. お問い合わせ",
         body: "問い合わせは kabuyomi.support@gmail.com または X（Twitter）@0xt4dano までご連絡ください。"
+      }
+    ]
+  },
+  {
+    path: "/legal/tokushoho",
+    title: "Kabuyomi 特定商取引法に基づく表記",
+    updatedAt: "2026-05-05",
+    sections: [
+      {
+        title: "提出前ブロッカー",
+        body:
+          "販売者の正式な氏名または法人名、住所、電話番号は未確定です。これらの値が最終確定するまで App Store 最終提出はブロックしてください。"
+      },
+      {
+        title: "事業者 / 販売者名",
+        body: "TODO_FINAL_LEGAL_IDENTITY: 正式な事業者名または法人名を記載してください。"
+      },
+      {
+        title: "所在地",
+        body: "TODO_FINAL_LEGAL_ADDRESS: 正式な所在地を記載してください。"
+      },
+      {
+        title: "電話番号",
+        body: "TODO_FINAL_LEGAL_PHONE: 正式な電話番号を記載してください。"
+      },
+      {
+        title: "連絡先",
+        body: "kabuyomi.support@gmail.com または X（Twitter）@0xt4dano までご連絡ください。"
+      },
+      {
+        title: "販売価格",
+        body: "v1.0 の paid credit 商品は kabuyomi.credits.100 のみです。販売価格は ¥200、付与数は 100 paid credits です。App Store の表示価格と税・手数料の扱いは Apple の決済画面に従います。"
+      },
+      {
+        title: "支払時期 / 支払方法",
+        body: "購入時に Apple ID / App Store のアプリ内課金で支払います。決済処理、請求、領収書、購入履歴は Apple の仕組みに従います。"
+      },
+      {
+        title: "サービス提供時期",
+        body: "Apple transaction を Kabuyomi Worker が App Store Server API で確認できた後、paid credit がアプリ内残高に反映されます。重複 transaction は二重付与せず、反映済みとして扱います。"
+      },
+      {
+        title: "キャンセル / 返金",
+        body: "デジタルコンテンツの性質上、購入後のキャンセルは原則として App Store の仕組みと適用法に従います。返金は Apple App Store の返金手続きおよび適用法に基づいて処理されます。"
+      },
+      {
+        title: "動作環境",
+        body: "Kabuyomi iOS アプリ、インターネット接続、Apple App Store / StoreKit、Kabuyomi API、SEC EDGAR、Cloudflare、OpenAI API などの外部サービスが利用可能である必要があります。"
+      },
+      {
+        title: "credit の有効期限",
+        body: "paid credit は失効しません。free/promotional credit と ad credit は paid credit と分けて管理され、期限がある場合はアプリ内表示または関連説明に従います。"
+      },
+      {
+        title: "投資助言ではありません",
+        body:
+          "Kabuyomi は SEC 10-K / 10-Q の読解支援アプリです。投資助言、売買推奨、株価予測、目標株価、証券口座連携、ポートフォリオ管理は提供しません。回答はアプリが利用できる SEC 提出資料に基づきます。投資判断は利用者自身の責任で行ってください。"
       }
     ]
   },

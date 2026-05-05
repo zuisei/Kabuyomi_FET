@@ -1,0 +1,69 @@
+{
+  "rows": 20,
+  "tickers": [
+    "AAPL",
+    "JPM"
+  ],
+  "sourceIdsValidFalse": 0,
+  "rawResponsePathBreakdown": {
+    "openai": 10,
+    "fallback": 7,
+    "deterministic": 3
+  },
+  "rawFallbackTotal": 7,
+  "rawFallbackKindBreakdown": {
+    "none": 20
+  },
+  "rawFallbackReasonBreakdown": {},
+  "fallbackCategoryBreakdown": {},
+  "fallbackUserReasonBreakdown": {},
+  "rawGeminiApiErrorBreakdown": {},
+  "fallbackKindNoneOnFallbackRows": 7,
+  "rawEnglishSurfaced": 0,
+  "bannedFallbackPhraseHits": 0,
+  "bankTermsInNonBankSectors": 0,
+  "wrongSectorTerms": 0,
+  "infraContaminated": false,
+  "infraContaminationReasons": [],
+  "rateLimitRows": 0,
+  "rateLimitRate": 0,
+  "authErrorRows": 0,
+  "providerErrorRows": 0,
+  "networkErrorRows": 0,
+  "engineeringErrorRows": 0,
+  "qualityRows": 20,
+  "qualityRowsExcluded": 0,
+  "qualityFallbackTotal": 7,
+  "qualityFallbackRate": 0.35,
+  "qualityHardIntentFallback": 6,
+  "qualityQ03Q04Q06Fallback": 6,
+  "qualityMetricWithoutDriver": 0,
+  "qualityTemporalityNotAssessed": 0,
+  "qualityEvasiveAnswer": 0,
+  "retryAttempted": 0,
+  "retryWasted": 0,
+  "rateLimitRetrySucceeded": 0,
+  "benchmarkRateLimitRetryCount": 0,
+  "latency": {
+    "p50": 3053,
+    "p95": 5777,
+    "p99": 7101
+  },
+  "qualityLatency": {
+    "p50": 3053,
+    "p95": 5777,
+    "p99": 7101
+  },
+  "benchmarkControls": {
+    "concurrency": 1,
+    "effectiveConcurrency": 1,
+    "minDelayMsBetweenRequests": 1500,
+    "maxRetriesOnRateLimit": 2,
+    "initialRateLimitBackoffMs": 5000,
+    "maxRateLimitBackoffMs": 30000,
+    "respectRetryAfterHeader": true,
+    "jitterMs": 500,
+    "stopRunOnRateLimitThreshold": null,
+    "markInfraContaminatedOnRateLimitThreshold": null
+  }
+}

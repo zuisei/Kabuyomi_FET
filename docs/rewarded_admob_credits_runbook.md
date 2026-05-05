@@ -1,14 +1,17 @@
 # Rewarded AdMob Credits Runbook
 
-Production release decision remains HOLD until the production D1 migration and a real AdMob SSV callback have both been verified.
+Rewarded credits are included in Kabuyomi v1. The normal Release/TestFlight credit screen may show the rewarded-credit UI, but the release decision remains HOLD until a real Google AdMob SSV callback is documented below with sanitized evidence.
 
 ## Scope
 
-- Completed rewarded ad view grants exactly 2 promotional credits.
+- Completed rewarded ad view grants exactly 2 free/ad credits after server-side Google AdMob SSV verification.
 - Daily cap is 3 rewarded grants per user per JST calendar day.
+- Rewarded ad credits expire 30 days after grant.
 - Rewarded credits are promotional/free credits and are separate from paid credit purchases.
+- Duplicate SSV transactions are success/no-op and do not double grant.
+- Invalid signatures, invalid ad units, malformed callbacks, and expired reward intents do not grant.
 - Normal chat cost remains 2 credits.
-- Paid credit and subscription behavior must not change.
+- Paid credit behavior must not change.
 
 ## AdMob IDs
 
@@ -46,7 +49,7 @@ The Worker expects Google AdMob SSV query parameters including `ad_unit`, `custo
 6. Confirm the ledger row has `creditSource = admob_rewarded`.
 7. Confirm usage reflects `rewardedAdRemaining` and the expected total balance.
 
-Do not enable production rewarded grants until step 5 succeeds.
+Do not mark rewarded credits release-verified until step 5 succeeds and the evidence is recorded below.
 
 Latest production-path route check:
 
@@ -57,7 +60,25 @@ Latest production-path route check:
 - `POST /v1/admob/reward-intents` without auth: reached route and returned `Device key is required`, not generic 404.
 - `GET /v1/admob/ssv` with numeric production suffix `7202804414` and no signature: reached route and returned `invalid_signature`, not generic 404 or 500.
 - `GET /v1/admob/ssv` with full production ad unit `ca-app-pub-1248492954379402/7202804414` and no signature: reached route and returned `invalid_signature`, not generic 404 or 500.
-- Real production Google SSV callback observed: no. Production release remains HOLD until a real callback reaches the Worker, verifies successfully, and grants exactly 2 credits once.
+- External product-owner statement: real SSV was verified outside the previous Codex pass.
+- Repository evidence status: not recorded. Production release remains HOLD until a real callback reaches the Worker, verifies successfully, grants exactly 2 credits once, and the sanitized evidence record below is completed.
+
+## Real SSV Evidence Record
+
+Do not include secrets, full private tokens, or full transaction IDs. Redact transaction IDs as `prefix...suffix`.
+
+- Real production/TestFlight Google SSV callback observed: no repository artifact recorded.
+- Evidence date/time: TODO_RECORD_VERIFIED_SSV_TIME_JST
+- Environment: TODO_RECORD_PRODUCTION_OR_TESTFLIGHT
+- Worker URL or route hit: TODO_RECORD_WORKER_ROUTE
+- Ad unit kind: TODO_RECORD_PRODUCTION_OR_TEST_UNIT_KIND
+- Redacted transaction ID: TODO_RECORD_REDACTED_TRANSACTION_ID
+- Expected grant result: +2 free/ad credits
+- Actual grant result: TODO_RECORD_GRANT_RESULT
+- Reward status poll result: TODO_RECORD_REWARD_STATUS_RESULT
+- `/v1/usage` result: TODO_RECORD_USAGE_RESULT
+- Duplicate callback result: TODO_RECORD_DUPLICATE_RESULT
+- Evidence source path or log reference: TODO_RECORD_SANITIZED_EVIDENCE_PATH
 
 ## Non-Production Verification
 
@@ -89,7 +110,7 @@ Latest non-production route check:
 - `POST /v1/admob/reward-intents` with a test device key: created a pending reward intent with `rewardCredits = 2`.
 - `GET /v1/admob/reward-status?id=<intent>`: returned `pending` before SSV.
 - `GET /v1/admob/ssv` without a valid signature: reached route and returned `invalid_signature`, not generic 404.
-- Real Google SSV callback observed: no. The AdMob console/device setup still needs to send a real SSV callback to the test Worker before production readiness can be marked READY.
+- Real Google SSV callback observed in repository evidence: no. The AdMob console/device setup or product-owner verification artifact still needs to be recorded before production readiness can be marked READY.
 
 If the production rewarded ad unit is temporarily pointed at the test SSV URL for smoke testing, switch it back to the production SSV URL before release. Prefer a separate staging/test rewarded ad unit with SSV configured directly to the test Worker.
 
@@ -105,6 +126,25 @@ If the production rewarded ad unit is temporarily pointed at the test SSV URL fo
 | Invalid or missing signature | Rejected, no credits granted |
 | Expired reward intent | Rejected, no credits granted |
 
+## Manual Verification Checklist
+
+1. Install the TestFlight or Release build.
+2. Open the credit/settings screen.
+3. Confirm rewarded-credit UI is visible.
+4. Tap the rewarded-ad button.
+5. Confirm the ad loads and completes.
+6. Confirm the reward intent was created.
+7. Confirm the Google SSV callback reached the Worker.
+8. Confirm +2 credits were granted.
+9. Confirm the status poll shows `granted`.
+10. Confirm `/v1/usage` reflects the balance.
+11. Repeat up to the daily cap.
+12. Confirm the 4th valid grant is capped.
+13. Confirm duplicate callback does not double grant.
+14. Confirm invalid ad unit rejects.
+15. Confirm invalid signature rejects.
+16. Confirm paid credit balance is not consumed before free/ad credits.
+
 ## Production Rollback
 
 - If production Worker deploy fails: stop, do not continue SSV smoke, and redeploy the last known-good Worker version if needed.
@@ -112,7 +152,7 @@ If the production rewarded ad unit is temporarily pointed at the test SSV URL fo
 - If `ad_unit` is rejected: confirm AdMob sent either the full configured unit ID or the numeric suffix. Do not broaden the allowlist beyond the configured unit and suffix.
 - If the credit grant amount is wrong: disable the rewarded ad UI in the app build or remove/disable the AdMob SSV callback until the Worker is fixed.
 - If AdMob callback URL is wrong: correct AdMob Console configuration before continuing.
-- Do not ship App Store release until real SSV, idempotency, daily cap, and normal chat credit consumption are verified.
+- Do not ship App Store release until real SSV evidence, idempotency, daily cap, and normal chat credit consumption are verified and recorded.
 
 ## Troubleshooting
 

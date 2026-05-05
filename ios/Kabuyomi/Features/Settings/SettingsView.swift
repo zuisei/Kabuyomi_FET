@@ -246,6 +246,16 @@ struct SettingsView: View {
                     )
                 }
                 .buttonStyle(.plain)
+
+                Button {
+                    presentedLegalDocument = .tokushoho
+                } label: {
+                    SettingsLinkRow(
+                        title: "特定商取引法に基づく表記",
+                        subtitle: "販売者情報と paid credit の条件"
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
         .fullScreenCover(item: $presentedLegalDocument) { document in
@@ -291,7 +301,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "第三者サービス",
-                body: "API 配信、キャッシュ、利用制限管理には Cloudflare、SEC の決算資料取得には SEC EDGAR、AI 応答と翻訳には OpenAI API などの外部 AI サービス、無料プランの広告表示には Google AdMob、アプリ内課金と購入復元には Apple App Store / StoreKit を利用します。"
+                body: "API 配信、キャッシュ、利用制限管理には Cloudflare、SEC の 10-K / 10-Q 取得には SEC EDGAR、AI 応答と翻訳には OpenAI API などの外部 AI サービス、広告表示や広告報酬の検証には Google AdMob、アプリ内課金と購入復元には Apple App Store / StoreKit を利用します。"
             ),
             LegalSection(
                 title: "広告と購入",
@@ -312,11 +322,11 @@ struct SettingsView: View {
         [
             LegalSection(
                 title: "サービスの性質",
-                body: "Kabuyomi は SEC EDGAR の公開提出書類を日本語で読みやすくし、根拠付きの要約、指標表示、AI チャット、引用文翻訳を提供するリサーチ支援アプリです。投資助言、売買推奨、株価予測、証券口座連携、利益保証は提供しません。"
+                body: "Kabuyomi は SEC EDGAR の公開 10-K / 10-Q を日本語で読みやすくし、根拠付きの要約、指標表示、AI チャット、引用文翻訳を提供する SEC filing reader です。投資助言、売買推奨、株価予測、目標株価、証券口座連携、利益保証は提供しません。"
             ),
             LegalSection(
                 title: "利用の前提",
-                body: "要約、AI チャット、翻訳、指標抽出には誤り、欠落、遅延、解釈の違いが含まれる可能性があります。重要な判断を行う場合は、必ず SEC 原文、企業の公式資料、専門家の助言を確認してください。"
+                body: "要約、AI チャット、翻訳、指標抽出には誤り、欠落、遅延、解釈の違いが含まれる可能性があります。回答はアプリが利用できる SEC 提出資料に基づきます。重要な判断を行う場合は、必ず SEC 原文、企業の公式資料、必要に応じて資格を持つ専門家の助言を確認してください。投資判断は利用者自身の責任で行ってください。"
             ),
             LegalSection(
                 title: "禁止事項",
@@ -332,7 +342,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "credit購入",
-                body: "v1.0 では買い切りの追加 credit を App Store のアプリ内課金として提供します。購入、返金、請求、購入履歴、購入復元は Apple ID と App Store の仕組みに従います。サブスクリプションは v1.1 以降で実装を検討しています。"
+                body: "v1.0 では買い切りの追加 credit を App Store のアプリ内課金として提供します。表示する paid credit 商品は kabuyomi.credits.100 のみで、100 paid credits を ¥200 で付与します。paid credit は失効しません。free/promotional credit と ad credit は paid credit と分けて管理され、表示された期限がある場合はその期限に従います。購入、返金、請求、購入履歴、購入復元は Apple ID と App Store の仕組みおよび適用法に従います。"
             ),
             LegalSection(
                 title: "外部サービス",
@@ -358,6 +368,59 @@ struct SettingsView: View {
         ]
     }
 
+    private var tokushohoSections: [LegalSection] {
+        [
+            LegalSection(
+                title: "提出前ブロッカー",
+                body: "販売者の正式な氏名または法人名、住所、電話番号は未確定です。これらの値が最終確定するまで App Store 最終提出はブロックしてください。"
+            ),
+            LegalSection(
+                title: "事業者 / 販売者名",
+                body: "TODO_FINAL_LEGAL_IDENTITY: 正式な事業者名または法人名を記載してください。"
+            ),
+            LegalSection(
+                title: "所在地",
+                body: "TODO_FINAL_LEGAL_ADDRESS: 正式な所在地を記載してください。"
+            ),
+            LegalSection(
+                title: "電話番号",
+                body: "TODO_FINAL_LEGAL_PHONE: 正式な電話番号を記載してください。"
+            ),
+            LegalSection(
+                title: "連絡先",
+                body: "kabuyomi.support@gmail.com または X（Twitter）@0xt4dano までご連絡ください。"
+            ),
+            LegalSection(
+                title: "販売価格",
+                body: "v1.0 の paid credit 商品は kabuyomi.credits.100 のみです。販売価格は ¥200、付与数は 100 paid credits です。App Store の表示価格と税・手数料の扱いは Apple の決済画面に従います。"
+            ),
+            LegalSection(
+                title: "支払時期 / 支払方法",
+                body: "購入時に Apple ID / App Store のアプリ内課金で支払います。決済処理、請求、領収書、購入履歴は Apple の仕組みに従います。"
+            ),
+            LegalSection(
+                title: "サービス提供時期",
+                body: "Apple transaction を Kabuyomi Worker が App Store Server API で確認できた後、paid credit がアプリ内残高に反映されます。重複 transaction は二重付与せず、反映済みとして扱います。"
+            ),
+            LegalSection(
+                title: "キャンセル / 返金",
+                body: "デジタルコンテンツの性質上、購入後のキャンセルは原則として App Store の仕組みと適用法に従います。返金は Apple App Store の返金手続きおよび適用法に基づいて処理されます。"
+            ),
+            LegalSection(
+                title: "動作環境",
+                body: "Kabuyomi iOS アプリ、インターネット接続、Apple App Store / StoreKit、Kabuyomi API、SEC EDGAR、Cloudflare、OpenAI API などの外部サービスが利用可能である必要があります。"
+            ),
+            LegalSection(
+                title: "credit の有効期限",
+                body: "paid credit は失効しません。free/promotional credit と ad credit は paid credit と分けて管理され、期限がある場合はアプリ内表示または関連説明に従います。"
+            ),
+            LegalSection(
+                title: "投資助言ではありません",
+                body: "Kabuyomi は SEC 10-K / 10-Q の読解支援アプリです。投資助言、売買推奨、株価予測、目標株価、証券口座連携、ポートフォリオ管理は提供しません。回答はアプリが利用できる SEC 提出資料に基づきます。投資判断は利用者自身の責任で行ってください。"
+            )
+        ]
+    }
+
     private func legalSections(for document: LegalDocumentKind) -> [LegalSection] {
         switch document {
         case .privacy:
@@ -366,6 +429,8 @@ struct SettingsView: View {
             termsSections
         case .support:
             supportSections
+        case .tokushoho:
+            tokushohoSections
         }
     }
 }
@@ -374,6 +439,7 @@ private enum LegalDocumentKind: String, Identifiable {
     case privacy
     case terms
     case support
+    case tokushoho
 
     var id: String { rawValue }
 
@@ -385,6 +451,8 @@ private enum LegalDocumentKind: String, Identifiable {
             "利用条件"
         case .support:
             "サポート"
+        case .tokushoho:
+            "特定商取引法に基づく表記"
         }
     }
 
@@ -396,6 +464,8 @@ private enum LegalDocumentKind: String, Identifiable {
             "Kabuyomi の利用条件"
         case .support:
             "問い合わせと不具合報告"
+        case .tokushoho:
+            "販売者情報と paid credit の条件"
         }
     }
 }

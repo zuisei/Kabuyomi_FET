@@ -13,7 +13,7 @@ struct BillingTier: Equatable, Hashable {
     }
 
     var summary: String {
-        "\(monthlyCredits) credits/月"
+        "\(monthlyCredits) credits"
     }
 }
 
@@ -61,6 +61,7 @@ enum BillingCatalog {
         monthlyCredits: 1200,
         productID: "app.kabuyomi.pro_max.monthly"
     )
+    // v1.1 recurring credit grant candidates. Keep isolated from v1 public UI.
     static let subscriptionTiers = [lite, pro, proMax]
     static let recognizedSubscriptionTiers = subscriptionTiers
 

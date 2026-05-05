@@ -251,6 +251,44 @@ describe("AdMob rewarded credits route", () => {
     });
   });
 
+  it("rejects invalid SSV signatures before reading callback grant fields", async () => {
+    mockVerifySsv.mockResolvedValue(false);
+    const { db } = createDb({
+      intents: [
+        {
+          id: "intent-1",
+          user_id: "free:local:device-123",
+          custom_data: "custom-1",
+          reward_credits: 2,
+          status: "pending",
+          daily_date_key: "2026-05-03",
+          expires_at: "2999-01-01T00:00:00.000Z",
+          created_at: "2026-05-03T00:00:00.000Z",
+          granted_at: null,
+          transaction_id: null,
+          credits_remaining: null
+        }
+      ]
+    });
+    const url = ssvUrl({
+      transaction_id: "tx-1",
+      ad_unit: "ca-app-pub-3940256099942544/1712485313",
+      custom_data: "custom-1"
+    });
+
+    const response = await handleAdMobRewardRoutes({
+      request: new Request(url),
+      url,
+      env: envWithDb(db),
+      config: DEFAULT_REMOTE_CONFIG,
+      ctx: {} as never
+    });
+
+    expect(response?.status).toBe(401);
+    await expect(response?.json()).resolves.toEqual({ error: "invalid_signature" });
+    expect(mockGrantRewardedAdCredits).not.toHaveBeenCalled();
+  });
+
   it("accepts the numeric ad_unit suffix Google can send in SSV callbacks", async () => {
     const { db } = createDb({
       intents: [
