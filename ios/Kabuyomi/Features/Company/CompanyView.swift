@@ -98,6 +98,7 @@ struct CompanyView: View {
     @State private var libraryQuery = ""
     @State private var activePanel: CompanySidePanel?
     @State private var librarySearchTask: Task<Void, Never>?
+    @State private var creditsPresented = false
     @State private var settingsPresented = false
     @State private var settingsDismissInputShield = false
     @State private var searchPresented = false
@@ -219,6 +220,7 @@ struct CompanyView: View {
                     .blur(radius: panelAtmosphereProgress(screenWidth: proxy.size.width) * 9)
                     .disabled(
                         panelVisibilityProgress(screenWidth: proxy.size.width) > 0.01
+                            || creditsPresented
                             || settingsPresented
                             || settingsDismissInputShield
                     )
@@ -250,6 +252,7 @@ struct CompanyView: View {
                             saveSearchResult: saveSearchResult,
                             openSearchResult: openSearchResult,
                             openSearch: openSearchScreen,
+                            openCredits: openCreditsScreen,
                             openSettings: openSettingsScreen,
                             close: closePanels,
                             cancelPendingOpen: cancelPendingDrawerOpen
@@ -365,6 +368,14 @@ struct CompanyView: View {
             ) {
                 question = restoredDraft
             }
+        }
+        .fullScreenCover(isPresented: $creditsPresented) {
+            CreditView()
+                .interactiveDismissDisabled(true)
+        }
+        .onChange(of: creditsPresented) { _, isPresented in
+            guard !isPresented else { return }
+            shieldSettingsDismissInput()
         }
         .fullScreenCover(isPresented: $settingsPresented) {
             SettingsView()
@@ -821,6 +832,15 @@ struct CompanyView: View {
         Task {
             try? await Task.sleep(for: .milliseconds(180))
             settingsPresented = true
+        }
+    }
+
+    private func openCreditsScreen() {
+        dismissKeyboard()
+        closePanels()
+        Task {
+            try? await Task.sleep(for: .milliseconds(180))
+            creditsPresented = true
         }
     }
 

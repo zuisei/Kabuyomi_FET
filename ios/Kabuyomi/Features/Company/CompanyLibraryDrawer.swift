@@ -18,6 +18,7 @@ struct ConversationLibraryDrawer: View {
     let saveSearchResult: (SearchItem) -> Void
     let openSearchResult: (SearchItem) -> Void
     let openSearch: () -> Void
+    let openCredits: () -> Void
     let openSettings: () -> Void
     let close: () -> Void
     let cancelPendingOpen: () -> Void
@@ -190,12 +191,12 @@ struct ConversationLibraryDrawer: View {
                     title: "Credits",
                     subtitle: creditSubtitle,
                     systemImage: "creditcard",
-                    action: openSettings
+                    action: openCredits
                 )
 
                 DrawerDockButton(
                     title: "Settings",
-                    subtitle: "creditと設定",
+                    subtitle: "アプリ設定",
                     systemImage: "gearshape",
                     action: openSettings
                 )
