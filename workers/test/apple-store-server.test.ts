@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { verifyCreditPurchaseWithApple, verifySubscriptionWithApple } from "../src/lib/apple-store-server";
+import {
+  buildAppStoreServerToken,
+  verifyCreditPurchaseWithApple,
+  verifySubscriptionWithApple
+} from "../src/lib/apple-store-server";
 
 describe("apple store server verification", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("verifies a sandbox credit purchase through Apple transaction info", async () => {
+  it("sandbox mode only calls sandbox and verifies a sandbox credit purchase", async () => {
     const privateKey = await testPrivateKeyPem();
     const signedTransactionInfo = fakeJws({
       transactionId: "tx-100",
@@ -14,24 +18,16 @@ describe("apple store server verification", () => {
       productId: "kabuyomi.credits.100",
       bundleId: "app.kabuyomi.ios"
     });
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "not found" }), { status: 404 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ signedTransactionInfo }), {
-          status: 200,
-          headers: { "content-type": "application/json" }
-        })
-      );
+    const fetch = vi.fn().mockResolvedValueOnce(successResponse(signedTransactionInfo));
     vi.stubGlobal("fetch", fetch);
 
     const result = await verifyCreditPurchaseWithApple(
       {
-        APPLE_APP_STORE_ISSUER_ID: "issuer-id",
-        APPLE_APP_STORE_KEY_ID: "key-id",
+        APPLE_APP_STORE_ISSUER_ID: "33b3d98d-ad68-4d93-874a-b9bc38db405d",
+        APPLE_APP_STORE_KEY_ID: "QT2X2QH4G6",
         APPLE_APP_STORE_PRIVATE_KEY: privateKey,
         APPLE_BUNDLE_ID: "app.kabuyomi.ios",
-        APPLE_APP_STORE_SERVER_ENVIRONMENT: "auto"
+        APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
       } as never,
       {
         productId: "kabuyomi.credits.100",
@@ -45,13 +41,270 @@ describe("apple store server verification", () => {
       transactionId: "tx-100",
       originalTransactionId: "orig-tx-100"
     });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(fetch.mock.calls[0][0])).toContain("api.storekit-sandbox.itunes.apple.com/inApps/v1/transactions/tx-100");
+    expect(fetch.mock.calls[0][1]?.headers).toMatchObject({
+      accept: "application/json"
+    });
+    expect(String(fetch.mock.calls[0][1]?.headers.authorization)).toMatch(/^Bearer /);
+  });
+
+  it("production mode only calls production and verifies a production credit purchase", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "tx-100",
+      originalTransactionId: "orig-tx-100",
+      productId: "kabuyomi.credits.100",
+      bundleId: "app.kabuyomi.ios"
+    });
+    const fetch = vi.fn().mockResolvedValueOnce(successResponse(signedTransactionInfo));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      verifyCreditPurchaseWithApple(
+        {
+          APPLE_APP_STORE_ISSUER_ID: "33b3d98d-ad68-4d93-874a-b9bc38db405d",
+          APPLE_APP_STORE_KEY_ID: "QT2X2QH4G6",
+          APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+          APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+          APPLE_APP_STORE_SERVER_ENVIRONMENT: "production"
+        } as never,
+        {
+          productId: "kabuyomi.credits.100",
+          transactionId: "tx-100",
+          originalTransactionId: "orig-tx-100",
+          signedTransactionInfo
+        }
+      )
+    ).resolves.toEqual({
+      transactionId: "tx-100",
+      originalTransactionId: "orig-tx-100"
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(fetch.mock.calls[0][0])).toContain("api.storekit.itunes.apple.com/inApps/v1/transactions/tx-100");
+  });
+
+  it("auto mode uses production success without calling sandbox", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "tx-100",
+      originalTransactionId: "orig-tx-100",
+      productId: "kabuyomi.credits.100",
+      bundleId: "app.kabuyomi.ios"
+    });
+    const fetch = vi.fn().mockResolvedValueOnce(successResponse(signedTransactionInfo));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      verifyCreditPurchaseWithApple(
+        {
+          APPLE_APP_STORE_ISSUER_ID: "33b3d98d-ad68-4d93-874a-b9bc38db405d",
+          APPLE_APP_STORE_KEY_ID: "QT2X2QH4G6",
+          APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+          APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+          APPLE_APP_STORE_SERVER_ENVIRONMENT: "auto"
+        } as never,
+        {
+          productId: "kabuyomi.credits.100",
+          transactionId: "tx-100",
+          originalTransactionId: "orig-tx-100",
+          signedTransactionInfo
+        }
+      )
+    ).resolves.toEqual({
+      transactionId: "tx-100",
+      originalTransactionId: "orig-tx-100"
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(fetch.mock.calls[0][0])).toContain("api.storekit.itunes.apple.com/inApps/v1/transactions/tx-100");
+  });
+
+  it("auto mode falls back from production 4040010 to sandbox", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "tx-100",
+      originalTransactionId: "orig-tx-100",
+      productId: "kabuyomi.credits.100",
+      bundleId: "app.kabuyomi.ios"
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(appleErrorResponse(404, 4040010, "TransactionIdNotFoundError"))
+      .mockResolvedValueOnce(successResponse(signedTransactionInfo));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      verifyCreditPurchaseWithApple(
+        {
+          APPLE_APP_STORE_ISSUER_ID: "33b3d98d-ad68-4d93-874a-b9bc38db405d",
+          APPLE_APP_STORE_KEY_ID: "QT2X2QH4G6",
+          APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+          APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+          APPLE_APP_STORE_SERVER_ENVIRONMENT: "auto"
+        } as never,
+        {
+          productId: "kabuyomi.credits.100",
+          transactionId: "tx-100",
+          originalTransactionId: "orig-tx-100",
+          signedTransactionInfo
+        }
+      )
+    ).resolves.toEqual({
+      transactionId: "tx-100",
+      originalTransactionId: "orig-tx-100"
+    });
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(String(fetch.mock.calls[0][0])).toContain("api.storekit.itunes.apple.com/inApps/v1/transactions/tx-100");
     expect(String(fetch.mock.calls[1][0])).toContain("api.storekit-sandbox.itunes.apple.com/inApps/v1/transactions/tx-100");
-    expect(fetch.mock.calls[1][1]?.headers).toMatchObject({
-      accept: "application/json"
+  });
+
+  it("auto mode falls back from production 401 to sandbox but only verifies after sandbox succeeds", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "tx-100",
+      originalTransactionId: "orig-tx-100",
+      productId: "kabuyomi.credits.100",
+      bundleId: "app.kabuyomi.ios"
     });
-    expect(String(fetch.mock.calls[1][1]?.headers.authorization)).toMatch(/^Bearer /);
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(appleErrorResponse(401, "UNAUTHORIZED", "Unauthorized"))
+      .mockResolvedValueOnce(successResponse(signedTransactionInfo));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      verifyCreditPurchaseWithApple(
+        {
+          APPLE_APP_STORE_ISSUER_ID: "33b3d98d-ad68-4d93-874a-b9bc38db405d",
+          APPLE_APP_STORE_KEY_ID: "QT2X2QH4G6",
+          APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+          APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+          APPLE_APP_STORE_SERVER_ENVIRONMENT: "auto"
+        } as never,
+        {
+          productId: "kabuyomi.credits.100",
+          transactionId: "tx-100",
+          originalTransactionId: "orig-tx-100",
+          signedTransactionInfo
+        }
+      )
+    ).resolves.toEqual({
+      transactionId: "tx-100",
+      originalTransactionId: "orig-tx-100"
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(String(fetch.mock.calls[1][0])).toContain("api.storekit-sandbox.itunes.apple.com/inApps/v1/transactions/tx-100");
+  });
+
+  it("auto mode fails without granting when production 401 and sandbox 401 both fail", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "tx-100",
+      originalTransactionId: "orig-tx-100",
+      productId: "kabuyomi.credits.100",
+      bundleId: "app.kabuyomi.ios"
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(appleErrorResponse(401, "UNAUTHORIZED", "Unauthorized"))
+      .mockResolvedValueOnce(appleErrorResponse(401, "UNAUTHORIZED", "Unauthorized"));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      verifyCreditPurchaseWithApple(
+        {
+          APPLE_APP_STORE_ISSUER_ID: "33b3d98d-ad68-4d93-874a-b9bc38db405d",
+          APPLE_APP_STORE_KEY_ID: "QT2X2QH4G6",
+          APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+          APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+          APPLE_APP_STORE_SERVER_ENVIRONMENT: "auto"
+        } as never,
+        {
+          productId: "kabuyomi.credits.100",
+          transactionId: "tx-100",
+          originalTransactionId: "orig-tx-100",
+          signedTransactionInfo
+        }
+      )
+    ).rejects.toMatchObject({
+      status: 503,
+      publicMessage: "Apple transaction verification is not configured"
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("auto mode fails without granting when production not-found fallback and sandbox both fail", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "tx-100",
+      originalTransactionId: "orig-tx-100",
+      productId: "kabuyomi.credits.100",
+      bundleId: "app.kabuyomi.ios"
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(appleErrorResponse(404, 4040010, "TransactionIdNotFoundError"))
+      .mockResolvedValueOnce(appleErrorResponse(404, 4040010, "TransactionIdNotFoundError"));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      verifyCreditPurchaseWithApple(
+        {
+          APPLE_APP_STORE_ISSUER_ID: "33b3d98d-ad68-4d93-874a-b9bc38db405d",
+          APPLE_APP_STORE_KEY_ID: "QT2X2QH4G6",
+          APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+          APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+          APPLE_APP_STORE_SERVER_ENVIRONMENT: "auto"
+        } as never,
+        {
+          productId: "kabuyomi.credits.100",
+          transactionId: "tx-100",
+          originalTransactionId: "orig-tx-100",
+          signedTransactionInfo
+        }
+      )
+    ).rejects.toMatchObject({
+      status: 400,
+      publicMessage: "Apple transaction could not be verified"
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("builds an App Store Server API JWT with JOSE ES256 shape", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const before = Math.floor(Date.now() / 1000);
+
+    const token = await buildAppStoreServerToken({
+      APPLE_APP_STORE_ISSUER_ID: "33b3d98d-ad68-4d93-874a-b9bc38db405d",
+      APPLE_APP_STORE_KEY_ID: "QT2X2QH4G6",
+      APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+      APPLE_BUNDLE_ID: "app.kabuyomi.ios"
+    } as never);
+
+    const parts = token.split(".");
+    expect(parts).toHaveLength(3);
+
+    const header = decodeJwtSegment(parts[0]);
+    const payload = decodeJwtSegment(parts[1]);
+    const signature = base64UrlDecode(parts[2]);
+
+    expect(header).toEqual({
+      alg: "ES256",
+      kid: "QT2X2QH4G6",
+      typ: "JWT"
+    });
+    expect(payload).toMatchObject({
+      iss: "33b3d98d-ad68-4d93-874a-b9bc38db405d",
+      aud: "appstoreconnect-v1",
+      bid: "app.kabuyomi.ios"
+    });
+    expect(typeof payload.iat).toBe("number");
+    expect(typeof payload.exp).toBe("number");
+    const issuedAt = Number(payload.iat);
+    const expiresAt = Number(payload.exp);
+    expect(issuedAt).toBeGreaterThanOrEqual(before);
+    expect(expiresAt).toBe(issuedAt + 20 * 60);
+    expect(signature).toHaveLength(64);
   });
 
   it("rejects mismatched transaction product ids before granting credits", async () => {
@@ -238,11 +491,46 @@ function fakeJws(payload: Record<string, unknown>): string {
   return `${base64UrlEncodeJSON({ alg: "ES256", kid: "apple" })}.${base64UrlEncodeJSON(payload)}.signature`;
 }
 
+function successResponse(signedTransactionInfo: string): Response {
+  return new Response(JSON.stringify({ signedTransactionInfo }), {
+    status: 200,
+    headers: { "content-type": "application/json" }
+  });
+}
+
+function appleErrorResponse(status: number, errorCode: number | string, errorName: string): Response {
+  return new Response(
+    JSON.stringify({
+      errorCode,
+      errorName,
+      errorMessage: errorName
+    }),
+    {
+      status,
+      headers: { "content-type": "application/json" }
+    }
+  );
+}
+
 function base64UrlEncodeJSON(value: unknown): string {
   return base64Encode(new TextEncoder().encode(JSON.stringify(value)))
     .replaceAll("+", "-")
     .replaceAll("/", "_")
     .replace(/=+$/u, "");
+}
+
+function decodeJwtSegment(value: string): Record<string, unknown> {
+  return JSON.parse(new TextDecoder().decode(base64UrlDecode(value))) as Record<string, unknown>;
+}
+
+function base64UrlDecode(value: string): Uint8Array {
+  const base64 = value.replaceAll("-", "+").replaceAll("_", "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 function base64Encode(bytes: Uint8Array): string {

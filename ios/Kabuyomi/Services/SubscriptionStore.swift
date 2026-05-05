@@ -34,6 +34,7 @@ final class SubscriptionStore {
     private var updatesTask: Task<Void, Never>?
     private var cachedProducts: [Product] = []
     private var cachedCreditPackProducts: [Product] = []
+    private var diagnostics = StoreKitDiagnosticsSnapshot.initial(requestedProductIds: creditPackProductIDs)
 
     var quotaSubject: String? {
         defaults.string(forKey: quotaSubjectKey)
@@ -54,6 +55,42 @@ final class SubscriptionStore {
     var requestOriginalTransactionId: String? {
         guard isSubscriptionActive else { return nil }
         return defaults.string(forKey: originalTransactionIdKey)
+    }
+
+    var storeKitDiagnostics: StoreKitDiagnosticsSnapshot {
+        diagnostics
+    }
+
+    func recordPurchaseButtonVisibilityReason(_ reason: String) {
+        diagnostics.updatePurchaseButtonVisibilityReason(reason)
+    }
+
+    func recordBackendGrantStarted() {
+        diagnostics.markBackendGrantStatus("started")
+        logger.notice("mini_iap_backend_grant_started product_ids=\(Self.creditPackProductIDs.joined(separator: ","), privacy: .public)")
+    }
+
+    func recordBackendGrantSucceeded(didMutate: Bool) {
+        let status = didMutate ? "succeeded" : "already_granted"
+        diagnostics.markBackendGrantStatus(status)
+        if didMutate {
+            logger.notice("mini_iap_backend_grant_succeeded product_ids=\(Self.creditPackProductIDs.joined(separator: ","), privacy: .public)")
+        } else {
+            logger.notice("mini_iap_backend_grant_already_granted product_ids=\(Self.creditPackProductIDs.joined(separator: ","), privacy: .public)")
+        }
+    }
+
+    func recordBackendGrantFailed(_ error: Error) {
+        diagnostics.markBackendGrantFailed(error)
+        let nsError = error as NSError
+        logger.error(
+            "mini_iap_backend_grant_failed domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) message=\(nsError.localizedDescription, privacy: .public)"
+        )
+    }
+
+    func recordTransactionFinished() {
+        diagnostics.markTransactionFinished()
+        logger.notice("mini_iap_transaction_finished")
     }
 
     func subscriptionProducts() async throws -> [SubscriptionProduct] {
@@ -138,31 +175,38 @@ final class SubscriptionStore {
 
     func purchaseCreditPack(productId: String) async throws -> PendingCreditPurchase? {
         startObservingTransactionsIfNeeded()
+        diagnostics.markPurchaseStarted(productId: productId)
+        logger.notice("mini_iap_purchase_started product_id=\(productId, privacy: .public)")
         let product = try await creditPackProduct(id: productId)
         let result = try await product.purchase()
 
         switch result {
         case .success(let verification):
             guard case .verified(let transaction) = verification else {
-                logger.error("credit_purchase_result=unverified product_id=\(productId, privacy: .public)")
+                diagnostics.markPurchaseFailed(SubscriptionStoreError.purchaseUnverified)
+                logger.error("mini_iap_purchase_failed product_id=\(productId, privacy: .public) reason=unverified")
                 throw SubscriptionStoreError.purchaseUnverified
             }
 
+            diagnostics.markPurchaseStatus("succeeded:\(productId)")
             logger.notice(
-                "credit_purchase_result=success product_id=\(transaction.productID, privacy: .public) transaction_id=\(String(transaction.id), privacy: .public)"
+                "mini_iap_purchase_succeeded product_id=\(transaction.productID, privacy: .public) transaction_id=\(Self.redactedTransactionId(String(transaction.id)), privacy: .public)"
             )
             return PendingCreditPurchase(transaction: transaction, signedTransactionInfo: verification.jwsRepresentation)
 
         case .userCancelled:
-            logger.notice("credit_purchase_result=cancelled product_id=\(productId, privacy: .public)")
+            diagnostics.markPurchaseStatus("cancelled:\(productId)")
+            logger.notice("mini_iap_purchase_failed product_id=\(productId, privacy: .public) reason=user_cancelled")
             return nil
 
         case .pending:
-            logger.notice("credit_purchase_result=pending product_id=\(productId, privacy: .public)")
+            diagnostics.markPurchaseFailed(SubscriptionStoreError.purchasePending)
+            logger.notice("mini_iap_purchase_failed product_id=\(productId, privacy: .public) reason=pending")
             throw SubscriptionStoreError.purchasePending
 
         @unknown default:
-            logger.error("credit_purchase_result=unknown product_id=\(productId, privacy: .public)")
+            diagnostics.markPurchaseFailed(SubscriptionStoreError.purchaseUnknown)
+            logger.error("mini_iap_purchase_failed product_id=\(productId, privacy: .public) reason=unknown")
             throw SubscriptionStoreError.purchaseUnknown
         }
     }
@@ -340,12 +384,14 @@ final class SubscriptionStore {
 
     private func creditPackProduct(id productId: String) async throws -> Product {
         guard Self.creditPackProductIDs.contains(productId) else {
+            diagnostics.markPurchaseFailed(SubscriptionStoreError.productNotFound)
             throw SubscriptionStoreError.productNotFound
         }
 
         let products = try await loadCreditPackProducts()
         guard let product = products.first(where: { $0.id == productId }) else {
-            logger.error("credit_purchase_result=product_not_found product_id=\(productId, privacy: .public)")
+            diagnostics.markPurchaseFailed(SubscriptionStoreError.productNotFound)
+            logger.error("mini_iap_purchase_failed product_id=\(productId, privacy: .public) reason=product_not_found")
             throw SubscriptionStoreError.productNotFound
         }
 
@@ -354,11 +400,31 @@ final class SubscriptionStore {
 
     private func loadCreditPackProducts() async throws -> [Product] {
         if !cachedCreditPackProducts.isEmpty {
+            diagnostics.markProductLoadCompleted(returnedProductIds: cachedCreditPackProducts.map(\.id))
             return cachedCreditPackProducts
         }
 
+        let canMakePayments = AppStore.canMakePayments
+        let storefront = await Storefront.current
+        diagnostics.markProductLoadStarted(
+            requestedProductIds: Self.creditPackProductIDs,
+            canMakePayments: canMakePayments,
+            storefrontCountryCode: storefront?.countryCode,
+            storefrontId: storefront?.id
+        )
+        let diagnosticBundleIdentifier = diagnostics.bundleIdentifier
+        let diagnosticAppVersion = diagnostics.appVersion
+        let diagnosticBuildNumber = diagnostics.buildNumber
+        let storefrontCountry = storefront?.countryCode ?? "unknown"
+        let storefrontIdentifier = storefront?.id ?? "unknown"
         logger.notice(
-            "mini_iap_product_load_started product_ids=\(Self.creditPackProductIDs.joined(separator: ","), privacy: .public)"
+            "mini_iap_can_make_payments_result can_make_payments=\(canMakePayments, privacy: .public) bundle_id=\(diagnosticBundleIdentifier, privacy: .public) app_version=\(diagnosticAppVersion, privacy: .public) build_number=\(diagnosticBuildNumber, privacy: .public)"
+        )
+        logger.notice(
+            "mini_iap_storefront_loaded country=\(storefrontCountry, privacy: .public) storefront_id=\(storefrontIdentifier, privacy: .public)"
+        )
+        logger.notice(
+            "mini_iap_product_load_started product_ids=\(Self.creditPackProductIDs.joined(separator: ","), privacy: .public) bundle_id=\(diagnosticBundleIdentifier, privacy: .public) app_version=\(diagnosticAppVersion, privacy: .public) build_number=\(diagnosticBuildNumber, privacy: .public) storefront_country=\(storefrontCountry, privacy: .public) can_make_payments=\(canMakePayments, privacy: .public)"
         )
 
         let products: [Product]
@@ -368,17 +434,35 @@ final class SubscriptionStore {
                 timeoutNanoseconds: Self.creditPackProductLoadTimeoutNanoseconds
             )
         } catch SubscriptionStoreError.productLoadTimedOut {
-            logger.error("mini_iap_product_load_timed_out timeout_seconds=10")
+            diagnostics.markProductLoadFailed(SubscriptionStoreError.productLoadTimedOut)
+            logger.error(
+                "mini_iap_product_load_failed product_ids=\(Self.creditPackProductIDs.joined(separator: ","), privacy: .public) domain=Kabuyomi.SubscriptionStoreError code=0 message=timed_out timeout_seconds=10"
+            )
             throw SubscriptionStoreError.productLoadTimedOut
         } catch {
-            logger.error("mini_iap_product_load_failed error=\(error.localizedDescription, privacy: .public)")
+            diagnostics.markProductLoadFailed(error)
+            let nsError = error as NSError
+            logger.error(
+                "mini_iap_product_load_failed product_ids=\(Self.creditPackProductIDs.joined(separator: ","), privacy: .public) domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) message=\(nsError.localizedDescription, privacy: .public)"
+            )
             throw error
         }
 
+        diagnostics.markProductLoadCompleted(returnedProductIds: products.map(\.id))
+        let returnedProductIds = products.map(\.id).joined(separator: ",")
+        let diagnosticCanMakePayments = diagnostics.canMakePayments.map(String.init) ?? "unknown"
+        let diagnosticStorefrontCountry = diagnostics.storefrontCountryCode ?? "unknown"
+        let completedDiagnosticBundleIdentifier = diagnostics.bundleIdentifier
+        let completedDiagnosticAppVersion = diagnostics.appVersion
+        let completedDiagnosticBuildNumber = diagnostics.buildNumber
         if products.isEmpty {
-            logger.error("mini_iap_product_load_empty product_ids=\(Self.creditPackProductIDs.joined(separator: ","), privacy: .public)")
+            logger.error(
+                "mini_iap_product_load_empty product_ids=\(Self.creditPackProductIDs.joined(separator: ","), privacy: .public) returned_count=0 returned_product_ids= bundle_id=\(completedDiagnosticBundleIdentifier, privacy: .public) app_version=\(completedDiagnosticAppVersion, privacy: .public) build_number=\(completedDiagnosticBuildNumber, privacy: .public) storefront_country=\(diagnosticStorefrontCountry, privacy: .public) can_make_payments=\(diagnosticCanMakePayments, privacy: .public)"
+            )
         } else {
-            logger.notice("mini_iap_product_load_succeeded count=\(products.count, privacy: .public)")
+            logger.notice(
+                "mini_iap_product_load_success product_ids=\(Self.creditPackProductIDs.joined(separator: ","), privacy: .public) returned_count=\(products.count, privacy: .public) returned_product_ids=\(returnedProductIds, privacy: .public) bundle_id=\(completedDiagnosticBundleIdentifier, privacy: .public) app_version=\(completedDiagnosticAppVersion, privacy: .public) build_number=\(completedDiagnosticBuildNumber, privacy: .public) storefront_country=\(diagnosticStorefrontCountry, privacy: .public) can_make_payments=\(diagnosticCanMakePayments, privacy: .public)"
+            )
         }
 
         cachedCreditPackProducts = products
@@ -487,6 +571,11 @@ final class SubscriptionStore {
 
     private static func isPurchasableSubscriptionProduct(_ productId: String) -> Bool {
         subscriptionProductIDs.contains(productId)
+    }
+
+    private static func redactedTransactionId(_ value: String) -> String {
+        guard value.count > 8 else { return "redacted" }
+        return "\(value.prefix(4))...\(value.suffix(4))"
     }
 
     private func planPriority(_ productId: String?) -> Int {

@@ -33,6 +33,34 @@ interface ParsedTransactionPayload {
 
 type AppStoreServerEnvironment = "production" | "sandbox" | "auto";
 
+interface AppleVerificationAttempt {
+  environment: AppStoreServerEnvironment;
+  status: number;
+  errorCode?: number | string;
+  errorName?: string;
+  errorMessage?: string;
+}
+
+interface AppStoreServerTokenDebugInfo {
+  keyId: string;
+  issuerIdPrefix: string;
+  issuerIdHash: string;
+  bundleId: string;
+  headerAlg: string;
+  headerKid: string;
+  headerTyp: string;
+  payloadAud: string;
+  payloadBid: string;
+  signatureBytes: number;
+}
+
+interface AppleErrorDetails {
+  reason: string;
+  errorCode?: number | string;
+  errorName?: string;
+  errorMessage?: string;
+}
+
 const PRODUCTION_TRANSACTION_URL = "https://api.storekit.itunes.apple.com/inApps/v1/transactions";
 const SANDBOX_TRANSACTION_URL = "https://api.storekit-sandbox.itunes.apple.com/inApps/v1/transactions";
 
@@ -109,12 +137,16 @@ export async function verifySubscriptionWithApple(
 }
 
 async function fetchSignedTransactionInfo(env: Env, transactionId: string): Promise<string> {
-  const token = await buildAppStoreServerToken(env);
+  const { token, debugInfo } = await buildAppStoreServerTokenWithDebug(env);
   const environments = resolveVerificationEnvironments(env.APPLE_APP_STORE_SERVER_ENVIRONMENT);
   let lastStatus = 0;
   let lastError = "Apple transaction verification failed";
+  let lastEnvironment: AppStoreServerEnvironment | null = null;
+  let lastErrorDetails: AppleErrorDetails = { reason: lastError };
+  const attempts: AppleVerificationAttempt[] = [];
 
   for (const environment of environments) {
+    lastEnvironment = environment;
     const baseURL = environment === "sandbox" ? SANDBOX_TRANSACTION_URL : PRODUCTION_TRANSACTION_URL;
     const response = await fetch(`${baseURL}/${encodeURIComponent(transactionId)}`, {
       headers: {
@@ -130,14 +162,30 @@ async function fetchSignedTransactionInfo(env: Env, transactionId: string): Prom
       }
       logEvent("apple_transaction_verified", {
         transactionId,
-        environment
+        environment,
+        attempts
       });
       return payload.signedTransactionInfo;
     }
 
     lastStatus = response.status;
-    lastError = await safeReadError(response);
-    if (!(environment === "production" && environments.includes("sandbox") && [400, 404].includes(response.status))) {
+    lastErrorDetails = await readAppleErrorDetails(response);
+    lastError = lastErrorDetails.reason;
+    const attempt = {
+      environment,
+      status: response.status,
+      errorCode: lastErrorDetails.errorCode,
+      errorName: lastErrorDetails.errorName,
+      errorMessage: lastErrorDetails.errorMessage
+    };
+    attempts.push(attempt);
+    logWarnEvent("apple_transaction_verification_attempt_failed", {
+      transactionId,
+      ...attempt,
+      appleAuth: buildAppleAuthLog(debugInfo)
+    });
+
+    if (!shouldTryNextAppleEnvironment(environment, environments, response.status, lastErrorDetails)) {
       break;
     }
   }
@@ -145,7 +193,20 @@ async function fetchSignedTransactionInfo(env: Env, transactionId: string): Prom
   logWarnEvent("apple_transaction_verification_failed", {
     transactionId,
     status: lastStatus,
-    reason: lastError
+    reason: lastError,
+    environment: lastEnvironment,
+    attempts,
+    finalFailure: {
+      status: lastStatus,
+      errorCode: lastErrorDetails.errorCode,
+      errorName: lastErrorDetails.errorName,
+      errorMessage: lastErrorDetails.errorMessage
+    },
+    ...(lastStatus === 401
+      ? {
+          appleAuth: buildAppleAuthLog(debugInfo)
+        }
+      : {})
   });
 
   if (lastStatus === 401) {
@@ -157,13 +218,27 @@ async function fetchSignedTransactionInfo(env: Env, transactionId: string): Prom
   throw new AppError(502, "Apple transaction verification failed", lastError);
 }
 
-async function buildAppStoreServerToken(env: Env): Promise<string> {
+export async function buildAppStoreServerToken(env: Env): Promise<string> {
+  return (await buildAppStoreServerTokenWithDebug(env)).token;
+}
+
+async function buildAppStoreServerTokenWithDebug(
+  env: Env
+): Promise<{ token: string; debugInfo: AppStoreServerTokenDebugInfo }> {
   const issuerId = env.APPLE_APP_STORE_ISSUER_ID?.trim();
   const keyId = env.APPLE_APP_STORE_KEY_ID?.trim();
   const privateKey = env.APPLE_APP_STORE_PRIVATE_KEY?.trim();
   const bundleId = env.APPLE_BUNDLE_ID?.trim();
 
   if (!issuerId || !keyId || !privateKey || !bundleId) {
+    logWarnEvent("apple_transaction_verification_config_missing", {
+      missing: [
+        !issuerId ? "APPLE_APP_STORE_ISSUER_ID" : null,
+        !keyId ? "APPLE_APP_STORE_KEY_ID" : null,
+        !privateKey ? "APPLE_APP_STORE_PRIVATE_KEY" : null,
+        !bundleId ? "APPLE_BUNDLE_ID" : null
+      ].filter(Boolean)
+    });
     throw new AppError(503, "Apple transaction verification is not configured");
   }
 
@@ -193,8 +268,23 @@ async function buildAppStoreServerToken(env: Env): Promise<string> {
     key,
     new TextEncoder().encode(signingInput)
   );
+  const joseSignature = normalizeES256Signature(new Uint8Array(signature));
 
-  return `${signingInput}.${base64UrlEncodeBytes(new Uint8Array(signature))}`;
+  return {
+    token: `${signingInput}.${base64UrlEncodeBytes(joseSignature)}`,
+    debugInfo: {
+      keyId,
+      issuerIdPrefix: issuerId.slice(0, 8),
+      issuerIdHash: await shortSha256Hex(issuerId),
+      bundleId,
+      headerAlg: header.alg,
+      headerKid: header.kid,
+      headerTyp: header.typ,
+      payloadAud: payload.aud,
+      payloadBid: payload.bid,
+      signatureBytes: joseSignature.byteLength
+    }
+  };
 }
 
 function ensureTransactionMatches(
@@ -267,6 +357,56 @@ function resolveVerificationEnvironments(rawValue: string | undefined): AppStore
   return ["production", "sandbox"];
 }
 
+function shouldTryNextAppleEnvironment(
+  environment: AppStoreServerEnvironment,
+  environments: AppStoreServerEnvironment[],
+  status: number,
+  errorDetails: AppleErrorDetails
+): boolean {
+  if (environment !== "production" || !environments.includes("sandbox")) {
+    return false;
+  }
+  if (status === 401) {
+    return true;
+  }
+  if (status === 404 || status === 400) {
+    return isAppleTransactionNotFound(errorDetails);
+  }
+  return false;
+}
+
+function isAppleTransactionNotFound(errorDetails: AppleErrorDetails): boolean {
+  const normalizedName = errorDetails.errorName?.toLowerCase() ?? "";
+  const normalizedMessage = errorDetails.errorMessage?.toLowerCase() ?? "";
+  const normalizedReason = errorDetails.reason.toLowerCase();
+  return (
+    errorDetails.errorCode === 4040010 ||
+    String(errorDetails.errorCode) === "4040010" ||
+    normalizedName.includes("transactionidnotfound") ||
+    normalizedMessage.includes("transactionidnotfound") ||
+    normalizedMessage.includes("transaction id not found") ||
+    normalizedReason.includes("4040010") ||
+    normalizedReason.includes("transactionidnotfound") ||
+    normalizedReason.includes("transaction id not found") ||
+    normalizedReason.includes("not found")
+  );
+}
+
+function buildAppleAuthLog(debugInfo: AppStoreServerTokenDebugInfo): Record<string, unknown> {
+  return {
+    keyId: debugInfo.keyId,
+    issuerIdPrefix: debugInfo.issuerIdPrefix,
+    issuerIdHash: debugInfo.issuerIdHash,
+    bundleId: debugInfo.bundleId,
+    headerAlg: debugInfo.headerAlg,
+    headerKid: debugInfo.headerKid,
+    headerTyp: debugInfo.headerTyp,
+    payloadAud: debugInfo.payloadAud,
+    payloadBid: debugInfo.payloadBid,
+    signatureBytes: debugInfo.signatureBytes
+  };
+}
+
 function base64UrlEncodeJSON(value: unknown): string {
   return base64UrlEncodeBytes(new TextEncoder().encode(JSON.stringify(value)));
 }
@@ -289,6 +429,95 @@ function base64UrlDecode(value: string): Uint8Array {
   return bytes;
 }
 
+function normalizeES256Signature(signature: Uint8Array): Uint8Array {
+  if (signature.byteLength === 64) {
+    return signature;
+  }
+  if (signature.byteLength > 0 && signature[0] === 0x30) {
+    return derEcdsaSignatureToJose(signature);
+  }
+  throw new AppError(503, "Apple transaction verification is not configured", "Unsupported ES256 signature format");
+}
+
+function derEcdsaSignatureToJose(signature: Uint8Array): Uint8Array {
+  let offset = 0;
+  if (signature[offset++] !== 0x30) {
+    throw new AppError(503, "Apple transaction verification is not configured", "Invalid DER signature sequence");
+  }
+
+  const sequenceLength = readDerLength(signature, offset);
+  offset = sequenceLength.offset;
+  if (sequenceLength.length !== signature.byteLength - offset) {
+    throw new AppError(503, "Apple transaction verification is not configured", "Invalid DER signature length");
+  }
+
+  const r = readDerInteger(signature, offset);
+  offset = r.offset;
+  const s = readDerInteger(signature, offset);
+  offset = s.offset;
+  if (offset !== signature.byteLength) {
+    throw new AppError(503, "Apple transaction verification is not configured", "Trailing DER signature bytes");
+  }
+
+  const jose = new Uint8Array(64);
+  jose.set(normalizeDerIntegerTo32Bytes(r.value), 0);
+  jose.set(normalizeDerIntegerTo32Bytes(s.value), 32);
+  return jose;
+}
+
+function readDerLength(bytes: Uint8Array, offset: number): { length: number; offset: number } {
+  const first = bytes[offset++];
+  if (first === undefined) {
+    throw new AppError(503, "Apple transaction verification is not configured", "Missing DER length");
+  }
+  if (first < 0x80) {
+    return { length: first, offset };
+  }
+
+  const byteCount = first & 0x7f;
+  if (byteCount < 1 || byteCount > 2 || offset + byteCount > bytes.byteLength) {
+    throw new AppError(503, "Apple transaction verification is not configured", "Unsupported DER length");
+  }
+  let length = 0;
+  for (let index = 0; index < byteCount; index += 1) {
+    length = (length << 8) | bytes[offset++];
+  }
+  return { length, offset };
+}
+
+function readDerInteger(bytes: Uint8Array, offset: number): { value: Uint8Array; offset: number } {
+  if (bytes[offset++] !== 0x02) {
+    throw new AppError(503, "Apple transaction verification is not configured", "Missing DER integer");
+  }
+  const lengthInfo = readDerLength(bytes, offset);
+  offset = lengthInfo.offset;
+  const end = offset + lengthInfo.length;
+  if (lengthInfo.length < 1 || end > bytes.byteLength) {
+    throw new AppError(503, "Apple transaction verification is not configured", "Invalid DER integer length");
+  }
+  return { value: bytes.slice(offset, end), offset: end };
+}
+
+function normalizeDerIntegerTo32Bytes(integer: Uint8Array): Uint8Array {
+  let value = integer;
+  while (value.byteLength > 0 && value[0] === 0x00) {
+    value = value.slice(1);
+  }
+  if (value.byteLength > 32) {
+    throw new AppError(503, "Apple transaction verification is not configured", "DER integer is too large for ES256");
+  }
+  const normalized = new Uint8Array(32);
+  normalized.set(value, 32 - value.byteLength);
+  return normalized;
+}
+
+async function shortSha256Hex(value: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+  return Array.from(digest.slice(0, 6))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 function pemToArrayBuffer(pem: string): ArrayBuffer {
   const base64 = pem
     .replace(/-----BEGIN PRIVATE KEY-----/gu, "")
@@ -300,10 +529,46 @@ function pemToArrayBuffer(pem: string): ArrayBuffer {
   return copy.buffer;
 }
 
-async function safeReadError(response: Response): Promise<string> {
+async function readAppleErrorDetails(response: Response): Promise<AppleErrorDetails> {
   try {
-    return await response.text();
+    const reason = await response.text();
+    if (!reason) {
+      return { reason: `HTTP ${response.status}` };
+    }
+    try {
+      const payload = JSON.parse(reason) as Record<string, unknown>;
+      return {
+        reason,
+        errorCode: readAppleErrorField(payload, "errorCode") ?? readAppleErrorField(payload, "error_code"),
+        errorName: stringOrUndefined(readAppleErrorField(payload, "errorName") ?? readAppleErrorField(payload, "error")),
+        errorMessage: stringOrUndefined(
+          readAppleErrorField(payload, "errorMessage") ??
+            readAppleErrorField(payload, "message") ??
+            readAppleErrorField(payload, "error_message")
+        )
+      };
+    } catch {
+      return { reason };
+    }
   } catch {
-    return `HTTP ${response.status}`;
+    return { reason: `HTTP ${response.status}` };
   }
+}
+
+function readAppleErrorField(payload: Record<string, unknown>, key: string): number | string | undefined {
+  const value = payload[key];
+  if (typeof value === "string" || typeof value === "number") {
+    return value;
+  }
+  return undefined;
+}
+
+function stringOrUndefined(value: number | string | undefined): string | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return undefined;
 }

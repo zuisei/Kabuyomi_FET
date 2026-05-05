@@ -134,6 +134,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var creditPackProducts: [CreditPackProduct] = []
     var creditPackProductLoadErrorMessage: String?
     var creditPackProductLoadInFlight = false
+    var storeKitDiagnostics = StoreKitDiagnosticsSnapshot.initial(requestedProductIds: SubscriptionStore.creditPackProductIDs)
     var activeAlert: AppAlertState?
     var aiConsentGranted = UserDefaults.standard.bool(forKey: "kabuyomi.aiConsentGranted")
     var showStarterCompanies = UserDefaults.standard.object(forKey: "kabuyomi.showStarterCompanies") as? Bool ?? true
@@ -443,8 +444,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             } else {
                 creditPackProductLoadErrorMessage = "クレジット商品を読み込めませんでした。少し時間をおいて再試行してください。"
             }
+            refreshStoreKitDiagnostics()
         } catch {
             creditPackProductLoadErrorMessage = error.localizedDescription
+            refreshStoreKitDiagnostics()
             if showErrors {
                 handle(error)
             }
@@ -466,11 +469,17 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
         do {
             guard let purchase = try await subscriptionStore.purchaseCreditPack(productId: productId) else {
+                refreshStoreKitDiagnostics()
                 return
             }
+            subscriptionStore.recordBackendGrantStarted()
+            refreshStoreKitDiagnostics()
             let response = try await apiClient.grantCreditPurchase(purchase.grantRequest)
+            subscriptionStore.recordBackendGrantSucceeded(didMutate: response.didMutate)
             storeUsage(response.usage, source: .refresh)
             await purchase.finish()
+            subscriptionStore.recordTransactionFinished()
+            refreshStoreKitDiagnostics()
             activeAlert = AppAlertState(
                 message: response.didMutate
                     ? "\(response.creditsGranted)クレジットを追加しました。"
@@ -478,6 +487,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 kind: .dismissOnly
             )
         } catch {
+            if subscriptionStore.storeKitDiagnostics.backendGrantStatus == "started" {
+                subscriptionStore.recordBackendGrantFailed(error)
+            }
+            refreshStoreKitDiagnostics()
             handle(error)
         }
     }
@@ -492,10 +505,19 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
         for purchase in purchases {
             do {
+                subscriptionStore.recordBackendGrantStarted()
+                refreshStoreKitDiagnostics()
                 let response = try await apiClient.grantCreditPurchase(purchase.grantRequest)
+                subscriptionStore.recordBackendGrantSucceeded(didMutate: response.didMutate)
                 storeUsage(response.usage, source: .refresh)
                 await purchase.finish()
+                subscriptionStore.recordTransactionFinished()
+                refreshStoreKitDiagnostics()
             } catch {
+                if subscriptionStore.storeKitDiagnostics.backendGrantStatus == "started" {
+                    subscriptionStore.recordBackendGrantFailed(error)
+                }
+                refreshStoreKitDiagnostics()
                 if showErrors {
                     handle(error)
                 }
@@ -1570,6 +1592,27 @@ credit残高に使う端末識別情報は維持されます。
             message: presentableMessage(for: error),
             kind: .dismissOnly
         )
+    }
+
+    func refreshStoreKitDiagnostics() {
+        subscriptionStore.recordPurchaseButtonVisibilityReason(storeKitPurchaseButtonVisibilityReason)
+        storeKitDiagnostics = subscriptionStore.storeKitDiagnostics
+    }
+
+    private var storeKitPurchaseButtonVisibilityReason: String {
+        guard isCreditBillingEnabled else {
+            return "hidden_or_disabled:credit_billing_disabled"
+        }
+        if creditPackProductLoadInFlight {
+            return "visible:product_load_in_flight"
+        }
+        if creditPackProducts.contains(where: { $0.id == SubscriptionStore.miniCreditProductID && $0.isAvailable }) {
+            return "visible:mini_credit_product_available"
+        }
+        if creditPackProducts.contains(where: { $0.id == SubscriptionStore.miniCreditProductID }) {
+            return "visible:mini_credit_product_unavailable"
+        }
+        return "visible:product_not_loaded"
     }
 
     private func shouldIgnore(_ error: Error) -> Bool {

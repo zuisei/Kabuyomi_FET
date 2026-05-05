@@ -35,9 +35,11 @@ OPENAI_MAX_COMPLETION_TOKENS = "1800"
 HARD_INTENT_TARGETED_RETRIEVAL_MODE = "diagnostic"
 ADMOB_REWARDED_AD_UNIT_ID = "ca-app-pub-1248492954379402/7202804414"
 SEC_FETCHER_TIMEOUT_MS = "25000"
+APPLE_BUNDLE_ID = "app.kabuyomi.ios"
+APPLE_APP_STORE_SERVER_ENVIRONMENT = "auto"
 # Configure SEC_FETCHER_BASE_URL in .dev.vars for local wrangler dev
 # Optionally set DEV_DETACHED_ACCESS_DEVICE_KEYS in deployed environments to allow DEBUG-only detached access for specific x-device-key values
-# Configure SEC_FETCHER_BASE_URL, SEC_FETCHER_SHARED_SECRET, and BACKFILL_SHARED_SECRET in deployed environments
+# Configure SEC_FETCHER_BASE_URL, SEC_FETCHER_SHARED_SECRET, BACKFILL_SHARED_SECRET, and Apple App Store Server API secrets in deployed environments
 
 [observability]
 enabled = true

@@ -45,6 +45,7 @@ struct SettingsView: View {
                         #endif
                         aiCard
                         linksCard
+                        storeKitDiagnosticsCard
                         displayCard
                         resetCard
                     }
@@ -53,6 +54,9 @@ struct SettingsView: View {
                 }
                 .scrollBounceBehavior(.basedOnSize, axes: .vertical)
             }
+        }
+        .onAppear {
+            appModel.refreshStoreKitDiagnostics()
         }
     }
 
@@ -203,6 +207,49 @@ struct SettingsView: View {
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
                 }
+            }
+        }
+    }
+
+    private var storeKitDiagnosticsCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("購入診断")
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Text("TestFlight の StoreKit 商品取得を確認するための読み取り専用情報です。credit付与や環境切替はできません。")
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(appModel.storeKitDiagnostics.diagnosticLines, id: \.self) { line in
+                        Text(line)
+                            .font(.system(.caption, design: .monospaced, weight: .medium))
+                            .foregroundStyle(KabuyomiTheme.ink)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .textSelection(.enabled)
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(KabuyomiTheme.paper.opacity(0.55))
+                )
+
+                Button {
+                    appModel.refreshStoreKitDiagnostics()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.clockwise")
+                        Text("診断表示を更新")
+                    }
+                    .font(.system(.footnote, design: .rounded, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(KabuyomiTheme.accentDeep)
             }
         }
     }

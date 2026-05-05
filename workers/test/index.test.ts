@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { EntitlementDO } from "../src/durable/entitlement";
 import { UserQuotaDO } from "../src/durable/user-quota";
 import worker from "../src/index";
@@ -89,7 +89,102 @@ function createEvalGrantEnv() {
   };
 }
 
+async function createCreditPurchaseEnv() {
+  const quota = new UserQuotaDO(createQuotaState() as never);
+  const purchaseTransactions = new Map<string, Record<string, unknown>>();
+  const creditLedgerRows: Record<string, unknown>[] = [];
+
+  const prepare = vi.fn((sql: string) => ({
+    bind: vi.fn((...args: unknown[]) => ({
+      async run() {
+        if (sql.includes("INSERT OR IGNORE INTO purchase_transactions")) {
+          const transactionId = String(args[3]);
+          if (!purchaseTransactions.has(transactionId)) {
+            purchaseTransactions.set(transactionId, {
+              user_id: args[1],
+              product_id: args[2],
+              transaction_id: args[3],
+              original_transaction_id: args[4],
+              credits_granted: args[5],
+              status: args[6],
+              purchased_at: args[7],
+              created_at: args[8],
+              updated_at: args[9]
+            });
+          }
+        }
+        if (sql.includes("UPDATE purchase_transactions")) {
+          const transactionId = String(args[2]);
+          const existing = purchaseTransactions.get(transactionId);
+          if (existing) {
+            existing.status = args[0];
+            existing.updated_at = args[1];
+          }
+        }
+        if (sql.includes("INSERT OR IGNORE INTO credit_ledger")) {
+          creditLedgerRows.push({
+            operation_id: args[2],
+            type: args[3],
+            delta: args[4],
+            reference_id: args[9]
+          });
+        }
+        return {};
+      },
+      async first() {
+        if (sql.includes("FROM purchase_transactions")) {
+          return purchaseTransactions.get(String(args[0])) ?? null;
+        }
+        return null;
+      }
+    }))
+  }));
+
+  return {
+    env: {
+      KABUYOMI_CACHE: {
+        get: vi.fn().mockResolvedValue(null)
+      },
+      APPLE_APP_STORE_ISSUER_ID: "issuer-id",
+      APPLE_APP_STORE_KEY_ID: "key-id",
+      APPLE_APP_STORE_PRIVATE_KEY: await testPrivateKeyPem(),
+      APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+      APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox",
+      USER_QUOTA: {
+        getByName: vi.fn().mockReturnValue({
+          fetch: (input: RequestInfo | URL, init?: RequestInit) => quota.fetch(new Request(input, init))
+        })
+      },
+      DB: { prepare }
+    },
+    purchaseTransactions,
+    creditLedgerRows
+  };
+}
+
+async function testPrivateKeyPem(): Promise<string> {
+  const keyPair = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"]
+  );
+  const pkcs8 = await crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
+  return `-----BEGIN PRIVATE KEY-----\n${base64Encode(new Uint8Array(pkcs8))}\n-----END PRIVATE KEY-----`;
+}
+
+function base64Encode(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
 describe("worker routing", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   const executionContext = {
     waitUntil: vi.fn(),
     passThroughOnException: vi.fn()
@@ -493,6 +588,79 @@ describe("worker routing", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Invalid credit purchase payload"
     });
+  });
+
+  it("verifies a public sandbox StoreKit credit purchase and treats duplicate transactions as already granted", async () => {
+    const { env, purchaseTransactions, creditLedgerRows } = await createCreditPurchaseEnv();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "tx-100",
+      originalTransactionId: "orig-tx-100",
+      productId: "kabuyomi.credits.100",
+      bundleId: "app.kabuyomi.ios"
+    });
+    const fetch = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ signedTransactionInfo }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }))
+    );
+    vi.stubGlobal("fetch", fetch);
+    const request = new Request("https://kabuyomi.test/v1/ios/purchases/credits/complete", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-device-key": "device-123"
+      },
+      body: JSON.stringify({
+        productId: "kabuyomi.credits.100",
+        transactionId: "tx-100",
+        originalTransactionId: "orig-tx-100",
+        signedTransactionInfo,
+        purchasedAt: "2026-05-05T12:00:00.000Z"
+      })
+    });
+
+    const first = await worker.fetch(request.clone() as Request, env as never, executionContext);
+    const second = await worker.fetch(request.clone() as Request, env as never, executionContext);
+
+    expect(first.status).toBe(200);
+    await expect(first.json()).resolves.toMatchObject({
+      status: "granted",
+      transactionId: "tx-100",
+      productId: "kabuyomi.credits.100",
+      creditsGranted: 100,
+      transactionStatus: "granted",
+      didMutate: true,
+      usage: {
+        credits: {
+          purchasedRemaining: 100,
+          totalRemaining: 150
+        }
+      }
+    });
+    expect(second.status).toBe(200);
+    await expect(second.json()).resolves.toMatchObject({
+      status: "already_granted",
+      transactionId: "tx-100",
+      productId: "kabuyomi.credits.100",
+      creditsGranted: 100,
+      transactionStatus: "granted",
+      didMutate: false,
+      usage: {
+        credits: {
+          purchasedRemaining: 100,
+          totalRemaining: 150
+        }
+      }
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(String(fetch.mock.calls[0][0])).toContain("api.storekit-sandbox.itunes.apple.com/inApps/v1/transactions/tx-100");
+    expect(purchaseTransactions.get("tx-100")).toMatchObject({
+      product_id: "kabuyomi.credits.100",
+      credits_granted: 100,
+      status: "granted"
+    });
+    expect(creditLedgerRows.filter((row) => row.operation_id === "purchase:tx-100")).toHaveLength(1);
   });
 
   it("returns 400 for invalid internal credit purchase JSON instead of bubbling a 500", async () => {
