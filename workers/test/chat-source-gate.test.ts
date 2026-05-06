@@ -796,6 +796,36 @@ describe("evidence-slot fallback", () => {
     expect(result.modelResponse.answer).not.toContain("預金・貸出");
   });
 
+  it("keeps AAPL-like revenue follow-up handoff as driver durability when product and services evidence exists", () => {
+    const filing = makeFiling("AAPL", "Apple Inc.", [
+      revenueMetric(143_756_000_000, 124_300_000_000, 15.7)
+    ], [
+      metricSource("S9", "売上高: 143756000000 USD / 比較値: 124300000000 / YoY: 15.7%"),
+      source(
+        "S1",
+        "md_a",
+        "Services revenue increased due to customer growth and the installed base, while product introductions and channel inventory can significantly impact net sales. Foreign exchange and tariffs may affect future net sales."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "前問で挙げた売上高の要因（product mix、Services、foreign exchange、demand）は一時的ですか？継続性と不明点を分けて説明してください。",
+      previousAnswer:
+        "本文で説明されている要因: 主な要因は製品とサービスの売上構成の変化と需要、マクロ経済条件・関税等の影響。サービスは売上高の増加とサービスの構成の違いが寄与。市場環境として為替などが影響。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.hardIntent).toBe("driver_durability_followup");
+    expect(result.followupTargetFound).toBe(true);
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.failureLabels).not.toContain("followup_target_empty");
+    expect(result.failureLabels).not.toContain("margin_driver_slots_empty");
+  });
+
   it("does not apply the source gate to non-hard intents", async () => {
     const filing = makeFiling("AAPL", "Apple Inc.", [], [
       source("S1", "md_a", "Apple designs and sells products and services.")

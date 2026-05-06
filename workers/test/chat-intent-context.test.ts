@@ -51,6 +51,12 @@ describe("chat question intent and context packing", () => {
     expect(classifyQuestionIntent("利益率が悪化した理由は？")).toBe("margin_profitability");
   });
 
+  it("keeps revenue-driver durability rewrites out of margin intent when AAPL-like drivers are present", () => {
+    expect(
+      classifyQuestionIntent("前問で挙げた売上高の要因（product mix、Services、foreign exchange、demand）は一時的ですか？継続性と不明点を分けて説明してください。")
+    ).toBe("yoy_change");
+  });
+
   it("classifies management-emphasis questions as MD&A-style context requests", () => {
     expect(classifyQuestionIntent("経営陣が強調している論点は？")).toBe("mda_summary");
     expect(classifyQuestionIntent("経営陣は何を強調してる？")).toBe("mda_summary");

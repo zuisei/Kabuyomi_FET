@@ -47,6 +47,15 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
     return "business_overview";
   }
 
+  if (
+    /(一時|一過性|継続|続く|続き|持続|構造的|temporary|transitory|recurring|sustain|continue)/.test(normalized) &&
+    /(売上|収益|sales|revenue)/.test(normalized) &&
+    /(主因|要因|原因|理由|driver|cause|why)/.test(normalized) &&
+    !/(利益率|マージン|営業利益率|純利益率|profitability|grossprofit)/.test(normalized)
+  ) {
+    return "yoy_change";
+  }
+
   if (/(リスク|懸念|逆風|不確実|不透明|risk|uncertain|uncertainty|macro|関税|tariff)/.test(normalized)) {
     return "risk_factors";
   }

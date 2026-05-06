@@ -105,7 +105,7 @@ function expandFollowUpQuestionWithContext(anchor: ContextAnchor, question: stri
 
   const label = anchorLabel(anchor);
   if (asksTemporary) {
-    const driverContext = extractLatestDriverContext(context);
+    const driverContext = extractLatestDriverContext(context, anchor);
     if (driverContext.driverCandidates.length > 0) {
       return `前問で挙げた${label}の要因（${driverContext.driverCandidates.join("、")}）は一時的ですか？継続性と不明点を分けて説明してください。`;
     }
@@ -127,7 +127,7 @@ function expandFollowUpQuestionWithContext(anchor: ContextAnchor, question: stri
   return `${label}について、${question}`;
 }
 
-function extractLatestDriverContext(context: ChatContextMessage[]): FollowUpDriverContext {
+function extractLatestDriverContext(context: ChatContextMessage[], anchor: ContextAnchor): FollowUpDriverContext {
   const assistant = [...context].reverse().find((message) => message.role === "assistant");
   const content = assistant?.content ?? "";
   if (!content.trim()) {
@@ -145,7 +145,7 @@ function extractLatestDriverContext(context: ChatContextMessage[]): FollowUpDriv
   }
 
   return {
-    driverCandidates: extractDriverCandidates(normalized),
+    driverCandidates: extractDriverCandidates(normalized, anchor),
     driverUnresolved
   };
 }
@@ -154,8 +154,8 @@ function hasCompanyExplainedDriverSignal(text: string): boolean {
   return /primarily due to|driven by|attributable to|resulted from|because of|partially offset|押し上げ|牽引|主な要因|要因として|寄与|増加.*(?:ため|による|背景)|減少.*(?:ため|による|背景)/i.test(text);
 }
 
-function extractDriverCandidates(text: string): string[] {
-  const candidates: Array<[RegExp, string]> = [
+function extractDriverCandidates(text: string, anchor: ContextAnchor): string[] {
+  const revenueCandidates: Array<[RegExp, string]> = [
     [/comparable sales|same-store sales|comp sales|既存店売上/i, "既存店売上"],
     [/\btraffic\b|客数/i, "traffic"],
     [/\bticket\b|客単価/i, "ticket"],
@@ -163,7 +163,6 @@ function extractDriverCandidates(text: string): string[] {
     [/membership|会員/i, "membership"],
     [/advertising|広告/i, "advertising"],
     [/inventory|在庫/i, "inventory"],
-    [/gross margin|粗利|売上総利益/i, "gross margin"],
     [/net interest income|nii|純利息収入/i, "net interest income"],
     [/noninterest income|非金利収入/i, "noninterest income"],
     [/provision for credit losses|信用損失/i, "credit losses"],
@@ -173,20 +172,34 @@ function extractDriverCandidates(text: string): string[] {
     [/natural gas|天然ガス/i, "natural gas price"],
     [/refining margins?|精製マージン/i, "refining margin"],
     [/production volumes?|\bvolume\b|生産量|販売数量/i, "volume"],
-    [/price realization|realizations?|pricing|価格実現|価格/i, "pricing"],
+    [/price realization|realizations?|価格実現/i, "pricing"],
     [/backlog|受注残/i, "backlog"],
     [/dealer inventory|ディーラー在庫/i, "dealer inventory"],
     [/iphone/i, "iPhone"],
+    [/\bmac\b|macbook/i, "Mac"],
+    [/\bipad\b/i, "iPad"],
+    [/wearables/i, "Wearables"],
+    [/製品とサービスの売上構成|売上構成|品目構成|構成の違い|product mix/i, "product mix"],
     [/services|サービス/i, "Services"],
     [/greater china|china|中国/i, "Greater China"],
     [/americas/i, "Americas"],
     [/foreign currency|foreign exchange|為替/i, "foreign exchange"],
-    [/品目構成|構成の違い|product mix/i, "product mix"],
+    [/installed base|インストールベース/i, "installed base"],
+    [/product introductions?|製品投入|新製品/i, "product introductions"],
+    [/demand|需要/i, "demand"],
     [/関税|tariff/i, "tariff"],
     [/\bnii\b|純利息収入|金利収入/i, "net interest income"],
     [/\bnir\b|非金利収入/i, "noninterest income"],
     [/販売量|販売数量|equipment to end users|エンドユーザー/i, "volume"]
   ];
+  const marginCandidates: Array<[RegExp, string]> = [
+    [/gross margin|粗利|売上総利益/i, "gross margin"],
+    [/pricing|価格|価格実現/i, "pricing"],
+    [/mix|構成/i, "mix"],
+    [/cost|expense|費用|コスト/i, "cost"],
+    [/volume|数量|販売量|販売数量/i, "volume"]
+  ];
+  const candidates = anchor === "revenue" ? revenueCandidates : [...marginCandidates, ...revenueCandidates];
 
   const found: string[] = [];
   for (const [pattern, label] of candidates) {
