@@ -203,6 +203,263 @@ describe("Japanese-only final answer guard", () => {
     expect(response.debug?.sourceIdsValid).toBe(true);
   });
 
+  it("softens overconfident WMT durability wording while keeping source-backed evidence", async () => {
+    const filing = makeFiling({ ticker: "WMT", companyName: "Walmart Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "Walmart US eCommerceの売上寄与が継続的に高まり、会員エンゲージメントとOmnichannelがComparable salesを押し上げました。eCommerce の貢献は安定成長を示しています。次回も同じ指標を確認します。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        sourceGateEvidenceSlots: {
+          companyExplainedDrivers: [
+            {
+              category: "retail_driver_durability_followup",
+              driver: "Walmart US eCommerce positively contributed approximately 4.3% to comparable sales. Growth reflects continued strength in customer and Walmart+ member engagement with omnichannel offerings.",
+              sourceIds: ["S1"],
+              confidence: "high"
+            }
+          ],
+          segmentOrBusinessSignals: []
+        },
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.answer).toContain("eCommerce");
+    expect(response.answer).toContain("会員エンゲージメント");
+    expect(response.answer).toContain("継続性は断定できません");
+    expect(response.answer).not.toContain("継続的に高まり");
+    expect(response.answer).not.toContain("安定成長を示しています");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q04_durability_wording_softened"]));
+    expect(response.debug?.fallbackCategory).toBe("none");
+    expect(response.debug?.sourceIdsValid).toBe(true);
+  });
+
+  it("does not soften Q04 durability wording when the source gate is insufficient", async () => {
+    const filing = makeFiling({ ticker: "WMT", companyName: "Walmart Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "Walmart US eCommerceの売上寄与が継続的に高まりました。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: false,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("継続的に高まり");
+    expect(response.debug?.sourceRepairLabels ?? []).not.toContain("q04_durability_wording_softened");
+  });
+
+  it("repairs WMT Q04 post-gate underanswers from source-backed retail durability evidence", async () => {
+    const filing = makeFiling({ ticker: "WMT", companyName: "Walmart Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "前問の具体的な要因が十分に特定できていません。そのため、選択された資料だけで一時要因か継続要因かは分類しません。判断には、経営陣による業績説明、comparable sales、traffic、ticket、eCommerce、membership income の追加確認が必要です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        sourceGateEvidenceSlots: {
+          companyExplainedDrivers: [
+            {
+              category: "retail_driver_durability_followup",
+              driver: "Comparable sales were driven by transactions and unit volumes, with strong sales in grocery and health & wellness. Walmart US eCommerce sales positively contributed to comparable sales. This growth reflects continued strength in customer and Walmart+ member engagement with omnichannel offerings.",
+              sourceIds: ["S1"],
+              confidence: "high"
+            }
+          ],
+          segmentOrBusinessSignals: []
+        },
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("このfilingだけでは継続性は断定できません");
+    expect(response.answer).toContain("comparable sales");
+    expect(response.answer).toContain("eCommerce");
+    expect(response.answer).toContain("member engagement");
+    expect(response.answer).toContain("継続性を見る材料");
+    expect(response.answer).not.toContain("継続的に高まり");
+    expect(response.answer).not.toContain("持続的に伸びる");
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackReason).toBeNull();
+    expect(response.debug?.fallbackCategory).toBe("none");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q04_retail_durability_source_backed_repair"]));
+    expect(response.debug?.sourceIdsValid).toBe(true);
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("repairs JPM Q04 post-gate underanswers from source-backed NII and NIR evidence", async () => {
+    const filing = makeFiling({ ticker: "JPM", companyName: "JPMorgan Chase & Co." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "純利益は570.5億ドルで前年同期比2.4%減です。セグメント・地域別の強弱はこの資料では十分に分解できません。確認すべき箇所は、セグメント実績、地域別売上、製品・カテゴリ別売上、業種固有のセグメントKPIです。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        lowQualityReason: "durability_missing_assessment",
+        sourceGateEvidenceSlots: {
+          confirmedMetricMovement: {
+            metric: "revenue",
+            label: "売上高",
+            value: "1,824.5億ドル",
+            change: "2.8%"
+          },
+          companyExplainedDrivers: [
+            {
+              category: "bank_driver_durability_followup",
+              driver: "Net interest income was up 3%, driven by higher Markets NII, Card Services revolving balances, wholesale deposit balances and investment securities activity, predominantly offset by deposit margin compression and lower rates.",
+              sourceIds: ["S9"],
+              confidence: "high"
+            },
+            {
+              category: "bank_driver_durability_followup",
+              driver: "Noninterest revenue was up 2%, reflecting Markets noninterest revenue, asset management fees, Payments fees, investment banking fees and a First Republic-related gain.",
+              sourceIds: ["S10"],
+              confidence: "high"
+            }
+          ],
+          segmentOrBusinessSignals: []
+        },
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("このfilingだけでは継続性は断定できません");
+    expect(response.answer).toContain("NII");
+    expect(response.answer).toContain("NIR");
+    expect(response.answer).toContain("金利環境次第");
+    expect(response.answer).toContain("市場関連収益や一時利益は変動しやすい");
+    expect(response.answer).not.toContain("今後も伸びる");
+    expect(response.answer).not.toContain("買うべき");
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackReason).toBeNull();
+    expect(response.debug?.fallbackCategory).toBe("none");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q04_bank_durability_source_backed_repair"]));
+    expect(response.debug?.sourceIdsValid).toBe(true);
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("does not repair JPM Q04 underanswers without source-gate sufficiency", async () => {
+    const filing = makeFiling({ ticker: "JPM", companyName: "JPMorgan Chase & Co." });
+    const answer = "セグメント・地域別の強弱はこの資料では十分に分解できません。";
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer,
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: false,
+        lowQualityReason: "durability_missing_assessment",
+        sourceGateEvidenceSlots: {
+          companyExplainedDrivers: [
+            {
+              category: "bank_driver_durability_followup",
+              driver: "Net interest income increased.",
+              sourceIds: ["S1"],
+              confidence: "low"
+            }
+          ]
+        },
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toBe(answer);
+    expect(response.debug?.sourceRepairLabels ?? []).not.toContain("q04_bank_durability_source_backed_repair");
+  });
+
   it("rewrites globally banned generic phrases before returning a final answer", async () => {
     const filing = makeFiling();
     const response = await finalizeChatResponse({

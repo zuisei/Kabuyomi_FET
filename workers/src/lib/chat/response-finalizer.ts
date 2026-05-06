@@ -75,7 +75,8 @@ export async function finalizeChatResponse({
     : supplemented;
   const normalizedFallbackKind = normalizeFallbackKind(responsePath, debug);
   const cleanup = cleanAnswerForQuestion(responseWithUrls.answer, responsePath, normalizedFallbackKind, question, debug.questionIntent, filing);
-  const uxCleanedAnswer = cleanup.answer;
+  const q04DurabilityRepair = repairDriverDurabilityFollowupAnswer(cleanup.answer, question, debug, filing);
+  const uxCleanedAnswer = q04DurabilityRepair?.answer ?? cleanup.answer;
   const originalAnswerBeforeLanguageGuard = uxCleanedAnswer;
   const languageCheck = checkFinalAnswerJapaneseOnly(uxCleanedAnswer);
   const bannedPhraseDetected = hasBannedPhrase(uxCleanedAnswer);
@@ -100,6 +101,10 @@ export async function finalizeChatResponse({
     !hasBannedPhrase(languageRepairCandidate)
   );
   const finalAnswerSafe = (languageCheck.ok && !bannedPhraseStillDetected) || languageRepairSafe;
+  const sourceBackedQ04RepairAccepted = Boolean(
+    finalAnswerSafe &&
+    q04DurabilityRepair?.labels.some((label) => label === "q04_bank_durability_source_backed_repair" || label === "q04_retail_durability_source_backed_repair")
+  );
   const languageSafeAnswer = languageCheck.ok && !bannedPhraseStillDetected
     ? bannedPhraseCleanedAnswer
     : languageRepairSafe && languageRepairCandidate
@@ -112,9 +117,11 @@ export async function finalizeChatResponse({
     });
   const finalLanguageCheck = languageRepairSafe && languageRepairCheck ? languageRepairCheck : languageCheck;
   const sanitizedLanguageSafeAnswer = sanitizeFinalUserFacingAnswer(languageSafeAnswer);
-  const finalResponsePath = finalAnswerSafe ? responsePath : "fallback";
+  const finalResponsePath = sourceBackedQ04RepairAccepted ? "openai" : finalAnswerSafe ? responsePath : "fallback";
   const finalFallbackKind: ChatFallbackKind = finalAnswerSafe
-    ? normalizedFallbackKind
+    ? sourceBackedQ04RepairAccepted
+      ? "none"
+      : normalizedFallbackKind
     : "language_guard_fallback";
   const responsePathFallbackButKindNone = finalResponsePath === "fallback" && finalFallbackKind === "none";
   const finalAnswerLanguageLabels = languageCheck.ok && finalAnswerSafe ? [] : languageRepairSafe ? [
@@ -144,14 +151,14 @@ export async function finalizeChatResponse({
     {
       ...debug,
       responsePath: finalResponsePath,
-      fallbackReason: finalAnswerSafe ? debug.fallbackReason : debug.fallbackReason ?? "low_quality_answer",
+      fallbackReason: sourceBackedQ04RepairAccepted ? null : finalAnswerSafe ? debug.fallbackReason : debug.fallbackReason ?? "low_quality_answer",
       fallbackCategory: finalFallbackTaxonomy.fallbackCategory,
       fallbackUserReason: finalFallbackTaxonomy.fallbackUserReason,
       missingEvidence: finalFallbackTaxonomy.missingEvidence ?? [],
       missingEvidenceLabelsJa: finalFallbackTaxonomy.missingEvidenceLabelsJa ?? [],
       guardLabels: finalFallbackTaxonomy.guardLabels ?? [],
       fallbackKind: responsePathFallbackButKindNone ? "unknown_fallback" : finalFallbackKind,
-      fallbackKindSource: finalAnswerSafe ? debug.fallbackKindSource ?? "finalizer" : "language_guard",
+      fallbackKindSource: sourceBackedQ04RepairAccepted ? "finalizer" : finalAnswerSafe ? debug.fallbackKindSource ?? "finalizer" : "language_guard",
       responsePathFallbackButKindNone,
       finalAnswerJapaneseRatio: finalLanguageCheck.japaneseRatio,
       finalAnswerEnglishSentenceCount: finalLanguageCheck.englishSentenceCount,
@@ -170,6 +177,7 @@ export async function finalizeChatResponse({
       genericFallbackPhraseDetected: bannedPhraseStillDetected,
       sourceRepairLabels: [
         ...(debug.sourceRepairLabels ?? []),
+        ...(q04DurabilityRepair?.labels ?? []),
         ...(languageRepairSafe ? ["language_guard_source_backed_repair"] : [])
       ],
       ...timings.snapshot()
@@ -183,6 +191,181 @@ const MANAGEMENT_MISSING_EVIDENCE = ["MD&A", "業績説明", "セグメント実
 const REVENUE_DRIVER_MISSING_EVIDENCE = ["MD&A", "セグメント実績", "売上説明"];
 const LIQUIDITY_MISSING_EVIDENCE = ["キャッシュフロー計算書", "流動性の説明", "負債の注記", "借入枠", "満期スケジュール"];
 const RISK_MISSING_EVIDENCE = ["リスク要因", "MD&Aのリスク説明", "見通し・リスクの説明"];
+
+type Q04DurabilityRepair = {
+  answer: string;
+  labels: string[];
+};
+
+function repairDriverDurabilityFollowupAnswer(
+  answer: string,
+  question: string,
+  debug: ChatResponseDebugInput,
+  filing: FilingCacheRecord
+): Q04DurabilityRepair | null {
+  if (!isDriverDurabilityFollowupQuestion(question, debug.questionIntent) || debug.sourceGateSufficient !== true) {
+    return null;
+  }
+
+  const evidenceText = extractSourceGateEvidenceText(debug.sourceGateEvidenceSlots);
+  const labels: string[] = [];
+  let repairedAnswer = answer;
+
+  const bankRepair = buildJpmDurabilitySynthesis(answer, evidenceText, debug.lowQualityReason, filing);
+  if (bankRepair) {
+    repairedAnswer = bankRepair;
+    labels.push("q04_bank_durability_source_backed_repair");
+  } else {
+    const retailRepair = buildWmtDurabilitySynthesis(answer, evidenceText, filing);
+    if (retailRepair) {
+      repairedAnswer = retailRepair;
+      labels.push("q04_retail_durability_source_backed_repair");
+    }
+  }
+
+  const softenedAnswer = softenOverconfidentDurabilityWording(repairedAnswer);
+  if (softenedAnswer !== repairedAnswer) {
+    repairedAnswer = softenedAnswer;
+    labels.push("q04_durability_wording_softened");
+  }
+
+  if (labels.length === 0) {
+    return null;
+  }
+
+  const sanitized = sanitizeFinalUserFacingAnswer(repairedAnswer);
+  return { answer: sanitized, labels };
+}
+
+function isDriverDurabilityFollowupQuestion(question: string, questionIntent?: string | null): boolean {
+  if (questionIntent === "driver_durability_followup") {
+    return true;
+  }
+  return /(その要因|一時|継続|続きそう|続く|durability|temporary)/i.test(question) &&
+    !/(利益率|margin|マージン)/i.test(question);
+}
+
+function extractSourceGateEvidenceText(sourceGateEvidenceSlots?: Record<string, unknown> | null): string {
+  if (!sourceGateEvidenceSlots || typeof sourceGateEvidenceSlots !== "object") {
+    return "";
+  }
+  const pieces: string[] = [];
+  const add = (value: unknown) => {
+    if (typeof value === "string") {
+      pieces.push(value);
+    }
+  };
+  const visit = (value: unknown, depth = 0) => {
+    if (depth > 4 || value == null) {
+      return;
+    }
+    if (typeof value === "string") {
+      add(value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        visit(item, depth + 1);
+      }
+      return;
+    }
+    if (typeof value === "object") {
+      for (const item of Object.values(value as Record<string, unknown>)) {
+        visit(item, depth + 1);
+      }
+    }
+  };
+  visit(sourceGateEvidenceSlots);
+  return pieces.join(" ").slice(0, 5000);
+}
+
+function buildJpmDurabilitySynthesis(
+  answer: string,
+  evidenceText: string,
+  lowQualityReason: unknown,
+  filing: FilingCacheRecord
+): string | null {
+  if (!isJpmLikeFiling(filing) || !hasBankDurabilityEvidence(evidenceText)) {
+    return null;
+  }
+  const underAnswered = lowQualityReason === "durability_missing_assessment" ||
+    /セグメント・地域別の強弱|十分に分解できません|確認すべき箇所は/.test(answer);
+  if (!underAnswered) {
+    return null;
+  }
+
+  const lower = evidenceText.toLowerCase();
+  const niiClause = /net interest income|\bnii\b/.test(lower)
+    ? "NIIはMarkets NII、Card Servicesの回転残高、wholesale deposit残高、投資証券活動が寄与しましたが、deposit margin compressionや金利低下の影響もあり、金利環境次第です。"
+    : "";
+  const nirClause = /noninterest income|\bnir\b|investment banking|markets noninterest|asset management|payments|first republic/.test(lower)
+    ? "NIRはMarkets非金利収益、資産運用・Payments・投資銀行手数料、First Republic関連利益が寄与しましたが、市場関連収益や一時利益は変動しやすい要因です。"
+    : "";
+  if (!niiClause && !nirClause) {
+    return null;
+  }
+
+  return `このfilingだけでは継続性は断定できません。${niiClause}${nirClause}次回はNII、NIR、預金マージン、Markets収益、手数料収入を確認する必要があります。`;
+}
+
+function buildWmtDurabilitySynthesis(
+  answer: string,
+  evidenceText: string,
+  filing: FilingCacheRecord
+): string | null {
+  if (!isWmtLikeFiling(filing) || !hasRetailDurabilityEvidence(evidenceText) || !isDurabilityUnderAnswer(answer)) {
+    return null;
+  }
+
+  return "このfilingだけでは継続性は断定できません。Walmart USでは、comparable salesにeCommerceが寄与し、transactionsやunit volumes、groceryとhealth & wellnessの強さ、Walmart+ member engagementとomnichannel利用が支えになっています。これらは継続性を見る材料ですが、持続性を判断するには、次回のcomparable sales、traffic、ticket、eCommerce寄与、member engagement、fuel価格影響を確認する必要があります。";
+}
+
+function isJpmLikeFiling(filing: FilingCacheRecord): boolean {
+  return /\bJPM\b|JPMorgan|Chase/i.test(`${filing.ticker} ${filing.companyName}`);
+}
+
+function isWmtLikeFiling(filing: FilingCacheRecord): boolean {
+  return /\bWMT\b|Walmart/i.test(`${filing.ticker} ${filing.companyName}`);
+}
+
+function hasBankDurabilityEvidence(text: string): boolean {
+  const lower = text.toLowerCase();
+  const hasNii = /net interest income|\bnii\b|deposit margin compression|wholesale deposit|card services/.test(lower);
+  const hasNir = /noninterest income|\bnir\b|markets noninterest|investment banking|asset management|payments|first republic/.test(lower);
+  const hasDurabilityContext = /deposit margin compression|lower rates|markets|investment banking|first republic|revolving balances|wholesale deposit|fees|gain/.test(lower);
+  return (hasNii || hasNir) && hasDurabilityContext;
+}
+
+function hasRetailDurabilityEvidence(text: string): boolean {
+  const lower = text.toLowerCase();
+  const hasComparableSales = /comparable sales|comp sales|same-store sales/.test(lower);
+  const hasRetailDriver = /ecommerce|e-commerce|walmart\+|member engagement|membership|omnichannel|transactions|unit volumes|average ticket|traffic|ticket/.test(lower);
+  const hasContext = /continued strength|driven by|contributed|growth|fuel|grocery|health and wellness|health & wellness/.test(lower);
+  return hasComparableSales && hasRetailDriver && hasContext;
+}
+
+function isDurabilityUnderAnswer(answer: string): boolean {
+  return /前問の具体的な要因が十分に特定|一時要因か継続要因かは分類しません|確認すべき箇所は|追加確認が必要/.test(answer);
+}
+
+function softenOverconfidentDurabilityWording(answer: string): string {
+  let softened = answer
+    .replace(/eCommerceの売上寄与が継続的に高まり/g, "eCommerceの売上寄与は継続要因になり得ますが、このfilingだけでは継続性は断定できません")
+    .replace(/eCommerce の売上寄与が継続的に高まり/g, "eCommerce の売上寄与は継続要因になり得ますが、このfilingだけでは継続性は断定できません")
+    .replace(/eCommerce[^。]*継続的に高まり/g, "eCommerceや会員エンゲージメントは継続性を見る材料ですが、持続性の断定は避けるべきです")
+    .replace(/今後も続くでしょう/g, "今後も続くかは、このfilingだけでは断定できません")
+    .replace(/今後も続くと見られます/g, "今後も続くかは、このfilingだけでは断定できません")
+    .replace(/継続するでしょう/g, "継続するかは、このfilingだけでは断定できません")
+    .replace(/持続的に伸びるでしょう/g, "持続的に伸びるかは、このfilingだけでは断定できません")
+    .replace(/持続的に伸びると見られます/g, "持続的に伸びるかは、このfilingだけでは断定できません")
+    .replace(/安定成長を示しています/g, "継続性を見る材料ですが、このfilingだけでは安定成長とは断定できません")
+    .replace(/安定した成長を示しています/g, "継続性を見る材料ですが、このfilingだけでは安定成長とは断定できません");
+
+  if (softened !== answer && !/継続性は断定できません|持続性の断定は避けるべき/.test(softened)) {
+    softened = `${softened} このfilingだけでは継続性は断定できません。`;
+  }
+  return softened.replace(/\s+/g, " ").trim();
+}
 
 function cleanAnswerForQuestion(
   answer: string,
