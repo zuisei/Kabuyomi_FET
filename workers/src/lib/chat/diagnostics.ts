@@ -93,11 +93,16 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
   | "modelRequestSourceCount"
   | "modelRequestContextCharCount"
   | "modelErrorOccurredBeforeResponse"
+  | "promptTokenCount"
+  | "completionTokenCount"
+  | "totalTokenCount"
+  | "modelCallLatencyMs"
 > {
   const diagnostics = modelResponse.retryDiagnostics;
   const qualityControl = modelResponse.qualityControl;
   const geminiApiError = modelResponse.geminiApiError;
   const modelApiError = modelResponse.modelApiError;
+  const usage = summarizeInvocationUsage(modelResponse.llmUsage);
   return {
     retryAttempted: diagnostics?.retryAttempted ?? false,
     retryAllowed: diagnostics?.retryAllowed ?? false,
@@ -165,7 +170,11 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
     modelRequestEstimatedTokens: modelApiError?.modelRequestEstimatedTokens ?? geminiApiError?.geminiRequestEstimatedTokens ?? null,
     modelRequestSourceCount: modelApiError?.modelRequestSourceCount ?? geminiApiError?.geminiRequestSourceCount ?? null,
     modelRequestContextCharCount: modelApiError?.modelRequestContextCharCount ?? geminiApiError?.geminiRequestContextCharCount ?? null,
-    modelErrorOccurredBeforeResponse: modelApiError?.modelErrorOccurredBeforeResponse ?? geminiApiError?.geminiErrorOccurredBeforeResponse ?? null
+    modelErrorOccurredBeforeResponse: modelApiError?.modelErrorOccurredBeforeResponse ?? geminiApiError?.geminiErrorOccurredBeforeResponse ?? null,
+    promptTokenCount: usage.promptTokenCount,
+    completionTokenCount: usage.completionTokenCount,
+    totalTokenCount: usage.totalTokenCount,
+    modelCallLatencyMs: usage.modelCallLatencyMs
   };
 }
 
@@ -402,6 +411,10 @@ export function buildChatQualityPipelinePayload({
     modelRequestSourceCount: answer.debug?.modelRequestSourceCount ?? null,
     modelRequestContextCharCount: answer.debug?.modelRequestContextCharCount ?? null,
     modelErrorOccurredBeforeResponse: answer.debug?.modelErrorOccurredBeforeResponse ?? null,
+    promptTokenCount: answer.debug?.promptTokenCount ?? null,
+    completionTokenCount: answer.debug?.completionTokenCount ?? null,
+    totalTokenCount: answer.debug?.totalTokenCount ?? null,
+    modelCallLatencyMs: answer.debug?.modelCallLatencyMs ?? null,
     fallbackKindSource: answer.debug?.fallbackKindSource ?? null,
     responsePathFallbackButKindNone: answer.debug?.responsePathFallbackButKindNone ?? false,
     finalAnswerJapaneseRatio: answer.debug?.finalAnswerJapaneseRatio ?? null,
@@ -439,4 +452,35 @@ export function selectedResponseSourceCharCount(answer: ChatResponsePayload): nu
 
 export function estimateTokenCountFromChars(charCount: number): number {
   return Math.ceil(charCount / 4);
+}
+
+function summarizeInvocationUsage(llmUsage: GeminiChatAnswer["llmUsage"]): {
+  promptTokenCount: number | null;
+  completionTokenCount: number | null;
+  totalTokenCount: number | null;
+  modelCallLatencyMs: number | null;
+} {
+  if (!llmUsage || llmUsage.length === 0) {
+    return {
+      promptTokenCount: null,
+      completionTokenCount: null,
+      totalTokenCount: null,
+      modelCallLatencyMs: null
+    };
+  }
+
+  return {
+    promptTokenCount: sumNullableCounts(llmUsage.map((usage) => usage.promptTokenCount)),
+    completionTokenCount: sumNullableCounts(llmUsage.map((usage) => usage.candidatesTokenCount)),
+    totalTokenCount: sumNullableCounts(llmUsage.map((usage) => usage.totalTokenCount)),
+    modelCallLatencyMs: sumNullableCounts(llmUsage.map((usage) => usage.latencyMs))
+  };
+}
+
+function sumNullableCounts(values: Array<number | null | undefined>): number | null {
+  const numeric = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (numeric.length === 0) {
+    return null;
+  }
+  return numeric.reduce((sum, value) => sum + value, 0);
 }

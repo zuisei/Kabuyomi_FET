@@ -79,6 +79,9 @@ for (const row of rows) {
     mustAvoid: row.mustAvoid,
     answer: payload.answer ?? "",
     sources: Array.isArray(payload.sources) ? payload.sources : [],
+    runtimeQuestionIntent: payload.debug?.questionIntent ?? null,
+    rewrittenQuestion: payload.debug?.rewrittenQuestion ?? null,
+    contextApplied: payload.debug?.contextApplied ?? false,
     responsePath: payload.responsePath ?? payload.debug?.responsePath ?? null,
     fallbackReason: payload.fallbackReason ?? payload.debug?.fallbackReason ?? null,
     fallbackCategory: payload.debug?.fallbackCategory ?? null,
@@ -88,7 +91,9 @@ for (const row of rows) {
     guardLabels: payload.debug?.guardLabels ?? [],
     modelName: payload.modelName ?? payload.debug?.modelName ?? null,
     modelProvider: payload.debug?.modelProvider ?? null,
-    promptTokenCount: payload.promptTokenCount ?? null,
+    promptTokenCount: payload.debug?.promptTokenCount ?? payload.promptTokenCount ?? null,
+    completionTokenCount: payload.debug?.completionTokenCount ?? payload.completionTokenCount ?? null,
+    totalTokenCount: payload.debug?.totalTokenCount ?? payload.totalTokenCount ?? null,
     latencyMs,
     sourceCount: Array.isArray(payload.sources) ? payload.sources.length : 0,
     selectedSourceCount: payload.debug?.selectedSourceCount ?? null,
@@ -96,6 +101,9 @@ for (const row of rows) {
     estimatedContextTokens: payload.debug?.estimatedContextTokens ?? null,
     selectedSourceIds: payload.debug?.selectedSourceIds ?? sourceIds(payload.sources),
     selectedSourceLabels: payload.debug?.selectedSourceLabels ?? sourceLabels(payload.sources),
+    selectedSourceTypes: payload.debug?.selectedSourceTypes ?? sourceTypes(payload.sources),
+    selectedSourceSectionFamilies: payload.debug?.selectedSourceSectionFamilies ?? sourceSectionFamilies(payload.sources),
+    tokenAttribution: buildTokenAttribution({ row, payload, conversationContext }),
     sourceIdsValid: payload.debug?.sourceIdsValid ?? null,
     answerQualityFlags: payload.debug?.answerQualityFlags ?? [],
     retryAttempted: payload.debug?.retryAttempted ?? false,
@@ -135,6 +143,8 @@ for (const row of rows) {
     marginDriverSlotsCountAfterHardRetrieval: payload.debug?.marginDriverSlotsCountAfterHardRetrieval ?? null,
     selectedSourceLabelsBeforeHardRetrieval: payload.debug?.selectedSourceLabelsBeforeHardRetrieval ?? [],
     selectedSourceLabelsAfterHardRetrieval: payload.debug?.selectedSourceLabelsAfterHardRetrieval ?? [],
+    hardIntentRetrievalMode: payload.debug?.hardRetrievalMode ?? "diagnostic",
+    hardIntentRetrievalAddedSourceCount: payload.debug?.hardRetrievalAddedSourceCount ?? 0,
     hardRetrievalMode: payload.debug?.hardRetrievalMode ?? "diagnostic",
     hardSourceCoverageScore: payload.debug?.hardSourceCoverageScore ?? null,
     hardSourceCoverageMissing: payload.debug?.hardSourceCoverageMissing ?? [],
@@ -162,6 +172,7 @@ for (const row of rows) {
     modelRequestEstimatedTokens: payload.debug?.modelRequestEstimatedTokens ?? null,
     modelRequestSourceCount: payload.debug?.modelRequestSourceCount ?? null,
     modelRequestContextCharCount: payload.debug?.modelRequestContextCharCount ?? null,
+    modelCallLatencyMs: payload.debug?.modelCallLatencyMs ?? null,
     modelErrorOccurredBeforeResponse: payload.debug?.modelErrorOccurredBeforeResponse ?? null,
     benchmarkHttpErrorStatus: payload.debug?.benchmarkHttpErrorStatus ?? null,
     benchmarkHttpErrorCode: payload.debug?.benchmarkHttpErrorCode ?? null,
@@ -465,6 +476,65 @@ function sourceLabels(sources) {
   return Array.isArray(sources)
     ? sources.map((source) => source?.label ?? source?.sourceLabel).filter((value) => typeof value === "string")
     : [];
+}
+
+function sourceTypes(sources) {
+  return Array.from(
+    new Set(
+      Array.isArray(sources)
+        ? sources.map((source) => source?.sectionType).filter((value) => typeof value === "string")
+        : []
+    )
+  );
+}
+
+function sourceSectionFamilies(sources) {
+  return Array.from(new Set(sourceTypes(sources).map(normalizeSectionFamily).filter(Boolean)));
+}
+
+function normalizeSectionFamily(sectionType) {
+  const normalized = String(sectionType ?? "").toLowerCase();
+  if (!normalized) return null;
+  if (normalized.includes("xbrl")) return "xbrl_metric";
+  if (normalized.includes("risk")) return "risk_factors";
+  if (normalized.includes("segment")) return "segment";
+  if (normalized.includes("revenue")) return "revenue_note";
+  if (normalized.includes("liquidity")) return "liquidity_capital_resources";
+  if (normalized.includes("debt")) return "debt_note";
+  if (normalized.includes("cash")) return "cash_flow_discussion";
+  if (normalized.includes("business")) return "business";
+  if (normalized.includes("mda") || normalized.includes("md_a") || normalized.includes("management")) return "mda";
+  return normalized;
+}
+
+function buildTokenAttribution({ row, payload, conversationContext }) {
+  const debug = payload.debug ?? {};
+  const selectedSourceCharCount = debug.selectedSourceCharCount ?? 0;
+  const conversationChars = Array.isArray(conversationContext)
+    ? conversationContext.reduce((sum, message) => sum + String(message.content ?? "").length, 0)
+    : 0;
+  const modelRequestPromptChars = debug.modelRequestPromptCharCount ?? null;
+  const modelRequestContextChars = debug.modelRequestContextCharCount ?? null;
+  const promptTokenCount = debug.promptTokenCount ?? payload.promptTokenCount ?? null;
+  return {
+    basis: "estimated_unless_exact_token_count_present",
+    exact: {
+      promptTokenCount,
+      completionTokenCount: debug.completionTokenCount ?? payload.completionTokenCount ?? null,
+      totalTokenCount: debug.totalTokenCount ?? payload.totalTokenCount ?? null
+    },
+    estimated: {
+      systemPolicyPromptTokens:
+        modelRequestPromptChars == null ? null : Math.max(0, Math.ceil((modelRequestPromptChars - selectedSourceCharCount) / 4)),
+      filingMetadataTokens: Math.ceil(`${row.ticker ?? ""} ${row.filingKey ?? ""}`.length / 4),
+      factualMetricsPackTokens: null,
+      factualNarrativePackTokens: null,
+      sourceChunkTokens: Math.ceil(selectedSourceCharCount / 4),
+      conversationFollowupContextTokens: Math.ceil(conversationChars / 4),
+      retryTokens: debug.retryAttempted ? promptTokenCount : 0,
+      modelRequestContextTokens: modelRequestContextChars == null ? null : Math.ceil(modelRequestContextChars / 4)
+    }
+  };
 }
 
 function extractTimings(debug) {

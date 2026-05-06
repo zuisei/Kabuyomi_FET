@@ -38,6 +38,22 @@ describe("remote config", () => {
     expect(config.proMaxMonthlyCreditLimit).toBe(1200);
   });
 
+  it("logs and falls back to defaults when remote config KV read fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const config = await loadRemoteConfig({
+      KABUYOMI_CACHE: {
+        get: async () => {
+          throw new Error("kv unavailable");
+        }
+      }
+    } as never);
+
+    expect(config).toEqual(DEFAULT_REMOTE_CONFIG);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("\"event\":\"remote_config_kv_read_failed\""));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("\"fallback\":\"default_config\""));
+  });
+
   it("normalizes plan credit limits from the compact planCredits map and keeps Free at least 50", async () => {
     const config = await loadRemoteConfig({
       KABUYOMI_CACHE: {

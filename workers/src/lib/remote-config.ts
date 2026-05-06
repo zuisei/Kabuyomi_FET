@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import type { CreditPlan } from "./billing-catalog";
+import { logWarnEvent } from "./logging";
 import {
   DEFAULT_TRACKED_TICKERS,
   MAX_TRACKED_TICKERS,
@@ -85,7 +86,11 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
   let raw: unknown;
   try {
     raw = await env.KABUYOMI_CACHE.get("remote_config", "json");
-  } catch {
+  } catch (error) {
+    logWarnEvent("remote_config_kv_read_failed", {
+      reason: error instanceof Error ? error.message : String(error),
+      fallback: "default_config"
+    });
     const fallback = DEFAULT_REMOTE_CONFIG;
     remoteConfigMemoryCaches.set(env.KABUYOMI_CACHE, {
       config: fallback,

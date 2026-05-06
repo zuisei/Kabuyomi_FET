@@ -15,7 +15,7 @@ export async function maybeAppendWebSupplement(
     return response;
   }
 
-  if (config?.webSupplementEnabled === false) {
+  if (config?.webSupplementEnabled !== true) {
     return response;
   }
 

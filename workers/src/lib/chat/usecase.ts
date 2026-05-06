@@ -146,6 +146,7 @@ export async function answerChatUsecase({
       sourceCount: answer.sources.length,
       sourceIds: answer.sources.map((source) => source.sourceId),
       contextApplied: resolvedQuestion !== payload.question,
+      rewrittenQuestion: resolvedQuestion,
       modelName,
       answerQualityFlags
     };

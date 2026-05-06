@@ -52,6 +52,7 @@ export interface ChatResponsePayload {
 
 export interface ChatResponseDebug {
   questionIntent?: string;
+  rewrittenQuestion?: string;
   responsePath?: ChatResponsePath;
   fallbackReason?: string | null;
   fallbackCategory?: FallbackCategory;
@@ -75,6 +76,10 @@ export interface ChatResponseDebug {
   modelRequestSourceCount?: number | null;
   modelRequestContextCharCount?: number | null;
   modelErrorOccurredBeforeResponse?: boolean | null;
+  promptTokenCount?: number | null;
+  completionTokenCount?: number | null;
+  totalTokenCount?: number | null;
+  modelCallLatencyMs?: number | null;
   contentMode?: "full" | "metrics_only";
   geminiCalled?: boolean;
   geminiSucceeded?: boolean;
