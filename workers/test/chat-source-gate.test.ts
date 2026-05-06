@@ -213,6 +213,82 @@ describe("hard-intent source gate", () => {
     expect(result.failureLabels).not.toContain("source_gate_failed");
   });
 
+  it("passes JPM-like revenue driver evidence when net interest and noninterest revenue are supported", () => {
+    const filing = makeFiling("JPM", "JPMorgan Chase & Co.", [revenueMetric(182_447_000_000, 177_556_000_000, 2.8)], [
+      source("CTX1", "md_a", "Total net revenue was $182.4 billion, up 3%, reflecting net interest income of $95.4 billion, up 3%, driven by higher Markets net interest income and higher revolving balances in Card Services. Noninterest revenue was $87.0 billion, up 2%, reflecting higher Markets noninterest revenue and higher investment banking fees."),
+      metricSource("S9", "売上高: 182447000000 USD / 比較値: 177556000000 / YoY: 2.8%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "売上成長の要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers[0]?.category).toContain("bank");
+  });
+
+  it("passes XOM-like revenue driver evidence when commodity and refining context are supported", () => {
+    const filing = makeFiling("XOM", "Exxon Mobil Corp", [revenueMetric(332_238_000_000, 349_585_000_000, -5.0)], [
+      source("CTX1", "md_a", "Sales and other operating revenue decreased as record crude demand was met by increasing industry supply, resulting in modestly lower prices, while industry refining margins improved and production volumes increased in the Permian."),
+      metricSource("S9", "売上高: 332238000000 USD / 比較値: 349585000000 / YoY: -5.0%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "減収の主な要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers[0]?.category).toContain("energy");
+  });
+
+  it("passes CAT-like revenue driver evidence when sales volume and price realization are supported", () => {
+    const filing = makeFiling("CAT", "Caterpillar Inc.", [revenueMetric(67_589_000_000, 64_809_000_000, 4.3)], [
+      source("CTX1", "md_a", "Total sales and revenues increased 4 percent compared with 2024. The increase reflected higher sales volume, partially offset by unfavorable price realization, and higher sales volume was primarily driven by higher sales of equipment to end users and healthy backlog."),
+      metricSource("S9", "売上高: 67589000000 USD / 比較値: 64809000000 / YoY: 4.3%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "売上成長の要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers[0]?.category).toContain("industrial");
+  });
+
+  it("passes WMT-like revenue driver evidence when comparable sales traffic ticket and eCommerce are supported", () => {
+    const filing = makeFiling("WMT", "Walmart Inc.", [revenueMetric(713_163_000_000, 680_985_000_000, 4.7)], [
+      source("CTX1", "md_a", "Walmart U.S. comparable sales increased 4.3%. Comparable sales were driven by growth in average ticket and transactions, reflected growth in unit volumes, and eCommerce sales positively contributed to comparable sales through customer and Walmart+ member engagement."),
+      metricSource("S9", "売上高: 713163000000 USD / 比較値: 680985000000 / YoY: 4.7%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "売上成長の要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers[0]?.category).toContain("retail");
+  });
+
   it("keeps revenue driver fallback for XBRL-only source packs", () => {
     const filing = makeFiling("AAPL", "Apple Inc.", [revenueMetric(111_184_000_000, 95_359_000_000, 16.6)], [
       metricSource("S9", "売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%")

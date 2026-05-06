@@ -281,7 +281,6 @@ describe("chat question intent and context packing", () => {
     };
 
     const context = buildChatContextPack(filing, "yoy_change");
-
     expect(context.contextTokenBudget).toBeGreaterThanOrEqual(8_000);
     expect(context.sourceChunks[0]?.sourceId).toBe("S2");
     expect(context.sourceChunks[0]?.text).toContain("primarily due to comparable store sales growth");
@@ -360,6 +359,57 @@ describe("chat question intent and context packing", () => {
     expect(context.sourceChunks[0]?.sourceId).toMatch(/^(S1|CTX)/);
     expect(context.sourceChunks[0]?.text).toContain("lower crude oil and natural gas realizations");
     expect(context.sourceChunks[0]?.text).toContain("refining margins");
+  });
+
+  it("finds JPM-like revenue driver windows after early generic filing matches", () => {
+    const driverText =
+      "Total net revenue was $182.4 billion, up 3%, reflecting net interest income of $95.4 billion, up 3%, driven by higher Markets net interest income, higher revolving balances in Card Services, higher wholesale deposit balances, and the impact of investment securities activity. Noninterest revenue was $87.0 billion, up 2%, reflecting higher Markets noninterest revenue and higher investment banking fees.";
+    const filing = makeLongRevenueDriverFiling("JPM", "JPMorgan Chase & Co.", driverText);
+
+    const context = buildChatContextPack(filing, "yoy_change");
+    const driverSource = context.sourceChunks.find((chunk) => chunk.text.includes("Total net revenue was $182.4 billion"));
+
+    expect(driverSource?.sourceId).toMatch(/^CTX/);
+    expect(driverSource?.sourceLabel).toContain("Segment and revenue context");
+    expect(driverSource?.text).toContain("driven by higher Markets net interest income");
+  });
+
+  it("finds XOM-like commodity and segment windows after early generic filing matches", () => {
+    const driverText =
+      "Markets remained broadly balanced. Record crude demand was met by increasing industry supply, resulting in modestly lower prices. Natural gas prices rose due to robust demand. Industry refining margins improved in 2025, supported by record full-year demand and an increase in supply disruptions driving higher margins. Permian production volumes averaged a record level, approximately higher than the previous year.";
+    const filing = makeLongRevenueDriverFiling("XOM", "Exxon Mobil Corp", driverText);
+
+    const context = buildChatContextPack(filing, "yoy_change");
+    const driverSource = context.sourceChunks.find((chunk) => chunk.text.includes("Record crude demand"));
+
+    expect(driverSource?.text).toContain("Record crude demand");
+    expect(context.sourceChunks.some((chunk) => /refining margins|production volumes/.test(chunk.text))).toBe(true);
+  });
+
+  it("finds CAT-like sales volume and price realization windows after early generic filing matches", () => {
+    const driverText =
+      "Total sales and revenues for 2025 were $67.589 billion, an increase of $2.780 billion, or 4 percent, compared with 2024. The increase reflected higher sales volume, partially offset by unfavorable price realization. Higher sales volume was primarily driven by higher sales of equipment to end users. The strong backlog coupled with healthy end markets supports expectations for sales volume growth.";
+    const filing = makeLongRevenueDriverFiling("CAT", "Caterpillar Inc.", driverText);
+
+    const context = buildChatContextPack(filing, "yoy_change");
+    const driverSource = context.sourceChunks.find((chunk) => chunk.text.includes("Total sales and revenues for 2025"));
+
+    expect(driverSource?.text).toContain("Total sales and revenues for 2025");
+    expect(driverSource?.text).toContain("higher sales volume");
+    expect(driverSource?.text).toContain("unfavorable price realization");
+  });
+
+  it("finds WMT-like comparable sales windows after early generic filing matches", () => {
+    const driverText =
+      "Walmart U.S. comparable sales increased 4.3% in fiscal 2026. Comparable sales in fiscal 2026 were driven by growth in average ticket and transactions, and also reflected growth in unit volumes and strength in all merchandise categories. Walmart U.S. eCommerce sales positively contributed to comparable sales, reflecting continued strength in customer and Walmart+ member engagement with omnichannel offerings.";
+    const filing = makeLongRevenueDriverFiling("WMT", "Walmart Inc.", driverText);
+
+    const context = buildChatContextPack(filing, "yoy_change");
+    const driverSource = context.sourceChunks.find((chunk) => chunk.text.includes("comparable sales increased"));
+
+    expect(driverSource?.text).toContain("comparable sales increased");
+    expect(driverSource?.text).toContain("driven by growth in average ticket and transactions");
+    expect(context.sourceChunks.some((chunk) => /eCommerce sales positively contributed|eCommerce/i.test(chunk.text))).toBe(true);
   });
 
   it("filters disaster risk windows out of revenue-growth context", () => {
@@ -512,5 +562,33 @@ function makeIntentFiling(): FilingCacheRecord {
     generatedAt: "2026-04-14T00:00:00.000Z",
     extractorVersion: "v1",
     promptVersion: "v1"
+  };
+}
+
+function makeLongRevenueDriverFiling(ticker: string, companyName: string, driverText: string): FilingCacheRecord {
+  const earlyNoise = Array.from({ length: 36 }, (_, index) =>
+    `Generic filing context ${index + 1}: customer demand, revenue, sales, growth and market conditions may change over time, but this paragraph does not explain the actual period driver.`
+  ).join(" ");
+  const filing = makeIntentFiling();
+  return {
+    ...filing,
+    ticker,
+    companyName,
+    formType: "10-K",
+    filedAt: "2026-02-13",
+    mdaText: `${earlyNoise} ${driverText}`,
+    sourceChunks: [
+      {
+        sourceId: "S1",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7",
+        text: "Management's Discussion and Analysis of Financial Condition and Results of Operations",
+        startOffset: 0,
+        endOffset: 78,
+        sortOrder: 1
+      },
+      ...filing.sourceChunks.filter((chunk) => chunk.sectionType === "xbrl_metric")
+    ]
   };
 }
