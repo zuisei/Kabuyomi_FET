@@ -826,6 +826,69 @@ describe("evidence-slot fallback", () => {
     expect(result.failureLabels).not.toContain("margin_driver_slots_empty");
   });
 
+  it("fails Q04 when the recovered driver only has XBRL and product/gross-margin table context", () => {
+    const filing = makeFiling("AAPL", "Apple Inc.", [
+      revenueMetric(143_756_000_000, 124_300_000_000, 15.7)
+    ], [
+      metricSource("S9", "売上高: 143756000000 USD / 比較値: 124300000000 / YoY: 15.7%"),
+      source(
+        "CTX1",
+        "md_a",
+        "| Q1 2026 Form 10-Q | 15 Gross Margin Products and Services gross margin and gross margin percentage for the three months ended December 27, 2025 and December 28, 2024, were as follows (dollars in millions): Three Months Ended December 27, 2025 December 28, 2024 Gross margin: Products $46,265 $38,513 Services $22,966 $19,762 Total gross margin $69,231 $58,275."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "前問で挙げた売上高の要因（Services、tariff）は一時的ですか？継続性と不明点を分けて説明してください。",
+      previousAnswer: "主な要因としてServicesとtariffが挙げられます。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.hardIntent).toBe("driver_durability_followup");
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "q04_table_heavy_context",
+      "q04_driver_evidence_too_generic",
+      "durability_context_missing",
+      "source_gate_failed"
+    ]));
+    expect(result.sourceSufficient).toBe(false);
+  });
+
+  it("fails Q04 when the prior driver only has generic macro text without source-backed durability", () => {
+    const filing = makeFiling("AAPL", "Apple Inc.", [
+      revenueMetric(143_756_000_000, 124_300_000_000, 15.7)
+    ], [
+      metricSource("S9", "売上高: 143756000000 USD / 比較値: 124300000000 / YoY: 15.7%"),
+      source(
+        "S1",
+        "md_a",
+        "Macroeconomic conditions, including inflation, interest rates, component pricing and currency fluctuations, have directly and indirectly impacted the Company and may affect future results."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "前問で挙げた売上高の要因（foreign exchange、demand）は一時的ですか？継続性と不明点を分けて説明してください。",
+      previousAnswer: "主な要因としてforeign exchangeとdemandが挙げられます。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "q04_driver_evidence_too_generic",
+      "durability_context_missing",
+      "source_gate_failed"
+    ]));
+  });
+
   it("does not apply the source gate to non-hard intents", async () => {
     const filing = makeFiling("AAPL", "Apple Inc.", [], [
       source("S1", "md_a", "Apple designs and sells products and services.")

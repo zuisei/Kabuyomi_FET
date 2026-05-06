@@ -69,6 +69,14 @@ export type SourceGateInput = {
   extractedDriverCandidates?: EvidenceDriver[];
 };
 
+type DriverDurabilitySourceQuality = {
+  hasStrongDriverEvidence: boolean;
+  hasSpecificDurabilityEvidence: boolean;
+  metricOnlyContext: boolean;
+  tableHeavyContext: boolean;
+  durabilityEvidenceTooGeneric: boolean;
+};
+
 const EMPTY_RESULT: SourceGateResult = {
   sourceGateApplied: false,
   hardIntent: null,
@@ -109,6 +117,9 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
   const hasDurabilityContext = hardIntent === "driver_durability_followup" || hardIntent === "margin_durability_followup"
     ? hasDurabilityEvidence(input.selectedSources, sector, hardIntent)
     : false;
+  const driverDurabilityQuality = hardIntent === "driver_durability_followup"
+    ? analyzeDriverDurabilitySourceQuality(input.selectedSources, drivers, sector)
+    : null;
   const missingSourceTypes = missingSourceTypesFor(sector, hardIntent, {
     hasMetricMovement: revenueCoverage?.hasRevenueMetric ?? knownFacts.length > 0,
     hasDrivers: drivers.length > 0,
@@ -147,11 +158,17 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
   }
   if (hardIntent === "driver_durability_followup") {
     addDriverDurabilityFailureLabels(input.selectedSources, followupTargetFound, drivers.length > 0, hasDurabilityContext, failureLabels);
+    addDriverDurabilitySourceQualityFailureLabels(driverDurabilityQuality, failureLabels);
   }
 
   const sourceSufficient = hardIntent === "revenue_driver"
     ? Boolean(revenueCoverage?.hasRevenueMetric) && drivers.length > 0 && hasStrongRevenueDriverEvidence
-    : Boolean(followupTargetFound) && drivers.length > 0 && hasDurabilityContext;
+    : hardIntent === "driver_durability_followup"
+      ? Boolean(followupTargetFound) &&
+        drivers.length > 0 &&
+        Boolean(driverDurabilityQuality?.hasStrongDriverEvidence) &&
+        Boolean(driverDurabilityQuality?.hasSpecificDurabilityEvidence)
+      : Boolean(followupTargetFound) && drivers.length > 0 && hasDurabilityContext;
 
   if (!sourceSufficient) {
     failureLabels.add("source_gate_failed");
@@ -575,6 +592,136 @@ function hasDriverDurabilitySignal(text: string, sector: SourceGateSector): bool
   return common.test(text) || sectorPatterns[sector].test(text);
 }
 
+function analyzeDriverDurabilitySourceQuality(
+  sources: SourceChunkRecord[],
+  drivers: EvidenceDriver[],
+  sector: SourceGateSector
+): DriverDurabilitySourceQuality {
+  const narrativeSources = sources.filter((source) => !isMetricSource(source));
+  const driverSourceIds = new Set(drivers.flatMap((driver) => driver.sourceIds));
+  const driverSources = narrativeSources.filter((source) => driverSourceIds.has(source.sourceId));
+  const tableHeavyDriverSources = driverSources.filter(isQ04MetricOrTableHeavySource);
+  const strongDriverSources = driverSources.filter((source) =>
+    !isQ04MetricOrTableHeavySource(source) &&
+    !isQ04GenericDurabilityContext(source.text) &&
+    hasQ04ConcreteDriverSignal(source.text, sector)
+  );
+  const specificDurabilitySources = narrativeSources.filter((source) =>
+    !isQ04MetricOrTableHeavySource(source) &&
+    hasSpecificQ04DurabilitySignal(source.text, sector)
+  );
+  const genericDurabilitySources = narrativeSources.filter((source) =>
+    !isQ04MetricOrTableHeavySource(source) &&
+    hasDriverDurabilitySignal(normalizeText(source.text), sector) &&
+    !hasSpecificQ04DurabilitySignal(source.text, sector)
+  );
+
+  return {
+    hasStrongDriverEvidence: strongDriverSources.length > 0,
+    hasSpecificDurabilityEvidence: specificDurabilitySources.length > 0,
+    metricOnlyContext: narrativeSources.length === 0,
+    tableHeavyContext: tableHeavyDriverSources.length > 0 || (
+      narrativeSources.length > 0 &&
+      narrativeSources.filter(isQ04MetricOrTableHeavySource).length >= Math.ceil(narrativeSources.length / 2)
+    ),
+    durabilityEvidenceTooGeneric: genericDurabilitySources.length > 0 && specificDurabilitySources.length === 0
+  };
+}
+
+function addDriverDurabilitySourceQualityFailureLabels(
+  quality: DriverDurabilitySourceQuality | null,
+  failureLabels: Set<string>
+): void {
+  if (!quality) {
+    return;
+  }
+  if (quality.metricOnlyContext) {
+    failureLabels.add("q04_metric_only_context");
+  }
+  if (quality.tableHeavyContext) {
+    failureLabels.add("q04_table_heavy_context");
+  }
+  if (!quality.hasStrongDriverEvidence) {
+    failureLabels.add("q04_driver_evidence_too_generic");
+  }
+  if (!quality.hasSpecificDurabilityEvidence) {
+    failureLabels.add("durability_context_missing");
+  }
+  if (quality.durabilityEvidenceTooGeneric) {
+    failureLabels.add("q04_durability_evidence_too_generic");
+  }
+}
+
+function isQ04MetricOrTableHeavySource(source: SourceChunkRecord): boolean {
+  if (isMetricSource(source)) {
+    return true;
+  }
+  const text = normalizeText(`${source.sectionTitle} ${source.sourceLabel} ${source.text}`);
+  const numberTokens = text.match(/\$?\d[\d,.%]*/g)?.length ?? 0;
+  const hasTableCue =
+    /\b(?:three months ended|year ended|gross margin percentage|dollars in millions|percentage of total net sales|total gross margin|operating expenses?)\b/i.test(text) ||
+    /\|\s*q[1-4]\s+20\d{2}\s+form\s+10-[qk]\s+\|/i.test(text);
+  const isProductMarginTable =
+    /(products?|services).{0,80}gross margin/i.test(text) &&
+    !/(increased|decreased|primarily due|driven by|attributable to|resulted from|because|expected|outlook|continue|continued)/i.test(text);
+  return (hasTableCue && numberTokens >= 8) || isProductMarginTable;
+}
+
+function isQ04GenericDurabilityContext(text: string): boolean {
+  const normalized = normalizeText(text);
+  return (
+    /(forward-looking statements|private securities litigation reform act|current expectations of future events|assumptions and other factors|available information|corporate website|business description|opened our first|store footprint|properties)/i.test(normalized) ||
+    (/(macroeconomic conditions|tariff|foreign exchange|currency fluctuations|interest rates?|inflation|component pricing)/i.test(normalized) &&
+      !/(net sales|revenue|sales|services revenue|product revenue|iphone|mac|ipad|wearables|installed base|channel inventory).{0,180}(macroeconomic|tariff|foreign exchange|currency|inflation|interest|component pricing)|(?:macroeconomic|tariff|foreign exchange|currency|inflation|interest|component pricing).{0,180}(net sales|revenue|sales|services revenue|product revenue|iphone|mac|ipad|wearables|installed base|channel inventory)/i.test(normalized))
+  );
+}
+
+function hasQ04ConcreteDriverSignal(text: string, sector: SourceGateSector): boolean {
+  const normalized = normalizeText(text);
+  if (isQ04GenericDurabilityContext(normalized)) {
+    return false;
+  }
+  const common =
+    /(primarily due to|driven by|attributable to|resulted from|because|reflect(?:ed|ing)|sales and revenues|net sales|revenue increased|revenue decreased|higher sales|lower sales|comparable sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership|sales volume|price realization|net interest income|noninterest income|commodity prices?|production volume|refining margins?|services revenue|installed base|channel inventory|product introductions?|foreign exchange|tariff)/i;
+  return common.test(normalized) || matchedDriverCategory(normalized, sector, "driver_durability_followup") !== null;
+}
+
+function hasSpecificQ04DurabilitySignal(text: string, sector: SourceGateSector): boolean {
+  const normalized = normalizeText(text);
+  if (isQ04MetricOrTableText(normalized) || isQ04GenericDurabilityContext(normalized)) {
+    return false;
+  }
+  const common =
+    /(continue|continued|recurring|expected|expects|outlook|guidance|trend|uncertain|uncertainty|risk|headwind|tailwind|seasonal|one-time|temporary|transitory|normalization|感応度|見通し|不確実|一時|継続)/i;
+  const sectorSpecific: Record<SourceGateSector, RegExp> = {
+    bank: /(deposit margin compression|lower rates?|higher rates?|interest rate sensitivity|card balances|revolving balances|investment banking fees|markets revenue|cyclical|wholesale deposit balances|flat when compared)/i,
+    capital_markets: /(investment banking fees|trading revenue|markets revenue|asset management fees|client activity|cyclical|advisory|underwriting)/i,
+    energy: /(commodity price sensitivity|crude prices?|natural gas prices?|production volumes?|refining margins?|chemical margins?|upstream|downstream|outlook|expected)/i,
+    oilfield_services: /(customer spending|drilling activity|completion activity|north america activity|international activity|outlook|expected|backlog)/i,
+    industrial: /(backlog|orders|dealer inventor(?:y|ies)|stronger sales|expected|expects|end-market demand|inventory to increase)/i,
+    retail: /(continued strength|ecommerce|e-commerce|membership|member engagement|omnichannel|grocery|health and wellness|expected|expects|transactions?|unit volumes?)/i,
+    consumer_staples: /(organic sales|pricing|volume|foreign exchange|commodity costs?|input costs?|continued|expected|outlook)/i,
+    auto: /(deliveries|production volume|vehicle pricing|average selling price|automotive gross margin|expected|outlook|demand)/i,
+    technology: /(services revenue|installed base|product introduction|product launch|channel inventory|macroeconomic conditions|tariff|foreign exchange|component pricing|recurring|continue|expected|outlook)/i,
+    software: /(subscription|recurring|rpo|remaining performance obligations|deferred revenue|retention|usage|customers?|expected|outlook)/i,
+    semiconductor_equipment: /(orders|backlog|customer demand|china|wafer fab equipment|expected|outlook|demand)/i,
+    healthcare_medtech: /(procedure volume|installed base|recurring|instruments|accessories|systems placements|expected|outlook)/i,
+    reit: /(occupancy|same-store|noi|interest rates?|lease|renewal|expected|outlook)/i,
+    media: /(advertising revenue|affiliate revenue|subscriber|distribution|sports rights|cyclical|expected|outlook)/i,
+    utility: /(rate case|regulated returns|load growth|weather|fuel cost|expected|outlook|capex)/i,
+    mining: /(copper price|gold price|production volume|unit cost|commodity price|expected|outlook)/i,
+    general: /(recurring|continue|continued|sustain|expected|outlook|backlog|orders|risk|uncertain|temporary|one-time)/i
+  };
+  return common.test(normalized) || sectorSpecific[sector].test(normalized);
+}
+
+function isQ04MetricOrTableText(text: string): boolean {
+  return (
+    /\b(?:three months ended|year ended|gross margin percentage|dollars in millions|percentage of total net sales|total gross margin|operating expenses?)\b/i.test(text) ||
+    /(products?|services).{0,80}gross margin/i.test(text)
+  ) && !/(primarily due to|driven by|expected|outlook|continue|continued|risk|uncertain)/i.test(text);
+}
+
 function addDriverDurabilityFailureLabels(
   sources: SourceChunkRecord[],
   followupTargetFound: boolean | null,
@@ -588,6 +735,7 @@ function addDriverDurabilityFailureLabels(
   }
   if (!hasDurabilityContext) {
     failureLabels.add("missing_durability_context");
+    failureLabels.add("durability_context_missing");
   }
   if (followupTargetFound && hasDrivers && !hasDurabilityContext) {
     failureLabels.add("driver_supported_but_durability_unclear");
