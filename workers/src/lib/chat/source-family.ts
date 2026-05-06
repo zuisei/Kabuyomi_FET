@@ -62,11 +62,11 @@ export function deriveSourceSectionFamily(source: SourceChunkRecord): SourceSect
   if (ENERGY_MARGIN_PATTERN.test(text)) {
     return "energy_margin_discussion";
   }
-  if (RETAIL_MARGIN_PATTERN.test(text)) {
-    return "retail_margin_discussion";
-  }
   if (INDUSTRIAL_MARGIN_PATTERN.test(text)) {
     return "industrial_margin_discussion";
+  }
+  if (RETAIL_MARGIN_PATTERN.test(text)) {
+    return "retail_margin_discussion";
   }
   if (MARGIN_DISCUSSION_PATTERN.test(text)) {
     return "margin_discussion";

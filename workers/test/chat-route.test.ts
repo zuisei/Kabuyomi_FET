@@ -11,9 +11,11 @@ vi.mock("../src/lib/filings/cache", () => ({
 }));
 
 vi.mock("../src/lib/filings/content-upgrade", () => ({
+  backfillMarginSourceAssets: vi.fn(async (record) => record),
   backfillRevenueDriverSourceAssets: vi.fn(async (record) => record),
   enqueueContentUpgrade: vi.fn(),
   isMetricsOnlyRecord: vi.fn((record: { contentMode?: string }) => record.contentMode === "metrics_only"),
+  needsMarginSourceBackfill: vi.fn(() => false),
   needsRevenueDriverSourceBackfill: vi.fn(() => false),
   upgradeMetricsOnlyRecord: vi.fn(async (record: { contentMode?: string }) =>
     record.contentMode === "metrics_only" ? { ...record, contentMode: "full", mdaText: "upgraded md&a" } : record

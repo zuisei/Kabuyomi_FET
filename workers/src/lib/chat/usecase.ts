@@ -6,9 +6,11 @@ import { resolveOpenAIChatModel } from "../../clients/llm/providers/openai/reque
 import { ChatRequestSchema } from "../contracts";
 import { consumeBillableCredits, refundBillableCredits } from "../credit-operation";
 import {
+  backfillMarginSourceAssets,
   backfillRevenueDriverSourceAssets,
   enqueueContentUpgrade,
   isMetricsOnlyRecord,
+  needsMarginSourceBackfill,
   needsRevenueDriverSourceBackfill,
   upgradeMetricsOnlyRecord
 } from "../filings/content-upgrade";
@@ -386,9 +388,20 @@ async function prepareFilingForChat(
   if (!isMetricsOnlyRecord(filing)) {
     if (isTestEnvironment(env) && needsRevenueDriverSourceBackfill(filing)) {
       try {
-        return await backfillRevenueDriverSourceAssets(filing, env);
+        filing = await backfillRevenueDriverSourceAssets(filing, env);
       } catch (error) {
         logErrorEvent("chat_revenue_driver_source_backfill_failed", {
+          filingKey: filing.filingKey,
+          ticker: filing.ticker,
+          reason: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+    if (isTestEnvironment(env) && needsMarginSourceBackfill(filing)) {
+      try {
+        return await backfillMarginSourceAssets(filing, env);
+      } catch (error) {
+        logErrorEvent("chat_margin_source_backfill_failed", {
           filingKey: filing.filingKey,
           ticker: filing.ticker,
           reason: error instanceof Error ? error.message : String(error)

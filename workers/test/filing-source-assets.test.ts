@@ -148,6 +148,56 @@ describe("revenue driver source assets", () => {
       deriveSourceSectionFamily(source("Segment operating profit declined as price realization was offset by higher manufacturing costs."))
     ).toBe("industrial_margin_discussion");
   });
+
+  it("creates an AAPL-like margin source from product and services gross-margin discussion", () => {
+    const chunks = buildSourceChunks(filing("AAPL", "Apple Inc."), genericMda(), [revenueMetric()], {
+      marginDriverSearchText:
+        "Products gross margin increased during fiscal 2025, primarily due to a favorable product mix and lower component costs, partially offset by tariff and foreign exchange headwinds. Services gross margin also improved, reflecting a higher mix of services revenue and continued operating expense discipline."
+    });
+
+    const marginSource = chunks.find((chunk) => chunk.sectionTitle === "Margin and profitability discussion");
+    expect(marginSource?.text).toMatch(/Products gross margin|Services gross margin|product mix/i);
+    expect(deriveSourceSectionFamily(marginSource!)).toBe("margin_discussion");
+    expect(sourceIdsAreValid(chunks)).toBe(true);
+  });
+
+  it("does not create a strong AAPL margin asset from a product revenue table alone", () => {
+    const chunks = buildSourceChunks(filing("AAPL", "Apple Inc."), genericMda(), [revenueMetric()], {
+      marginDriverSearchText:
+        "| Q1 2026 Form 10-Q | Product revenue iPhone Mac iPad Wearables Services Total net sales $143,756 $124,300 Three Months Ended December 27, 2025 December 28, 2024."
+    });
+
+    expect(chunks.some((chunk) => chunk.sectionTitle === "Margin and profitability discussion")).toBe(false);
+    expect(sourceIdsAreValid(chunks)).toBe(true);
+  });
+
+  it("creates XOM-like current-period energy margin assets but rejects reserves-only text", () => {
+    const chunks = buildSourceChunks(filing("XOM", "Exxon Mobil Corporation"), genericMda(), [revenueMetric()], {
+      marginDriverSearchText:
+        "Downstream earnings increased in fiscal 2025 compared with the prior year, reflecting higher refining margins and lower operating expenses. Chemical margins declined and partially offset upstream earnings improvement."
+    });
+    const reservesOnly = buildSourceChunks(filing("XOM", "Exxon Mobil Corporation"), genericMda(), [revenueMetric()], {
+      marginDriverSearchText:
+        "Proved reserves and depletion accounting are described for long-term asset planning. The table lists depletion amounts and reserve additions without explaining current-period margin or profitability movement."
+    });
+
+    expect(chunks.find((chunk) => chunk.sectionTitle === "Margin and profitability discussion")?.text).toMatch(/refining margins|Chemical margins|earnings/i);
+    expect(reservesOnly.some((chunk) => chunk.sectionTitle === "Margin and profitability discussion")).toBe(false);
+  });
+
+  it("creates WMT and CAT sector margin assets from current-period cost/profitability discussion", () => {
+    const wmt = buildSourceChunks(filing("WMT", "Walmart Inc."), genericMda(), [revenueMetric()], {
+      marginDriverSearchText:
+        "Gross margin rate improved in fiscal 2025, driven by fewer markdowns, lower shrink and better inventory management, partially offset by eCommerce fulfillment costs and wage pressure."
+    });
+    const cat = buildSourceChunks(filing("CAT", "Caterpillar Inc."), genericMda(), [revenueMetric()], {
+      marginDriverSearchText:
+        "Segment operating profit declined compared with the prior year because favorable price realization was more than offset by higher manufacturing costs and weaker volume leverage. Dealer inventory normalization may continue to affect cost absorption."
+    });
+
+    expect(deriveSourceSectionFamily(wmt.find((chunk) => chunk.sectionTitle === "Margin and profitability discussion")!)).toBe("retail_margin_discussion");
+    expect(deriveSourceSectionFamily(cat.find((chunk) => chunk.sectionTitle === "Margin and profitability discussion")!)).toBe("industrial_margin_discussion");
+  });
 });
 
 function filing(ticker: string, companyName: string): FilingReference {

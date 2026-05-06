@@ -165,6 +165,84 @@ describe("hard-intent targeted retrieval source selection", () => {
     expect(secondGate.sourceSufficient).toBe(false);
     expect(secondGate.failureLabels).toContain("source_gate_failed");
   });
+
+  it("prefers Q06 retail margin evidence over comparable-sales and eCommerce revenue context", () => {
+    const filing = makeFiling("WMT", "Walmart Inc.", [
+      metric("operatingIncome", 29_825_000_000, 29_348_000_000, 1.6)
+    ], [
+      metricSource("S9", "営業利益: 29825000000 USD / 比較値: 29348000000 / YoY: 1.6%"),
+      source("S1", "md_a", "Comparable sales increased due to higher transactions, eCommerce revenue and membership engagement."),
+      source("S2", "md_a", "Gross margin rate improved because markdowns and shrink decreased, while inventory normalization and eCommerce fulfillment costs may continue to affect operating expenses.")
+    ]);
+    const basePack = {
+      ...buildChatContextPack(filing, "margin_profitability"),
+      sourceChunks: [filing.sourceChunks[0], filing.sourceChunks[1]]
+    };
+    const gate = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "これは一時要因？それとも構造的な変化？",
+      previousAnswer: "利益率の要因は gross margin、markdowns、shrink、inventory です。",
+      selectedSources: basePack.sourceChunks,
+      metrics: filing.metrics
+    });
+    const plan = buildHardIntentRetrievalPlan({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      sector: "retail",
+      questionIntent: "margin_profitability",
+      question: "これは一時要因？それとも構造的な変化？",
+      previousAnswer: "利益率の要因は gross margin、markdowns、shrink、inventory です。",
+      sourceGateResult: gate,
+      sourceGateMissingSourceTypes: gate.missingSourceTypes
+    });
+
+    const result = applyHardIntentRetrievalPlan(filing, basePack, plan, "margin_durability_followup");
+
+    expect(result.outcome).toBe("improved");
+    expect(result.addedSources.map((source) => source.sourceId)).toContain("S2");
+    expect(result.addedSources.map((source) => source.sourceId)).not.toContain("S1");
+    expect(result.contextPack.sourceChunks[0].sourceId).toBe("S2");
+  });
+
+  it("does not add Q06 reserve or revenue-only sources when margin durability evidence is missing", () => {
+    const filing = makeFiling("XOM", "Exxon Mobil Corporation", [
+      metric("netIncome", 28_844_000_000, 33_680_000_000, -14.4)
+    ], [
+      metricSource("S9", "純利益: 28844000000 USD / 比較値: 33680000000 / YoY: -14.4%"),
+      source("S1", "md_a", "Sales and other operating revenue increased because commodity prices improved and demand was higher."),
+      source("S2", "md_a", "Proved reserves and depletion accounting tables describe long-term assets and production sharing contracts.")
+    ]);
+    const basePack = {
+      ...buildChatContextPack(filing, "margin_profitability"),
+      sourceChunks: [filing.sourceChunks[0]]
+    };
+    const gate = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "これは一時要因？それとも構造的な変化？",
+      previousAnswer: "利益率の要因は depreciation と depletion です。",
+      selectedSources: basePack.sourceChunks,
+      metrics: filing.metrics
+    });
+    const plan = buildHardIntentRetrievalPlan({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      sector: "energy",
+      questionIntent: "margin_profitability",
+      question: "これは一時要因？それとも構造的な変化？",
+      previousAnswer: "利益率の要因は depreciation と depletion です。",
+      sourceGateResult: gate,
+      sourceGateMissingSourceTypes: gate.missingSourceTypes
+    });
+
+    const result = applyHardIntentRetrievalPlan(filing, basePack, plan, "margin_durability_followup");
+
+    expect(result.outcome).toBe("no_improvement");
+    expect(result.addedSources).toHaveLength(0);
+  });
 });
 
 describe("hard-intent retrieval mode and source coverage diagnostics", () => {
