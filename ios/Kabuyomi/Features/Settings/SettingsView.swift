@@ -46,7 +46,9 @@ struct SettingsView: View {
                         #endif
                         aiCard
                         linksCard
+                        #if DEBUG
                         storeKitDiagnosticsCard
+                        #endif
                         displayCard
                         resetCard
                     }
@@ -57,7 +59,9 @@ struct SettingsView: View {
             }
         }
         .onAppear {
+            #if DEBUG
             appModel.refreshStoreKitDiagnostics()
+            #endif
         }
     }
 
@@ -212,6 +216,7 @@ struct SettingsView: View {
         }
     }
 
+    #if DEBUG
     private var storeKitDiagnosticsCard: some View {
         card {
             VStack(alignment: .leading, spacing: 12) {
@@ -254,6 +259,7 @@ struct SettingsView: View {
             }
         }
     }
+    #endif
 
     private var linksCard: some View {
         card {
