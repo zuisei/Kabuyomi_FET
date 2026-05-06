@@ -543,7 +543,7 @@ describe("OpenAI quote translation provider", () => {
         text: "Revenue increased year over year.",
         targetLanguage: "ja"
       }
-    )).rejects.toThrow("Japanese text");
+    )).rejects.toThrow(/Japanese text|ordinary English/);
   });
 
   it("retries when the model changes a required company name", async () => {
@@ -612,6 +612,41 @@ describe("OpenAI quote translation provider", () => {
     const retryBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
     expect(String(retryBody.messages[0].content)).toContain("previous translation was rejected");
     expect(String(retryBody.messages[0].content)).toContain("Dominion Energy South Carolina");
+  });
+
+  it("repairs ordinary English leftovers while preserving required names and acronyms", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  translatedText: "Dominion Energy South Carolina は DESC の発電・送電・配電で構成され、約80万 customers に電力を供給します。"
+                })
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    ));
+
+    const response = await generateModelQuoteTranslation(
+      {
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key"
+      } as never,
+      {
+        text: "Dominion Energy South Carolina is composed of DESC's generation, transmission and distribution of electricity to approximately 0.8 million customers.",
+        targetLanguage: "ja"
+      }
+    );
+
+    expect(response.translatedText).toContain("Dominion Energy South Carolina");
+    expect(response.translatedText).toContain("DESC");
+    expect(response.translatedText).toContain("顧客");
+    expect(response.translatedText).not.toContain("customers");
   });
 
   it("rejects quote translations that introduce investment advice", async () => {

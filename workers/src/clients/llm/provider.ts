@@ -136,7 +136,7 @@ function buildOpenAIQuoteTranslationPrompt(
 }
 
 function guardQuoteTranslation(translatedText: string, sourceText: string, exactTerms: string[]): string {
-  const cleaned = polishJapaneseText(stripAnswerFormattingArtifacts(translatedText));
+  const cleaned = repairResidualEnglishTerms(polishJapaneseText(stripAnswerFormattingArtifacts(translatedText)));
   if (!containsJapanese(cleaned)) {
     throw new Error("Quote translation did not produce Japanese text");
   }
@@ -150,6 +150,10 @@ function guardQuoteTranslation(translatedText: string, sourceText: string, exact
   if (missingTerm) {
     throw new Error(`Quote translation changed required source term: ${missingTerm}`);
   }
+  const leakedTerm = leakedOrdinaryEnglishTerm(cleaned, exactTerms);
+  if (leakedTerm) {
+    throw new Error(`Quote translation leaked ordinary English term: ${leakedTerm}`);
+  }
   return cleaned;
 }
 
@@ -159,6 +163,29 @@ function containsJapanese(text: string): boolean {
 
 function containsInvestmentAdvice(text: string): boolean {
   return /(買い|売り|購入|売却|投資判断|推奨|目標株価|株価予想|buy|sell|target price|forecast)/i.test(text);
+}
+
+function repairResidualEnglishTerms(text: string): string {
+  return text
+    .replace(/\bcustomers\b/gi, "顧客")
+    .replace(/\bcustomer\b/gi, "顧客")
+    .replace(/\bproducts\b/gi, "製品")
+    .replace(/\bproduct\b/gi, "製品")
+    .replace(/\brevenue\b/gi, "売上高")
+    .replace(/\bincome\b/gi, "利益")
+    .replace(/\boperations\b/gi, "事業")
+    .replace(/\boperation\b/gi, "事業");
+}
+
+function leakedOrdinaryEnglishTerm(text: string, exactTerms: string[]): string | null {
+  let normalized = text;
+  for (const term of exactTerms) {
+    normalized = normalized.replaceAll(term, "");
+  }
+  const leaked = normalized.match(
+    /\b(customers?|products?|revenues?|income|operations?|increased|decreased|year|over|due|higher|lower|demand|composed|generation|transmission|distribution|electricity|approximately|million|central|southern|southwestern)\b/i
+  );
+  return leaked?.[0] ?? null;
 }
 
 function exactTermsToPreserve(sourceText: string): string[] {
