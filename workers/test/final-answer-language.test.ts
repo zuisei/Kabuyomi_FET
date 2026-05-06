@@ -1164,6 +1164,107 @@ describe("Japanese-only final answer guard", () => {
     expect(response.debug?.guardLabels).not.toContain("malformed_currency_detected");
   });
 
+  it("cleans CAT Q06 finance terms and suspicious million-dollar net income units", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "売上高は約678.9億ドル、営業利益は111.51億ドル、純利益は88.82百万ドル。要因としては、販売量の増加とprice realizationの不利がある一方、manufacturing costやcost、tariffs、developing economiesの影響が押し下げ要因です。利益率の変動要因は一時的というより、需要の変動とコスト構造の影響が組み合わさっています。Construction Industriesの継続性はこのfilingだけでは断定できません。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "margin_durability_followup",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        selectedSourceExcerpts: [
+          "Total sales and revenues for 2025 were $67.589 billion, an increase of $2.780 billion, or 4 percent.",
+          "売上高: 67589000000 USD / 比較値: 64809000000 / YoY: 4.3%"
+        ],
+        sourceGateEvidenceSlots: {
+          confirmedMetricMovement: {
+            metricName: "純利益",
+            currentValue: "88.8億ドル",
+            comparisonValue: "107.9億ドル",
+            changePct: "-17.7%"
+          }
+        },
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("売上高は約675.9億ドル");
+    expect(response.answer).toContain("純利益は88.8億ドル");
+    expect(response.answer).toContain("一時的か構造的かは、このfilingだけでは断定できません");
+    expect(response.answer).toContain("価格実現");
+    expect(response.answer).toContain("製造コスト");
+    expect(response.answer).toContain("コスト");
+    expect(response.answer).toContain("関税");
+    expect(response.answer).toContain("新興国");
+    expect(response.answer).toContain("Construction Industries");
+    expect(response.answer).not.toContain("678.9億ドル");
+    expect(response.answer).not.toContain("88.82百万ドル");
+    expect(response.answer).not.toContain("一時的というより");
+    expect(response.answer).not.toContain("price realization");
+    expect(response.answer).not.toContain("manufacturing cost");
+    expect(response.answer).not.toContain("tariffs");
+    expect(response.answer).not.toContain("developing economies");
+    expect(response.answer).not.toMatch(/\bcost\b/i);
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining([
+      "cat_q06_revenue_unit_corrected_from_source",
+      "cat_q06_net_income_unit_corrected_from_source",
+      "cat_q06_temporality_wording_softened"
+    ]));
+    expect(response.debug?.fallbackCategory).toBe("none");
+    expect(response.debug?.fallbackUserReason).toBe("none");
+    expect(response.debug?.sourceIdsValid).toBe(true);
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("adds a cautious CAT Q06 temporality caveat when the answer omits temporary-versus-structural framing", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "売上高・営業利益・純利益: 2025年は売上高675億ドル、営業利益111.5億ドル、純利益88.8億ドル。価格実現と製造コストの不利要因が利益を押し下げました。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "margin_durability_followup",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("一時要因か構造的変化かは断定できません");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["cat_q06_temporality_caveat_added"]));
+    expect(response.debug?.sourceIdsValid).toBe(true);
+  });
+
   it("removes raw XBRL tags and mixed driver wording from final answers", async () => {
     const filing = makeFiling();
     const response = await finalizeChatResponse({

@@ -1,0 +1,85 @@
+{
+  "rows": 10,
+  "tickers": [
+    "AAPL",
+    "JPM",
+    "XOM",
+    "CAT",
+    "WMT"
+  ],
+  "sourceIdsValidFalse": 0,
+  "rawResponsePathBreakdown": {
+    "fallback": 5,
+    "openai": 5
+  },
+  "rawFallbackTotal": 5,
+  "rawFallbackKindBreakdown": {
+    "evidence_slot": 5,
+    "none": 5
+  },
+  "rawFallbackReasonBreakdown": {
+    "low_quality_answer": 5
+  },
+  "fallbackCategoryBreakdown": {
+    "source_insufficient": 5,
+    "none": 4,
+    "sanitation_guard": 1
+  },
+  "fallbackUserReasonBreakdown": {
+    "none": 4,
+    "revenue_driver_sources_missing": 4,
+    "malformed_currency_detected": 1,
+    "risk_sources_missing": 1
+  },
+  "rawGeminiApiErrorBreakdown": {},
+  "fallbackKindNoneOnFallbackRows": 0,
+  "rawEnglishInAnswer": 0,
+  "rawEnglishInDiagnostics": 0,
+  "rawEnglishSurfaced": 0,
+  "bannedFallbackPhraseHits": 0,
+  "bankTermsInNonBankSectors": 0,
+  "wrongSectorTerms": 0,
+  "infraContaminated": false,
+  "infraContaminationReasons": [],
+  "rateLimitRows": 0,
+  "rateLimitRate": 0,
+  "authErrorRows": 0,
+  "providerErrorRows": 0,
+  "networkErrorRows": 0,
+  "engineeringErrorRows": 0,
+  "qualityRows": 10,
+  "qualityRowsExcluded": 0,
+  "qualityFallbackTotal": 5,
+  "qualityFallbackRate": 0.5,
+  "qualityHardIntentFallback": 5,
+  "qualityQ03Q04Q06Fallback": 5,
+  "qualityMetricWithoutDriver": 0,
+  "qualityTemporalityNotAssessed": 0,
+  "qualityEvasiveAnswer": 0,
+  "retryAttempted": 1,
+  "retryWasted": 0,
+  "rateLimitRetrySucceeded": 0,
+  "benchmarkRateLimitRetryCount": 0,
+  "latency": {
+    "p50": 5286,
+    "p95": 13273,
+    "p99": 13273
+  },
+  "qualityLatency": {
+    "p50": 5286,
+    "p95": 13273,
+    "p99": 13273
+  },
+  "benchmarkControls": {
+    "concurrency": 1,
+    "effectiveConcurrency": 1,
+    "minDelayMsBetweenRequests": 1500,
+    "maxRetriesOnRateLimit": 2,
+    "initialRateLimitBackoffMs": 5000,
+    "maxRateLimitBackoffMs": 30000,
+    "respectRetryAfterHeader": true,
+    "jitterMs": 500,
+    "stopRunOnRateLimitThreshold": null,
+    "markInfraContaminatedOnRateLimitThreshold": null
+  }
+}

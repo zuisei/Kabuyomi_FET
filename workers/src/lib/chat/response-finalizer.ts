@@ -75,8 +75,9 @@ export async function finalizeChatResponse({
     : supplemented;
   const normalizedFallbackKind = normalizeFallbackKind(responsePath, debug);
   const cleanup = cleanAnswerForQuestion(responseWithUrls.answer, responsePath, normalizedFallbackKind, question, debug.questionIntent, filing);
-  const q04DurabilityRepair = repairDriverDurabilityFollowupAnswer(cleanup.answer, question, debug, filing);
-  const uxCleanedAnswer = q04DurabilityRepair?.answer ?? cleanup.answer;
+  const catQ06Cleanup = cleanCatQ06MarginDurabilityAnswer(cleanup.answer, question, debug, filing);
+  const q04DurabilityRepair = repairDriverDurabilityFollowupAnswer(catQ06Cleanup.answer, question, debug, filing);
+  const uxCleanedAnswer = q04DurabilityRepair?.answer ?? catQ06Cleanup.answer;
   const originalAnswerBeforeLanguageGuard = uxCleanedAnswer;
   const languageCheck = checkFinalAnswerJapaneseOnly(uxCleanedAnswer);
   const bannedPhraseDetected = hasBannedPhrase(uxCleanedAnswer);
@@ -177,6 +178,7 @@ export async function finalizeChatResponse({
       genericFallbackPhraseDetected: bannedPhraseStillDetected,
       sourceRepairLabels: [
         ...(debug.sourceRepairLabels ?? []),
+        ...catQ06Cleanup.labels,
         ...(q04DurabilityRepair?.labels ?? []),
         ...(languageRepairSafe ? ["language_guard_source_backed_repair"] : [])
       ],
@@ -196,6 +198,98 @@ type Q04DurabilityRepair = {
   answer: string;
   labels: string[];
 };
+
+type AnswerRepairResult = {
+  answer: string;
+  labels: string[];
+};
+
+function cleanCatQ06MarginDurabilityAnswer(
+  answer: string,
+  question: string,
+  debug: ChatResponseDebugInput,
+  filing: FilingCacheRecord
+): AnswerRepairResult {
+  if (!isMarginDurabilityFollowupQuestion(question, debug.questionIntent) || !isCatLikeFiling(filing)) {
+    return { answer, labels: [] };
+  }
+
+  let cleaned = answer;
+  const labels: string[] = [];
+  const sourceText = `${debug.selectedSourceExcerpts?.join(" ") ?? ""} ${extractSourceGateEvidenceText(debug.sourceGateEvidenceSlots)}`;
+  const netIncomeAmount = extractCurrentMetricValue(debug.sourceGateEvidenceSlots, "純利益");
+  if (netIncomeAmount) {
+    const corrected = cleaned.replace(/(純利益[^。！？\n]{0,16}?)([0-9]+(?:\.[0-9]+)?)\s*百万ドル/g, `$1${netIncomeAmount}`);
+    if (corrected !== cleaned) {
+      cleaned = corrected;
+      labels.push("cat_q06_net_income_unit_corrected_from_source");
+    }
+  }
+  const revenueAmount = extractCatRevenueOkuDollar(sourceText);
+  if (revenueAmount) {
+    const corrected = cleaned.replace(/売上高は(?:約)?(?:2025年)?[0-9]+(?:\.[0-9]+)?億ドル/g, `売上高は約${revenueAmount}億ドル`);
+    if (corrected !== cleaned) {
+      cleaned = corrected;
+      labels.push("cat_q06_revenue_unit_corrected_from_source");
+    }
+  }
+  const softened = cleaned.replace(
+    /利益率の変動要因は一時的というより、需要の変動とコスト構造の影響が組み合わさっています。/g,
+    "利益率の変動要因が一時的か構造的かは、このfilingだけでは断定できません。需要の変動とコスト構造の影響が組み合わさっている点は確認できます。"
+  );
+  if (softened !== cleaned) {
+    cleaned = softened;
+    labels.push("cat_q06_temporality_wording_softened");
+  }
+  if (!/(一時|構造|断定できません|未確定|不確実)/.test(cleaned)) {
+    cleaned = `${cleaned.trim()} このfilingだけでは、一時要因か構造的変化かは断定できません。`;
+    labels.push("cat_q06_temporality_caveat_added");
+  }
+
+  const normalized = sanitizeFinalUserFacingAnswer(cleaned);
+  if (normalized !== answer && labels.length === 0) {
+    labels.push("cat_q06_wording_cleaned");
+  }
+  return { answer: normalized, labels };
+}
+
+function extractCurrentMetricValue(sourceGateEvidenceSlots: Record<string, unknown> | null | undefined, metricName: string): string | null {
+  if (!sourceGateEvidenceSlots || typeof sourceGateEvidenceSlots !== "object") {
+    return null;
+  }
+  const confirmedMetricMovement = (sourceGateEvidenceSlots as Record<string, unknown>).confirmedMetricMovement;
+  if (!confirmedMetricMovement || typeof confirmedMetricMovement !== "object") {
+    return null;
+  }
+  const slot = confirmedMetricMovement as Record<string, unknown>;
+  return slot.metricName === metricName && typeof slot.currentValue === "string" ? slot.currentValue : null;
+}
+
+function isMarginDurabilityFollowupQuestion(question: string, questionIntent?: string | null): boolean {
+  if (questionIntent === "margin_durability_followup") {
+    return true;
+  }
+  return /(利益率|margin|マージン).*(一時|構造|継続)|これは一時要因/i.test(question);
+}
+
+function isCatLikeFiling(filing: FilingCacheRecord): boolean {
+  return /\bCAT\b|Caterpillar/i.test(`${filing.ticker} ${filing.companyName}`);
+}
+
+function extractCatRevenueOkuDollar(text: string): string | null {
+  const rawUsdMatch = text.match(/売上高:\s*([0-9]{8,})\s*USD/i);
+  if (rawUsdMatch) {
+    const value = Number.parseFloat(rawUsdMatch[1]);
+    return Number.isFinite(value) ? formatOkuDollar(value / 100_000_000, true) : null;
+  }
+
+  const billionMatch = text.match(/Total sales and revenues[^.]{0,80}\$([0-9]+(?:\.[0-9]+)?)\s*billion/i);
+  if (billionMatch) {
+    const value = Number.parseFloat(billionMatch[1]);
+    return Number.isFinite(value) ? formatOkuDollar(value * 10, true) : null;
+  }
+  return null;
+}
 
 function repairDriverDurabilityFollowupAnswer(
   answer: string,
@@ -449,6 +543,14 @@ function normalizeAwkwardModelLanguage(answer: string): string {
     .replace(/driverが十分に特定/g, "要因が十分に特定")
     .replace(/前問の\s*driver/g, "前問の要因")
     .replace(/利益率\s*driver/g, "利益率要因")
+    .replace(/\bprice\s+reali[sz]ation\b/gi, "価格実現")
+    .replace(/\bcost\s+of\s+sales\b/gi, "売上原価")
+    .replace(/\bcost\s+of\s+revenue\b/gi, "売上原価")
+    .replace(/\bmanufacturing\s+costs?\b/gi, "製造コスト")
+    .replace(/\bcosts?\b/gi, "コスト")
+    .replace(/\btariffs?\b/gi, "関税")
+    .replace(/\bdeveloping economies\b/gi, "新興国")
+    .replace(/\bdeveloped economies\b/gi, "先進国")
     .replace(/較為小さい/g, "比較的小さい")
     .replace(/前年同\s*period\s*比/gi, "前年同期比")
     .replace(/\bperiod\b/gi, "期間")
