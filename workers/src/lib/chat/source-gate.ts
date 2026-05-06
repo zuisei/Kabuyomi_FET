@@ -1,6 +1,7 @@
 import type { MetricSnapshot, SourceChunkRecord } from "../../env";
 import { isUnsafeDriverEvidence } from "./evidence-text-quality";
 import type { QuestionIntent } from "./intent";
+import { hasRevenueDriverSignal, hasSegmentRevenueSignal } from "./source-family";
 
 export type SourceGateConfidence = "high" | "medium" | "low";
 export type HardFinancialIntent = "revenue_driver" | "driver_durability_followup" | "margin_durability_followup";
@@ -92,11 +93,16 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
   const sector = normalizeSector(input.sector, input.ticker, input.companyName);
   const knownFacts = extractKnownMetricFacts(input.metrics ?? [], input.selectedSources);
   const drivers = extractSupportedDrivers(input.selectedSources, sector, hardIntent);
+  const revenueCoverage = hardIntent === "revenue_driver"
+    ? analyzeRevenueDriverCoverage(input.metrics ?? [], input.selectedSources, drivers.length > 0)
+    : null;
   const priorDriverFound = hasConcretePriorDriver(input.previousAnswer ?? "", hardIntent);
   const followupTargetFound = hardIntent === "revenue_driver" ? null : priorDriverFound || drivers.length > 0;
   const missingSourceTypes = missingSourceTypesFor(sector, hardIntent, {
-    hasMetricMovement: knownFacts.length > 0,
-    hasDrivers: drivers.length > 0
+    hasMetricMovement: revenueCoverage?.hasRevenueMetric ?? knownFacts.length > 0,
+    hasDrivers: drivers.length > 0,
+    hasRevenueDiscussion: revenueCoverage?.hasRevenueDiscussion ?? drivers.length > 0,
+    hasSegmentRevenueContext: revenueCoverage?.hasSegmentRevenueContext ?? false
   });
   const failureLabels = new Set<string>();
 
@@ -122,7 +128,7 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
   }
 
   const sourceSufficient = hardIntent === "revenue_driver"
-    ? knownFacts.length > 0 && drivers.length > 0
+    ? Boolean(revenueCoverage?.hasRevenueMetric) && drivers.length > 0
     : Boolean(followupTargetFound) && drivers.length > 0 && hasDurabilityEvidence(input.selectedSources, sector, hardIntent);
 
   if (!sourceSufficient) {
@@ -306,7 +312,7 @@ function matchedDriverCategory(
     retail: /(comparable sales|comp sales|traffic|ticket|ecommerce|e-commerce|membership|advertising|inventory|gross margin|walmart u\.s\.|walmart international|sam'?s club|segment results)/i,
     consumer_staples: /(pricing|volume|foreign exchange|organic sales|gross margin|commodity costs?|input costs?|oral care|pet nutrition|segment results)/i,
     auto: /(deliveries|vehicle pricing|automotive gross margin|production volume|average selling price|energy generation|services revenue|segment results)/i,
-    technology: /(product revenue|services revenue|geographic revenue|installed base|channel inventory|product launches|unit demand|gross margin|iphone|mac|ipad|wearables|services)/i,
+    technology: /((net sales|revenue|sales).{0,160}(iphone|mac|ipad|wearables|services|geographic|product revenue|services revenue|channel inventory)|(iphone|mac|ipad|wearables|services).{0,100}(net sales|revenue|sales)|installed base|channel inventory|unit demand|gross margin)/i,
     software: /(subscription revenue|usage|customers?|rpo|remaining performance obligations|deferred revenue|retention|expansion|customer growth)/i,
     semiconductor_equipment: /(orders|backlog|wafer fab equipment|customer demand|china|semiconductor equipment|segment results)/i,
     healthcare_medtech: /(procedure volume|installed base|systems placements|instruments|accessories|recurring revenue|healthcare utilization|segment results)/i,
@@ -329,11 +335,27 @@ function matchedDriverCategory(
 function missingSourceTypesFor(
   sector: SourceGateSector,
   hardIntent: HardFinancialIntent,
-  state: { hasMetricMovement: boolean; hasDrivers: boolean }
+  state: {
+    hasMetricMovement: boolean;
+    hasDrivers: boolean;
+    hasRevenueDiscussion?: boolean;
+    hasSegmentRevenueContext?: boolean;
+  }
 ): string[] {
   if (state.hasDrivers && (hardIntent !== "revenue_driver" || state.hasMetricMovement)) {
     return [];
   }
+  if (hardIntent === "revenue_driver") {
+    const missing = [];
+    if (!state.hasMetricMovement) missing.push("revenue metric");
+    if (!state.hasRevenueDiscussion) missing.push("MD&A revenue discussion");
+    if (!state.hasSegmentRevenueContext) missing.push("segment/revenue context");
+    return missing.length > 0 ? [...missing, ...baseMissingSourceTypes(sector, hardIntent)] : baseMissingSourceTypes(sector, hardIntent);
+  }
+  return baseMissingSourceTypes(sector, hardIntent);
+}
+
+function baseMissingSourceTypes(sector: SourceGateSector, hardIntent: HardFinancialIntent): string[] {
   const base: Record<SourceGateSector, string[]> = {
     bank: hardIntent === "margin_durability_followup"
       ? ["net interest margin discussion", "provision for credit losses discussion", "noninterest expense discussion", "segment profitability"]
@@ -360,6 +382,21 @@ function missingSourceTypesFor(
     general: ["MD&A driver discussion", "segment results", "revenue or profitability discussion"]
   };
   return base[sector];
+}
+
+function analyzeRevenueDriverCoverage(
+  metrics: MetricSnapshot[],
+  sources: SourceChunkRecord[],
+  hasDrivers: boolean
+): { hasRevenueMetric: boolean; hasRevenueDiscussion: boolean; hasSegmentRevenueContext: boolean } {
+  const hasRevenueMetric = metrics.some((metric) => metric.logicalName === "revenue") ||
+    sources.some((source) => isMetricSource(source) && /(売上|revenue|sales|net interest income|noninterest income)/i.test(source.text));
+  const narrativeSources = sources.filter((source) => !isMetricSource(source) && !isBoilerplateSource(source));
+  return {
+    hasRevenueMetric,
+    hasRevenueDiscussion: hasDrivers || narrativeSources.some(hasRevenueDriverSignal),
+    hasSegmentRevenueContext: narrativeSources.some(hasSegmentRevenueSignal)
+  };
 }
 
 function retrievalQueriesFor(
@@ -435,6 +472,9 @@ function isMetricSource(source: SourceChunkRecord): boolean {
 }
 
 function isBoilerplateSource(source: SourceChunkRecord): boolean {
+  if (hasRevenueDriverSignal(source)) {
+    return false;
+  }
   return /(investor relations website|available information|forward-looking statements|properties|website|http|www\.|trademark|table of contents)/i.test(
     source.text
   );

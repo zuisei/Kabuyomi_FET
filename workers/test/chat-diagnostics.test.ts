@@ -65,6 +65,8 @@ describe("chat diagnostics helpers", () => {
         estimatedContextTokens: 309,
         selectedSourceIds: ["S1", "S2"],
         selectedSourceLabels: ["10-Q Part I Item 2", "10-Q XBRL 売上高"],
+        selectedSourceTypes: ["md_a", "xbrl_metric"],
+        selectedSourceSectionFamilies: ["mda", "xbrl_metric"],
         geminiCalled: true,
         geminiSucceeded: true,
         schemaValid: true,
@@ -104,6 +106,8 @@ describe("chat diagnostics helpers", () => {
       latencyMs: 42,
       selectedSourceIds: ["S1", "S2"],
       selectedSourceLabels: ["10-Q Part I Item 2", "10-Q XBRL 売上高"],
+      selectedSourceTypes: ["md_a", "xbrl_metric"],
+      selectedSourceSectionFamilies: ["mda", "xbrl_metric"],
       answerQualityFlags: ["context_rewritten", "fallback_path", "fallback:weak_grounding", "invalid_source_ids", "model_retry_used", "fallback_kind_missing"],
       sourceIdsValid: false,
       geminiCalled: true,
@@ -169,7 +173,9 @@ describe("chat diagnostics helpers", () => {
       estimatedContextTokens: 309,
       sourceSelectionStrategy: "mda_summary:standard:intent_ranked",
       selectedSourceIds: ["S1", "S2"],
-      selectedSourceLabels: ["10-Q Part I Item 2", "10-Q XBRL 売上高"]
+      selectedSourceLabels: ["10-Q Part I Item 2", "10-Q XBRL 売上高"],
+      selectedSourceTypes: ["md_a", "xbrl_metric"],
+      selectedSourceSectionFamilies: ["mda", "xbrl_metric"]
     });
   });
 

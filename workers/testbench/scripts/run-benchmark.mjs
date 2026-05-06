@@ -113,6 +113,7 @@ for (const row of rows) {
     retryWasted: payload.debug?.retryWasted ?? false,
     firstCallFailureKind: payload.debug?.firstCallFailureKind ?? null,
     sourceGateApplied: payload.debug?.sourceGateApplied ?? false,
+    sourceGatePassed: payload.debug?.sourceGatePassed ?? payload.debug?.sourceGateSufficient ?? null,
     sourceGateSufficient: payload.debug?.sourceGateSufficient ?? null,
     sourceGateMissingSourceTypes: payload.debug?.sourceGateMissingSourceTypes ?? [],
     sourceGateFailureLabels: payload.debug?.sourceGateFailureLabels ?? [],

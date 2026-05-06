@@ -2,6 +2,7 @@ import type { FilingCacheRecord } from "../../env";
 import type { GeminiChatAnswer } from "../../clients/gemini/types";
 import type { ChatContextPack } from "./context-pack";
 import type { ChatResponseDebug, ChatResponsePayload, ChatResponsePath } from "./grounding";
+import { selectedSourceSectionFamilies, selectedSourceTypes } from "./source-family";
 
 export function buildContextDebugFields(contextPack: ChatContextPack): Pick<
   ChatResponseDebug,
@@ -12,6 +13,8 @@ export function buildContextDebugFields(contextPack: ChatContextPack): Pick<
   | "sourceSelectionStrategy"
   | "selectedSourceIds"
   | "selectedSourceLabels"
+  | "selectedSourceTypes"
+  | "selectedSourceSectionFamilies"
 > {
   return {
     contextTokenBudget: contextPack.contextTokenBudget,
@@ -20,7 +23,9 @@ export function buildContextDebugFields(contextPack: ChatContextPack): Pick<
     estimatedContextTokens: contextPack.selectionDiagnostics.estimatedContextTokens,
     sourceSelectionStrategy: contextPack.sourceSelectionStrategy,
     selectedSourceIds: contextPack.sourceChunks.map((source) => source.sourceId),
-    selectedSourceLabels: contextPack.sourceChunks.map((source) => source.sourceLabel)
+    selectedSourceLabels: contextPack.sourceChunks.map((source) => source.sourceLabel),
+    selectedSourceTypes: selectedSourceTypes(contextPack.sourceChunks),
+    selectedSourceSectionFamilies: selectedSourceSectionFamilies(contextPack.sourceChunks)
   };
 }
 
@@ -33,6 +38,7 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
   | "retryWasted"
   | "firstCallFailureKind"
   | "sourceGateApplied"
+  | "sourceGatePassed"
   | "sourceGateSufficient"
   | "sourceGateMissingSourceTypes"
   | "sourceGateFailureLabels"
@@ -111,6 +117,7 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
     retryWasted: diagnostics?.retryWasted ?? false,
     firstCallFailureKind: diagnostics?.firstCallFailureKind ?? null,
     sourceGateApplied: qualityControl?.sourceGateApplied ?? false,
+    sourceGatePassed: qualityControl?.sourceGateSufficient ?? null,
     sourceGateSufficient: qualityControl?.sourceGateSufficient ?? null,
     sourceGateMissingSourceTypes: qualityControl?.sourceGateMissingSourceTypes ?? [],
     sourceGateFailureLabels: qualityControl?.sourceGateFailureLabels ?? [],
@@ -341,6 +348,8 @@ export function buildChatQualityPipelinePayload({
     latencyMs,
     selectedSourceIds: answer.debug?.selectedSourceIds ?? answer.sources.map((source) => source.sourceId),
     selectedSourceLabels: answer.debug?.selectedSourceLabels ?? answer.sources.map((source) => source.sourceLabel),
+    selectedSourceTypes: answer.debug?.selectedSourceTypes ?? answer.sources.map((source) => source.sectionType),
+    selectedSourceSectionFamilies: answer.debug?.selectedSourceSectionFamilies ?? [],
     answerQualityFlags,
     sourceIdsValid: answer.debug?.sourceIdsValid ?? null,
     geminiCalled: answer.debug?.geminiCalled ?? false,
@@ -355,6 +364,7 @@ export function buildChatQualityPipelinePayload({
     retryWasted: answer.debug?.retryWasted ?? false,
     firstCallFailureKind: answer.debug?.firstCallFailureKind ?? null,
     sourceGateApplied: answer.debug?.sourceGateApplied ?? false,
+    sourceGatePassed: answer.debug?.sourceGatePassed ?? answer.debug?.sourceGateSufficient ?? null,
     sourceGateSufficient: answer.debug?.sourceGateSufficient ?? null,
     sourceGateMissingSourceTypes: answer.debug?.sourceGateMissingSourceTypes ?? [],
     sourceGateFailureLabels: answer.debug?.sourceGateFailureLabels ?? [],

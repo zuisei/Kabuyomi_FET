@@ -192,6 +192,84 @@ describe("hard-intent source gate", () => {
     expect(result.sourceSufficient).toBe(true);
     expect(result.identifiedDrivers.length).toBeGreaterThan(0);
   });
+
+  it("passes revenue driver with MD&A revenue narrative and revenue XBRL", () => {
+    const filing = makeFiling("WMT", "Walmart Inc.", [revenueMetric(680_000_000_000, 660_000_000_000, 3.0)], [
+      source("S3", "md_a", "Net sales increased primarily due to comparable sales growth, higher traffic and stronger e-commerce sales in Walmart U.S. segment results."),
+      metricSource("S9", "売上高: 680000000000 USD / 比較値: 660000000000 / YoY: 3.0%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "売上成長の要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.missingSourceTypes).toEqual([]);
+    expect(result.failureLabels).not.toContain("source_gate_failed");
+  });
+
+  it("keeps revenue driver fallback for XBRL-only source packs", () => {
+    const filing = makeFiling("AAPL", "Apple Inc.", [revenueMetric(111_184_000_000, 95_359_000_000, 16.6)], [
+      metricSource("S9", "売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "売上成長、または減収の主な要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.failureLabels).toEqual(expect.arrayContaining(["retrieval_overfocused_xbrl", "driver_slots_empty", "source_gate_failed"]));
+    expect(result.missingSourceTypes).toEqual(expect.arrayContaining(["MD&A revenue discussion", "segment/revenue context"]));
+  });
+
+  it("does not pass generic boilerplate as revenue driver evidence", () => {
+    const filing = makeFiling("AAPL", "Apple Inc.", [revenueMetric(111_184_000_000, 95_359_000_000, 16.6)], [
+      source("S3", "md_a", "Table of Contents. The following table presents revenue as a percentage of total net sales. See our website for additional information."),
+      metricSource("S9", "売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "売上成長の要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.identifiedDrivers).toHaveLength(0);
+    expect(result.failureLabels).toContain("source_relevance_low");
+  });
+
+  it("does not discard substantive revenue-driver text solely because a context window contains table-of-contents noise", () => {
+    const filing = makeFiling("CAT", "Caterpillar Inc.", [revenueMetric(64_800_000_000, 67_100_000_000, -3.4)], [
+      source("CTX1", "md_a", "Table of Contents. Sales decreased primarily due to lower sales volume and unfavorable price realization, partially offset by stronger services demand in segment results."),
+      metricSource("S9", "売上高: 64800000000 USD / 比較値: 67100000000 / YoY: -3.4%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "減収の主な要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers.length).toBeGreaterThan(0);
+  });
 });
 
 describe("evidence-slot fallback", () => {

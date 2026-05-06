@@ -93,6 +93,7 @@ export interface ChatResponseDebug {
   retryWasted?: boolean;
   firstCallFailureKind?: string | null;
   sourceGateApplied?: boolean;
+  sourceGatePassed?: boolean | null;
   sourceGateSufficient?: boolean | null;
   sourceGateMissingSourceTypes?: string[];
   sourceGateFailureLabels?: string[];
@@ -161,6 +162,8 @@ export interface ChatResponseDebug {
   sourceSelectionStrategy?: string | null;
   selectedSourceIds?: string[];
   selectedSourceLabels?: string[];
+  selectedSourceTypes?: string[];
+  selectedSourceSectionFamilies?: string[];
   answerQualityFlags?: string[];
   totalPipelineMs?: number;
   historicalLookupMs?: number;
