@@ -63,6 +63,21 @@ describe("resolveContextualQuestion", () => {
     );
   });
 
+  it("extracts Japanese driver labels from supported Q03 answers", () => {
+    const industrialContext = [
+      { role: "user" as const, content: "売上成長の要因は？" },
+      {
+        role: "assistant" as const,
+        content:
+          "本文の要因: 売上増加は主に販売量の増加による。価格実現が不利だったため一部相殺されました。機械をエンドユーザーへ多く販売したことが主因です。"
+      }
+    ];
+
+    expect(resolveContextualQuestion("その要因は一時的？", industrialContext)).toBe(
+      "前問で挙げた売上高の要因（pricing、volume）は一時的ですか？継続性と不明点を分けて説明してください。"
+    );
+  });
+
   it("marks durability follow-ups unresolved when the previous answer did not identify a driver", () => {
     const unresolvedRevenueContext = [
       { role: "user" as const, content: "売上成長の要因は？" },

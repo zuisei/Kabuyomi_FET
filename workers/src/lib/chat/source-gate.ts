@@ -101,7 +101,14 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
     ? analyzeRevenueDriverCoverage(input.metrics ?? [], input.selectedSources, drivers.length > 0, hasStrongRevenueDriverEvidence)
     : null;
   const priorDriverFound = hasConcretePriorDriver(input.previousAnswer ?? "", hardIntent);
-  const followupTargetFound = hardIntent === "revenue_driver" ? null : priorDriverFound || drivers.length > 0;
+  const followupTargetFound = hardIntent === "revenue_driver"
+    ? null
+    : hardIntent === "driver_durability_followup"
+      ? priorDriverFound
+      : priorDriverFound || drivers.length > 0;
+  const hasDurabilityContext = hardIntent === "driver_durability_followup" || hardIntent === "margin_durability_followup"
+    ? hasDurabilityEvidence(input.selectedSources, sector, hardIntent)
+    : false;
   const missingSourceTypes = missingSourceTypesFor(sector, hardIntent, {
     hasMetricMovement: revenueCoverage?.hasRevenueMetric ?? knownFacts.length > 0,
     hasDrivers: drivers.length > 0,
@@ -128,6 +135,7 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
 
   if (hardIntent !== "revenue_driver" && !followupTargetFound) {
     failureLabels.add("followup_target_empty");
+    failureLabels.add("missing_followup_target_driver");
   }
 
   if (hasLowRelevanceSources(input.selectedSources)) {
@@ -137,10 +145,13 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
   if (hardIntent === "revenue_driver") {
     addRevenueDriverQualityFailureLabels(input.selectedSources, sector, drivers.length > 0, hasStrongRevenueDriverEvidence, failureLabels);
   }
+  if (hardIntent === "driver_durability_followup") {
+    addDriverDurabilityFailureLabels(input.selectedSources, followupTargetFound, drivers.length > 0, hasDurabilityContext, failureLabels);
+  }
 
   const sourceSufficient = hardIntent === "revenue_driver"
     ? Boolean(revenueCoverage?.hasRevenueMetric) && drivers.length > 0 && hasStrongRevenueDriverEvidence
-    : Boolean(followupTargetFound) && drivers.length > 0 && hasDurabilityEvidence(input.selectedSources, sector, hardIntent);
+    : Boolean(followupTargetFound) && drivers.length > 0 && hasDurabilityContext;
 
   if (!sourceSufficient) {
     failureLabels.add("source_gate_failed");
@@ -170,12 +181,13 @@ export function resolveHardFinancialIntent(
   question: string,
   previousAnswer = ""
 ): HardFinancialIntent | null {
+  const normalizedQuestion = question.replace(/\s+/g, "").toLowerCase();
   const normalized = `${question} ${previousAnswer}`.replace(/\s+/g, "").toLowerCase();
   const asksDurability = /(一時|一過性|継続|続く|構造|temporary|transitory|recurring|sustain|continue)/.test(normalized);
   const asksRevenueDriver = /(売上|収益|sales|revenue)/.test(normalized) && /(主因|要因|原因|理由|なぜ|driver|cause|why|伸び|増収|減収)/.test(normalized);
-  const asksMargin = /(利益率|マージン|粗利|営業利益率|純利益率|margin|profitability|採算)/.test(normalized);
+  const asksMargin = /(利益率|マージン|粗利|営業利益率|純利益率|margin|profitability|採算)/.test(normalizedQuestion);
 
-  if (asksDurability && asksMargin) {
+  if (asksDurability && (asksMargin || questionIntent === "margin_profitability")) {
     return "margin_durability_followup";
   }
 
@@ -507,16 +519,17 @@ function hasConcretePriorDriver(previousAnswer: string, hardIntent: HardFinancia
   const text = normalizeText(previousAnswer);
   if (
     !text ||
-    /(具体的なdriverが十分に特定|要因.*不足|主因.*断定|増収だった.*点まで|利益率.*方向.* known)/i.test(text) ||
+    /(具体的なdriverが十分に特定|十分に特定できていません|特定できていません|会社固有の売上要因は十分|要因.*不足|主因.*断定|増収だった.*点まで|利益率.*方向.* known)/i.test(text) ||
     /(前問のdriverは、|利益率driverとして確認できるのは、)\s*[A-Za-z]/.test(text) ||
     /(?:\.{3}|…|•\s*[A-Za-z]|Item\s+7|Part\s+I\.\s*Item|Risk Factors|Results of Operations)/i.test(text) ||
+    /our ability to leverage|store and club footprint|business description|available information|corporate website/i.test(text) ||
     /価格、数量、需要、コスト、mix|segment composition|セグメント構成.*軸/i.test(text)
   ) {
     return false;
   }
   return hardIntent === "margin_durability_followup"
     ? /(cost|expense|margin|provision|price|mix|volume|impairment|restructuring|費用|コスト|価格|数量|引当|減損|一時費用|sg&a|r&d)/i.test(text)
-    : /(due to|driven by|because|price|volume|mix|segment|traffic|ticket|ecommerce|net interest|noninterest|commodity|production|backlog|orders|要因|主因|価格|数量|セグメント|既存店|トラフィック|受注|商品価格)/i.test(text);
+    : /(due to|driven by|because|price|pricing|volume|mix|segment|traffic|ticket|ecommerce|services|installed base|net interest|nii|noninterest|nir|markets revenue|investment banking|commodity|production|backlog|orders|要因|主因|価格|価格実現|数量|販売量|品目構成|セグメント|既存店|トラフィック|客数|客単価|サービス|受注|商品価格|金利収入|非金利収入)/i.test(text);
 }
 
 function hasDurabilityEvidence(
@@ -526,11 +539,66 @@ function hasDurabilityEvidence(
 ): boolean {
   return sources.some((source) => {
     const text = normalizeText(source.text);
-    return !isMetricSource(source) && !isUnsafeDriverEvidence(source, hardIntent, sector) && (
-      /(temporary|transitory|one-time|recurring|seasonal|sustain|continue|demand|risk|outlook|継続|一時|一過性|構造)/i.test(text) ||
-      matchedDriverCategory(text, sector, hardIntent) !== null
-    );
+    if (isMetricSource(source) || isUnsafeDriverEvidence(source, hardIntent, sector)) {
+      return false;
+    }
+    if (hardIntent !== "driver_durability_followup") {
+      return /(temporary|transitory|one-time|recurring|seasonal|sustain|continue|demand|risk|outlook|継続|一時|一過性|構造)/i.test(text) ||
+        matchedDriverCategory(text, sector, hardIntent) !== null;
+    }
+    return hasDriverDurabilitySignal(text, sector);
   });
+}
+
+function hasDriverDurabilitySignal(text: string, sector: SourceGateSector): boolean {
+  const common =
+    /(temporary|transitory|one-time|seasonal|recurring|continue|continued|sustain|expected|expects|outlook|guidance|trend|uncertain|uncertainty|risk|sensitivity|headwind|tailwind|normalize|normalization|継続|一時|一過性|構造|見通し|不確実|感応度)/i;
+  const sectorPatterns: Record<SourceGateSector, RegExp> = {
+    bank: /(deposit margin compression|lower rates?|higher rates?|interest rate sensitivity|credit normalization|card balances|revolving balances|investment banking fees|markets revenue|cyclical|wholesale deposit balances|net interest income excluding markets|flat when compared)/i,
+    capital_markets: /(investment banking fees|trading revenue|markets revenue|asset management fees|wealth management|cyclical|advisory|underwriting|client activity)/i,
+    energy: /(commodity price sensitivity|crude prices?|natural gas prices?|production volumes?|refining margins?|chemical margins?|upstream|downstream|price realizations?|outlook|expected)/i,
+    oilfield_services: /(customer spending|drilling activity|completion activity|north america activity|international activity|outlook|expected|backlog)/i,
+    industrial: /(backlog|orders|dealer inventor(?:y|ies)|stronger sales|expected|expects|end-market demand|inventory to increase)/i,
+    retail: /(continued strength|ecommerce|e-commerce|membership|member engagement|omnichannel|grocery|health and wellness|expected|expects)/i,
+    consumer_staples: /(organic sales|pricing|volume|foreign exchange|commodity costs?|input costs?|continued|expected|outlook)/i,
+    auto: /(deliveries|production volume|vehicle pricing|average selling price|automotive gross margin|expected|outlook|demand)/i,
+    technology: /(services revenue|installed base|product introduction|product launch|channel inventory|macroeconomic conditions|tariff|foreign exchange|component pricing|recurring|continue|expected|outlook)/i,
+    software: /(subscription|recurring|rpo|remaining performance obligations|deferred revenue|retention|usage|customers?|expected|outlook)/i,
+    semiconductor_equipment: /(orders|backlog|customer demand|china|wafer fab equipment|expected|outlook|demand)/i,
+    healthcare_medtech: /(procedure volume|installed base|recurring|instruments|accessories|systems placements|expected|outlook)/i,
+    reit: /(occupancy|same-store|noi|interest rates?|lease|renewal|expected|outlook)/i,
+    media: /(advertising revenue|affiliate revenue|subscriber|distribution|sports rights|cyclical|expected|outlook)/i,
+    utility: /(rate case|regulated returns|load growth|weather|fuel cost|expected|outlook|capex)/i,
+    mining: /(copper price|gold price|production volume|unit cost|commodity price|expected|outlook)/i,
+    general: /(recurring|continue|continued|sustain|expected|outlook|backlog|orders|risk|uncertain|temporary|one-time)/i
+  };
+  return common.test(text) || sectorPatterns[sector].test(text);
+}
+
+function addDriverDurabilityFailureLabels(
+  sources: SourceChunkRecord[],
+  followupTargetFound: boolean | null,
+  hasDrivers: boolean,
+  hasDurabilityContext: boolean,
+  failureLabels: Set<string>
+): void {
+  const narrativeText = sources.filter((source) => !isMetricSource(source)).map((source) => source.text).join(" ");
+  if (!followupTargetFound) {
+    failureLabels.add("missing_followup_target_driver");
+  }
+  if (!hasDurabilityContext) {
+    failureLabels.add("missing_durability_context");
+  }
+  if (followupTargetFound && hasDrivers && !hasDurabilityContext) {
+    failureLabels.add("driver_supported_but_durability_unclear");
+  }
+  if (
+    narrativeText.trim() &&
+    /(risk factors?|forward-looking statements?|long[- ]term|strategy|history|available information|properties|website|market supply and demand|general economic activities)/i.test(narrativeText) &&
+    !hasDurabilityContext
+  ) {
+    failureLabels.add("durability_context_too_generic");
+  }
 }
 
 function hasLowRelevanceSources(sources: SourceChunkRecord[]): boolean {

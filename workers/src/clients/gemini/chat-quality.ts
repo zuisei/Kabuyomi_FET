@@ -12,7 +12,7 @@ export function classifyLowQualityChatAnswer(input: ChatPromptInput, answer: str
       normalizedQuestion
     ) || /(whatdoes.*companydo|whatcompany|whatbusiness|businessmodel)/.test(normalizedQuestion);
   const asksProfitCause =
-    /(赤字|黒字|損失|欠損|純利益|利益|net income|net loss|profit|income|earnings|loss)/.test(normalizedQuestion) &&
+    /(赤字|黒字|損失|欠損|純利益|利益|net income|net loss|profit|loss)/.test(normalizedQuestion) &&
     /(主因|要因|原因|理由|なぜ|背景|何が|driver|cause|why)/.test(normalizedQuestion);
   const asksRevenueCause =
     /(売上|増収|revenue|sales|growth)/.test(normalizedQuestion) &&

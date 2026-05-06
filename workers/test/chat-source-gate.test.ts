@@ -205,6 +205,191 @@ describe("hard-intent source gate", () => {
     expect(result.failureLabels).toEqual(expect.arrayContaining(["followup_target_empty", "driver_slots_empty"]));
   });
 
+  it("does not treat business-description fallback text as a recovered Q04 driver", () => {
+    const filing = makeFiling("WMT", "Walmart Inc.", [revenueMetric(713_163_000_000, 680_985_000_000, 4.7)], [
+      source(
+        "S3",
+        "md_a",
+        "Comparable sales were driven by growth in transactions and unit volumes, with strong sales in grocery and health and wellness."
+      ),
+      metricSource("S9", "売上高: 713163000000 USD / 比較値: 680985000000 / YoY: 4.7%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "売上高が変化した要因は一時的ですか？",
+      previousAnswer: "本文では、our ability to leverage our store and club footprint to expand customer access が売上変化の要因として説明されています。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.followupTargetFound).toBe(false);
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.failureLabels).toContain("missing_followup_target_driver");
+  });
+
+  it("passes Q04 when a recovered Q03 driver has source-backed recurring demand evidence", () => {
+    const filing = makeFiling("AAPL", "Apple Inc.", [revenueMetric(111_184_000_000, 95_359_000_000, 16.6)], [
+      source(
+        "S3",
+        "md_a",
+        "Net sales increased due to higher Services revenue and product launches. Services revenue growth reflected continued strength in the installed base, while macroeconomic conditions and tariffs remain uncertain."
+      ),
+      metricSource("S9", "売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "前問で挙げた売上高の要因（Services）は一時的ですか？継続性と不明点を分けて説明してください。",
+      previousAnswer: "主な要因として Services revenue と製品ローンチが寄与しています。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.followupTargetFound).toBe(true);
+    expect(result.failureLabels).not.toContain("missing_durability_context");
+  });
+
+  it("keeps Q04 as revenue-driver durability even when prior driver text mentions margin pressure", () => {
+    const filing = makeFiling("JPM", "JPMorgan Chase & Co.", [revenueMetric(182_447_000_000, 177_556_000_000, 2.8)], [
+      source(
+        "S3",
+        "md_a",
+        "Net interest income was up 3%, driven by higher Markets net interest income, higher revolving balances in Card Services and higher wholesale deposit balances. These factors were largely offset by deposit margin compression and the impact of lower rates."
+      ),
+      metricSource("S9", "売上高: 182447000000 USD / 比較値: 177556000000 / YoY: 2.8%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "前問で挙げた売上高の要因（net interest income、deposits）は一時的ですか？",
+      previousAnswer: "NII と deposits が寄与しましたが、deposit margin compression と lower rates が相殺しました。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers[0]?.category).toBe("bank_driver_durability_followup");
+    expect(result.failureLabels).not.toContain("margin_driver_slots_empty");
+  });
+
+  it("fails Q04 safely when the Q03 driver is recovered but durability evidence is absent", () => {
+    const filing = makeFiling("CAT", "Caterpillar Inc.", [revenueMetric(67_589_000_000, 64_809_000_000, 4.3)], [
+      source(
+        "S3",
+        "md_a",
+        "Total sales and revenues increased 4 percent. The increase reflected higher sales volume, partially offset by unfavorable price realization."
+      ),
+      metricSource("S9", "売上高: 67589000000 USD / 比較値: 64809000000 / YoY: 4.3%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "前問で挙げた売上高の要因（volume、pricing）は一時的ですか？",
+      previousAnswer: "売上増加は販売量と価格実現が要因です。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.followupTargetFound).toBe(true);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "missing_durability_context",
+      "driver_supported_but_durability_unclear",
+      "source_gate_failed"
+    ]));
+  });
+
+  it("fails Q04 safely when no prior Q03 driver was recovered", () => {
+    const filing = makeFiling("XOM", "Exxon Mobil Corp", [revenueMetric(332_238_000_000, 349_585_000_000, -5.0)], [
+      source(
+        "S3",
+        "md_a",
+        "Commodity prices over the long term will continue to be driven by market supply and demand and general economic activities."
+      ),
+      metricSource("S9", "売上高: 332238000000 USD / 比較値: 349585000000 / YoY: -5.0%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "前問では売上高の具体的なdriverが十分に特定できていません。売上高の一時要因と継続要因を説明してください。",
+      previousAnswer: "会社固有の売上要因は十分に特定できていません。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.followupTargetFound).toBe(false);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "missing_followup_target_driver",
+      "followup_target_empty",
+      "source_gate_failed"
+    ]));
+  });
+
+  it("does not pass generic risk or outlook text alone as Q04 durability evidence", () => {
+    const filing = makeFiling("WMT", "Walmart Inc.", [revenueMetric(713_163_000_000, 680_985_000_000, 4.7)], [
+      source(
+        "S3",
+        "md_a",
+        "Forward-looking statements involve risks and uncertainties. The company strategy is to serve customers through stores and digital channels over the long term."
+      ),
+      metricSource("S9", "売上高: 713163000000 USD / 比較値: 680985000000 / YoY: 4.7%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "前問で挙げた売上高の要因（eCommerce、membership）は一時的ですか？",
+      previousAnswer: "eCommerce と membership が寄与しています。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "driver_slots_empty",
+      "durability_context_too_generic",
+      "source_gate_failed"
+    ]));
+  });
+
+  it("recognizes sector-specific Q04 durability only when the source backs it", () => {
+    const filing = makeFiling("WMT", "Walmart Inc.", [revenueMetric(713_163_000_000, 680_985_000_000, 4.7)], [
+      source(
+        "S3",
+        "md_a",
+        "Comparable sales were driven by growth in transactions and unit volumes. Walmart US eCommerce sales growth reflects continued strength in customer and Walmart+ member engagement with omnichannel offerings."
+      ),
+      metricSource("S9", "売上高: 713163000000 USD / 比較値: 680985000000 / YoY: 4.7%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "前問で挙げた売上高の要因（既存店売上、eCommerce、membership）は一時的ですか？",
+      previousAnswer: "既存店売上、eCommerce、membership が寄与しています。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers[0]?.category).toContain("retail");
+  });
+
   it("classifies WMT as retail, not bank", () => {
     const filing = makeFiling("WMT", "Walmart Inc.", [revenueMetric(680_000_000_000, 660_000_000_000, 3.0)], [
       metricSource("S9", "売上高: 680000000000 USD / 比較値: 660000000000 / YoY: 3.0%")

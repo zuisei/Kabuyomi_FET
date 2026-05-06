@@ -253,7 +253,13 @@ describe("handleChatRoute", () => {
       "営業CFが変化した理由は？",
       expect.anything(),
       expect.anything(),
-      { executionContext: ctx }
+      {
+        executionContext: ctx,
+        followupContext: {
+          previousQuestion: "営業CF",
+          previousAnswer: "営業キャッシュフローはマイナスで、前年比で減少しました。"
+        }
+      }
     );
   });
 

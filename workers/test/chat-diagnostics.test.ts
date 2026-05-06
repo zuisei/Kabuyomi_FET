@@ -277,6 +277,38 @@ describe("chat diagnostics helpers", () => {
       )
     ).toBe("revenue_driver_declined_despite_context");
   });
+
+  it("does not classify net-interest revenue durability as a profit-cause answer", () => {
+    const filing = makeFiling();
+    filing.sourceChunks = [
+      {
+        sourceId: "S1",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Revenue driver discussion",
+        text: "Net interest income was up 3%, driven by higher Markets net interest income and higher wholesale deposit balances, partly offset by deposit margin compression and lower rates.",
+        startOffset: 0,
+        endOffset: 160,
+        sortOrder: 1
+      }
+    ];
+
+    expect(
+      classifyLowQualityChatAnswer(
+        {
+          question: "前問で挙げた売上高の要因（net interest income、deposits）は一時的ですか？",
+          filing,
+          contextPack: {
+            ...makeContextPack(),
+            questionIntent: "yoy_change",
+            sourceChunks: filing.sourceChunks
+          }
+        },
+        "本文で説明されている要因: NII は市場関連収益の増加やカードサービスの残高増、wholesale deposit の増加などで3%増。NII excluding Markets は横ばいで、低金利とdeposit margin compressionは相殺要因です。継続性は断定できません。",
+        ["S1"]
+      )
+    ).toBeNull();
+  });
 });
 
 function makeFiling(): FilingCacheRecord {

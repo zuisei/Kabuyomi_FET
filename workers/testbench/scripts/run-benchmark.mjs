@@ -393,9 +393,17 @@ function buildConversationContext(row, previousResults) {
   }
 
   return [
-    { role: "user", content: prior.question },
-    { role: "assistant", content: prior.answer }
+    { role: "user", content: clipChatContextMessage(prior.question) },
+    { role: "assistant", content: clipChatContextMessage(prior.answer) }
   ];
+}
+
+function clipChatContextMessage(value) {
+  const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (normalized.length <= 420) {
+    return normalized;
+  }
+  return normalized.slice(0, 417).trimEnd() + "...";
 }
 
 function requestHeaders(overrideDeviceKey = deviceKey) {

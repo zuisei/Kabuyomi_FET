@@ -22,7 +22,7 @@ import { logErrorEvent, logEvent } from "../logging";
 import { isCreditBillingEnabledForIdentity, type RemoteConfig } from "../remote-config";
 import { buildChatResponse } from "./orchestrator";
 import { formatChatAnswerForDisplay } from "./answer-format";
-import { resolveContextualQuestion } from "./context";
+import { type ChatContextMessage, resolveContextualQuestion } from "./context";
 import {
   buildAnswerQualityFlags,
   buildChatQualityPipelinePayload,
@@ -66,6 +66,7 @@ export async function answerChatUsecase({
   });
   const startedAt = Date.now();
   const resolvedQuestion = resolveContextualQuestion(payload.question, payload.conversationContext);
+  const followupContext = summarizeFollowupContext(payload.conversationContext);
   const answer = await buildChatResponseWithRefund({
     filing: preparedFiling,
     question: resolvedQuestion,
@@ -75,7 +76,8 @@ export async function answerChatUsecase({
     identity,
     creditBillingEnabled,
     chatCharge,
-    creditOperationId
+    creditOperationId,
+    followupContext
   });
   const latencyMs = Date.now() - startedAt;
   const responsePath = resolveChatResponsePath(answer);
@@ -187,7 +189,8 @@ async function buildChatResponseWithRefund({
   identity,
   creditBillingEnabled,
   chatCharge,
-  creditOperationId
+  creditOperationId,
+  followupContext
 }: {
   filing: FilingCacheRecord;
   question: string;
@@ -198,10 +201,15 @@ async function buildChatResponseWithRefund({
   creditBillingEnabled: boolean;
   chatCharge: ChatChargeResult;
   creditOperationId: string;
+  followupContext: FollowupContextSummary;
 }): ReturnType<typeof buildChatResponse> {
   try {
+    const options: Parameters<typeof buildChatResponse>[4] = { executionContext: ctx };
+    if (followupContext.previousQuestion || followupContext.previousAnswer) {
+      options.followupContext = followupContext;
+    }
     return await buildChatResponse(filing, question, env, config, {
-      executionContext: ctx
+      ...options
     });
   } catch (error) {
     return refundAfterChatGenerationFailure({
@@ -215,6 +223,20 @@ async function buildChatResponseWithRefund({
       creditOperationId
     });
   }
+}
+
+interface FollowupContextSummary {
+  previousQuestion?: string;
+  previousAnswer?: string;
+}
+
+function summarizeFollowupContext(context: ChatContextMessage[] = []): FollowupContextSummary {
+  const previousQuestion = [...context].reverse().find((message) => message.role === "user")?.content?.trim();
+  const previousAnswer = [...context].reverse().find((message) => message.role === "assistant")?.content?.trim();
+  return {
+    previousQuestion: previousQuestion ? previousQuestion.slice(0, 500) : undefined,
+    previousAnswer: previousAnswer ? previousAnswer.slice(0, 1_500) : undefined
+  };
 }
 
 async function refundAfterChatGenerationFailure({

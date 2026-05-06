@@ -31,13 +31,17 @@ export async function buildValidatedModelAnswer({
   question,
   env,
   questionIntent,
-  timings
+  timings,
+  previousQuestion,
+  previousAnswer
 }: {
   filing: FilingCacheRecord;
   question: string;
   env: Env;
   questionIntent: QuestionIntent;
   timings: ChatTimingTracker;
+  previousQuestion?: string;
+  previousAnswer?: string;
 }): Promise<{
   contextPack: ChatContextPack;
   modelResponse: GeminiChatAnswer;
@@ -50,6 +54,8 @@ export async function buildValidatedModelAnswer({
     companyName: filing.companyName,
     questionIntent,
     question,
+    previousQuestion,
+    previousAnswer,
     selectedSources: contextPack.sourceChunks,
     metrics: contextPack.metrics.length > 0 ? contextPack.metrics : filing.metrics
   });
@@ -90,6 +96,8 @@ export async function buildValidatedModelAnswer({
       sector,
       questionIntent,
       question,
+      previousAnswer,
+      conversationContext: previousQuestion ? `${previousQuestion}\n${previousAnswer ?? ""}` : previousAnswer,
       sourceGateResult: initialGate,
       sourceGateMissingSourceTypes: initialGate.missingSourceTypes,
       selectedSourceLabels: contextPack.sourceChunks.map((source) => source.sourceLabel),
@@ -115,6 +123,8 @@ export async function buildValidatedModelAnswer({
         companyName: filing.companyName,
         questionIntent,
         question,
+        previousQuestion,
+        previousAnswer,
         selectedSources: expandedContextPack.sourceChunks,
         metrics: expandedContextPack.metrics.length > 0 ? expandedContextPack.metrics : filing.metrics
       });

@@ -173,14 +173,19 @@ function extractDriverCandidates(text: string): string[] {
     [/natural gas|天然ガス/i, "natural gas price"],
     [/refining margins?|精製マージン/i, "refining margin"],
     [/production volumes?|\bvolume\b|生産量|販売数量/i, "volume"],
-    [/price realization|realizations?|pricing|価格/i, "pricing"],
+    [/price realization|realizations?|pricing|価格実現|価格/i, "pricing"],
     [/backlog|受注残/i, "backlog"],
     [/dealer inventory|ディーラー在庫/i, "dealer inventory"],
     [/iphone/i, "iPhone"],
-    [/services/i, "Services"],
+    [/services|サービス/i, "Services"],
     [/greater china|china|中国/i, "Greater China"],
     [/americas/i, "Americas"],
-    [/foreign currency|foreign exchange|為替/i, "foreign exchange"]
+    [/foreign currency|foreign exchange|為替/i, "foreign exchange"],
+    [/品目構成|構成の違い|product mix/i, "product mix"],
+    [/関税|tariff/i, "tariff"],
+    [/\bnii\b|純利息収入|金利収入/i, "net interest income"],
+    [/\bnir\b|非金利収入/i, "noninterest income"],
+    [/販売量|販売数量|equipment to end users|エンドユーザー/i, "volume"]
   ];
 
   const found: string[] = [];
