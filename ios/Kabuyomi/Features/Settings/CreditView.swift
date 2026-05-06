@@ -1,5 +1,17 @@
 import SwiftUI
 
+private enum RewardedCreditReviewUI {
+    static let rewardedAdsVisibleInV1Review = false
+
+    static var isVisible: Bool {
+        #if DEBUG
+        true
+        #else
+        rewardedAdsVisibleInV1Review
+        #endif
+    }
+}
+
 struct CreditView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
@@ -112,7 +124,9 @@ struct CreditView: View {
                     VStack(spacing: 10) {
                         CreditMetricRow(title: "合計", value: "\(credits.totalRemaining) credits")
                         CreditMetricRow(title: "Free付与", value: "\(credits.monthlyRemaining) / \(credits.monthlyLimit)")
-                        if let rewardedAdRemaining = credits.rewardedAdRemaining, rewardedAdRemaining > 0 {
+                        if shouldShowRewardedCreditUI,
+                           let rewardedAdRemaining = credits.rewardedAdRemaining,
+                           rewardedAdRemaining > 0 {
                             CreditMetricRow(title: "広告報酬", value: "\(rewardedAdRemaining)")
                         }
                         if credits.purchasedRemaining > 0 {
@@ -192,7 +206,7 @@ struct CreditView: View {
     }
 
     private var shouldShowRewardedCreditUI: Bool {
-        true
+        RewardedCreditReviewUI.isVisible
     }
 
     private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {

@@ -116,21 +116,24 @@ const legalPages: LegalPage[] = [
     updatedAt: "2026-05-05",
     sections: [
       {
-        title: "提出前ブロッカー",
+        title: "API-hosted fallback copy",
         body:
-          "販売者の正式な氏名または法人名、住所、電話番号は未確定です。これらの値が最終確定するまで App Store 最終提出はブロックしてください。"
+          "このページは API Worker 上の legacy fallback copy です。App Store metadata と公開法務リンクでは https://kabuyomi-legal-site.pages.dev/tokushoho/ を優先してください。"
       },
       {
         title: "事業者 / 販売者名",
-        body: "TODO_FINAL_LEGAL_IDENTITY: 正式な事業者名または法人名を記載してください。"
+        body:
+          "プライバシー保護のため、販売者または運営者の氏名または名称はこのページ上では省略しています。特定商取引法に基づき開示請求があった場合、kabuyomi.support@gmail.com 宛ての請求に対して、メールその他の適切な方法により遅滞なく開示します。"
       },
       {
         title: "所在地",
-        body: "TODO_FINAL_LEGAL_ADDRESS: 正式な所在地を記載してください。"
+        body:
+          "プライバシー保護のため、所在地はこのページ上では省略しています。特定商取引法に基づき開示請求があった場合、kabuyomi.support@gmail.com 宛ての請求に対して、メールその他の適切な方法により遅滞なく開示します。"
       },
       {
         title: "電話番号",
-        body: "TODO_FINAL_LEGAL_PHONE: 正式な電話番号を記載してください。"
+        body:
+          "プライバシー保護のため、電話番号はこのページ上では省略しています。特定商取引法に基づき開示請求があった場合、kabuyomi.support@gmail.com 宛ての請求に対して、メールその他の適切な方法により遅滞なく開示します。"
       },
       {
         title: "連絡先",
@@ -200,6 +203,11 @@ export const handleLegalRoute: RouteHandler = async ({ request, url }) => {
 };
 
 function renderLegalPage(page: LegalPage): string {
+  const fallbackNotice = `
+        <section class="fallback-notice">
+          <h2>API-hosted fallback copy</h2>
+          <p>このページは API Worker 上の legacy fallback copy です。App Store metadata と公開法務リンクでは、Cloudflare Pages の static legal site を優先してください。</p>
+        </section>`;
   const sections = page.sections
     .map(
       (section) => `
@@ -261,6 +269,13 @@ function renderLegalPage(page: LegalPage): string {
         padding: 24px 0;
         border-top: 1px solid var(--line);
       }
+      .fallback-notice {
+        margin: 0 0 8px;
+        padding: 16px;
+        border: 1px solid rgba(155, 87, 34, 0.45);
+        border-radius: 14px;
+        background: rgba(246, 226, 204, 0.58);
+      }
       h2 {
         margin: 0 0 10px;
         color: var(--accent);
@@ -286,6 +301,7 @@ function renderLegalPage(page: LegalPage): string {
       <article>
         <h1>${escapeHtml(page.title)}</h1>
         <p class="updated">最終更新日: ${escapeHtml(page.updatedAt)}</p>
+        ${fallbackNotice}
         ${sections}
         <footer>Kabuyomi / Contact: kabuyomi.support@gmail.com / X: @0xt4dano</footer>
       </article>

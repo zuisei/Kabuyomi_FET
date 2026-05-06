@@ -209,7 +209,7 @@ describe("worker routing", () => {
     expect(body).toContain("Google AdMob");
   });
 
-  it("serves the tokushoho page with explicit legal identity blockers", async () => {
+  it("serves the tokushoho page with disclosure-by-request legal identity wording", async () => {
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/legal/tokushoho"),
       {
@@ -223,7 +223,10 @@ describe("worker routing", () => {
     expect(response.status).toBe(200);
     const body = await response.text();
     expect(body).toContain("特定商取引法に基づく表記");
-    expect(body).toContain("TODO_FINAL_LEGAL_IDENTITY");
+    expect(body).toContain("プライバシー保護のため");
+    expect(body).toContain("開示請求があった場合");
+    expect(body).toContain("遅滞なく開示します");
+    expect(body).not.toContain("TODO_FINAL_LEGAL_IDENTITY");
     expect(body).toContain("kabuyomi.credits.100");
     expect(body).toContain("paid credit は失効しません");
   });

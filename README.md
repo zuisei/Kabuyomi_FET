@@ -7,6 +7,7 @@ Kabuyomi is an iOS + Cloudflare Workers app for reading SEC filings in Japanese 
 - `ios/`: current SwiftUI app generated with XcodeGen
 - `workers/`: Cloudflare Workers API, Durable Objects, chat orchestration, quota, and filing history pipeline
 - `sec-fetcher/`: SEC submissions and filing fetcher used by Workers
+- `legal-site/`: Cloudflare Pages-ready static legal pages for App Store metadata and public legal links
 - `docs/`: product specs, as-built notes, and implementation handoff documents
 - `artifacts/`: screenshot dumps and exported UI archives
 
@@ -19,7 +20,9 @@ Kabuyomi is an iOS + Cloudflare Workers app for reading SEC filings in Japanese 
 - v1 chat is filing-grounded by default and must not be described as web search, investment advice, buy/sell recommendation, stock-price forecast, or target-price service.
 - v1 monetization is consumable credits only. The only visible paid IAP product is `kabuyomi.credits.100`, which grants 100 paid credits for ¥200.
 - Paid credits do not expire. Free/promotional credits and ad credits are separate from paid credits.
+- AdMob rewarded-credit infrastructure exists, but the normal rewarded-credit UI is hidden for v1 App Review and deferred to v1.1 / post-approval.
 - Subscriptions, Lite / Pro / Pro Max public plans, the ¥500 pack, App Attest, DeviceCheck, account systems, 8-K support, and web search are v1.1+ or later.
+- Public legal pages are served from `https://kabuyomi-legal-site.pages.dev`. Worker `/legal/*` routes are legacy API-hosted fallback copies, not the preferred App Store metadata surface.
 - Workers routes live under `workers/src/routes/`; shared logic is split across `workers/src/lib/` and `workers/src/clients/gemini/`.
 
 ## Quick Start
@@ -60,6 +63,20 @@ open Kabuyomi.xcodeproj
 ```
 
 Unit tests live under `ios/KabuyomiTests/` and can be run with `xcodebuild test` after generating the project.
+
+### 4. Static Legal Site
+
+```bash
+cd /Users/0xt4/t4dano/Kabuyomi/legal-site
+npm run validate
+```
+
+Preferred public legal URLs:
+
+- `https://kabuyomi-legal-site.pages.dev/privacy/`
+- `https://kabuyomi-legal-site.pages.dev/terms/`
+- `https://kabuyomi-legal-site.pages.dev/support/`
+- `https://kabuyomi-legal-site.pages.dev/tokushoho/`
 
 ## Current v1 Semantics
 

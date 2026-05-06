@@ -7,6 +7,7 @@ Project documentation that used to sit in the repository root is grouped here.
 - [project_file_map.md](./project_file_map.md): plain-English map of what the project is doing and what each meaningful file/module does
 - [testflight_readiness_checklist.md](./testflight_readiness_checklist.md): practical checklist for shipping the current build to TestFlight
 - [app_store_submission_notes.md](./app_store_submission_notes.md): App Store Connect review/privacy notes for the current release candidate
+- [LEGAL_SITE_DEPLOYMENT.md](./LEGAL_SITE_DEPLOYMENT.md): Cloudflare Pages setup for static legal pages used by App Store metadata
 - [APPLE_STORE_SERVER_CONFIG.md](./APPLE_STORE_SERVER_CONFIG.md): Worker secrets and App Store Server API setup for paid-credit verification
 - [worker_refactor_tickets.md](./worker_refactor_tickets.md): Worker reliability/chat-quality refactor tickets for test-first work
 - [chat_quality_contract.md](./chat_quality_contract.md): `/v1/chat` answer-quality contract and eval gate

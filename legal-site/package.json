@@ -1,0 +1,9 @@
+{
+  "name": "kabuyomi-legal-site",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "validate": "node ./scripts/validate.mjs"
+  }
+}

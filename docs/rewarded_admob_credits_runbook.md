@@ -1,12 +1,13 @@
 # Rewarded AdMob Credits Runbook
 
-Rewarded credits are included in Kabuyomi v1. The normal Release/TestFlight credit screen may show the rewarded-credit UI, but the release decision remains HOLD until a real Google AdMob SSV callback is documented below with sanitized evidence.
+AdMob rewarded-credit infrastructure exists in Kabuyomi v1, but the normal rewarded-credit UI is hidden for v1 App Review. Rewarded credits are deferred to v1.1 / post-approval. Keep this runbook because the app code, Worker SSV routes, D1 migration, and tests remain in place.
 
 ## Scope
 
-- Completed rewarded ad view grants exactly 2 free/ad credits after server-side Google AdMob SSV verification.
-- Daily cap is 3 rewarded grants per user per JST calendar day.
-- Rewarded ad credits expire 30 days after grant.
+- v1 App Review builds must not show the normal rewarded-credit card or button.
+- When the UI is re-enabled after approval, a completed rewarded ad view grants exactly 2 free/ad credits after server-side Google AdMob SSV verification.
+- When the UI is re-enabled after approval, the daily cap is 3 rewarded grants per user per JST calendar day.
+- When granted, rewarded ad credits expire 30 days after grant.
 - Rewarded credits are promotional/free credits and are separate from paid credit purchases.
 - Duplicate SSV transactions are success/no-op and do not double grant.
 - Invalid signatures, invalid ad units, malformed callbacks, and expired reward intents do not grant.
@@ -49,7 +50,7 @@ The Worker expects Google AdMob SSV query parameters including `ad_unit`, `custo
 6. Confirm the ledger row has `creditSource = admob_rewarded`.
 7. Confirm usage reflects `rewardedAdRemaining` and the expected total balance.
 
-Do not mark rewarded credits release-verified until step 5 succeeds and the evidence is recorded below.
+Do not expose rewarded-credit UI in a submitted build until step 5 succeeds and the evidence is recorded below.
 
 Latest production-path route check:
 
@@ -130,20 +131,21 @@ If the production rewarded ad unit is temporarily pointed at the test SSV URL fo
 
 1. Install the TestFlight or Release build.
 2. Open the credit/settings screen.
-3. Confirm rewarded-credit UI is visible.
-4. Tap the rewarded-ad button.
-5. Confirm the ad loads and completes.
-6. Confirm the reward intent was created.
-7. Confirm the Google SSV callback reached the Worker.
-8. Confirm +2 credits were granted.
-9. Confirm the status poll shows `granted`.
-10. Confirm `/v1/usage` reflects the balance.
-11. Repeat up to the daily cap.
-12. Confirm the 4th valid grant is capped.
-13. Confirm duplicate callback does not double grant.
-14. Confirm invalid ad unit rejects.
-15. Confirm invalid signature rejects.
-16. Confirm paid credit balance is not consumed before free/ad credits.
+3. For v1 App Review, confirm rewarded-credit UI is hidden.
+4. For v1.1 / post-approval rewarded-credit verification only, use a build that intentionally enables the UI and continue with the SSV checks below.
+5. Tap the rewarded-ad button.
+6. Confirm the ad loads and completes.
+7. Confirm the reward intent was created.
+8. Confirm the Google SSV callback reached the Worker.
+9. Confirm +2 credits were granted.
+10. Confirm the status poll shows `granted`.
+11. Confirm `/v1/usage` reflects the balance.
+12. Repeat up to the daily cap.
+13. Confirm the 4th valid grant is capped.
+14. Confirm duplicate callback does not double grant.
+15. Confirm invalid ad unit rejects.
+16. Confirm invalid signature rejects.
+17. Confirm paid credit balance is not consumed before free/ad credits.
 
 ## Production Rollback
 
@@ -152,7 +154,7 @@ If the production rewarded ad unit is temporarily pointed at the test SSV URL fo
 - If `ad_unit` is rejected: confirm AdMob sent either the full configured unit ID or the numeric suffix. Do not broaden the allowlist beyond the configured unit and suffix.
 - If the credit grant amount is wrong: disable the rewarded ad UI in the app build or remove/disable the AdMob SSV callback until the Worker is fixed.
 - If AdMob callback URL is wrong: correct AdMob Console configuration before continuing.
-- Do not ship App Store release until real SSV evidence, idempotency, daily cap, and normal chat credit consumption are verified and recorded.
+- Do not ship a build that exposes rewarded-credit UI until real SSV evidence, idempotency, daily cap, and normal chat credit consumption are verified and recorded.
 
 ## Troubleshooting
 

@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @State private var presentedLegalDocument: LegalDocumentKind?
 
     var body: some View {
@@ -260,12 +261,12 @@ struct SettingsView: View {
                 Text("リンク")
                     .font(.system(.headline, design: .rounded, weight: .bold))
 
-                Text("プライバシーポリシー / 利用条件 / サポートはアプリ内で確認できます。")
+                Text("プライバシーポリシー / 利用条件 / サポートは公開法務ページを開きます。アプリ内表示は接続できない場合の控えです。")
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
 
                 Button {
-                    presentedLegalDocument = .privacy
+                    openLegalDocument(.privacy)
                 } label: {
                     SettingsLinkRow(
                         title: "プライバシーポリシー",
@@ -275,7 +276,7 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
 
                 Button {
-                    presentedLegalDocument = .terms
+                    openLegalDocument(.terms)
                 } label: {
                     SettingsLinkRow(
                         title: "利用条件",
@@ -285,7 +286,7 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
 
                 Button {
-                    presentedLegalDocument = .support
+                    openLegalDocument(.support)
                 } label: {
                     SettingsLinkRow(
                         title: "サポート",
@@ -295,7 +296,7 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
 
                 Button {
-                    presentedLegalDocument = .tokushoho
+                    openLegalDocument(.tokushoho)
                 } label: {
                     SettingsLinkRow(
                         title: "特定商取引法に基づく表記",
@@ -312,6 +313,14 @@ struct SettingsView: View {
                 sections: legalSections(for: document)
             )
         }
+    }
+
+    private func openLegalDocument(_ document: LegalDocumentKind) {
+        if let url = LegalSiteConfig.url(pathComponent: document.pathComponent) {
+            openURL(url)
+            return
+        }
+        presentedLegalDocument = document
     }
 
     private var resetCard: some View {
@@ -352,7 +361,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "広告と購入",
-                body: "無料プランでは Google AdMob による広告を表示する場合があります。広告視聴による credit 付与は、サーバー側で完了確認できた場合に反映されます。追加 credit の購入、返金、請求、購入復元は Apple ID と App Store の仕組みに従います。"
+                body: "v1 App Review ビルドでは rewarded-credit UI を表示しません。AdMob rewarded-credit infrastructure は残していますが、rewarded credits は v1.1 / post-approval に延期しています。追加 credit の購入、返金、請求、購入復元は Apple ID と App Store の仕組みに従います。"
             ),
             LegalSection(
                 title: "保存期間",
@@ -367,6 +376,10 @@ struct SettingsView: View {
 
     private var termsSections: [LegalSection] {
         [
+            LegalSection(
+                title: "公開法務ページ",
+                body: "最新版は https://kabuyomi-legal-site.pages.dev/terms/ で確認できます。"
+            ),
             LegalSection(
                 title: "サービスの性質",
                 body: "Kabuyomi は SEC EDGAR の公開 10-K / 10-Q を日本語で読みやすくし、根拠付きの要約、指標表示、AI チャット、引用文翻訳を提供する SEC filing reader です。投資助言、売買推奨、株価予測、目標株価、証券口座連携、利益保証は提供しません。"
@@ -401,6 +414,10 @@ struct SettingsView: View {
     private var supportSections: [LegalSection] {
         [
             LegalSection(
+                title: "公開法務ページ",
+                body: "最新版は https://kabuyomi-legal-site.pages.dev/support/ で確認できます。"
+            ),
+            LegalSection(
                 title: "問い合わせ方法",
                 body: "不具合や改善要望は、メール kabuyomi.support@gmail.com または X（Twitter）@0xt4dano へ連絡してください。"
             ),
@@ -418,20 +435,24 @@ struct SettingsView: View {
     private var tokushohoSections: [LegalSection] {
         [
             LegalSection(
+                title: "公開法務ページ",
+                body: "最新版は https://kabuyomi-legal-site.pages.dev/tokushoho/ で確認できます。"
+            ),
+            LegalSection(
                 title: "提出前ブロッカー",
-                body: "販売者の正式な氏名または法人名、住所、電話番号は未確定です。これらの値が最終確定するまで App Store 最終提出はブロックしてください。"
+                body: "最新版は https://kabuyomi-legal-site.pages.dev/tokushoho/ で確認できます。"
             ),
             LegalSection(
                 title: "事業者 / 販売者名",
-                body: "TODO_FINAL_LEGAL_IDENTITY: 正式な事業者名または法人名を記載してください。"
+                body: "プライバシー保護のため、販売者または運営者の氏名または名称はこの画面上では省略しています。特定商取引法に基づき開示請求があった場合、kabuyomi.support@gmail.com 宛ての請求に対して、メールその他の適切な方法により遅滞なく開示します。"
             ),
             LegalSection(
                 title: "所在地",
-                body: "TODO_FINAL_LEGAL_ADDRESS: 正式な所在地を記載してください。"
+                body: "プライバシー保護のため、所在地はこの画面上では省略しています。特定商取引法に基づき開示請求があった場合、kabuyomi.support@gmail.com 宛ての請求に対して、メールその他の適切な方法により遅滞なく開示します。"
             ),
             LegalSection(
                 title: "電話番号",
-                body: "TODO_FINAL_LEGAL_PHONE: 正式な電話番号を記載してください。"
+                body: "プライバシー保護のため、電話番号はこの画面上では省略しています。特定商取引法に基づき開示請求があった場合、kabuyomi.support@gmail.com 宛ての請求に対して、メールその他の適切な方法により遅滞なく開示します。"
             ),
             LegalSection(
                 title: "連絡先",
@@ -482,13 +503,17 @@ struct SettingsView: View {
     }
 }
 
-private enum LegalDocumentKind: String, Identifiable {
+enum LegalDocumentKind: String, Identifiable {
     case privacy
     case terms
     case support
     case tokushoho
 
     var id: String { rawValue }
+
+    var pathComponent: String {
+        rawValue
+    }
 
     var title: String {
         switch self {
