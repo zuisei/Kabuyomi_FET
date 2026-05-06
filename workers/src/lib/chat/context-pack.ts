@@ -238,18 +238,47 @@ function filterRevenueDriverDistractorSources(
     const original = filing.sourceChunks.find((chunk) => chunk.sourceId === source.sourceId);
     const text = `${source.sectionTitle} ${source.sourceLabel} ${source.text} ${original?.text ?? ""}`;
     return !isRevenueDriverBusinessDistractor(text);
+  }).map((source) => {
+    if (source.sectionType !== "md_a") {
+      return source;
+    }
+    const cleanedText = removeRevenueDriverDistractorSentences(source.text);
+    return cleanedText === source.text
+      ? source
+      : {
+        ...source,
+        text: cleanedText,
+        endOffset: source.startOffset + cleanedText.length
+      };
   });
 }
 
 function isConcreteRevenueDriverSource(source: SourceChunkRecord): boolean {
+  if (isRevenueDriverBusinessDistractor(`${source.sectionTitle} ${source.sourceLabel} ${source.text}`)) {
+    return false;
+  }
   return hasConcreteRevenueDriverWindow(source.text) && revenueDriverWindowQualityScore(source.text) >= 45;
 }
 
 function isRevenueDriverBusinessDistractor(text: string): boolean {
   const haystack = text.toLowerCase();
-  return /(item\s+2\.?\s+properties|headquarters|office locations?|opened our first|store footprint|remodeling existing locations|available information|corporate website|business description|history)/i.test(haystack) ||
-    (/we operate|we provide|we offer|customer experience|omnichannel capabilities|physical footprint/i.test(haystack) &&
-      !/driven by|primarily due to|reflected|reflecting|partially offset|offset by|total net revenue|net sales|sales and revenues|comparable sales|sales volume|price realization/i.test(haystack));
+  if (hasCurrentPeriodDriverSignal(haystack)) {
+    return false;
+  }
+
+  return hasRevenueDriverBusinessDistractorCue(haystack);
+}
+
+function hasRevenueDriverBusinessDistractorCue(text: string): boolean {
+  const haystack = text.toLowerCase();
+  return /(item\s+2\.?\s+properties|headquarters|office locations?|opened our first|began our first|store footprint|available information|corporate website|business description|history|table of contents|item\s+7a\s+quantitative|item\s+8\s+financial statements)/i.test(haystack) ||
+    /(financial subsidiaries|below-market interest rate programs|broad array of financial merchandising programs|primarily responsible for supporting customers|majority of machine sales|nature of customer demand|developing economies)/i.test(haystack) ||
+    /(opening new stores and clubs|remodeling existing locations|physical footprint|technology, automation, and our associates|customer experience|omnichannel capabilities|broader set of offerings|site-to-store|pickup or delivery services at over|locations globally|seasonal aspects of operations|suppliers, supply chain and distribution|highest sales volume.*fourth quarter)/i.test(haystack) ||
+    (/we operate|we provide|we offer|customer experience|omnichannel capabilities|physical footprint/i.test(haystack));
+}
+
+function hasCurrentPeriodDriverSignal(text: string): boolean {
+  return /driven by|primarily due to|attributable to|resulted from|reflected|reflecting|partially offset|offset by|total net revenue|net sales|sales and revenues|comparable sales|sales volume|price realization|transactions?|average ticket|unit volumes?|ecommerce sales|member engagement|expected stronger sales|dealer inventor/i.test(text);
 }
 
 function isOffIntentRiskNarrative(questionIntent: QuestionIntent, text: string): boolean {
@@ -734,32 +763,83 @@ function clipToSourceExcerpt(text: string, maxChars: number): string {
 
 function clipToRevenueDriverExcerpt(text: string, maxChars: number): string {
   const normalized = normalizeWhitespace(text);
-  if (normalized.length <= maxChars) {
+  if (normalized.length <= maxChars && !hasRevenueDriverBusinessDistractorCue(normalized)) {
     return normalized;
   }
 
   const pattern = supplementalPriorityPattern("yoy_change");
-  const match = pattern ? pattern.exec(normalized) : null;
+  const match = bestRevenueDriverFocusMatch(normalized, pattern, maxChars);
   pattern && (pattern.lastIndex = 0);
-  if (!match || match.index == null) {
+  if (match == null) {
     return clipToSourceExcerpt(normalized, maxChars);
   }
 
+  const shouldAvoidDistractorLead = hasRevenueDriverBusinessDistractorCue(normalized);
   const half = Math.floor(maxChars / 2);
-  let start = Math.max(0, match.index - half);
+  let start = shouldAvoidDistractorLead
+    ? Math.max(0, normalized.lastIndexOf(". ", match - 1) + 2)
+    : Math.max(0, match - half);
   let end = Math.min(normalized.length, start + maxChars);
   if (end - start < maxChars) {
     start = Math.max(0, end - maxChars);
   }
   const startBoundary = normalized.lastIndexOf(". ", start);
-  if (startBoundary > 0 && match.index - startBoundary < maxChars) {
+  if (!shouldAvoidDistractorLead && startBoundary > 0 && match - startBoundary < maxChars) {
     start = startBoundary + 2;
   }
   const endBoundary = normalized.indexOf(". ", end);
-  if (endBoundary > match.index && endBoundary - match.index < maxChars) {
+  if (endBoundary > match && endBoundary - match < maxChars) {
     end = endBoundary + 1;
   }
-  return normalized.slice(start, end).trim();
+  return removeRevenueDriverDistractorSentences(normalized.slice(start, end).trim());
+}
+
+function bestRevenueDriverFocusMatch(text: string, pattern: RegExp | null, maxChars: number): number | null {
+  if (!pattern) {
+    return null;
+  }
+
+  const matches = [...text.matchAll(pattern)];
+  if (matches.length === 0) {
+    return null;
+  }
+
+  const scored = matches
+    .filter((match) => match.index != null && !isRevenueDriverBusinessDistractor(sentenceAround(text, match.index)))
+    .map((match) => {
+      const index = match.index ?? 0;
+      const window = extractFocusedWindow(text, index, maxChars);
+      const score = revenueDriverWindowQualityScore(window) + driverSpecificityScore(window) -
+        (hasRevenueDriverBusinessDistractorCue(window) ? 60 : 0);
+      return { index, score };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  return scored[0]?.index ?? matches[0]?.index ?? null;
+}
+
+function sentenceAround(text: string, index: number | undefined): string {
+  const center = Math.max(0, index ?? 0);
+  const start = Math.max(0, text.lastIndexOf(". ", center - 1) + 2);
+  const endBoundary = text.indexOf(". ", center);
+  const end = endBoundary === -1 ? text.length : endBoundary + 1;
+  return text.slice(start, end);
+}
+
+function removeRevenueDriverDistractorSentences(text: string): string {
+  if (!hasRevenueDriverBusinessDistractorCue(text)) {
+    return text;
+  }
+
+  const sentences = text.split(/(?<=\.)\s+/).filter((sentence) => sentence.trim().length > 0);
+  const kept = sentences.filter((sentence) =>
+    !hasRevenueDriverBusinessDistractorCue(sentence) ||
+    (hasConcreteRevenueDriverWindow(sentence) && !isRevenueDriverBusinessDistractor(sentence))
+  );
+  if (kept.length === 0 || kept.length === sentences.length) {
+    return text;
+  }
+  return kept.join(" ").trim();
 }
 
 function supplementalWindowScore(text: string, questionIntent: QuestionIntent): number {
@@ -965,7 +1045,8 @@ function buildNeighborExpandedText(
       source.sectionTitle === chunk.sectionTitle &&
       (source.sourceId === chunk.sourceId ||
         (!shouldRejectNarrativeSource(questionIntent, assessNarrativeQuality(source.text)) &&
-          !isOffIntentRiskNarrative(questionIntent, `${source.sectionTitle} ${source.sourceLabel} ${source.text}`)))
+          !isOffIntentRiskNarrative(questionIntent, `${source.sectionTitle} ${source.sourceLabel} ${source.text}`) &&
+          !(shouldLeadWithDriverNarrative(questionIntent) && isRevenueDriverBusinessDistractor(source.text))))
   );
 
   const joined = normalizeWhitespace(candidates.map((source) => source.text).join(" "));
@@ -989,6 +1070,13 @@ function buildOffsetExpandedText(
     (questionIntent === "yoy_change" || questionIntent === "mda_summary") &&
     hasOffIntentRiskTerms(window) &&
     !hasOffIntentRiskTerms(chunk.text)
+  ) {
+    return null;
+  }
+  if (
+    shouldLeadWithDriverNarrative(questionIntent) &&
+    hasRevenueDriverBusinessDistractorCue(window) &&
+    !hasRevenueDriverBusinessDistractorCue(chunk.text)
   ) {
     return null;
   }

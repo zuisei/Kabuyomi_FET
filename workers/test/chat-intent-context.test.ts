@@ -418,6 +418,72 @@ describe("chat question intent and context packing", () => {
     expect(context.sourceChunks.some((chunk) => /eCommerce sales positively contributed|eCommerce/i.test(chunk.text))).toBe(true);
   });
 
+  it("prefers CAT Q04 durability sources over generic segment and finance descriptions", () => {
+    const genericFinanceText =
+      "Cat Financial also own financial subsidiaries and provides below-market interest rate programs to support machine sales. The broader organization provides financial merchandising programs and segment descriptions around the world.";
+    const genericSegmentText =
+      "Construction Industries is primarily responsible for supporting customers using machinery in infrastructure and building construction applications. The majority of machine sales are made in construction, rental, quarry and mining industries.";
+    const driverText =
+      "Total sales and revenues for 2025 increased compared with 2024. The increase reflected higher sales volume, partially offset by unfavorable price realization. Higher sales volume was primarily driven by higher sales of equipment to end users.";
+    const outlookText =
+      "In the first quarter of 2026, we expect stronger sales and revenues primarily due to higher sales volume and favorable price realization. We expect machine dealer inventory to increase during the first quarter.";
+    const filing = {
+      ...makeIntentFiling(),
+      ticker: "CAT",
+      companyName: "Caterpillar Inc.",
+      mdaText: [genericFinanceText, driverText, genericSegmentText, outlookText].join(" "),
+      sourceChunks: [
+        chunk("S1", genericFinanceText, 1),
+        chunk("S2", driverText, 2),
+        chunk("S3", genericSegmentText, 3),
+        chunk("S4", outlookText, 4),
+        ...makeIntentFiling().sourceChunks.filter((source) => source.sectionType === "xbrl_metric")
+      ]
+    };
+
+    const context = buildChatContextPack(filing, "yoy_change");
+    const selectedText = context.sourceChunks.map((source) => source.text).join(" ");
+
+    expect(selectedText).toContain("higher sales volume");
+    expect(selectedText).toContain("dealer inventory");
+    expect(selectedText).not.toContain("below-market interest rate programs");
+    expect(selectedText).not.toContain("primarily responsible for supporting customers");
+  });
+
+  it("prefers WMT Q04 comparable-sales and engagement sources over store history and broad strategy", () => {
+    const historyText =
+      "In 1996, we began our first eCommerce initiative by creating walmart.com. Since then, our eCommerce presence has continued to grow. Today, customers can access pickup or delivery services at over 8,400 locations globally.";
+    const strategyText =
+      "Seasonal Aspects of Operations. Historically, our highest sales volume for each segment has occurred in the fourth quarter. We provide customers a broader set of offerings by opening new stores and strengthening our physical footprint.";
+    const driverText =
+      "Walmart U.S. comparable sales increased in fiscal 2026. Comparable sales were driven by growth in average ticket and transactions, and also reflected growth in unit volumes and strength in all merchandise categories.";
+    const engagementText =
+      "Walmart U.S. eCommerce sales positively contributed to comparable sales. This growth reflects continued strength in customer and Walmart+ member engagement with omnichannel offerings.";
+    const filing = {
+      ...makeIntentFiling(),
+      ticker: "WMT",
+      companyName: "Walmart Inc.",
+      mdaText: [historyText, strategyText, driverText, engagementText].join(" "),
+      sourceChunks: [
+        chunk("S1", historyText, 1),
+        chunk("S2", strategyText, 2),
+        chunk("S3", driverText, 3),
+        chunk("S4", engagementText, 4),
+        ...makeIntentFiling().sourceChunks.filter((source) => source.sectionType === "xbrl_metric")
+      ]
+    };
+
+    const context = buildChatContextPack(filing, "yoy_change");
+    const selectedText = context.sourceChunks.map((source) => source.text).join(" ");
+
+    expect(selectedText).toContain("Comparable sales were driven by growth in average ticket and transactions");
+    expect(selectedText).toContain("continued strength in customer and Walmart+ member engagement");
+    expect(selectedText).not.toContain("began our first eCommerce initiative");
+    expect(selectedText).not.toContain("pickup or delivery services at over");
+    expect(selectedText).not.toContain("highest sales volume for each segment");
+    expect(selectedText).not.toContain("strengthening our physical footprint");
+  });
+
   it("filters disaster risk windows out of revenue-growth context", () => {
     const riskText =
       "Natural disasters and other catastrophic events such as public health crises could affect our personnel, data centers, service providers, manufacturing vendors, and logistics providers. Climate change could increase the frequency or severity of these events, which could affect revenue timing.";
@@ -466,6 +532,19 @@ describe("chat question intent and context packing", () => {
     expect(classifyQuestionIntent("bull bearで強みと弱みを見て")).toBe("investment_view");
   });
 });
+
+function chunk(sourceId: string, text: string, sortOrder: number) {
+  return {
+    sourceId,
+    sectionType: "md_a" as const,
+    sectionTitle: "Item 7",
+    sourceLabel: "10-K Item 7",
+    text,
+    startOffset: 0,
+    endOffset: text.length,
+    sortOrder
+  };
+}
 
 function makeIntentFiling(): FilingCacheRecord {
   return {

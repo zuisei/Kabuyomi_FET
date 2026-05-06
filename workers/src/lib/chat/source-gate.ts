@@ -109,11 +109,12 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
     ? analyzeRevenueDriverCoverage(input.metrics ?? [], input.selectedSources, drivers.length > 0, hasStrongRevenueDriverEvidence)
     : null;
   const priorDriverFound = hasConcretePriorDriver(input.previousAnswer ?? "", hardIntent);
+  const explicitFollowupTargetFound = hasConcreteFollowupTarget(input.question, hardIntent);
   const followupTargetFound = hardIntent === "revenue_driver"
     ? null
     : hardIntent === "driver_durability_followup"
-      ? priorDriverFound
-      : priorDriverFound || drivers.length > 0;
+      ? priorDriverFound || explicitFollowupTargetFound
+      : priorDriverFound || explicitFollowupTargetFound || drivers.length > 0;
   const hasDurabilityContext = hardIntent === "driver_durability_followup" || hardIntent === "margin_durability_followup"
     ? hasDurabilityEvidence(input.selectedSources, sector, hardIntent)
     : false;
@@ -167,7 +168,9 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
       ? Boolean(followupTargetFound) &&
         drivers.length > 0 &&
         Boolean(driverDurabilityQuality?.hasStrongDriverEvidence) &&
-        Boolean(driverDurabilityQuality?.hasSpecificDurabilityEvidence)
+        Boolean(driverDurabilityQuality?.hasSpecificDurabilityEvidence) &&
+        !Boolean(driverDurabilityQuality?.metricOnlyContext) &&
+        !Boolean(driverDurabilityQuality?.tableHeavyContext)
       : Boolean(followupTargetFound) && drivers.length > 0 && hasDurabilityContext;
 
   if (!sourceSufficient) {
@@ -547,6 +550,17 @@ function hasConcretePriorDriver(previousAnswer: string, hardIntent: HardFinancia
   return hardIntent === "margin_durability_followup"
     ? /(cost|expense|margin|provision|price|mix|volume|impairment|restructuring|費用|コスト|価格|数量|引当|減損|一時費用|sg&a|r&d)/i.test(text)
     : /(due to|driven by|because|price|pricing|volume|mix|segment|traffic|ticket|ecommerce|services|installed base|net interest|nii|noninterest|nir|markets revenue|investment banking|commodity|production|backlog|orders|要因|主因|価格|価格実現|数量|販売量|品目構成|セグメント|既存店|トラフィック|客数|客単価|サービス|受注|商品価格|金利収入|非金利収入)/i.test(text);
+}
+
+function hasConcreteFollowupTarget(question: string, hardIntent: HardFinancialIntent): boolean {
+  const text = normalizeText(question);
+  if (!text || !/(一時|一過性|継続|続き|構造|temporary|transitory|continue|continued|sustain|recurring)/i.test(text)) {
+    return false;
+  }
+  if (hardIntent === "margin_durability_followup") {
+    return /(gross margin|operating margin|margin|cost|expense|pricing|mix|volume|利益率|粗利|営業利益率|費用|コスト|価格|数量)/i.test(text);
+  }
+  return /(net interest income|nii|noninterest income|noninterest revenue|nir|markets revenue|investment banking|card services|deposits?|services revenue|installed base|iphone|mac|ipad|wearables|foreign exchange|tariff|commodity|crude|natural gas|production volume|refining margin|sales volume|price realization|dealer inventor|backlog|comparable sales|transactions?|traffic|ticket|ecommerce|membership|売上高の要因（[^）]{3,})/i.test(text);
 }
 
 function hasDurabilityEvidence(
