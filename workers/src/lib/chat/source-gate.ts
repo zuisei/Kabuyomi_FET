@@ -1,4 +1,5 @@
 import type { MetricSnapshot, SourceChunkRecord } from "../../env";
+import { hasStrongRevenueDriverSource } from "../filings/ingest";
 import { isUnsafeDriverEvidence } from "./evidence-text-quality";
 import type { QuestionIntent } from "./intent";
 import { hasRevenueDriverSignal, hasSegmentRevenueSignal } from "./source-family";
@@ -93,8 +94,11 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
   const sector = normalizeSector(input.sector, input.ticker, input.companyName);
   const knownFacts = extractKnownMetricFacts(input.metrics ?? [], input.selectedSources);
   const drivers = extractSupportedDrivers(input.selectedSources, sector, hardIntent);
+  const hasStrongRevenueDriverEvidence = hardIntent === "revenue_driver"
+    ? input.selectedSources.some(hasStrongRevenueDriverSource)
+    : false;
   const revenueCoverage = hardIntent === "revenue_driver"
-    ? analyzeRevenueDriverCoverage(input.metrics ?? [], input.selectedSources, drivers.length > 0)
+    ? analyzeRevenueDriverCoverage(input.metrics ?? [], input.selectedSources, drivers.length > 0, hasStrongRevenueDriverEvidence)
     : null;
   const priorDriverFound = hasConcretePriorDriver(input.previousAnswer ?? "", hardIntent);
   const followupTargetFound = hardIntent === "revenue_driver" ? null : priorDriverFound || drivers.length > 0;
@@ -109,6 +113,9 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
   const hasOnlyMetrics = input.selectedSources.length > 0 && input.selectedSources.every(isMetricSource);
   if (hasOnlyMetrics) {
     failureLabels.add("retrieval_overfocused_xbrl");
+    if (hardIntent === "revenue_driver") {
+      failureLabels.add("xbrl_only_revenue_driver");
+    }
   }
 
   if (drivers.length === 0) {
@@ -127,8 +134,12 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
     failureLabels.add("source_relevance_low");
   }
 
+  if (hardIntent === "revenue_driver") {
+    addRevenueDriverQualityFailureLabels(input.selectedSources, drivers.length > 0, hasStrongRevenueDriverEvidence, failureLabels);
+  }
+
   const sourceSufficient = hardIntent === "revenue_driver"
-    ? Boolean(revenueCoverage?.hasRevenueMetric) && drivers.length > 0
+    ? Boolean(revenueCoverage?.hasRevenueMetric) && drivers.length > 0 && hasStrongRevenueDriverEvidence
     : Boolean(followupTargetFound) && drivers.length > 0 && hasDurabilityEvidence(input.selectedSources, sector, hardIntent);
 
   if (!sourceSufficient) {
@@ -252,7 +263,12 @@ function extractSupportedDrivers(
 ): EvidenceDriver[] {
   const drivers: EvidenceDriver[] = [];
   for (const source of sources) {
-    if (isMetricSource(source) || isBoilerplateSource(source) || isUnsafeDriverEvidence(source, hardIntent, sector)) {
+    if (
+      isMetricSource(source) ||
+      isBoilerplateSource(source) ||
+      isUnsafeDriverEvidence(source, hardIntent, sector) ||
+      (hardIntent === "revenue_driver" && !hasStrongRevenueDriverSource(source))
+    ) {
       continue;
     }
     const text = normalizeText(source.text);
@@ -387,16 +403,44 @@ function baseMissingSourceTypes(sector: SourceGateSector, hardIntent: HardFinanc
 function analyzeRevenueDriverCoverage(
   metrics: MetricSnapshot[],
   sources: SourceChunkRecord[],
-  hasDrivers: boolean
+  hasDrivers: boolean,
+  hasStrongRevenueDriverEvidence = false
 ): { hasRevenueMetric: boolean; hasRevenueDiscussion: boolean; hasSegmentRevenueContext: boolean } {
   const hasRevenueMetric = metrics.some((metric) => metric.logicalName === "revenue") ||
     sources.some((source) => isMetricSource(source) && /(売上|revenue|sales|net interest income|noninterest income)/i.test(source.text));
   const narrativeSources = sources.filter((source) => !isMetricSource(source) && !isBoilerplateSource(source));
   return {
     hasRevenueMetric,
-    hasRevenueDiscussion: hasDrivers || narrativeSources.some(hasRevenueDriverSignal),
+    hasRevenueDiscussion: hasStrongRevenueDriverEvidence || hasDrivers || narrativeSources.some(hasRevenueDriverSignal),
     hasSegmentRevenueContext: narrativeSources.some(hasSegmentRevenueSignal)
   };
+}
+
+function addRevenueDriverQualityFailureLabels(
+  sources: SourceChunkRecord[],
+  hasDrivers: boolean,
+  hasStrongRevenueDriverEvidence: boolean,
+  failureLabels: Set<string>
+): void {
+  const narrativeSources = sources.filter((source) => !isMetricSource(source));
+  const narrativeText = narrativeSources.map((source) => source.text).join(" ");
+  if (/item\s+2\.?\s+properties|headquarters|office locations?|square footage/i.test(narrativeText)) {
+    failureLabels.add("selected_properties_not_revenue_driver");
+  }
+  if (
+    /(business description|opened our first|began our first international|store footprint|remodeling existing locations|available information|corporate website|history)/i.test(narrativeText)
+  ) {
+    failureLabels.add("selected_business_description_not_period_driver");
+  }
+  if (narrativeSources.length > 0 && (!hasDrivers || !hasStrongRevenueDriverEvidence)) {
+    failureLabels.add("revenue_driver_evidence_too_generic");
+  }
+  if (!hasStrongRevenueDriverEvidence) {
+    failureLabels.add("missing_revenue_driver_narrative");
+  }
+  if (!narrativeSources.some(hasSegmentRevenueSignal)) {
+    failureLabels.add("missing_segment_revenue_context");
+  }
 }
 
 function retrievalQueriesFor(

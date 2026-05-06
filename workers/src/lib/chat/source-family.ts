@@ -15,7 +15,7 @@ const REVENUE_NOTE_PATTERN =
 const SEGMENT_REVENUE_PATTERN =
   /(segment and revenue context|segment results|segment revenue|reportable segment|geographic segment|net sales by (?:category|segment|geographic|region)|walmart u\.s\.|walmart international|sam'?s club|upstream|downstream|energy products|chemical products|construction industries|resource industries|power & energy)/i;
 const REVENUE_DRIVER_SIGNAL_PATTERN =
-  /(net sales|revenue|sales|net interest income|noninterest income|product revenue|services revenue|comparable sales|traffic|ticket|commodity prices?|production volume|price realization|sales volume|orders|backlog).{0,180}(increase|decrease|growth|decline|higher|lower|primarily due|driven by|attributable to|resulted from|price|volume|mix|product revenue|services revenue|segment results|geographic|foreign exchange|commodity|production|traffic|ticket|ecommerce|e-commerce|orders|backlog)/i;
+  /(total net revenue|net sales|revenue|sales|net interest income|noninterest income|noninterest revenue|markets revenue|investment banking fees|product revenue|services revenue|comparable sales|traffic|average ticket|transactions?|commodity prices?|production volumes?|refining margins?|price realization|sales volume|equipment to end users|orders|backlog).{0,180}(increase|decrease|growth|decline|higher|lower|primarily due|driven by|attributable to|resulted from|reflecting|price|volume|mix|product revenue|services revenue|segment results|geographic|foreign exchange|commodity|production|traffic|ticket|ecommerce|e-commerce|orders|backlog)/i;
 
 export function selectedSourceTypes(sources: SourceChunkRecord[]): string[] {
   return [...new Set(sources.map((source) => source.sectionType).filter(Boolean))];

@@ -36,6 +36,59 @@ describe("hard-intent source gate", () => {
     ]));
   });
 
+  it("passes JPM-Q03-like revenue driver only with period-specific bank narrative plus revenue metric", () => {
+    const filing = makeFiling("JPM", "JPMorgan Chase & Co.", [revenueMetric(182_447_000_000, 177_556_000_000, 2.8)], [
+      source(
+        "S1",
+        "md_a",
+        "Total net revenue was $182.4 billion for fiscal 2025, up 3% compared with the prior year. The increase was driven by higher net interest income, noninterest income, markets revenue and investment banking fees, partially offset by lower card services revenue."
+      ),
+      metricSource("S9", "売上高: 182447000000 USD / 比較値: 177556000000 / YoY: 2.8%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "売上成長の主な要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers[0]?.category).toBe("bank_revenue_driver");
+    expect(result.failureLabels).not.toContain("revenue_driver_evidence_too_generic");
+  });
+
+  it("rejects generic business and properties text even when it mentions revenue", () => {
+    const filing = makeFiling("WMT", "Walmart Inc.", [revenueMetric(680_985_000_000, 648_125_000_000, 5.1)], [
+      source(
+        "S1",
+        "md_a",
+        "Item 2. Properties. Walmart opened its first store decades ago and has a large store footprint. Revenue information and available information can be found on the corporate website."
+      ),
+      metricSource("S9", "売上高: 680985000000 USD / 比較値: 648125000000 / YoY: 5.1%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "売上成長の主な要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.identifiedDrivers).toHaveLength(0);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "selected_properties_not_revenue_driver",
+      "selected_business_description_not_period_driver",
+      "revenue_driver_evidence_too_generic",
+      "source_gate_failed"
+    ]));
+  });
+
   it("rejects JPM-Q06-like margin durability when the prior answer only calculated movement", () => {
     const filing = makeFiling("JPM", "JPMorgan Chase & Co.", [
       metric("netIncome", 57_000_000_000, 58_000_000_000, -1.7)

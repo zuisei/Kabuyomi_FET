@@ -9,7 +9,8 @@ vi.mock("../src/clients/gemini", () => ({
 }));
 
 vi.mock("../src/extractors/mda", () => ({
-  extractMDASectionWithDiagnostics: vi.fn()
+  extractMDASectionWithDiagnostics: vi.fn(),
+  normalizeFilingText: vi.fn((html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
 }));
 
 vi.mock("../src/lib/filings/company-website", () => ({

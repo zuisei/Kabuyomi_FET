@@ -5,7 +5,13 @@ import { resolveGeminiModel } from "../../clients/gemini/request";
 import { resolveOpenAIChatModel } from "../../clients/llm/providers/openai/request";
 import { ChatRequestSchema } from "../contracts";
 import { consumeBillableCredits, refundBillableCredits } from "../credit-operation";
-import { enqueueContentUpgrade, isMetricsOnlyRecord, upgradeMetricsOnlyRecord } from "../filings/content-upgrade";
+import {
+  backfillRevenueDriverSourceAssets,
+  enqueueContentUpgrade,
+  isMetricsOnlyRecord,
+  needsRevenueDriverSourceBackfill,
+  upgradeMetricsOnlyRecord
+} from "../filings/content-upgrade";
 import {
   consumeChatQuota,
   readQuotaIdentity,
@@ -356,6 +362,17 @@ async function prepareFilingForChat(
   ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<FilingCacheRecord> {
   if (!isMetricsOnlyRecord(filing)) {
+    if (isTestEnvironment(env) && needsRevenueDriverSourceBackfill(filing)) {
+      try {
+        return await backfillRevenueDriverSourceAssets(filing, env);
+      } catch (error) {
+        logErrorEvent("chat_revenue_driver_source_backfill_failed", {
+          filingKey: filing.filingKey,
+          ticker: filing.ticker,
+          reason: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
     return filing;
   }
 
@@ -377,5 +394,9 @@ async function prepareFilingForChat(
 }
 
 function shouldIncludeChatDebug(env: Env): boolean {
+  return env.KABUYOMI_ENV === "test" || env.ENVIRONMENT === "test";
+}
+
+function isTestEnvironment(env: Env): boolean {
   return env.KABUYOMI_ENV === "test" || env.ENVIRONMENT === "test";
 }

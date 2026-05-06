@@ -160,14 +160,18 @@ export function buildChatContextPack(
 
   removeRiskDistractorSources(selected, questionIntent);
 
-  const expandedChunks = filterExpandedRiskDistractorSources(
-    filing,
+  const expandedChunks = filterRevenueDriverDistractorSources(
     questionIntent,
-    expandSelectedSourceChunks(
+    filing,
+    filterExpandedRiskDistractorSources(
       filing,
-      orderSelectedSources([...selected.values()], questionIntent).slice(0, profile.maxSources),
       questionIntent,
-      profile
+      expandSelectedSourceChunks(
+        filing,
+        orderSelectedSources([...selected.values()], questionIntent).slice(0, profile.maxSources),
+        questionIntent,
+        profile
+      )
     )
   );
   const selectedChunks = trimToBudget(expandedChunks, profile.tokenBudget);
@@ -209,6 +213,43 @@ function filterExpandedRiskDistractorSources(
       `${source.sectionTitle} ${source.sourceLabel} ${original?.text ?? ""} ${source.text}`
     );
   });
+}
+
+function filterRevenueDriverDistractorSources(
+  questionIntent: QuestionIntent,
+  filing: FilingCacheRecord,
+  sourceChunks: SourceChunkRecord[]
+): SourceChunkRecord[] {
+  if (!shouldLeadWithDriverNarrative(questionIntent)) {
+    return sourceChunks;
+  }
+
+  const concreteNarrativeCount = sourceChunks.filter((source) =>
+    source.sectionType === "md_a" && isConcreteRevenueDriverSource(source)
+  ).length;
+  if (concreteNarrativeCount < 2) {
+    return sourceChunks;
+  }
+
+  return sourceChunks.filter((source) => {
+    if (source.sectionType !== "md_a" || isConcreteRevenueDriverSource(source)) {
+      return true;
+    }
+    const original = filing.sourceChunks.find((chunk) => chunk.sourceId === source.sourceId);
+    const text = `${source.sectionTitle} ${source.sourceLabel} ${source.text} ${original?.text ?? ""}`;
+    return !isRevenueDriverBusinessDistractor(text);
+  });
+}
+
+function isConcreteRevenueDriverSource(source: SourceChunkRecord): boolean {
+  return hasConcreteRevenueDriverWindow(source.text) && revenueDriverWindowQualityScore(source.text) >= 45;
+}
+
+function isRevenueDriverBusinessDistractor(text: string): boolean {
+  const haystack = text.toLowerCase();
+  return /(item\s+2\.?\s+properties|headquarters|office locations?|opened our first|store footprint|remodeling existing locations|available information|corporate website|business description|history)/i.test(haystack) ||
+    (/we operate|we provide|we offer|customer experience|omnichannel capabilities|physical footprint/i.test(haystack) &&
+      !/driven by|primarily due to|reflected|reflecting|partially offset|offset by|total net revenue|net sales|sales and revenues|comparable sales|sales volume|price realization/i.test(haystack));
 }
 
 function isOffIntentRiskNarrative(questionIntent: QuestionIntent, text: string): boolean {

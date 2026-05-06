@@ -1,13 +1,13 @@
 import { generateSummary } from "../../clients/gemini";
 import { fetchFilingHtml } from "../../clients/sec";
 import type { Env, FilingCacheRecord, FilingReference } from "../../env";
-import { extractMDASectionWithDiagnostics } from "../../extractors/mda";
+import { extractMDASectionWithDiagnostics, normalizeFilingText } from "../../extractors/mda";
 import { buildArchiveObjectKey, upsertHistoricalIndex } from "../history-store";
 import { logLlmUsage } from "../llm-usage";
 import { logErrorEvent, logEvent } from "../logging";
 import { loadFilingByKey } from "./cache";
 import { extractCompanyWebsiteUrl } from "./company-website";
-import { buildSourceChunks } from "./ingest";
+import { buildSourceChunks, hasStrongRevenueDriverSource } from "./ingest";
 import { acquireFilingLock } from "./lock";
 
 export function isMetricsOnlyRecord(record: FilingCacheRecord): boolean {
@@ -16,6 +16,17 @@ export function isMetricsOnlyRecord(record: FilingCacheRecord): boolean {
 
 export function needsCompanyWebsiteBackfill(record: FilingCacheRecord): boolean {
   return !isMetricsOnlyRecord(record) && !record.companyWebsiteUrl;
+}
+
+export function needsRevenueDriverSourceBackfill(record: FilingCacheRecord): boolean {
+  if (isMetricsOnlyRecord(record)) {
+    return false;
+  }
+  const hasRevenueMetric = record.metrics.some((metric) => metric.logicalName === "revenue");
+  if (!hasRevenueMetric) {
+    return false;
+  }
+  return !record.sourceChunks.some(hasStrongRevenueDriverSource);
 }
 
 export function enqueueContentUpgrade(
@@ -102,7 +113,9 @@ export async function upgradeMetricsOnlyRecord(record: FilingCacheRecord, env: E
       companyName: current.companyName,
       primaryDocumentUrl: current.primaryDocumentUrl
     });
-    const sourceChunks = buildSourceChunks(filing, extracted.text, current.metrics);
+    const sourceChunks = buildSourceChunks(filing, extracted.text, current.metrics, {
+      revenueDriverSearchText: normalizeFilingText(html)
+    });
     const generated = await generateSummary(env, {
       filingKey: current.filingKey,
       ticker: current.ticker,
@@ -140,6 +153,76 @@ export async function upgradeMetricsOnlyRecord(record: FilingCacheRecord, env: E
       ticker: current.ticker,
       summaryProvider: generated.provider,
       sourceChunkCount: sourceChunks.length,
+      mdaTokenCount: extracted.tokenCount
+    });
+
+    return upgraded;
+  } finally {
+    await releaseLock();
+  }
+}
+
+export async function backfillRevenueDriverSourceAssets(
+  record: FilingCacheRecord,
+  env: Env
+): Promise<FilingCacheRecord> {
+  if (!needsRevenueDriverSourceBackfill(record)) {
+    return record;
+  }
+
+  const releaseLock = await acquireFilingLock(record.filingKey, env);
+  try {
+    const current = (await loadFilingByKey(record.filingKey, env)) ?? record;
+    if (!needsRevenueDriverSourceBackfill(current)) {
+      return current;
+    }
+
+    const filing = buildFilingReference(current);
+    if (!filing) {
+      logEvent("filing_revenue_driver_source_backfill_skipped", {
+        filingKey: current.filingKey,
+        ticker: current.ticker,
+        reason: "missing_filing_reference"
+      });
+      return current;
+    }
+
+    logEvent("filing_revenue_driver_source_backfill_attempted", {
+      filingKey: current.filingKey,
+      ticker: current.ticker
+    });
+
+    const html = await fetchFilingHtml(filing, env);
+    const { result: extracted, diagnostics } = extractMDASectionWithDiagnostics(html, filing.formType);
+    if (!extracted) {
+      logEvent("filing_revenue_driver_source_backfill_skipped", {
+        filingKey: current.filingKey,
+        ticker: current.ticker,
+        reason: "mda_extraction_failed",
+        inputHtmlChars: diagnostics.inputHtmlChars,
+        normalizedChars: diagnostics.normalizedChars
+      });
+      return current;
+    }
+
+    const sourceChunks = buildSourceChunks(filing, extracted.text, current.metrics, {
+      revenueDriverSearchText: normalizeFilingText(html)
+    });
+    const upgraded: FilingCacheRecord = {
+      ...current,
+      mdaText: extracted.text,
+      mdaTokenCount: extracted.tokenCount,
+      sourceChunks,
+      contentMode: "full",
+      generatedAt: new Date().toISOString()
+    };
+    await persistUpgradedRecord(upgraded, env);
+
+    logEvent("filing_revenue_driver_source_backfilled", {
+      filingKey: current.filingKey,
+      ticker: current.ticker,
+      sourceChunkCount: sourceChunks.length,
+      strongRevenueDriverSourceCount: sourceChunks.filter(hasStrongRevenueDriverSource).length,
       mdaTokenCount: extracted.tokenCount
     });
 
