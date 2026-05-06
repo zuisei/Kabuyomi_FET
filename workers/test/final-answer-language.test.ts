@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Env, FilingCacheRecord, SourceChunkRecord } from "../src/env";
 import {
   buildJapaneseLanguageGuardFallback,
+  buildJapaneseLanguageGuardRepair,
   checkFinalAnswerJapaneseOnly
 } from "../src/lib/chat/final-answer-language";
 import { finalizeChatResponse } from "../src/lib/chat/response-finalizer";
@@ -21,6 +22,63 @@ describe("Japanese-only final answer guard", () => {
   it("allows Japanese answers with short financial KPI terms", () => {
     const answer = "主因を見るには、net interest income、noninterest income、provision for credit losses、segment results を追加確認する必要があります。";
     expect(checkFinalAnswerJapaneseOnly(answer).ok).toBe(true);
+  });
+
+  it("allows Japanese CAT durability wording with bounded English financial terms", () => {
+    const answer = "CATのConstruction Industriesでは、backlog、dealer inventory、price realization の推移を見る必要があります。継続性は提出資料だけでは断定しません。";
+    expect(checkFinalAnswerJapaneseOnly(answer).ok).toBe(true);
+  });
+
+  it("repairs supported CAT durability answers without allowing raw English excerpts", () => {
+    const repair = buildJapaneseLanguageGuardRepair({
+      question: "その要因は一時的？それとも続きそう？",
+      questionIntent: "driver_durability_followup",
+      sourceGateSufficient: true,
+      sourceGateEvidenceSlots: {
+        companyExplainedDrivers: [
+          {
+            category: "industrial",
+            driver: "Total sales and revenues for 2025 were $67.589 billion, an increase of $2.780 billion, or 4 percent. The increase reflected higher sales volume, partially offset by unfavorable price realization and higher sales of equipment to end users.",
+            sourceIds: ["S1"],
+            confidence: "high"
+          },
+          {
+            category: "industrial",
+            driver: "In the first quarter of 2026 we expect stronger sales and revenues primarily due to higher sales volume and favorable price realization, partially offset by changes in dealer inventory.",
+            sourceIds: ["S3"],
+            confidence: "high"
+          }
+        ],
+        segmentOrBusinessSignals: []
+      }
+    });
+
+    expect(repair).toContain("販売数量");
+    expect(repair).toContain("価格実現");
+    expect(repair).toContain("dealer inventory");
+    expect(repair).toContain("継続性は断定しません");
+    expect(repair).not.toContain("Total sales and revenues");
+    expect(repair).not.toContain("stronger sales and revenues");
+    expect(checkFinalAnswerJapaneseOnly(repair ?? "").ok).toBe(true);
+  });
+
+  it("does not repair unsafe durability answers without sufficient source gate evidence", () => {
+    const repair = buildJapaneseLanguageGuardRepair({
+      questionIntent: "driver_durability_followup",
+      sourceGateSufficient: false,
+      sourceGateEvidenceSlots: {
+        companyExplainedDrivers: [
+          {
+            category: "industrial",
+            driver: "Operating within the industrial sector presents generic long-term risks.",
+            sourceIds: ["S1"],
+            confidence: "low"
+          }
+        ]
+      }
+    });
+
+    expect(repair).toBeNull();
   });
 
   it("builds a safe Japanese fallback without quoting raw English excerpts", () => {
@@ -79,6 +137,70 @@ describe("Japanese-only final answer guard", () => {
     expect(response.debug?.originalAnswerBeforeLanguageGuardSample).not.toContain("Operating within the financial services industry");
     expect(response.answer).toContain("前問の具体的な要因");
     expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("repairs source-supported CAT durability answers instead of falling back", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "前問の要因は、Total sales and revenues for 2025 were $67.589 billion, an increase of $2.780 billion, or 4 percent. The increase reflected higher sales volume, partially offset by unfavorable price realization.です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        sourceGateEvidenceSlots: {
+          companyExplainedDrivers: [
+            {
+              category: "industrial",
+              driver: "Total sales and revenues for 2025 were $67.589 billion, an increase of $2.780 billion, or 4 percent. The increase reflected higher sales volume, partially offset by unfavorable price realization and higher sales of equipment to end users.",
+              sourceIds: ["S1"],
+              confidence: "high"
+            },
+            {
+              category: "industrial",
+              driver: "In the first quarter of 2026 we expect stronger sales and revenues primarily due to higher sales volume and favorable price realization, partially offset by changes in dealer inventory.",
+              sourceIds: ["S3"],
+              confidence: "high"
+            }
+          ],
+          segmentOrBusinessSignals: []
+        },
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackKind).toBe("none");
+    expect(response.debug?.fallbackCategory).toBe("none");
+    expect(response.debug?.languageGuardOk).toBe(true);
+    expect(response.debug?.languageGuardFallbackUsed).toBe(false);
+    expect(response.debug?.finalAnswerLanguageLabels).toEqual(expect.arrayContaining([
+      "english_answer_leak",
+      "answer_repaired_to_japanese"
+    ]));
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["language_guard_source_backed_repair"]));
+    expect(response.answer).toContain("販売数量");
+    expect(response.answer).toContain("価格実現");
+    expect(response.answer).not.toContain("Total sales and revenues");
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+    expect(response.debug?.sourceIdsValid).toBe(true);
   });
 
   it("rewrites globally banned generic phrases before returning a final answer", async () => {

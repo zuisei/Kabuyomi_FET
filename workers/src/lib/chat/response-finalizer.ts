@@ -3,6 +3,7 @@ import type { ChatFallbackKind } from "../../clients/gemini/types";
 import type { RemoteConfig } from "../remote-config";
 import {
   buildJapaneseLanguageGuardFallback,
+  buildJapaneseLanguageGuardRepair,
   checkFinalAnswerJapaneseOnly
 } from "./final-answer-language";
 import { attachChatDebug } from "./response-payload";
@@ -82,22 +83,44 @@ export async function finalizeChatResponse({
     ? cleanBannedFinalAnswer(uxCleanedAnswer, debug.questionIntent)
     : uxCleanedAnswer;
   const bannedPhraseStillDetected = languageCheck.ok && hasBannedPhrase(bannedPhraseCleanedAnswer);
-  const finalAnswerSafe = languageCheck.ok && !bannedPhraseStillDetected;
-  const languageSafeAnswer = finalAnswerSafe
+  const languageRepairCandidate = languageCheck.ok
+    ? null
+    : buildJapaneseLanguageGuardRepair({
+      question,
+      questionIntent: debug.questionIntent,
+      sourceGateSufficient: debug.sourceGateSufficient,
+      sourceGateEvidenceSlots: debug.sourceGateEvidenceSlots
+    });
+  const languageRepairCheck = languageRepairCandidate
+    ? checkFinalAnswerJapaneseOnly(languageRepairCandidate)
+    : null;
+  const languageRepairSafe = Boolean(
+    languageRepairCandidate &&
+    languageRepairCheck?.ok &&
+    !hasBannedPhrase(languageRepairCandidate)
+  );
+  const finalAnswerSafe = (languageCheck.ok && !bannedPhraseStillDetected) || languageRepairSafe;
+  const languageSafeAnswer = languageCheck.ok && !bannedPhraseStillDetected
     ? bannedPhraseCleanedAnswer
-    : buildJapaneseLanguageGuardFallback({
+    : languageRepairSafe && languageRepairCandidate
+      ? languageRepairCandidate
+      : buildJapaneseLanguageGuardFallback({
       question,
       questionIntent: debug.questionIntent,
       fallbackKind: normalizedFallbackKind,
       missingSourceTypes: debug.sourceGateMissingSourceTypes
     });
+  const finalLanguageCheck = languageRepairSafe && languageRepairCheck ? languageRepairCheck : languageCheck;
   const sanitizedLanguageSafeAnswer = sanitizeFinalUserFacingAnswer(languageSafeAnswer);
   const finalResponsePath = finalAnswerSafe ? responsePath : "fallback";
   const finalFallbackKind: ChatFallbackKind = finalAnswerSafe
     ? normalizedFallbackKind
     : "language_guard_fallback";
   const responsePathFallbackButKindNone = finalResponsePath === "fallback" && finalFallbackKind === "none";
-  const finalAnswerLanguageLabels = finalAnswerSafe ? [] : [
+  const finalAnswerLanguageLabels = languageCheck.ok && finalAnswerSafe ? [] : languageRepairSafe ? [
+    ...languageCheck.labels,
+    "answer_repaired_to_japanese"
+  ] : [
     ...languageCheck.labels,
     ...(bannedPhraseStillDetected ? ["generic_fallback_phrase"] : []),
     "answer_rewritten_to_japanese_fallback"
@@ -129,21 +152,25 @@ export async function finalizeChatResponse({
       fallbackKind: responsePathFallbackButKindNone ? "unknown_fallback" : finalFallbackKind,
       fallbackKindSource: finalAnswerSafe ? debug.fallbackKindSource ?? "finalizer" : "language_guard",
       responsePathFallbackButKindNone,
-      finalAnswerJapaneseRatio: languageCheck.japaneseRatio,
-      finalAnswerEnglishSentenceCount: languageCheck.englishSentenceCount,
-      finalAnswerRawExcerptLike: languageCheck.rawExcerptLike,
+      finalAnswerJapaneseRatio: finalLanguageCheck.japaneseRatio,
+      finalAnswerEnglishSentenceCount: finalLanguageCheck.englishSentenceCount,
+      finalAnswerRawExcerptLike: finalLanguageCheck.rawExcerptLike,
       finalAnswerLanguageLabels,
-      finalAnswerLanguageViolations: languageCheck.violations,
+      finalAnswerLanguageViolations: finalAnswerSafe ? [] : languageCheck.violations,
       languageGuardChecked: true,
       languageGuardOk: finalAnswerSafe,
       languageGuardViolationLabels: finalAnswerLanguageLabels,
       languageGuardFallbackUsed: !finalAnswerSafe,
       languageGuardFallbackKind: finalAnswerSafe ? null : "language_guard_fallback",
-      originalAnswerBeforeLanguageGuardLength: finalAnswerSafe ? null : originalAnswerBeforeLanguageGuard.length,
-      originalAnswerBeforeLanguageGuardSample: finalAnswerSafe
+      originalAnswerBeforeLanguageGuardLength: languageCheck.ok ? null : originalAnswerBeforeLanguageGuard.length,
+      originalAnswerBeforeLanguageGuardSample: languageCheck.ok
         ? null
         : sampleUnsafeAnswer(originalAnswerBeforeLanguageGuard),
       genericFallbackPhraseDetected: bannedPhraseStillDetected,
+      sourceRepairLabels: [
+        ...(debug.sourceRepairLabels ?? []),
+        ...(languageRepairSafe ? ["language_guard_source_backed_repair"] : [])
+      ],
       ...timings.snapshot()
     }
   );

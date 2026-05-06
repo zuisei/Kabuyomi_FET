@@ -26,6 +26,10 @@ const ALLOWED_ENGLISH_TERMS = [
   "traffic",
   "ticket",
   "eCommerce",
+  "Caterpillar",
+  "Construction Industries",
+  "Energy & Transportation",
+  "Resource Industries",
   "RPO",
   "ARR",
   "NOI",
@@ -33,6 +37,7 @@ const ALLOWED_ENGLISH_TERMS = [
   "EBITDA",
   "capex",
   "backlog",
+  "dealer inventory",
   "orders",
   "price realization",
   "product revenue",
@@ -134,6 +139,45 @@ export function buildJapaneseLanguageGuardFallback({
   return `選択された資料だけでは、この質問に直接答えるための具体的な説明を十分に確認できません。確認できる範囲に限定すると、追加で必要なのは ${missing} です。`;
 }
 
+export function buildJapaneseLanguageGuardRepair({
+  question,
+  questionIntent,
+  sourceGateSufficient,
+  sourceGateEvidenceSlots
+}: {
+  question?: string | null;
+  questionIntent?: string | null;
+  sourceGateSufficient?: boolean | null;
+  sourceGateEvidenceSlots?: Record<string, unknown> | null;
+}): string | null {
+  const effectiveIntent = resolveFallbackIntent(questionIntent, question);
+  if (effectiveIntent !== "driver_durability_followup" || sourceGateSufficient !== true) {
+    return null;
+  }
+
+  const evidenceText = extractEvidenceText(sourceGateEvidenceSlots);
+  if (!evidenceText) {
+    return null;
+  }
+
+  const driverLabels = inferDriverLabels(evidenceText);
+  if (driverLabels.length === 0) {
+    return null;
+  }
+
+  const durabilitySignals = inferDurabilitySignals(evidenceText);
+  const nextIndicators = inferNextIndicators(evidenceText, driverLabels);
+  const driverText = joinItems(driverLabels.slice(0, 4));
+  const signalText = durabilitySignals.length > 0
+    ? `提出資料には ${joinItems(durabilitySignals.slice(0, 3))} も示されていますが、これだけで継続性は断定しません。`
+    : "ただし、提出資料だけでは継続性は断定できません。";
+  const indicatorText = nextIndicators.length > 0
+    ? `次に見るべき指標は、${joinItems(nextIndicators.slice(0, 4))} です。`
+    : "次に見るべき指標は、同じ要因が次期にも続くかどうかです。";
+
+  return `前問の売上要因は、${driverText} に関する説明が中心です。${signalText}${indicatorText}`;
+}
+
 function maskAllowedEnglishTerms(answer: string): string {
   return ALLOWED_ENGLISH_TERMS.reduce(
     (masked, term) => masked.replace(new RegExp(escapeRegExp(term), "gi"), " "),
@@ -195,6 +239,118 @@ function resolveFallbackIntent(questionIntent?: string | null, question?: string
   }
 
   return questionIntent;
+}
+
+function extractEvidenceText(sourceGateEvidenceSlots?: Record<string, unknown> | null): string {
+  if (!sourceGateEvidenceSlots || typeof sourceGateEvidenceSlots !== "object") {
+    return "";
+  }
+  const texts: string[] = [];
+  const add = (value: unknown) => {
+    if (typeof value === "string") {
+      texts.push(value);
+    }
+  };
+
+  const metricMovement = sourceGateEvidenceSlots.confirmedMetricMovement;
+  if (metricMovement && typeof metricMovement === "object") {
+    const record = metricMovement as Record<string, unknown>;
+    add(record.label);
+    add(record.value);
+    add(record.period);
+    add(record.change);
+  }
+
+  const driverSlots = Array.isArray(sourceGateEvidenceSlots.companyExplainedDrivers)
+    ? sourceGateEvidenceSlots.companyExplainedDrivers
+    : [];
+  for (const slot of driverSlots) {
+    if (!slot || typeof slot !== "object") {
+      continue;
+    }
+    const record = slot as Record<string, unknown>;
+    add(record.category);
+    add(record.driver);
+  }
+
+  const signals = Array.isArray(sourceGateEvidenceSlots.segmentOrBusinessSignals)
+    ? sourceGateEvidenceSlots.segmentOrBusinessSignals
+    : [];
+  for (const signal of signals) {
+    if (!signal || typeof signal !== "object") {
+      continue;
+    }
+    add((signal as Record<string, unknown>).fact);
+  }
+
+  return texts.join(" ").slice(0, 2000);
+}
+
+function inferDriverLabels(text: string): string[] {
+  const labels: string[] = [];
+  const lower = text.toLowerCase();
+  const add = (label: string, pattern: RegExp) => {
+    if (pattern.test(lower)) {
+      labels.push(label);
+    }
+  };
+
+  add("販売数量", /\b(?:sales\s+)?volume|production volumes?|unit volume|数量/);
+  add("価格実現", /price realization|pricing|price\/mix|price mix|価格/);
+  add("エンドユーザー向け機械販売", /equipment to end users?|end users?|machine sales/);
+  add("backlog", /backlog/);
+  add("dealer inventory", /dealer inventory|dealer inventories/);
+  add("net interest income", /net interest income|nii/);
+  add("noninterest income", /noninterest income|investment banking|markets revenue|card services/);
+  add("比較可能売上", /comparable sales|comp sales|same-store sales/);
+  add("traffic", /traffic/);
+  add("ticket", /ticket/);
+  add("eCommerce", /ecommerce|e-commerce/);
+  add("membership", /membership/);
+  add("commodity price", /commodity prices?|crude|oil price|natural gas/);
+  add("production volume", /production volumes?|liquids production|gas production/);
+  add("refining margin", /refin(?:ing|ery) margins?|downstream margins?/);
+  add("services revenue", /services revenue|recurring revenue|installed base/);
+
+  return [...new Set(labels)];
+}
+
+function inferDurabilitySignals(text: string): string[] {
+  const signals: string[] = [];
+  const lower = text.toLowerCase();
+  const add = (label: string, pattern: RegExp) => {
+    if (pattern.test(lower)) {
+      signals.push(label);
+    }
+  };
+
+  add("次期の販売数量や価格実現への見通し", /\bexpect(?:s|ed)?\b.*\b(?:sales|revenues?|volume|price realization)|stronger sales and revenues/);
+  add("backlogや受注の確認材料", /backlog|orders?/);
+  add("dealer inventoryの変化", /dealer inventory|dealer inventories/);
+  add("recurring revenueやサービス需要", /recurring revenue|services revenue|installed base/);
+  add("membershipやeCommerceの継続性", /membership|ecommerce|e-commerce/);
+  add("金利や預金環境への感応度", /interest rate|deposit|net interest income|nii/);
+  add("commodity priceやmarginへの感応度", /commodity prices?|crude|natural gas|refin(?:ing|ery) margins?/);
+
+  return [...new Set(signals)];
+}
+
+function inferNextIndicators(text: string, driverLabels: string[]): string[] {
+  const lower = text.toLowerCase();
+  const indicators = [...driverLabels];
+  if (/dealer inventory|dealer inventories/.test(lower)) {
+    indicators.push("dealer inventory");
+  }
+  if (/backlog/.test(lower)) {
+    indicators.push("backlog");
+  }
+  if (/price realization|pricing/.test(lower)) {
+    indicators.push("価格実現");
+  }
+  if (/sales volume|production volume|volume/.test(lower)) {
+    indicators.push("販売数量");
+  }
+  return [...new Set(indicators)];
 }
 
 function isAllowedNameLikeEnglishSpan(span: string): boolean {
