@@ -55,6 +55,7 @@ describe("hard-intent source gate", () => {
       metrics: filing.metrics
     });
 
+    console.log(result);
     expect(result.sourceSufficient).toBe(true);
     expect(result.identifiedDrivers[0]?.category).toBe("bank_revenue_driver");
     expect(result.failureLabels).not.toContain("revenue_driver_evidence_too_generic");
@@ -183,6 +184,123 @@ describe("hard-intent source gate", () => {
     expect(result.sourceSufficient).toBe(false);
     expect(slots.marginDrivers).toHaveLength(0);
     expect(slots.failureLabels).toEqual(expect.arrayContaining(["margin_driver_slots_empty"]));
+  });
+
+  it("fails Q06 when margin context is only XBRL and gross-margin tables", () => {
+    const filing = makeFiling("AAPL", "Apple Inc.", [
+      metric("operatingIncome", 50_852_000_000, 42_832_000_000, 18.7)
+    ], [
+      metricSource("S9", "営業利益: 50852000000 USD / 比較値: 42832000000 / YoY: 18.7%"),
+      source(
+        "S1",
+        "md_a",
+        "| Q1 2026 Form 10-Q | Gross Margin Products and Services gross margin and gross margin percentage for the three months ended December 27, 2025 and December 28, 2024, were as follows (dollars in millions): Products $46,265 $38,513 Services $22,966 $19,762 Total gross margin $69,231 $58,275."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "これは一時要因？それとも構造的な変化？",
+      previousAnswer: "営業利益率は34.5%から35.4%へ改善しています。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "margin_context_table_heavy",
+      "missing_margin_driver_evidence",
+      "missing_margin_durability_context",
+      "source_gate_failed"
+    ]));
+  });
+
+  it("fails Q06 when industrial margin context is generic business demand text", () => {
+    const filing = makeFiling("CAT", "Caterpillar Inc.", [
+      metric("operatingIncome", 11_151_000_000, 13_072_000_000, -14.7)
+    ], [
+      metricSource("S9", "営業利益: 11151000000 USD / 比較値: 13072000000 / YoY: -14.7%"),
+      source(
+        "S1",
+        "md_a",
+        "The Construction Industries product portfolio includes asphalt pavers and motor graders. The nature of customer demand for construction machinery varies around the world, and customers in developing economies often prioritize purchase price while customers in developed economies weigh lower owning and operating costs over the lifetime of the machine."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "これは一時要因？それとも構造的な変化？",
+      previousAnswer: "営業利益率は20.2%から16.5%へ低下しています。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "missing_margin_driver_evidence",
+      "missing_margin_durability_context",
+      "source_gate_failed"
+    ]));
+  });
+
+  it("fails Q06 when industrial context has revenue drivers but no margin durability evidence", () => {
+    const filing = makeFiling("CAT", "Caterpillar Inc.", [
+      metric("operatingIncome", 11_151_000_000, 13_072_000_000, -14.7)
+    ], [
+      metricSource("S9", "営業利益: 11151000000 USD / 比較値: 13072000000 / YoY: -14.7%"),
+      source(
+        "S1",
+        "md_a",
+        "Total sales and revenues increased 4 percent compared with 2024. The increase reflected higher sales volume, partially offset by unfavorable price realization. Higher sales volume was primarily driven by higher sales of equipment to end users."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "これは一時要因？それとも構造的な変化？",
+      previousAnswer: "営業利益率は20.2%から16.5%へ低下しています。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "missing_margin_durability_context",
+      "source_gate_failed"
+    ]));
+  });
+
+  it("passes Q06 with energy margin evidence tied to depreciation and upstream spending", () => {
+    const filing = makeFiling("XOM", "Exxon Mobil Corporation", [
+      metric("netIncome", 28_844_000_000, 33_680_000_000, -14.4)
+    ], [
+      metricSource("S9", "純利益: 28844000000 USD / 比較値: 33680000000 / YoY: -14.4%"),
+      source(
+        "S1",
+        "md_a",
+        "Upstream spending of $24.7 billion in 2025 was up $4.4 billion from 2024, reflecting higher spend in the U.S. Permian Basin. Depreciation and depletion expense was $21.4 billion for the year ended December 31, 2025."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "これは一時要因？それとも構造的な変化？",
+      previousAnswer: "純利益率は9.6%から8.7%へ低下しています。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.failureLabels).not.toContain("margin_context_table_heavy");
+    expect(result.failureLabels).not.toContain("missing_margin_driver_evidence");
   });
 
   it("does not treat raw English previous answers as follow-up targets", () => {

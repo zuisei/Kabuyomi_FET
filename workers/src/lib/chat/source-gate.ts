@@ -77,6 +77,14 @@ type DriverDurabilitySourceQuality = {
   durabilityEvidenceTooGeneric: boolean;
 };
 
+type MarginDurabilitySourceQuality = {
+  hasSpecificMarginDriverEvidence: boolean;
+  hasSpecificDurabilityEvidence: boolean;
+  metricOnlyContext: boolean;
+  tableHeavyContext: boolean;
+  marginEvidenceTooGeneric: boolean;
+};
+
 const EMPTY_RESULT: SourceGateResult = {
   sourceGateApplied: false,
   hardIntent: null,
@@ -121,6 +129,9 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
   const driverDurabilityQuality = hardIntent === "driver_durability_followup"
     ? analyzeDriverDurabilitySourceQuality(input.selectedSources, drivers, sector)
     : null;
+  const marginDurabilityQuality = hardIntent === "margin_durability_followup"
+    ? analyzeMarginDurabilitySourceQuality(input.selectedSources, drivers, sector)
+    : null;
   const missingSourceTypes = missingSourceTypesFor(sector, hardIntent, {
     hasMetricMovement: revenueCoverage?.hasRevenueMetric ?? knownFacts.length > 0,
     hasDrivers: drivers.length > 0,
@@ -161,6 +172,9 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
     addDriverDurabilityFailureLabels(input.selectedSources, followupTargetFound, drivers.length > 0, hasDurabilityContext, failureLabels);
     addDriverDurabilitySourceQualityFailureLabels(driverDurabilityQuality, failureLabels);
   }
+  if (hardIntent === "margin_durability_followup") {
+    addMarginDurabilitySourceQualityFailureLabels(marginDurabilityQuality, failureLabels);
+  }
 
   const sourceSufficient = hardIntent === "revenue_driver"
     ? Boolean(revenueCoverage?.hasRevenueMetric) && drivers.length > 0 && hasStrongRevenueDriverEvidence
@@ -172,25 +186,35 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
         !Boolean(driverDurabilityQuality?.metricOnlyContext) &&
         !Boolean(driverDurabilityQuality?.tableHeavyContext)
       : Boolean(followupTargetFound) && drivers.length > 0 && hasDurabilityContext;
+  const marginSourceSufficient = hardIntent === "margin_durability_followup"
+    ? Boolean(followupTargetFound) &&
+      drivers.length > 0 &&
+      hasDurabilityContext &&
+      Boolean(marginDurabilityQuality?.hasSpecificMarginDriverEvidence) &&
+      Boolean(marginDurabilityQuality?.hasSpecificDurabilityEvidence) &&
+      !Boolean(marginDurabilityQuality?.metricOnlyContext) &&
+      !Boolean(marginDurabilityQuality?.tableHeavyContext)
+    : sourceSufficient;
+  const finalSourceSufficient = hardIntent === "margin_durability_followup" ? marginSourceSufficient : sourceSufficient;
 
-  if (!sourceSufficient) {
+  if (!finalSourceSufficient) {
     failureLabels.add("source_gate_failed");
   }
 
   return {
     sourceGateApplied: true,
     hardIntent,
-    sourceSufficient,
-    confidence: sourceSufficient ? "medium" : "high",
+    sourceSufficient: finalSourceSufficient,
+    confidence: finalSourceSufficient ? "medium" : "high",
     followupTargetFound,
     knownFacts,
     identifiedDrivers: drivers,
     missingSourceTypes,
-    retrievalRetryRecommended: !sourceSufficient,
-    retrievalQueries: !sourceSufficient ? retrievalQueriesFor(input.ticker, sector, hardIntent, missingSourceTypes) : [],
-    fallbackRecommendedIfRetryFails: !sourceSufficient,
+    retrievalRetryRecommended: !finalSourceSufficient,
+    retrievalQueries: !finalSourceSufficient ? retrievalQueriesFor(input.ticker, sector, hardIntent, missingSourceTypes) : [],
+    fallbackRecommendedIfRetryFails: !finalSourceSufficient,
     failureLabels: [...failureLabels],
-    reason: sourceSufficient
+    reason: finalSourceSufficient
       ? "Selected sources include metric movement and company-specific evidence for the hard intent."
       : "Selected sources do not provide enough company-specific evidence for the hard intent."
   };
@@ -328,7 +352,7 @@ function matchedDriverCategory(
   const marginPatterns: Record<SourceGateSector, RegExp> = {
     bank: /(net interest margin|provision for credit losses|noninterest expense|compensation expense|credit quality|funding costs|segment profitability|efficiency ratio)/i,
     capital_markets: /(compensation expense|noninterest expense|investment banking|trading|wealth management|asset management|segment profitability|pre-tax margin)/i,
-    energy: /(refining margin|chemical margin|upstream earnings|downstream earnings|costs?|impairment|restructuring|segment earnings|margin)/i,
+    energy: /(refining margin|chemical margin|upstream earnings|downstream earnings|upstream spending|capital expenditures?|depreciation|depletion|costs?|impairment|restructuring|segment earnings|margin)/i,
     oilfield_services: /(oilfield services margins?|drilling activity|completion activity|north america margin|international margin|segment operating income|costs?)/i,
     industrial: /(price-cost|manufacturing cost|sga|sg&a|r&d|volume leverage|restructuring|segment operating profit|operating margin|profit margin)/i,
     retail: /(gross margin|inventory|markdown|shrink|wage|fulfillment cost|operating expense|membership income|advertising income|segment operating income)/i,
@@ -664,6 +688,160 @@ function addDriverDurabilitySourceQualityFailureLabels(
   if (quality.durabilityEvidenceTooGeneric) {
     failureLabels.add("q04_durability_evidence_too_generic");
   }
+}
+
+function analyzeMarginDurabilitySourceQuality(
+  sources: SourceChunkRecord[],
+  drivers: EvidenceDriver[],
+  sector: SourceGateSector
+): MarginDurabilitySourceQuality {
+  const narrativeSources = sources.filter((source) => !isMetricSource(source));
+  const driverSourceIds = new Set(drivers.flatMap((driver) => driver.sourceIds));
+  const driverSources = narrativeSources.filter((source) => driverSourceIds.has(source.sourceId));
+  const tableHeavyDriverSources = driverSources.filter(isQ06MetricOrTableHeavySource);
+  const specificMarginDriverSources = driverSources.filter((source) =>
+    !isQ06MetricOrTableHeavySource(source) &&
+    !isQ06GenericMarginContext(source.text, sector) &&
+    hasQ06ConcreteMarginDriverSignal(source.text, sector)
+  );
+  const specificDurabilitySources = narrativeSources.filter((source) =>
+    !isQ06MetricOrTableHeavySource(source) &&
+    !isQ06GenericMarginContext(source.text, sector) &&
+    hasSpecificQ06MarginDurabilitySignal(source.text, sector)
+  );
+  const genericMarginSources = narrativeSources.filter((source) =>
+    !isQ06MetricOrTableHeavySource(source) &&
+    matchedDriverCategory(normalizeText(source.text), sector, "margin_durability_followup") !== null &&
+    !hasQ06ConcreteMarginDriverSignal(source.text, sector)
+  );
+
+  return {
+    hasSpecificMarginDriverEvidence: specificMarginDriverSources.length > 0,
+    hasSpecificDurabilityEvidence: specificDurabilitySources.length > 0,
+    metricOnlyContext: narrativeSources.length === 0,
+    tableHeavyContext: tableHeavyDriverSources.length > 0 || (
+      narrativeSources.length > 0 &&
+      narrativeSources.filter(isQ06MetricOrTableHeavySource).length >= Math.ceil(narrativeSources.length / 2)
+    ),
+    marginEvidenceTooGeneric: genericMarginSources.length > 0 && specificMarginDriverSources.length === 0
+  };
+}
+
+function addMarginDurabilitySourceQualityFailureLabels(
+  quality: MarginDurabilitySourceQuality | null,
+  failureLabels: Set<string>
+): void {
+  if (!quality) {
+    return;
+  }
+  if (quality.metricOnlyContext) {
+    failureLabels.add("margin_context_xbrl_only");
+  }
+  if (quality.tableHeavyContext) {
+    failureLabels.add("margin_context_table_heavy");
+  }
+  if (!quality.hasSpecificMarginDriverEvidence) {
+    failureLabels.add("missing_margin_driver_evidence");
+  }
+  if (!quality.hasSpecificDurabilityEvidence) {
+    failureLabels.add("missing_margin_durability_context");
+  }
+  if (quality.marginEvidenceTooGeneric) {
+    failureLabels.add("margin_durability_evidence_too_generic");
+  }
+}
+
+function isQ06MetricOrTableHeavySource(source: SourceChunkRecord): boolean {
+  if (isMetricSource(source)) {
+    return true;
+  }
+  const text = normalizeText(`${source.sectionTitle} ${source.sourceLabel} ${source.text}`);
+  const numberTokens = text.match(/\$?\d[\d,.%]*/g)?.length ?? 0;
+  const hasTableCue =
+    /\b(?:three months ended|year ended|gross margin percentage|gross margin|operating margin|operating expenses?|dollars in millions|percentage of total net sales|total gross margin)\b/i.test(text) ||
+    /\|\s*q[1-4]\s+20\d{2}\s+form\s+10-[qk]\s+\|/i.test(text);
+  const hasNarrativeCause = /(primarily due to|driven by|attributable to|resulted from|because|reflect(?:ed|ing)|partially offset|offset by|expected|outlook|continue|continued|risk|uncertain|one-time|temporary|restructuring|impairment)/i.test(text);
+  return hasTableCue && numberTokens >= 8 && !hasNarrativeCause;
+}
+
+function isQ06GenericMarginContext(text: string, sector: SourceGateSector): boolean {
+  const normalized = normalizeText(text);
+  if (/(forward-looking statements|business description|properties|opened our first|store footprint|corporate website|available information)/i.test(normalized)) {
+    return true;
+  }
+  if (sector === "industrial" && /customers? in developing economies.*purchase price|product portfolio includes|construction machinery varies around the world|owning and operating costs over the lifetime/i.test(normalized)) {
+    return true;
+  }
+  if (sector === "technology" && /(tariff|foreign exchange|component pricing|macroeconomic conditions)/i.test(normalized) &&
+    !/(gross margin|operating margin|cost of sales|operating expense|net sales|products gross margin|services gross margin)/i.test(normalized)) {
+    return true;
+  }
+  return false;
+}
+
+function hasQ06ConcreteMarginDriverSignal(text: string, sector: SourceGateSector): boolean {
+  const normalized = normalizeText(text);
+  if (isQ06MetricOrTableText(normalized) || isQ06GenericMarginContext(normalized, sector)) {
+    return false;
+  }
+  const common =
+    /(gross margin|operating margin|profit margin|cost of sales|costs?|expenses?|operating expenses?|pricing|price realization|mix|volume|sales volume|input costs?|manufacturing cost|sg&a|r&d|research and development|provision|credit losses?|impairment|restructuring|depreciation|depletion|tariff|foreign exchange|inventory|fuel|labor)/i;
+  const sectorSpecific: Record<SourceGateSector, RegExp> = {
+    bank: /(net interest margin|deposit margin compression|provision for credit losses|noninterest expense|compensation expense|efficiency ratio|credit quality|funding costs)/i,
+    capital_markets: /(compensation expense|noninterest expense|pre-tax margin|segment profitability|trading|investment banking|asset management)/i,
+    energy: /(depreciation|depletion|upstream spending|capital expenditures?|refining margins?|chemical margins?|upstream earnings|downstream earnings|impairment|restructuring|costs?)/i,
+    oilfield_services: /(oilfield services margins?|north america margin|international margin|segment operating income|costs?|drilling activity|completion activity)/i,
+    industrial: /(price-cost|manufacturing cost|price realization|sales volume|volume leverage|sg&a|r&d|segment operating profit|operating margin|dealer inventory)/i,
+    retail: /(gross margin|inventory|markdown|shrink|wage|fulfillment cost|operating expense|membership income|advertising income|segment operating income|fuel)/i,
+    consumer_staples: /(gross margin|commodity costs?|input costs?|pricing|volume|foreign exchange|advertising expense|organic sales)/i,
+    auto: /(automotive gross margin|pricing|production cost|warranty|deliveries|average selling price|restructuring)/i,
+    technology: /(gross margin|product margin|services margin|cost of sales|operating expense|r&d|research and development|channel inventory|mix|pricing|tariff|foreign exchange|component pricing)/i,
+    software: /(gross margin|operating margin|sales and marketing|r&d|research and development|infrastructure costs?|usage|subscription)/i,
+    semiconductor_equipment: /(gross margin|operating expenses?|backlog|orders|customer demand|china|restructuring)/i,
+    healthcare_medtech: /(gross margin|procedure volume|systems placements|instruments|accessories|operating expense|installed base)/i,
+    reit: /(net operating income|\bnoi\b|occupancy|same-store|interest expense|operating expenses?|segment margin)/i,
+    media: /(content costs?|sports rights|advertising revenue|affiliate fees|operating expense|segment ebitda)/i,
+    utility: /(fuel cost|operating expenses?|rate case|regulated returns|interest expense|capex|capital expenditures)/i,
+    mining: /(unit costs?|copper price|gold price|production volume|mining costs?|operating margin)/i,
+    general: common
+  };
+  return common.test(normalized) || sectorSpecific[sector].test(normalized);
+}
+
+function hasSpecificQ06MarginDurabilitySignal(text: string, sector: SourceGateSector): boolean {
+  const normalized = normalizeText(text);
+  if (isQ06MetricOrTableText(normalized) || isQ06GenericMarginContext(normalized, sector)) {
+    return false;
+  }
+  const common =
+    /(temporary|transitory|one-time|recurring|continue|continued|expected|expects|outlook|guidance|trend|uncertain|uncertainty|risk|headwind|tailwind|seasonal|normalization|structural|restructuring|impairment|depreciation|depletion|capital expenditures?|tariff|foreign exchange|fuel|inventory|cost pressure)/i;
+  const sectorSpecific: Record<SourceGateSector, RegExp> = {
+    bank: /(deposit margin compression|lower rates?|higher rates?|interest rate sensitivity|credit normalization|provision for credit losses|funding costs|efficiency ratio)/i,
+    capital_markets: /(cyclical|client activity|compensation expense|trading revenue|investment banking fees|markets revenue)/i,
+    energy: /(depreciation|depletion|upstream spending|capital expenditures?|commodity price sensitivity|refining margins?|chemical margins?|impairment|restructuring|outlook|expected)/i,
+    oilfield_services: /(customer spending|drilling activity|completion activity|north america activity|international activity|outlook|expected|costs?)/i,
+    industrial: /(dealer inventor(?:y|ies)|backlog|orders|expected|expects|stronger sales|manufacturing cost|end-market demand)/i,
+    retail: /(continued strength|inventory|markdown|shrink|wage|fulfillment cost|membership|advertising|fuel|expected|expects|transactions?|unit volumes?)/i,
+    consumer_staples: /(commodity costs?|input costs?|pricing|volume|foreign exchange|continued|expected|outlook)/i,
+    auto: /(deliveries|production volume|vehicle pricing|average selling price|automotive gross margin|expected|outlook|demand)/i,
+    technology: /(services margin|product margin|channel inventory|tariff|foreign exchange|component pricing|product launch|expected|outlook|recurring)/i,
+    software: /(subscription|recurring|infrastructure costs?|usage|customers?|expected|outlook)/i,
+    semiconductor_equipment: /(orders|backlog|customer demand|china|expected|outlook|restructuring)/i,
+    healthcare_medtech: /(procedure volume|installed base|recurring|systems placements|expected|outlook)/i,
+    reit: /(occupancy|same-store|noi|interest rates?|lease|renewal|expected|outlook)/i,
+    media: /(content costs?|sports rights|advertising|subscriber|cyclical|expected|outlook)/i,
+    utility: /(rate case|regulated returns|load growth|weather|fuel cost|expected|outlook|capex)/i,
+    mining: /(copper price|gold price|production volume|unit cost|commodity price|expected|outlook)/i,
+    general: /(temporary|one-time|recurring|continue|continued|expected|outlook|risk|uncertain|restructuring|impairment)/
+  };
+  return common.test(normalized) || sectorSpecific[sector].test(normalized);
+}
+
+function isQ06MetricOrTableText(text: string): boolean {
+  return (
+    /\b(?:three months ended|year ended|gross margin percentage|dollars in millions|percentage of total net sales|total gross margin|operating expenses?)\b/i.test(text) ||
+    /(products?|services).{0,80}gross margin/i.test(text)
+  ) && !/(primarily due to|driven by|attributable to|resulted from|because|reflect(?:ed|ing)|expected|outlook|continue|continued|risk|uncertain|temporary|one-time|restructuring|impairment)/i.test(text);
 }
 
 function isQ04MetricOrTableHeavySource(source: SourceChunkRecord): boolean {
