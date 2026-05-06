@@ -502,6 +502,7 @@ function buildCashGenerationAnswer(
 
   if (options.asksAboutCause || options.asksAboutDeterioration) {
     const context = summarizeCashFlowContext(filing.sourceChunks);
+    const isFinancialCompany = isFinancialFiling(filing);
     const sources: ChatEvidenceSource[] = [buildSecFilingSource(source)];
     if (context) {
       for (const contextSourceId of context.sourceIds) {
@@ -514,7 +515,9 @@ function buildCashGenerationAnswer(
 
     const answerParts = [
       buildMetricObservationSentence(metric),
-      "営業CFは売上高ではなく、運転資本、在庫・売掛金・買掛金、金融機関なら貸出・預金や取引資産負債の増減にも大きく振れます。"
+      isFinancialCompany
+        ? "金融機関の営業CFは、貸出・預金や取引資産負債の増減にも大きく振れます。"
+        : "営業CFは売上高ではなく、運転資本、在庫・売掛金・買掛金の増減にも大きく振れます。"
     ];
     if (context) {
       answerParts.push(context.text);

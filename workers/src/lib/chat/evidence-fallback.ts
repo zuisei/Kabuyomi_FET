@@ -12,7 +12,12 @@ const BANNED_PHRASES = [
   "本文に説明があります",
   "本文全体と数字を並べると見えてきます",
   "本文の要因説明と並べると判断しやすくなります",
-  "価格、数量、需要、コスト、mixを見るべきです"
+  "価格、数量、需要、コスト、mixを見るべきです",
+  "売るべき",
+  "買うべき",
+  "投資推奨",
+  "目標株価",
+  "株価予想"
 ];
 
 export function buildEvidenceFallbackAnswer({
@@ -56,7 +61,9 @@ export function hasBannedPhrase(answer: string): boolean {
     /本文全体と数字を並べると/.test(answer) ||
     /数字を並べると.*見えてきます/.test(answer) ||
     /この資料の範囲では確認できません(?!.*(不足|source|説明|指標|KPI|MD&A))/.test(answer) ||
-    /一時的とは断定しにくいです(?!.*(要因|不足|未特定|不明))/.test(answer);
+    /一時的とは断定しにくいです(?!.*(要因|不足|未特定|不明))/.test(answer) ||
+    /(^|[。！？\s])買いです/.test(answer) ||
+    /(?:割安|割高)(?:です|だ|と断定|と判断)/.test(answer);
 }
 
 function buildRevenueDriverFallback(sourceGateResult: SourceGateResult, evidenceSlots: EvidenceSlots): string {

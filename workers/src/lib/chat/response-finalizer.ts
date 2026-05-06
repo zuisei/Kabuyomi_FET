@@ -73,7 +73,7 @@ export async function finalizeChatResponse({
     ? timings.timeSync("groundingMs", () => attachCurrentFilingSourceUrls(supplemented, filing.primaryDocumentUrl))
     : supplemented;
   const normalizedFallbackKind = normalizeFallbackKind(responsePath, debug);
-  const cleanup = cleanAnswerForQuestion(responseWithUrls.answer, responsePath, normalizedFallbackKind, question, debug.questionIntent);
+  const cleanup = cleanAnswerForQuestion(responseWithUrls.answer, responsePath, normalizedFallbackKind, question, debug.questionIntent, filing);
   const uxCleanedAnswer = cleanup.answer;
   const originalAnswerBeforeLanguageGuard = uxCleanedAnswer;
   const languageCheck = checkFinalAnswerJapaneseOnly(uxCleanedAnswer);
@@ -161,9 +161,18 @@ function cleanAnswerForQuestion(
   responsePath: ChatResponsePath,
   fallbackKind: ChatFallbackKind,
   question: string,
-  questionIntent?: string | null
+  questionIntent?: string | null,
+  filing?: FilingCacheRecord
 ): AnswerCleanupResult {
   const normalizedAnswer = sanitizeFinalUserFacingAnswer(answer);
+  const sectorCleanup = cleanWrongSectorBankLanguage(normalizedAnswer, question, questionIntent, filing);
+  if (sectorCleanup) {
+    return sectorCleanup;
+  }
+  const operatingMarginCleanup = cleanUnsupportedOperatingMarginMovement(normalizedAnswer);
+  if (operatingMarginCleanup) {
+    return operatingMarginCleanup;
+  }
   if (isLiquidityDebtQuestion(question, questionIntent)) {
     return cleanLiquidityDebtAnswer(normalizedAnswer);
   }
@@ -229,6 +238,10 @@ function normalizeAwkwardModelLanguage(answer: string): string {
     .replace(/driverが十分に特定/g, "要因が十分に特定")
     .replace(/前問の\s*driver/g, "前問の要因")
     .replace(/利益率\s*driver/g, "利益率要因")
+    .replace(/較為小さい/g, "比較的小さい")
+    .replace(/前年同\s*period\s*比/gi, "前年同期比")
+    .replace(/\bperiod\b/gi, "期間")
+    .replace(/[0-9]+(?:,[0-9]{1,2})+\.[0-9]+億ドル/g, "売上高の数値表示")
     .replace(/([0-9]+(?:,[0-9])+)億ドル/g, (_match, raw: string) => `${raw.replace(/,/g, ".")}億ドル`)
     .replace(/([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?)\s*USD/g, (_match, raw: string) => {
       const value = Number.parseFloat(raw.replace(/,/g, ""));
@@ -293,6 +306,11 @@ function normalizeFallbackSourceLabels(answer: string): string {
 
 function normalizeInternalSourceWording(answer: string): string {
   return answer
+    .replace(/evidence\s*slot/gi, "根拠")
+    .replace(/metric-only/gi, "数値中心")
+    .replace(/\bfallback\b/gi, "代替回答")
+    .replace(/\bdebug\b/gi, "診断")
+    .replace(/\bschema\b/gi, "形式")
     .replace(/選択された\s*source/g, "選択された資料")
     .replace(/この\s*source/g, "この資料")
     .replace(/取得できた\s*source/g, "取得できた資料")
@@ -317,6 +335,70 @@ function normalizeBusinessLineLabels(answer: string): string {
     .replace(/全社売上高も確認できます。?/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+const GENERAL_COMPANY_CASH_FLOW_NOTE = "営業CFは、運転資本、在庫、売掛金、買掛金などで大きく動くため、単純な利益水準だけでは判断しません。キャッシュフロー計算書と流動性の説明を合わせて確認する必要があります。";
+
+function cleanWrongSectorBankLanguage(
+  answer: string,
+  question: string,
+  questionIntent?: string | null,
+  filing?: FilingCacheRecord
+): AnswerCleanupResult | null {
+  if (!filing || isFinancialFilingForFinalizer(filing)) {
+    return null;
+  }
+  if (!isCashFlowOrLiquidityAnswer(answer, question, questionIntent) || !containsBankSpecificLanguage(answer)) {
+    return null;
+  }
+
+  return {
+    answer: `${removeBankSpecificSentences(answer)} ${GENERAL_COMPANY_CASH_FLOW_NOTE}`.replace(/\s+/g, " ").trim(),
+    taxonomy: {
+      fallbackCategory: "sanitation_guard",
+      fallbackUserReason: "wrong_sector_wording",
+      guardLabels: ["wrong_sector_bank_language_removed"]
+    }
+  };
+}
+
+function cleanUnsupportedOperatingMarginMovement(answer: string): AnswerCleanupResult | null {
+  const match = answer.match(/営業利益率は(?:前期比|前年同期比)?で?約?([0-9.]+)%増/);
+  if (!match) {
+    return null;
+  }
+  return {
+    answer: `営業利益は前年同期比で約${match[1]}%増です。営業利益率の変化要因は、選択された資料だけでは断定しません。`,
+    taxonomy: {
+      fallbackCategory: "answer_quality_guard",
+      fallbackUserReason: "answer_too_metric_only",
+      guardLabels: ["operating_margin_growth_wording_rewritten"]
+    }
+  };
+}
+
+function isCashFlowOrLiquidityAnswer(answer: string, question: string, questionIntent?: string | null): boolean {
+  if (questionIntent === "cash_flow" || questionIntent === "liquidity_debt") {
+    return true;
+  }
+  return /(営業CF|営業キャッシュフロー|キャッシュフロー|資金繰り|流動性|cash\s*flow|liquidity)/i.test(`${question} ${answer}`);
+}
+
+function containsBankSpecificLanguage(answer: string): boolean {
+  return /\b(deposits?|loans?|loan losses|credit losses|deposit base|net interest income)\b|預金|貸出|貸倒|信用損失|純金利収入/i.test(answer);
+}
+
+function removeBankSpecificSentences(answer: string): string {
+  const parts = answer.match(/[^。！？\n]+[。！？]?|\n+/g) ?? [answer];
+  return parts.filter((part) => !containsBankSpecificLanguage(part)).join("").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function isFinancialFilingForFinalizer(filing: FilingCacheRecord): boolean {
+  const haystack = `${filing.ticker} ${filing.companyName} ${filing.sourceChunks
+    .slice(0, 20)
+    .map((chunk) => `${chunk.sourceLabel} ${chunk.text}`)
+    .join(" ")}`.toLowerCase();
+  return /\b(jpm|bac|wfc|c|gs|ms|usb|pnc|tfc|cof|axp|bank|bancorp|financial|securities|brokerage|deposit|loans?|net interest income|credit losses)\b/.test(haystack);
 }
 
 function formatUsdAmount(value: number): string {
@@ -347,9 +429,9 @@ function isLiquidityDebtQuestion(question: string, questionIntent?: string | nul
 }
 
 function cleanLiquidityDebtAnswer(answer: string): AnswerCleanupResult {
-  const hasLiquidityEvidence = /(cash|キャッシュ|現金|資金|liquidity|流動性|debt|負債|債務|借入|credit facility|信用枠|revolver|社債|maturit|満期|leverage|レバレッジ|deposit|預金|capital ratio|自己資本|operating cash flow|営業キャッシュフロー|キャッシュフロー)/i.test(answer);
+  const hasLiquidityEvidence = /(cash|キャッシュ|現金|資金|liquidity|流動性|debt|負債|債務|借入|credit facility|信用枠|revolver|社債|maturit|満期|leverage|レバレッジ|deposit|預金|capital ratio|自己資本|operating cash flow|営業CF|営業キャッシュフロー|キャッシュフロー)/i.test(answer);
   const genericRiskShape = /(主要リスク|リスク要因|規制|競争|顧客|データ|市場環境|サプライチェーン)/.test(answer) &&
-    !/(cash|キャッシュ|現金|資金|liquidity|流動性|debt|負債|債務|借入|credit facility|信用枠|maturit|満期|leverage|レバレッジ|deposit|預金|capital ratio|自己資本|operating cash flow|営業キャッシュフロー|キャッシュフロー)/i.test(answer);
+    !/(cash|キャッシュ|現金|資金|liquidity|流動性|debt|負債|債務|借入|credit facility|信用枠|maturit|満期|leverage|レバレッジ|deposit|預金|capital ratio|自己資本|operating cash flow|営業CF|営業キャッシュフロー|キャッシュフロー)/i.test(answer);
   const riskSummaryLead = /^主要リスク/.test(answer.trim()) &&
     /(規制|競争|顧客|データ|市場環境|サプライチェーン|リスク要因)/.test(answer) &&
     !/(現金|借入残高|負債残高|満期スケジュール|借入枠|信用枠|キャッシュフロー計算書|営業キャッシュフロー|預金|自己資本比率)/.test(answer);
@@ -569,7 +651,7 @@ function hasForbiddenCurrencyUnit(text: string): boolean {
 
 function hasMalformedCurrencyForTaxonomy(text: string): boolean {
   return hasForbiddenCurrencyUnit(text) ||
-    /(?:百万\s*USD|億\s*USD|億USD|千\s*USD|千USD|[0-9]{1,3}(?:,[0-9]{3})+\s*USD|[0-9]+,[0-9]+億ドル|前年同[0-9.,?，]+)/.test(text);
+    /(?:百万\s*USD|億\s*USD|億USD|千\s*USD|千USD|[0-9]{1,3}(?:,[0-9]{3})+\s*USD|[0-9]+,[0-9]+億ドル|[0-9]+(?:,[0-9]{1,2})+\.[0-9]+億ドル|前年同[0-9.,?，]+)/.test(text);
 }
 
 function classifyFallbackTaxonomy({
@@ -780,7 +862,9 @@ function cleanBannedFinalAnswer(answer: string, questionIntent?: string | null):
     .replace(/本文全体と数字を並べると見えてきます。?\s*/g, "")
     .replace(/本文の要因説明と並べると判断しやすくなります。?\s*/g, "")
     .replace(/価格、数量、需要、コスト、mixを見るべきです。?\s*/g, "")
-    .replace(/利益の動きは、この説明と費用・評価損益・税金の数字を並べると見えてきます。?/g, "利益の動きは、費用・評価損益・税金の内訳確認が必要です。");
+    .replace(/利益の動きは、この説明と費用・評価損益・税金の数字を並べると見えてきます。?/g, "利益の動きは、費用・評価損益・税金の内訳確認が必要です。")
+    .replace(/(^|[。！？\s])買いです。?/g, "$1投資判断や株価の断定はしません。")
+    .replace(/(?:売るべき|買うべき|投資推奨|目標株価|株価予想|(?:割安|割高)(?:です|だ|と断定|と判断))。?/g, "投資判断や株価の断定はしません。");
 
   if (/この資料の範囲では確認できません/.test(cleaned)) {
     const replacement = questionIntent === "liquidity_debt"

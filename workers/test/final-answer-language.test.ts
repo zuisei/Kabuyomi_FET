@@ -990,9 +990,248 @@ describe("Japanese-only final answer guard", () => {
 
     expect(response.answer).toBe(answer);
   });
+
+  it("removes bank-specific cash-flow wording from non-bank answers", async () => {
+    const filing = makeFiling({ ticker: "AAPL", companyName: "Apple Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "営業CFが減った理由は？",
+      response: {
+        answer: "営業CFは売上高ではなく、運転資本、貸出・預金、信用損失、deposit baseの増減にも大きく振れます。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "deterministic",
+      debug: {
+        questionIntent: "cash_flow",
+        responsePath: "deterministic",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: false,
+        geminiSucceeded: false,
+        schemaValid: true
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("営業CFは、運転資本");
+    expect(response.answer).toContain("キャッシュフロー計算書");
+    expect(response.answer).not.toMatch(/貸出|預金|信用損失|deposit base/i);
+    expect(response.debug?.fallbackCategory).toBe("sanitation_guard");
+    expect(response.debug?.fallbackUserReason).toBe("wrong_sector_wording");
+  });
+
+  it("keeps bank-specific cash-flow wording for financial filings", async () => {
+    const filing = makeFiling({ ticker: "JPM", companyName: "JPMorgan Chase & Co." });
+    const answer = "金融機関の営業CFは、貸出・預金や信用損失の増減にも大きく振れます。";
+    const response = await finalizeChatResponse({
+      filing,
+      question: "営業CFはどう見る？",
+      response: {
+        answer,
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "deterministic",
+      debug: {
+        questionIntent: "cash_flow",
+        responsePath: "deterministic",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: false,
+        geminiSucceeded: false,
+        schemaValid: true
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toBe(answer);
+    expect(response.answer).toContain("貸出・預金");
+    expect(response.answer).toContain("信用損失");
+  });
+
+  it("guards malformed comma-decimal currency strings", async () => {
+    const filing = makeFiling({ ticker: "AAPL", companyName: "Apple Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "売上高はどうだった？",
+      response: {
+        answer: "売上高は143,7.6億ドルで、前年同期比15.7%増です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "revenue_snapshot",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("売上高の数値表示");
+    expect(response.answer).not.toContain("143,7.6億ドル");
+    expect(response.answer).not.toContain("143.7.6億ドル");
+    expect(response.debug?.fallbackCategory).toBe("sanitation_guard");
+    expect(response.debug?.fallbackUserReason).toBe("malformed_currency_detected");
+  });
+
+  it("removes minor English and Chinese-looking leakage from final answers", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "前年同期比は？",
+      response: {
+        answer: "前年同period比では影響は較為小さいです。debug fallback schemaも表示しません。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "revenue_snapshot",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("前年同期比");
+    expect(response.answer).toContain("比較的小さい");
+    expect(response.answer).toContain("診断");
+    expect(response.answer).toContain("代替回答");
+    expect(response.answer).toContain("形式");
+    expect(response.answer).not.toContain("period");
+    expect(response.answer).not.toContain("較為小さい");
+    expect(response.answer).not.toContain("debug");
+    expect(response.answer).not.toContain("fallback");
+    expect(response.answer).not.toContain("schema");
+  });
+
+  it("rewrites unsupported operating-margin growth wording conservatively", async () => {
+    const filing = makeFiling({ ticker: "WMT", companyName: "Walmart Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "営業利益率は改善した？",
+      response: {
+        answer: "営業利益率は前年同期比で約1.6%増です。eコマース改善が主因です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "margin_snapshot",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("営業利益は前年同期比で約1.6%増");
+    expect(response.answer).toContain("営業利益率の変化要因は、選択された資料だけでは断定しません");
+    expect(response.answer).not.toContain("営業利益率は前年同期比で約1.6%増");
+    expect(response.debug?.fallbackCategory).toBe("answer_quality_guard");
+  });
+
+  it("keeps investment-advice phrases blocked in final answers", async () => {
+    const filing = makeFiling({ ticker: "AAPL", companyName: "Apple Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "この株は買うべき？",
+      response: {
+        answer: "業績が強いので買うべきです。目標株価は200ドルで、割安です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "investment_view",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("投資判断や株価の断定はしません");
+    expect(response.answer).not.toMatch(/買うべき|目標株価|割安です/);
+  });
+
+  it("does not treat buyback wording as investment advice", async () => {
+    const filing = makeFiling({ ticker: "AAPL", companyName: "Apple Inc." });
+    const answer = "資本配分では、自社株買いです。投資判断の推奨ではありません。";
+    const response = await finalizeChatResponse({
+      filing,
+      question: "資本配分は？",
+      response: {
+        answer,
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "capital_allocation",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toBe(answer);
+    expect(response.debug?.fallbackCategory).toBe("none");
+  });
 });
 
-function makeFiling(): FilingCacheRecord {
+function makeFiling(overrides: Partial<Pick<FilingCacheRecord, "ticker" | "companyName">> = {}): FilingCacheRecord {
   const chunk: SourceChunkRecord = {
     sourceId: "S1",
     sectionType: "md_a",
@@ -1005,8 +1244,8 @@ function makeFiling(): FilingCacheRecord {
   };
   return {
     filingKey: "v1:test",
-    ticker: "MS",
-    companyName: "Morgan Stanley",
+    ticker: overrides.ticker ?? "MS",
+    companyName: overrides.companyName ?? "Morgan Stanley",
     cik: "0000000000",
     formType: "10-K",
     filedAt: "2026-01-01",
