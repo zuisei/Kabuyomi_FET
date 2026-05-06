@@ -820,11 +820,91 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).toContain("601.0億ドル");
     expect(response.answer).toContain("3.8億ドル");
     expect(response.answer).toContain("前年同期の比較値");
-    expect(response.debug?.fallbackCategory).toBe("sanitation_guard");
-    expect(response.debug?.fallbackUserReason).toBe("malformed_currency_detected");
+    expect(response.debug?.fallbackCategory).not.toBe("sanitation_guard");
+    expect(response.debug?.fallbackUserReason).not.toBe("malformed_currency_detected");
     expect(response.answer).not.toContain("601,0億ドル");
     expect(response.answer).not.toContain("379,600,000 USD");
     expect(response.answer).not.toContain("前年同468,?");
+  });
+
+  it("normalizes mixed CJK USD units without emitting malformed currency labels", async () => {
+    const filing = makeFiling({ ticker: "JPM", companyName: "JPMorgan Chase & Co." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "売上高 1,824억4700万 USD、総売上高は 7131.63 亿 USD、WMT売上高7131.63亿美元、比較値680.985亿美元、2025年売上高67.589十億 USD、7.9十億ドルの影響、純利益は57億ドルです。2026年第1四半期の在庫増加が1兆円超の規模と seasonality に依存します。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("1824.5億ドル");
+    expect(response.answer).toContain("7131.6億ドル");
+    expect(response.answer).toContain("681.0億ドル");
+    expect(response.answer).toContain("675.9億ドル");
+    expect(response.answer).toContain("79.0億ドル");
+    expect(response.answer).toContain("金額規模");
+    expect(response.answer).toContain("季節性");
+    expect(response.answer).not.toContain("억");
+    expect(response.answer).not.toContain("亿");
+    expect(response.answer).not.toContain("美元");
+    expect(response.answer).not.toContain("十億 USD");
+    expect(response.answer).not.toContain("十億ドル");
+    expect(response.answer).not.toContain("兆円");
+    expect(response.debug?.fallbackCategory).not.toBe("sanitation_guard");
+    expect(response.debug?.fallbackUserReason).not.toBe("malformed_currency_detected");
+    expect(response.debug?.guardLabels).not.toContain("malformed_currency_detected");
+  });
+
+  it("suppresses stale malformed currency labels when the final visible answer is clean", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "2025年の売上高は675.9億ドル、前年同期比4.3%増。機械ディーラー在庫が2026年第一四半期に1.0億 USD超増加する見通しです。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("1.0億ドル");
+    expect(response.debug?.fallbackCategory).toBe("none");
+    expect(response.debug?.fallbackUserReason).toBe("none");
+    expect(response.debug?.guardLabels).not.toContain("malformed_currency_detected");
   });
 
   it("removes raw XBRL tags and mixed driver wording from final answers", async () => {

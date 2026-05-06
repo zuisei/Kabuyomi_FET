@@ -133,6 +133,7 @@ export async function finalizeChatResponse({
     finalAnswerSafe,
     languageLabels: finalAnswerLanguageLabels
   });
+  const finalFallbackTaxonomy = suppressInvisibleMalformedCurrencyTaxonomy(fallbackTaxonomy, sanitizedLanguageSafeAnswer);
 
   return attachChatDebug(
     {
@@ -144,11 +145,11 @@ export async function finalizeChatResponse({
       ...debug,
       responsePath: finalResponsePath,
       fallbackReason: finalAnswerSafe ? debug.fallbackReason : debug.fallbackReason ?? "low_quality_answer",
-      fallbackCategory: fallbackTaxonomy.fallbackCategory,
-      fallbackUserReason: fallbackTaxonomy.fallbackUserReason,
-      missingEvidence: fallbackTaxonomy.missingEvidence ?? [],
-      missingEvidenceLabelsJa: fallbackTaxonomy.missingEvidenceLabelsJa ?? [],
-      guardLabels: fallbackTaxonomy.guardLabels ?? [],
+      fallbackCategory: finalFallbackTaxonomy.fallbackCategory,
+      fallbackUserReason: finalFallbackTaxonomy.fallbackUserReason,
+      missingEvidence: finalFallbackTaxonomy.missingEvidence ?? [],
+      missingEvidenceLabelsJa: finalFallbackTaxonomy.missingEvidenceLabelsJa ?? [],
+      guardLabels: finalFallbackTaxonomy.guardLabels ?? [],
       fallbackKind: responsePathFallbackButKindNone ? "unknown_fallback" : finalFallbackKind,
       fallbackKindSource: finalAnswerSafe ? debug.fallbackKindSource ?? "finalizer" : "language_guard",
       responsePathFallbackButKindNone,
@@ -212,7 +213,7 @@ function cleanAnswerForQuestion(
   if (isBusinessModelQuestion(question, questionIntent)) {
     return cleanBusinessModelAnswer(normalizedAnswer, responsePath, fallbackKind);
   }
-  if (hasMalformedCurrencyForTaxonomy(answer)) {
+  if (hasMalformedCurrencyForTaxonomy(normalizedAnswer) || hasCurrencySanitizationPlaceholder(normalizedAnswer)) {
     return {
       answer: normalizedAnswer,
       taxonomy: {
@@ -286,7 +287,32 @@ function normalizeAwkwardModelLanguage(answer: string): string {
       const value = Number.parseFloat(raw);
       return Number.isFinite(value) ? `${formatOkuDollar(value / 100_000)}億ドル` : `${raw}千ドル`;
     })
+    .replace(/([0-9]+(?:\.[0-9]+)?)\s*十億\s*(?:USD|ドル)/g, (_match, raw: string) => {
+      const value = Number.parseFloat(raw);
+      return Number.isFinite(value) ? `${formatOkuDollar(value * 10, raw.includes("."))}億ドル` : `${raw}十億ドル`;
+    })
+    .replace(/([0-9,]+)\s*억\s*([0-9,]+)\s*万\s*USD/g, (_match, okuRaw: string, manRaw: string) => {
+      const oku = Number.parseFloat(okuRaw.replace(/,/g, ""));
+      const man = Number.parseFloat(manRaw.replace(/,/g, ""));
+      return Number.isFinite(oku) && Number.isFinite(man)
+        ? `${formatOkuDollar(oku + man / 10_000, true)}億ドル`
+        : "金額";
+    })
+    .replace(/([0-9]+(?:\.[0-9]+)?)\s*[亿億]\s*USD/g, (_match, raw: string) => {
+      const value = Number.parseFloat(raw);
+      return Number.isFinite(value) ? `${formatOkuDollar(value, raw.includes("."))}億ドル` : `${raw}億ドル`;
+    })
+    .replace(/([0-9]+(?:\.[0-9]+)?)\s*[亿億]\s*美元/g, (_match, raw: string) => {
+      const value = Number.parseFloat(raw);
+      return Number.isFinite(value) ? `${formatOkuDollar(value, raw.includes("."))}億ドル` : `${raw}億ドル`;
+    })
+    .replace(/([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?)\s*美元/g, (_match, raw: string) => {
+      const value = Number.parseFloat(raw.replace(/,/g, ""));
+      return Number.isFinite(value) ? formatUsdAmount(value) : "金額";
+    })
+    .replace(/[0-9０-９.,，]+\s*兆円超?(?:の規模)?/g, "金額規模")
     .replace(/前年同[0-9.,?，]+/g, "前年同期の比較値")
+    .replace(/\bseasonality\b/gi, "季節性")
     .replace(/\bgovernment\b/gi, "政府")
     .replace(/\bacquisitions?\b/gi, "買収")
     .replace(/\brepurchase(?:d|s)?\b/gi, "買い戻し")
@@ -557,7 +583,7 @@ function cleanBusinessModelAnswer(answer: string, responsePath: ChatResponsePath
     };
   }
 
-  if (hasMalformedCurrencyForTaxonomy(answer)) {
+  if (hasMalformedCurrencyForTaxonomy(withoutMetricSnapshots) || hasCurrencySanitizationPlaceholder(withoutMetricSnapshots)) {
     return {
       answer: withoutMetricSnapshots,
       taxonomy: {
@@ -678,7 +704,31 @@ function hasForbiddenCurrencyUnit(text: string): boolean {
 
 function hasMalformedCurrencyForTaxonomy(text: string): boolean {
   return hasForbiddenCurrencyUnit(text) ||
-    /(?:百万\s*USD|億\s*USD|億USD|千\s*USD|千USD|[0-9]{1,3}(?:,[0-9]{3})+\s*USD|[0-9]+,[0-9]+億ドル|[0-9]+(?:,[0-9]{1,2})+\.[0-9]+億ドル|前年同[0-9.,?，]+)/.test(text);
+    /(?:百万\s*USD|億\s*USD|億USD|千\s*USD|千USD|[0-9]{1,3}(?:,[0-9]{3})+\s*USD|[0-9]+(?:\.[0-9]+)?\s*[亿億]?\s*美元|[0-9]+,[0-9]+億ドル|[0-9]+(?:,[0-9]{1,2})+\.[0-9]+億ドル|前年同[0-9.,?，]+)/.test(text);
+}
+
+function hasCurrencySanitizationPlaceholder(text: string): boolean {
+  return /売上高の数値表示/.test(text);
+}
+
+function suppressInvisibleMalformedCurrencyTaxonomy(
+  taxonomy: FallbackTaxonomy,
+  finalAnswer: string
+): FallbackTaxonomy {
+  if (
+    taxonomy.fallbackUserReason !== "malformed_currency_detected" ||
+    hasMalformedCurrencyForTaxonomy(finalAnswer) ||
+    hasCurrencySanitizationPlaceholder(finalAnswer)
+  ) {
+    return taxonomy;
+  }
+  return {
+    fallbackCategory: "none",
+    fallbackUserReason: "none",
+    missingEvidence: taxonomy.missingEvidence,
+    missingEvidenceLabelsJa: taxonomy.missingEvidenceLabelsJa,
+    guardLabels: (taxonomy.guardLabels ?? []).filter((label) => label !== "malformed_currency_detected")
+  };
 }
 
 function classifyFallbackTaxonomy({

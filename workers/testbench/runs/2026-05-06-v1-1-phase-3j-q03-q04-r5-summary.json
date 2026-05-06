@@ -1,0 +1,87 @@
+{
+  "rows": 10,
+  "tickers": [
+    "AAPL",
+    "JPM",
+    "XOM",
+    "CAT",
+    "WMT"
+  ],
+  "sourceIdsValidFalse": 0,
+  "rawResponsePathBreakdown": {
+    "openai": 6,
+    "fallback": 4
+  },
+  "rawFallbackTotal": 4,
+  "rawFallbackKindBreakdown": {
+    "none": 6,
+    "evidence_slot": 3,
+    "language_guard_fallback": 1
+  },
+  "rawFallbackReasonBreakdown": {
+    "low_quality_answer": 4
+  },
+  "fallbackCategoryBreakdown": {
+    "none": 4,
+    "source_insufficient": 3,
+    "sanitation_guard": 2,
+    "language_guard": 1
+  },
+  "fallbackUserReasonBreakdown": {
+    "none": 4,
+    "revenue_driver_sources_missing": 3,
+    "malformed_currency_detected": 2,
+    "raw_english_detected": 1
+  },
+  "rawGeminiApiErrorBreakdown": {},
+  "fallbackKindNoneOnFallbackRows": 0,
+  "rawEnglishInAnswer": 0,
+  "rawEnglishInDiagnostics": 1,
+  "rawEnglishSurfaced": 0,
+  "bannedFallbackPhraseHits": 0,
+  "bankTermsInNonBankSectors": 0,
+  "wrongSectorTerms": 0,
+  "infraContaminated": false,
+  "infraContaminationReasons": [],
+  "rateLimitRows": 0,
+  "rateLimitRate": 0,
+  "authErrorRows": 0,
+  "providerErrorRows": 0,
+  "networkErrorRows": 0,
+  "engineeringErrorRows": 0,
+  "qualityRows": 10,
+  "qualityRowsExcluded": 0,
+  "qualityFallbackTotal": 4,
+  "qualityFallbackRate": 0.4,
+  "qualityHardIntentFallback": 4,
+  "qualityQ03Q04Q06Fallback": 4,
+  "qualityMetricWithoutDriver": 0,
+  "qualityTemporalityNotAssessed": 0,
+  "qualityEvasiveAnswer": 0,
+  "retryAttempted": 0,
+  "retryWasted": 0,
+  "rateLimitRetrySucceeded": 0,
+  "benchmarkRateLimitRetryCount": 0,
+  "latency": {
+    "p50": 4726,
+    "p95": 7587,
+    "p99": 7587
+  },
+  "qualityLatency": {
+    "p50": 4726,
+    "p95": 7587,
+    "p99": 7587
+  },
+  "benchmarkControls": {
+    "concurrency": 1,
+    "effectiveConcurrency": 1,
+    "minDelayMsBetweenRequests": 1500,
+    "maxRetriesOnRateLimit": 2,
+    "initialRateLimitBackoffMs": 5000,
+    "maxRateLimitBackoffMs": 30000,
+    "respectRetryAfterHeader": true,
+    "jitterMs": 500,
+    "stopRunOnRateLimitThreshold": null,
+    "markInfraContaminatedOnRateLimitThreshold": null
+  }
+}
