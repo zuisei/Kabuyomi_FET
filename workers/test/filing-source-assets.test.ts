@@ -120,6 +120,34 @@ describe("revenue driver source assets", () => {
     expect(chunks.some(hasStrongRevenueDriverSource)).toBe(false);
     expect(sourceIdsAreValid(chunks)).toBe(true);
   });
+
+  it("derives margin and cost source families from profitability discussion text", () => {
+    const grossMarginSource = source(
+      "Gross margin improved because product mix shifted toward services, partially offset by higher operating expenses."
+    );
+    const costSource = source(
+      "Operating expenses increased due to higher SG&A, R&D, labor costs and restructuring charges.",
+      "Item 7"
+    );
+
+    expect(deriveSourceSectionFamily(grossMarginSource)).toBe("margin_discussion");
+    expect(deriveSourceSectionFamily(costSource)).toBe("cost_discussion");
+  });
+
+  it("derives sector-specific margin source families", () => {
+    expect(
+      deriveSourceSectionFamily(source("Provision for credit losses and noninterest expense affected segment profitability and efficiency ratio."))
+    ).toBe("bank_profitability_discussion");
+    expect(
+      deriveSourceSectionFamily(source("Refining margins and chemical margins decreased, reducing downstream earnings and operating profit."))
+    ).toBe("energy_margin_discussion");
+    expect(
+      deriveSourceSectionFamily(source("Gross margin rate increased because markdowns and shrink improved while inventory costs declined."))
+    ).toBe("retail_margin_discussion");
+    expect(
+      deriveSourceSectionFamily(source("Segment operating profit declined as price realization was offset by higher manufacturing costs."))
+    ).toBe("industrial_margin_discussion");
+  });
 });
 
 function filing(ticker: string, companyName: string): FilingReference {
@@ -155,4 +183,17 @@ function genericMda(): string {
 function sourceIdsAreValid(chunks: { sourceId: string }[]): boolean {
   const ids = chunks.map((chunk) => chunk.sourceId);
   return ids.length === new Set(ids).size && ids.every((id, index) => id === `S${index + 1}`);
+}
+
+function source(text: string, sectionTitle = "Profitability context") {
+  return {
+    sourceId: "S1",
+    sectionType: "md_a" as const,
+    sectionTitle,
+    sourceLabel: `10-K ${sectionTitle}`,
+    text,
+    startOffset: 0,
+    endOffset: text.length,
+    sortOrder: 1
+  };
 }

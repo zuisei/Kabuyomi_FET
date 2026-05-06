@@ -13,7 +13,11 @@ export function shouldLetModelTryBeforeDeterministic(
 ): boolean {
   return (
     hasConfiguredChatModel(env) &&
-    (deterministic?.strategy === "business_overview" || deterministic?.strategy === "revenue_drivers")
+    (
+      deterministic?.strategy === "business_overview" ||
+      deterministic?.strategy === "revenue_drivers" ||
+      deterministic?.strategy === "margin_snapshot"
+    )
   );
 }
 

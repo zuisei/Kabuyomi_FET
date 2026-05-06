@@ -14,14 +14,16 @@ describe("chat question intent and context packing", () => {
     expect(context.sourceChunks[0]?.text).toContain("supply chain");
   });
 
-  it("selects metrics context for margin questions", () => {
+  it("selects margin narrative before metrics for margin questions", () => {
     const filing = makeIntentFiling();
     const intent = classifyQuestionIntent("利益率はどう？");
     const context = buildChatContextPack(filing, intent);
 
     expect(intent).toBe("margin_profitability");
     expect(context.metrics.map((metric) => metric.logicalName)).toEqual(["revenue", "operatingIncome", "netIncome"]);
-    expect(context.sourceChunks.slice(0, 3).map((chunk) => chunk.sourceId)).toEqual(["S9", "S10", "S11"]);
+    expect(context.sourceChunks[0]?.sourceId).toBe("S2");
+    expect(context.sourceChunks[0]?.text).toMatch(/Gross margin|operating expenses/i);
+    expect(context.sourceChunks.map((chunk) => chunk.sourceId)).toEqual(expect.arrayContaining(["S9", "S10", "S11"]));
   });
 
   it("keeps numeric metric context for previous-filing comparison questions", () => {
@@ -597,6 +599,17 @@ function makeIntentFiling(): FilingCacheRecord {
         startOffset: 0,
         endOffset: 57,
         sortOrder: 1
+      },
+      {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Part I, Item 2",
+        sourceLabel: "10-Q Profitability context",
+        text:
+          "Gross margin improved because product mix shifted toward services, partially offset by higher operating expenses and research and development spending.",
+        startOffset: 58,
+        endOffset: 200,
+        sortOrder: 2
       },
       {
         sourceId: "S3",

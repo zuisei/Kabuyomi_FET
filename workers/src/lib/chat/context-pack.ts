@@ -286,6 +286,16 @@ function isOffIntentRiskNarrative(questionIntent: QuestionIntent, text: string):
     return isAccountingEstimateRiskDistractor(text);
   }
 
+  if (questionIntent === "margin_profitability") {
+    const haystack = text.toLowerCase();
+    const hasSpecificMarginResult =
+      /(gross margin|operating margin|profit margin|gross profit|operating income|segment operating income|segment operating profit|cost of sales|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|price realization|manufacturing cost|markdown|shrink|refining margins?|chemical margins?).{0,220}(increased|decreased|improved|declined|higher|lower|driven by|due to|reflecting|partially offset|offset by)/i.test(haystack) ||
+      /(increased|decreased|improved|declined|higher|lower|driven by|due to|reflecting|partially offset|offset by).{0,220}(gross margin|operating margin|profit margin|gross profit|operating income|segment operating income|segment operating profit|cost of sales|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|price realization|manufacturing cost|markdown|shrink|refining margins?|chemical margins?)/i.test(haystack);
+    if (hasOffIntentRiskTerms(haystack) && !hasSpecificMarginResult) {
+      return true;
+    }
+  }
+
   if (questionIntent !== "yoy_change" && questionIntent !== "mda_summary") {
     return false;
   }
