@@ -81,6 +81,8 @@ export interface QuoteTranslationPromptInput {
 export interface GeminiChatAnswer {
   answer: string;
   sourceIds: string[];
+  modelRawAnswerPreview?: string | null;
+  lowQualityReason?: string | null;
   usedRemoteModel?: boolean;
   llmUsage?: GeminiInvocationUsage[];
   modelUsage?: GeminiInvocationUsage[];
@@ -139,6 +141,7 @@ export interface ChatQualityControlDiagnostics {
   sourceGateSufficient: boolean | null;
   sourceGateMissingSourceTypes: string[];
   sourceGateFailureLabels: string[];
+  sourceGateEvidenceSlots?: Record<string, unknown>;
   sourceGateRetrievalRetryRecommended: boolean;
   retrievalRetryUsed: boolean;
   retrievalRetryOutcome: "improved" | "no_improvement" | "not_used";

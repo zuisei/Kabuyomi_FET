@@ -103,9 +103,16 @@ for (const row of rows) {
     selectedSourceLabels: payload.debug?.selectedSourceLabels ?? sourceLabels(payload.sources),
     selectedSourceTypes: payload.debug?.selectedSourceTypes ?? sourceTypes(payload.sources),
     selectedSourceSectionFamilies: payload.debug?.selectedSourceSectionFamilies ?? sourceSectionFamilies(payload.sources),
+    selectedSourceFamilies: payload.debug?.selectedSourceFamilies ?? payload.debug?.selectedSourceSectionFamilies ?? sourceSectionFamilies(payload.sources),
+    selectedSourceExcerpts: payload.debug?.selectedSourceExcerpts ?? sourceExcerpts(payload.sources, 420),
+    selectedSourceTextPreview: payload.debug?.selectedSourceTextPreview ?? sourceExcerpts(payload.sources, 320),
     tokenAttribution: buildTokenAttribution({ row, payload, conversationContext }),
     sourceIdsValid: payload.debug?.sourceIdsValid ?? null,
     answerQualityFlags: payload.debug?.answerQualityFlags ?? [],
+    sourceGateEvidenceSlots: payload.debug?.sourceGateEvidenceSlots ?? {},
+    modelRawAnswerPreview: payload.debug?.modelRawAnswerPreview ?? null,
+    finalizerGuardLabels: payload.debug?.guardLabels ?? payload.debug?.finalAnswerLanguageLabels ?? [],
+    lowQualityReason: payload.debug?.lowQualityReason ?? null,
     retryAttempted: payload.debug?.retryAttempted ?? false,
     retryAllowed: payload.debug?.retryAllowed ?? false,
     retryBlockedReason: payload.debug?.retryBlockedReason ?? null,
@@ -491,6 +498,12 @@ function sourceTypes(sources) {
 
 function sourceSectionFamilies(sources) {
   return Array.from(new Set(sourceTypes(sources).map(normalizeSectionFamily).filter(Boolean)));
+}
+
+function sourceExcerpts(sources, maxChars) {
+  return Array.isArray(sources)
+    ? sources.map((source) => String(source?.excerpt ?? "").slice(0, maxChars))
+    : [];
 }
 
 function normalizeSectionFamily(sectionType) {

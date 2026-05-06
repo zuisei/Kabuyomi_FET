@@ -442,6 +442,7 @@ function attachQualityControl(
       sourceGateSufficient: sourceGateResult.sourceGateApplied ? sourceGateResult.sourceSufficient : null,
       sourceGateMissingSourceTypes: sourceGateResult.missingSourceTypes,
       sourceGateFailureLabels: [...new Set([...sourceGateResult.failureLabels, ...evidenceSlots.failureLabels])],
+      sourceGateEvidenceSlots: summarizeEvidenceSlots(evidenceSlots),
       sourceGateRetrievalRetryRecommended: sourceGateResult.retrievalRetryRecommended,
       retrievalRetryUsed: options.retrievalRetryUsed,
       retrievalRetryOutcome: options.retrievalRetryOutcome,
@@ -453,6 +454,27 @@ function attachQualityControl(
       genericFallbackPhraseDetected: options.genericFallbackPhraseDetected,
       ...hardRetrievalDiagnostics
     }
+  };
+}
+
+function summarizeEvidenceSlots(evidenceSlots: EvidenceSlots): Record<string, unknown> {
+  return {
+    confirmedMetricMovement: evidenceSlots.confirmedMetricMovement ?? null,
+    companyExplainedDrivers: evidenceSlots.companyExplainedDrivers.map((driver) => ({
+      category: driver.category,
+      driver: driver.driver.slice(0, 220),
+      sourceIds: driver.sourceIds,
+      confidence: driver.confidence
+    })),
+    segmentOrBusinessSignals: evidenceSlots.segmentOrBusinessSignals.map((signal) => ({
+      fact: signal.fact.slice(0, 220),
+      sourceIds: signal.sourceIds,
+      confidence: signal.confidence
+    })),
+    marginDriverCount: evidenceSlots.marginDrivers.length,
+    unknowns: evidenceSlots.unknowns,
+    sourceLimitations: evidenceSlots.sourceLimitations,
+    failureLabels: evidenceSlots.failureLabels
   };
 }
 

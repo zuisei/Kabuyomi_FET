@@ -1,6 +1,6 @@
 import type { Env } from "../../../../env";
 import { logEvent } from "../../../../lib/logging";
-import { polishChatAnswerForQuestion, shouldRecoverLowQualityChatAnswer } from "../../../gemini/chat-quality";
+import { classifyLowQualityChatAnswer, polishChatAnswerForQuestion } from "../../../gemini/chat-quality";
 import { localChatFallback, recoverBroaderFallbackIfNeeded } from "../../../gemini/fallback";
 import {
   normalizeChatResponse,
@@ -88,14 +88,18 @@ export async function generateOpenAIChatAnswer(env: Env, input: ChatPromptInput)
     schemaValid: true
   }), recoveredWithoutUsage.usedRemoteModel === true);
 
-  if (shouldRecoverLowQualityChatAnswer(input, recovered.answer, recovered.sourceIds)) {
+  const lowQualityReason = classifyLowQualityChatAnswer(input, recovered.answer, recovered.sourceIds);
+  if (lowQualityReason) {
     logEvent("openai_fallback_used", { kind: "chat", reason: "low_quality_answer" });
     return attachProviderMeta(attachChatDecisionMeta(attachLlmUsage(localChatFallback(input), invocation.usage), {
       geminiCalled: true,
       geminiSucceeded: true,
       fallbackReason: "low_quality_answer",
       schemaValid: true
-    }), false);
+    }), false, {
+      modelRawAnswerPreview: recovered.answer.slice(0, 500),
+      lowQualityReason
+    });
   }
 
   return recovered;
@@ -122,9 +126,14 @@ function attachChatDecisionMeta(
   };
 }
 
-function attachProviderMeta(answer: GeminiChatAnswer, usedRemoteModel: boolean): GeminiChatAnswer {
+function attachProviderMeta(
+  answer: GeminiChatAnswer,
+  usedRemoteModel: boolean,
+  diagnostics: Pick<GeminiChatAnswer, "modelRawAnswerPreview" | "lowQualityReason"> = {}
+): GeminiChatAnswer {
   return {
     ...answer,
+    ...diagnostics,
     modelProvider: "openai",
     modelName: usedRemoteModel ? answer.modelName ?? answer.llmUsage?.[0]?.model ?? null : answer.modelName ?? null
   };

@@ -97,6 +97,7 @@ export interface ChatResponseDebug {
   sourceGateSufficient?: boolean | null;
   sourceGateMissingSourceTypes?: string[];
   sourceGateFailureLabels?: string[];
+  sourceGateEvidenceSlots?: Record<string, unknown>;
   sourceGateRetrievalRetryRecommended?: boolean;
   retrievalRetryUsed?: boolean;
   retrievalRetryOutcome?: "improved" | "no_improvement" | "not_used";
@@ -164,6 +165,11 @@ export interface ChatResponseDebug {
   selectedSourceLabels?: string[];
   selectedSourceTypes?: string[];
   selectedSourceSectionFamilies?: string[];
+  selectedSourceFamilies?: string[];
+  selectedSourceExcerpts?: string[];
+  selectedSourceTextPreview?: string[];
+  modelRawAnswerPreview?: string | null;
+  lowQualityReason?: string | null;
   answerQualityFlags?: string[];
   totalPipelineMs?: number;
   historicalLookupMs?: number;

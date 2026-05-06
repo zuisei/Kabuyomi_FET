@@ -15,7 +15,11 @@ export function buildContextDebugFields(contextPack: ChatContextPack): Pick<
   | "selectedSourceLabels"
   | "selectedSourceTypes"
   | "selectedSourceSectionFamilies"
+  | "selectedSourceFamilies"
+  | "selectedSourceExcerpts"
+  | "selectedSourceTextPreview"
 > {
+  const selectedFamilies = selectedSourceSectionFamilies(contextPack.sourceChunks);
   return {
     contextTokenBudget: contextPack.contextTokenBudget,
     selectedSourceCount: contextPack.selectedSourceCount,
@@ -25,7 +29,10 @@ export function buildContextDebugFields(contextPack: ChatContextPack): Pick<
     selectedSourceIds: contextPack.sourceChunks.map((source) => source.sourceId),
     selectedSourceLabels: contextPack.sourceChunks.map((source) => source.sourceLabel),
     selectedSourceTypes: selectedSourceTypes(contextPack.sourceChunks),
-    selectedSourceSectionFamilies: selectedSourceSectionFamilies(contextPack.sourceChunks)
+    selectedSourceSectionFamilies: selectedFamilies,
+    selectedSourceFamilies: selectedFamilies,
+    selectedSourceExcerpts: contextPack.sourceChunks.map((source) => source.text.slice(0, 420)),
+    selectedSourceTextPreview: contextPack.sourceChunks.map((source) => source.text.slice(0, 320))
   };
 }
 
@@ -42,6 +49,7 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
   | "sourceGateSufficient"
   | "sourceGateMissingSourceTypes"
   | "sourceGateFailureLabels"
+  | "sourceGateEvidenceSlots"
   | "sourceGateRetrievalRetryRecommended"
   | "retrievalRetryUsed"
   | "retrievalRetryOutcome"
@@ -103,6 +111,8 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
   | "completionTokenCount"
   | "totalTokenCount"
   | "modelCallLatencyMs"
+  | "modelRawAnswerPreview"
+  | "lowQualityReason"
 > {
   const diagnostics = modelResponse.retryDiagnostics;
   const qualityControl = modelResponse.qualityControl;
@@ -121,6 +131,7 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
     sourceGateSufficient: qualityControl?.sourceGateSufficient ?? null,
     sourceGateMissingSourceTypes: qualityControl?.sourceGateMissingSourceTypes ?? [],
     sourceGateFailureLabels: qualityControl?.sourceGateFailureLabels ?? [],
+    sourceGateEvidenceSlots: qualityControl?.sourceGateEvidenceSlots ?? {},
     sourceGateRetrievalRetryRecommended: qualityControl?.sourceGateRetrievalRetryRecommended ?? false,
     retrievalRetryUsed: qualityControl?.retrievalRetryUsed ?? false,
     retrievalRetryOutcome: qualityControl?.retrievalRetryOutcome ?? "not_used",
@@ -181,7 +192,9 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
     promptTokenCount: usage.promptTokenCount,
     completionTokenCount: usage.completionTokenCount,
     totalTokenCount: usage.totalTokenCount,
-    modelCallLatencyMs: usage.modelCallLatencyMs
+    modelCallLatencyMs: usage.modelCallLatencyMs,
+    modelRawAnswerPreview: modelResponse.modelRawAnswerPreview ?? null,
+    lowQualityReason: modelResponse.lowQualityReason ?? null
   };
 }
 
@@ -204,6 +217,9 @@ export function buildAnswerQualityFlags(
   }
   if (debug?.fallbackReason) {
     flags.add(`fallback:${debug.fallbackReason}`);
+  }
+  if (debug?.lowQualityReason) {
+    flags.add(`low_quality:${debug.lowQualityReason}`);
   }
   if (debug?.sourceIdsValid === false) {
     flags.add("invalid_source_ids");
@@ -350,6 +366,11 @@ export function buildChatQualityPipelinePayload({
     selectedSourceLabels: answer.debug?.selectedSourceLabels ?? answer.sources.map((source) => source.sourceLabel),
     selectedSourceTypes: answer.debug?.selectedSourceTypes ?? answer.sources.map((source) => source.sectionType),
     selectedSourceSectionFamilies: answer.debug?.selectedSourceSectionFamilies ?? [],
+    selectedSourceFamilies: answer.debug?.selectedSourceFamilies ?? answer.debug?.selectedSourceSectionFamilies ?? [],
+    selectedSourceExcerpts: answer.debug?.selectedSourceExcerpts ?? answer.sources.map((source) => source.excerpt).filter(Boolean),
+    selectedSourceTextPreview: answer.debug?.selectedSourceTextPreview ?? answer.sources.map((source) => source.excerpt).filter(Boolean),
+    modelRawAnswerPreview: answer.debug?.modelRawAnswerPreview ?? null,
+    lowQualityReason: answer.debug?.lowQualityReason ?? null,
     answerQualityFlags,
     sourceIdsValid: answer.debug?.sourceIdsValid ?? null,
     geminiCalled: answer.debug?.geminiCalled ?? false,
@@ -368,6 +389,7 @@ export function buildChatQualityPipelinePayload({
     sourceGateSufficient: answer.debug?.sourceGateSufficient ?? null,
     sourceGateMissingSourceTypes: answer.debug?.sourceGateMissingSourceTypes ?? [],
     sourceGateFailureLabels: answer.debug?.sourceGateFailureLabels ?? [],
+    sourceGateEvidenceSlots: answer.debug?.sourceGateEvidenceSlots ?? {},
     sourceGateRetrievalRetryRecommended: answer.debug?.sourceGateRetrievalRetryRecommended ?? false,
     retrievalRetryUsed: answer.debug?.retrievalRetryUsed ?? false,
     retrievalRetryOutcome: answer.debug?.retrievalRetryOutcome ?? "not_used",

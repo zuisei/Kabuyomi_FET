@@ -9,6 +9,7 @@ import {
   resolveChatResponsePath,
   selectedResponseSourceCharCount
 } from "../src/lib/chat/diagnostics";
+import { classifyLowQualityChatAnswer } from "../src/clients/gemini/chat-quality";
 import type { ChatContextPack } from "../src/lib/chat/context-pack";
 import type { ChatResponsePayload } from "../src/lib/chat/grounding";
 
@@ -67,6 +68,12 @@ describe("chat diagnostics helpers", () => {
         selectedSourceLabels: ["10-Q Part I Item 2", "10-Q XBRL 売上高"],
         selectedSourceTypes: ["md_a", "xbrl_metric"],
         selectedSourceSectionFamilies: ["mda", "xbrl_metric"],
+        selectedSourceFamilies: ["mda", "xbrl_metric"],
+        selectedSourceExcerpts: ["source preview"],
+        selectedSourceTextPreview: ["short source preview"],
+        sourceGateEvidenceSlots: { companyExplainedDrivers: [] },
+        modelRawAnswerPreview: "raw model answer",
+        lowQualityReason: "revenue_driver_declined_despite_context",
         geminiCalled: true,
         geminiSucceeded: true,
         schemaValid: true,
@@ -108,7 +115,13 @@ describe("chat diagnostics helpers", () => {
       selectedSourceLabels: ["10-Q Part I Item 2", "10-Q XBRL 売上高"],
       selectedSourceTypes: ["md_a", "xbrl_metric"],
       selectedSourceSectionFamilies: ["mda", "xbrl_metric"],
-      answerQualityFlags: ["context_rewritten", "fallback_path", "fallback:weak_grounding", "invalid_source_ids", "model_retry_used", "fallback_kind_missing"],
+      selectedSourceFamilies: ["mda", "xbrl_metric"],
+      selectedSourceExcerpts: ["source preview"],
+      selectedSourceTextPreview: ["short source preview"],
+      sourceGateEvidenceSlots: { companyExplainedDrivers: [] },
+      modelRawAnswerPreview: "raw model answer",
+      lowQualityReason: "revenue_driver_declined_despite_context",
+      answerQualityFlags: ["context_rewritten", "fallback_path", "fallback:weak_grounding", "low_quality:revenue_driver_declined_despite_context", "invalid_source_ids", "model_retry_used", "fallback_kind_missing"],
       sourceIdsValid: false,
       geminiCalled: true,
       geminiSucceeded: true,
@@ -175,7 +188,10 @@ describe("chat diagnostics helpers", () => {
       selectedSourceIds: ["S1", "S2"],
       selectedSourceLabels: ["10-Q Part I Item 2", "10-Q XBRL 売上高"],
       selectedSourceTypes: ["md_a", "xbrl_metric"],
-      selectedSourceSectionFamilies: ["mda", "xbrl_metric"]
+      selectedSourceSectionFamilies: ["mda", "xbrl_metric"],
+      selectedSourceFamilies: ["mda", "xbrl_metric"],
+      selectedSourceExcerpts: ["source", "metric"],
+      selectedSourceTextPreview: ["source", "metric"]
     });
   });
 
@@ -228,6 +244,38 @@ describe("chat diagnostics helpers", () => {
       "retry_wasted",
       "retry_blocked:hard_intent_retry_disabled"
     ]);
+  });
+
+  it("classifies revenue-driver low-quality refusals without changing the guard outcome", () => {
+    const filing = makeFiling();
+    filing.sourceChunks = [
+      {
+        sourceId: "S1",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Segment and revenue context",
+        text: "Comparable sales increased and eCommerce sales contributed to sales growth.",
+        startOffset: 0,
+        endOffset: 75,
+        sortOrder: 1
+      }
+    ];
+
+    expect(
+      classifyLowQualityChatAnswer(
+        {
+          question: "売上成長の主な要因は？",
+          filing,
+          contextPack: {
+            ...makeContextPack(),
+            questionIntent: "yoy_change",
+            sourceChunks: filing.sourceChunks
+          }
+        },
+        "売上高は増加しましたが、具体的な売上成長の要因は本文で説明されていません。",
+        ["S1"]
+      )
+    ).toBe("revenue_driver_declined_despite_context");
   });
 });
 
