@@ -8,7 +8,7 @@ Kabuyomi is an iOS + Cloudflare Workers app for reading SEC filings in Japanese 
 - `workers/`: Cloudflare Workers API, Durable Objects, chat orchestration, quota, and filing history pipeline
 - `sec-fetcher/`: SEC submissions and filing fetcher used by Workers
 - `legal-site/`: Cloudflare Pages-ready static legal pages for App Store metadata and public legal links
-- `docs/`: product specs, as-built notes, and implementation handoff documents
+- `docs/`: organized release, legal, quality, AdMob, and historical documentation
 - `artifacts/`: screenshot dumps and exported UI archives
 
 ## Current Product Shape
@@ -160,9 +160,12 @@ It also validates the current chat metadata contract: `responsePath` must be pre
 
 ## Historical Docs
 
-- Older specs and handoffs under `docs/` are reference-only. Some still describe Home/Tab roots, monetization-forward work, or pre-slice quota language.
-- `docs/current_shipping_truth.md` is the shared shipping snapshot; `CURRENT_SLICE.md` is working-slice context and may be more transient.
-- For the tracked repository, use `docs/testflight_readiness_checklist.md` and the current code as the current-behavior reference.
+- Start from `docs/INDEX.md` for the maintained documentation map.
+- Current v1 release truth lives at `docs/release/RELEASE_TRUTH.md`.
+- Current shipping snapshot lives at `docs/release/CURRENT_SHIPPING_TRUTH.md`.
+- App Review notes live at `docs/release/APP_STORE_SUBMISSION_NOTES.md`.
+- TestFlight readiness notes live at `docs/release/TESTFLIGHT_READINESS_CHECKLIST.md`.
+- Older specs and handoffs under `docs/archive/` are reference-only. Some still describe Home/Tab roots, subscription-era monetization, old beta quota language, or broader product plans.
 - Screenshot notes are consolidated at `artifacts/README.md` instead of keeping README files inside dated capture folders.
 
 Project docs that were previously scattered in the repository root now live under `docs/`.

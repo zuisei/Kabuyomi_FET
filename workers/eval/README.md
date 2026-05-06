@@ -136,7 +136,7 @@ npm run eval:chat:pilot
 The current quality contract is documented in:
 
 ```text
-../../docs/chat_quality_contract.md
+../../docs/quality/chat_quality_contract.md
 ```
 
 Use the local test console for quick manual checks:

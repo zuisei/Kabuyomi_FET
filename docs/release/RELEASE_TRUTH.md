@@ -55,7 +55,7 @@ These are v1.1+ or later items unless a new release truth document explicitly ch
 - Duplicate SSV transaction callbacks are success/no-op and must not double grant.
 - Ad credit expires 30 days after grant and must be disclosed in user-facing copy when the UI is enabled.
 - Paid credits remain separate and do not expire.
-- Real production/TestFlight Google SSV evidence must be recorded in `docs/rewarded_admob_credits_runbook.md` before rewarded credits can be enabled in a submitted build.
+- Real production/TestFlight Google SSV evidence must be recorded in `docs/admob/rewarded_admob_credits_runbook.md` before rewarded credits can be enabled in a submitted build.
 
 ## Legal / Review Requirements
 

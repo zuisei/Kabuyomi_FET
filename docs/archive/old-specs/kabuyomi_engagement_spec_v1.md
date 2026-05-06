@@ -1,5 +1,7 @@
 # Kabuyomi プロダクト改善仕様書 v1
 
+> Historical / stale document. Not current v1 release truth. See `docs/release/RELEASE_TRUTH.md`.
+
 ## 目的
 Kabuyomi の現状の弱さは、UI の細部ではなく、**プロダクトのループが弱い**ことにある。
 

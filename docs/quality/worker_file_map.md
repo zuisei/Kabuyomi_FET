@@ -138,7 +138,7 @@ Kabuyomi Worker のファイルが増えてきたため、まず「どのファ�
 6. `clients/gemini/fallback.ts`
 7. `lib/chat/grounding.ts`
 
-`routes/chat.ts` の将来整理ポイントは `docs/chat_route_notes.md` を参照。
+`routes/chat.ts` の将来整理ポイントは `docs/quality/chat_route_notes.md` を参照。
 
 ### 会社ページ / filing 準備が変
 

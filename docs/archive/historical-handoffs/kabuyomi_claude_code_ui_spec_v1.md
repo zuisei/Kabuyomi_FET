@@ -1,5 +1,7 @@
 # Kabuyomi UI Spec For Claude Code
 
+> Historical / stale document. Not current v1 release truth. See `docs/release/RELEASE_TRUTH.md`.
+
 ## Purpose
 
 Kabuyomi should feel less like "a nice chat app" and more like "an app that makes it instantly obvious what an investor should ask about this filing right now."

@@ -101,7 +101,7 @@ workers/src/routes/chat.ts
 workers/src/lib/chat/*
 workers/src/clients/gemini/*
 workers/test/*
-docs/chat_route_notes.md
+docs/quality/chat_route_notes.md
 ```
 
 やること:
@@ -132,7 +132,7 @@ local Web UI の Question Set / Compare Log
 実装メモ:
 
 ```text
-docs/chat_quality_contract.md を追加済み。
+docs/quality/chat_quality_contract.md を追加済み。
 workers/eval/chat-quality-v1.jsonl を一次評価セットとして固定。
 workers/scripts/validate-chat-run.mjs で eval run の JSONL 形を検証できる。
 ```

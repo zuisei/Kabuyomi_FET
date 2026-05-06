@@ -1,5 +1,7 @@
 # Kabuyomi Project File Map
 
+> Historical / stale document. Not current v1 release truth. See `docs/release/RELEASE_TRUTH.md`.
+
 This is the plain-English map of the current project.
 
 It is meant for orientation, not as a perfect architecture spec. Generated folders, dependency folders, build output, `.DS_Store`, `.git`, `.wrangler`, `node_modules`, `dist`, `.deploy-out`, `.wrangler-dry-run`, `ios/build`, and `tmp` are intentionally excluded.

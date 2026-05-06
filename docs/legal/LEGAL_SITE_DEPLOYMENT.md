@@ -44,7 +44,7 @@ If a custom domain is adopted later, update:
 
 - `ios/Kabuyomi/Services/LegalSiteConfig.swift`
 - App Store Connect metadata
-- `docs/app_store_submission_notes.md`
+- `docs/release/APP_STORE_SUBMISSION_NOTES.md`
 - this document
 
 ## DNS Notes

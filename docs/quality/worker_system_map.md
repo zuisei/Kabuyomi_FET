@@ -268,7 +268,7 @@ SEC filing を準備する場所。重い処理が多い。
 次に必要なら、以下を別ページ化する。
 
 ```text
-docs/chat_route_notes.md
+docs/quality/chat_route_notes.md
 docs/chat_flow_map.md
 docs/filing_prep_flow_map.md
 docs/quota_credit_flow_map.md
