@@ -271,9 +271,152 @@ describe("hard-intent source gate", () => {
 
     expect(result.sourceSufficient).toBe(false);
     expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "q06_margin_context_revenue_only",
       "missing_margin_durability_context",
       "source_gate_failed"
     ]));
+  });
+
+  it("recovers Q06 gross margin and cost drivers when durability context is source-backed", () => {
+    const filing = makeFiling("AAPL", "Apple Inc.", [
+      metric("operatingIncome", 50_852_000_000, 42_832_000_000, 18.7)
+    ], [
+      metricSource("S9", "営業利益: 50852000000 USD / 比較値: 42832000000 / YoY: 18.7%"),
+      source(
+        "S1",
+        "md_a",
+        "Gross margin improved because product mix shifted toward Services, while operating expenses and R&D may continue to affect profitability in future periods."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "前問で挙げた利益率の要因（gross margin、product mix、operating expenses）は一時的ですか？",
+      previousAnswer: "利益率の要因は gross margin、product mix、operating expenses です。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    const slots = extractEvidenceSlots({ filing, sources: filing.sourceChunks, sourceGateResult: result });
+
+    expect(result.hardIntent).toBe("margin_durability_followup");
+    expect(result.followupTargetFound).toBe(true);
+    expect(result.sourceSufficient).toBe(true);
+    expect(slots.marginDrivers.length).toBeGreaterThan(0);
+    expect(result.failureLabels).not.toContain("missing_margin_driver_evidence");
+  });
+
+  it("does not recover revenue growth or eCommerce revenue as a Q06 margin driver", () => {
+    const filing = makeFiling("WMT", "Walmart Inc.", [
+      metric("operatingIncome", 29_825_000_000, 29_348_000_000, 1.6)
+    ], [
+      metricSource("S9", "営業利益: 29825000000 USD / 比較値: 29348000000 / YoY: 1.6%"),
+      source(
+        "S1",
+        "md_a",
+        "Comparable sales increased due to growth in transactions and eCommerce revenue, reflecting strong sales in grocery and health and wellness."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "前問で挙げた利益率の要因（comparable sales、eCommerce）は一時的ですか？",
+      previousAnswer: "売上成長は comparable sales と eCommerce revenue が要因です。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.followupTargetFound).toBe(false);
+    expect(result.identifiedDrivers).toHaveLength(0);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "q06_margin_context_revenue_only",
+      "margin_driver_slots_empty",
+      "source_gate_failed"
+    ]));
+  });
+
+  it("recognizes bank provision and noninterest expense as Q06 profitability evidence", () => {
+    const filing = makeFiling("JPM", "JPMorgan Chase & Co.", [
+      metric("netIncome", 57_048_000_000, 58_471_000_000, -2.4)
+    ], [
+      metricSource("S9", "純利益: 57048000000 USD / 比較値: 58471000000 / YoY: -2.4%"),
+      source(
+        "S1",
+        "md_a",
+        "Net income declined because provision for credit losses and noninterest expense increased. Deposit margin compression and lower rates may continue to pressure net interest margin."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "前問で挙げた利益率の要因（provision for credit losses、noninterest expense）は一時的ですか？",
+      previousAnswer: "利益率の要因は provision for credit losses と noninterest expense、deposit margin compression です。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers[0]?.category).toBe("bank_margin_driver");
+    expect(result.failureLabels).not.toContain("margin_driver_slots_empty");
+  });
+
+  it("recognizes retail markdown, shrink, inventory and fulfillment cost evidence", () => {
+    const filing = makeFiling("WMT", "Walmart Inc.", [
+      metric("operatingIncome", 29_825_000_000, 29_348_000_000, 1.6)
+    ], [
+      metricSource("S9", "営業利益: 29825000000 USD / 比較値: 29348000000 / YoY: 1.6%"),
+      source(
+        "S1",
+        "md_a",
+        "Gross margin rate improved because markdowns and shrink decreased, while eCommerce fulfillment costs and wage pressure may continue to affect operating expenses."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "前問で挙げた利益率の要因（markdowns、shrink、fulfillment costs）は一時的ですか？",
+      previousAnswer: "利益率の要因は markdowns、shrink、inventory、fulfillment costs です。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers[0]?.category).toBe("retail_margin_driver");
+  });
+
+  it("recognizes industrial price-cost and manufacturing cost evidence without accepting revenue-only sales volume", () => {
+    const filing = makeFiling("CAT", "Caterpillar Inc.", [
+      metric("operatingIncome", 11_151_000_000, 13_072_000_000, -14.7)
+    ], [
+      metricSource("S9", "営業利益: 11151000000 USD / 比較値: 13072000000 / YoY: -14.7%"),
+      source(
+        "S1",
+        "md_a",
+        "Segment operating profit declined because unfavorable price-cost spread and higher manufacturing costs more than offset volume leverage. Dealer inventory normalization may continue to affect cost absorption."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "前問で挙げた利益率の要因（price-cost spread、manufacturing costs）は一時的ですか？",
+      previousAnswer: "利益率の要因は price-cost spread、manufacturing costs、volume leverage です。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers[0]?.category).toBe("industrial_margin_driver");
   });
 
   it("passes Q06 with energy margin evidence tied to depreciation and upstream spending", () => {

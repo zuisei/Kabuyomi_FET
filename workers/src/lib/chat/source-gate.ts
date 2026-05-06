@@ -83,6 +83,8 @@ type MarginDurabilitySourceQuality = {
   metricOnlyContext: boolean;
   tableHeavyContext: boolean;
   marginEvidenceTooGeneric: boolean;
+  revenueOnlyContext: boolean;
+  genericIndustrialContext: boolean;
 };
 
 const EMPTY_RESULT: SourceGateResult = {
@@ -350,15 +352,15 @@ function matchedDriverCategory(
   const commonRevenue = /(increase|decrease|growth|decline|higher|lower|primarily due|driven by|attributable to|because|resulted from|net sales|revenue).{0,120}(price|volume|mix|demand|customer|product|service|segment|geographic|foreign exchange|launch)/i;
   const commonMargin = /(margin|profitability|gross profit|operating income|expense|sga|sg&a|r&d|tax|impairment|restructuring|one-time|provision|credit loss|price-cost|manufacturing cost)/i;
   const marginPatterns: Record<SourceGateSector, RegExp> = {
-    bank: /(net interest margin|provision for credit losses|noninterest expense|compensation expense|credit quality|funding costs|segment profitability|efficiency ratio)/i,
+    bank: /(net interest margin|deposit margin compression|lower rates?|rate sensitivity|provision for credit losses|credit loss expense|net charge-offs?|noninterest expense|compensation expense|credit quality|funding costs|segment profitability|efficiency ratio)/i,
     capital_markets: /(compensation expense|noninterest expense|investment banking|trading|wealth management|asset management|segment profitability|pre-tax margin)/i,
     energy: /(refining margin|chemical margin|upstream earnings|downstream earnings|upstream spending|capital expenditures?|depreciation|depletion|costs?|impairment|restructuring|segment earnings|margin)/i,
     oilfield_services: /(oilfield services margins?|drilling activity|completion activity|north america margin|international margin|segment operating income|costs?)/i,
-    industrial: /(price-cost|manufacturing cost|sga|sg&a|r&d|volume leverage|restructuring|segment operating profit|operating margin|profit margin)/i,
+    industrial: /(price-cost|manufacturing cost|cost absorption|material costs?|sga|sg&a|r&d|volume leverage|restructuring|warranty|quality costs?|segment operating profit|operating margin|profit margin)/i,
     retail: /(gross margin|inventory|markdown|shrink|wage|fulfillment cost|operating expense|membership income|advertising income|segment operating income)/i,
     consumer_staples: /(gross margin|commodity costs?|input costs?|pricing|volume|foreign exchange|advertising expense|organic sales)/i,
     auto: /(automotive gross margin|pricing|production cost|deliveries|warranty|restructuring|average selling price)/i,
-    technology: /(gross margin|product margin|services margin|operating expense|r&d|research and development|channel inventory|mix|pricing|one-time|impairment)/i,
+    technology: /(gross margin|product margin|services margin|operating expense|r&d|research and development|channel inventory|product mix|price-cost|tariff|foreign exchange|one-time|impairment)/i,
     software: /(gross margin|operating margin|sales and marketing|r&d|research and development|infrastructure costs?|usage|subscription)/i,
     semiconductor_equipment: /(gross margin|operating expenses?|backlog|orders|customer demand|china|restructuring)/i,
     healthcare_medtech: /(gross margin|procedure volume|systems placements|instruments|accessories|operating expense|installed base)/i,
@@ -369,7 +371,11 @@ function matchedDriverCategory(
     general: commonMargin
   };
   if (hardIntent === "margin_durability_followup") {
-    if (marginPatterns[sector].test(text) || (sector === "general" && commonMargin.test(text))) {
+    if (
+      !isQ06RevenueOnlyMarginContext(text, sector) &&
+      !isQ06GenericMarginContext(text, sector) &&
+      (marginPatterns[sector].test(text) || (sector === "general" && commonMargin.test(text)))
+    ) {
       return `${sector}_margin_driver`;
     }
     return null;
@@ -572,7 +578,7 @@ function hasConcretePriorDriver(previousAnswer: string, hardIntent: HardFinancia
     return false;
   }
   return hardIntent === "margin_durability_followup"
-    ? /(cost|expense|margin|provision|price|mix|volume|impairment|restructuring|費用|コスト|価格|数量|引当|減損|一時費用|sg&a|r&d)/i.test(text)
+    ? hasPriorMarginDriverTerms(text)
     : /(due to|driven by|because|price|pricing|volume|mix|segment|traffic|ticket|ecommerce|services|installed base|net interest|nii|noninterest|nir|markets revenue|investment banking|commodity|production|backlog|orders|要因|主因|価格|価格実現|数量|販売量|品目構成|セグメント|既存店|トラフィック|客数|客単価|サービス|受注|商品価格|金利収入|非金利収入)/i.test(text);
 }
 
@@ -582,9 +588,13 @@ function hasConcreteFollowupTarget(question: string, hardIntent: HardFinancialIn
     return false;
   }
   if (hardIntent === "margin_durability_followup") {
-    return /(gross margin|operating margin|margin|cost|expense|pricing|mix|volume|利益率|粗利|営業利益率|費用|コスト|価格|数量)/i.test(text);
+    return /(利益率|粗利|営業利益率|純利益率|マージン|margin|profitability)/i.test(text) && hasPriorMarginDriverTerms(text);
   }
   return /(net interest income|nii|noninterest income|noninterest revenue|nir|markets revenue|investment banking|card services|deposits?|services revenue|installed base|iphone|mac|ipad|wearables|foreign exchange|tariff|commodity|crude|natural gas|production volume|refining margin|sales volume|price realization|dealer inventor|backlog|comparable sales|transactions?|traffic|ticket|ecommerce|membership|売上高の要因（[^）]{3,})/i.test(text);
+}
+
+function hasPriorMarginDriverTerms(text: string): boolean {
+  return /(gross margin|operating margin|profit margin|net margin|margin rate|cost of sales|cost of revenue|operating expenses?|noninterest expense|compensation expense|provision for credit losses|credit loss expense|efficiency ratio|deposit margin compression|net interest margin|gross profit|operating income|segment operating profit|manufacturing costs?|cost absorption|price-cost|volume leverage|markdowns?|shrink|inventory|fulfillment costs?|labor costs?|wage|refining margins?|chemical margins?|depreciation|depletion|impairment|restructuring|sg&a|sga|r&d|research and development|粗利|販管費|営業費用|費用|コスト|引当|減損|一時費用)/i.test(text);
 }
 
 function hasDurabilityEvidence(
@@ -714,6 +724,7 @@ function analyzeMarginDurabilitySourceQuality(
     matchedDriverCategory(normalizeText(source.text), sector, "margin_durability_followup") !== null &&
     !hasQ06ConcreteMarginDriverSignal(source.text, sector)
   );
+  const revenueOnlySources = narrativeSources.filter((source) => isQ06RevenueOnlyMarginContext(source.text, sector));
 
   return {
     hasSpecificMarginDriverEvidence: specificMarginDriverSources.length > 0,
@@ -723,7 +734,11 @@ function analyzeMarginDurabilitySourceQuality(
       narrativeSources.length > 0 &&
       narrativeSources.filter(isQ06MetricOrTableHeavySource).length >= Math.ceil(narrativeSources.length / 2)
     ),
-    marginEvidenceTooGeneric: genericMarginSources.length > 0 && specificMarginDriverSources.length === 0
+    marginEvidenceTooGeneric: genericMarginSources.length > 0 && specificMarginDriverSources.length === 0,
+    revenueOnlyContext: revenueOnlySources.length > 0 && specificMarginDriverSources.length === 0,
+    genericIndustrialContext: sector === "industrial" &&
+      narrativeSources.some((source) => isQ06GenericMarginContext(source.text, sector)) &&
+      specificMarginDriverSources.length === 0
   };
 }
 
@@ -748,6 +763,12 @@ function addMarginDurabilitySourceQualityFailureLabels(
   }
   if (quality.marginEvidenceTooGeneric) {
     failureLabels.add("margin_durability_evidence_too_generic");
+  }
+  if (quality.revenueOnlyContext) {
+    failureLabels.add("q06_margin_context_revenue_only");
+  }
+  if (quality.genericIndustrialContext) {
+    failureLabels.add("q06_margin_context_generic_industrial");
   }
 }
 
@@ -779,9 +800,32 @@ function isQ06GenericMarginContext(text: string, sector: SourceGateSector): bool
   return false;
 }
 
+function isQ06RevenueOnlyMarginContext(text: string, sector: SourceGateSector): boolean {
+  const normalized = normalizeText(text);
+  const revenueOnly =
+    /(net sales|sales and revenues|revenue|comparable sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership engagement|sales volume|equipment to end users|demand|unit volumes?)/i.test(normalized) &&
+    !/(gross margin|operating margin|profit margin|gross profit|operating income|segment operating profit|cost of sales|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|credit loss expense|efficiency ratio|deposit margin compression|manufacturing costs?|cost absorption|price-cost|volume leverage|markdowns?|shrink|inventory|fulfillment costs?|labor costs?|wage|refining margins?|chemical margins?|depreciation|depletion|impairment|restructuring)/i.test(normalized);
+  if (revenueOnly) {
+    return true;
+  }
+  if (sector === "industrial" && /(sales and revenues|sales volume|price realization|equipment to end users)/i.test(normalized) &&
+    !/(margin|profit|cost|expense|price-cost|manufacturing|volume leverage|cost absorption|segment operating)/i.test(normalized)) {
+    return true;
+  }
+  if (sector === "retail" && /(comparable sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership engagement|unit volumes?)/i.test(normalized) &&
+    !/(gross margin|markdown|shrink|inventory|fuel|fulfillment|operating expense|wage|labor|advertising income|membership income|segment operating)/i.test(normalized)) {
+    return true;
+  }
+  if (sector === "bank" && /(net interest income|noninterest income|nii|nir|markets revenue|investment banking fees|asset management fees|payments fees)/i.test(normalized) &&
+    !/(net interest margin|deposit margin compression|provision|credit loss|noninterest expense|compensation expense|efficiency ratio|profitability|margin)/i.test(normalized)) {
+    return true;
+  }
+  return false;
+}
+
 function hasQ06ConcreteMarginDriverSignal(text: string, sector: SourceGateSector): boolean {
   const normalized = normalizeText(text);
-  if (isQ06MetricOrTableText(normalized) || isQ06GenericMarginContext(normalized, sector)) {
+  if (isQ06MetricOrTableText(normalized) || isQ06GenericMarginContext(normalized, sector) || isQ06RevenueOnlyMarginContext(normalized, sector)) {
     return false;
   }
   const common =
@@ -810,7 +854,7 @@ function hasQ06ConcreteMarginDriverSignal(text: string, sector: SourceGateSector
 
 function hasSpecificQ06MarginDurabilitySignal(text: string, sector: SourceGateSector): boolean {
   const normalized = normalizeText(text);
-  if (isQ06MetricOrTableText(normalized) || isQ06GenericMarginContext(normalized, sector)) {
+  if (isQ06MetricOrTableText(normalized) || isQ06GenericMarginContext(normalized, sector) || isQ06RevenueOnlyMarginContext(normalized, sector)) {
     return false;
   }
   const common =
