@@ -1,4 +1,4 @@
-import { generateQuoteTranslation } from "../clients/gemini";
+import { generateModelQuoteTranslation, isQuoteTranslationAvailable } from "../clients/llm/provider";
 import { TranslateQuoteRequestSchema } from "../lib/contracts";
 import { consumeBillableCredits, refundBillableCredits, type CreditChargeResult } from "../lib/credit-operation";
 import { logLlmUsage } from "../lib/llm-usage";
@@ -23,7 +23,7 @@ export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, en
     tooLargeMessage: "Quote translation payload is too large"
   });
 
-  if (!env.GEMINI_API_KEY) {
+  if (!isQuoteTranslationAvailable(env)) {
     return unavailable("Quote translation is temporarily disabled");
   }
 
@@ -62,11 +62,11 @@ export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, en
   }
 
   try {
-    const translation = await generateQuoteTranslation(env, payload);
+    const translation = await generateModelQuoteTranslation(env, payload);
     logLlmUsage(translation.llmUsage, {
       aiTask: "translation",
       route: "/v1/translate-quote",
-      responsePath: "gemini"
+      responsePath: translation.providerName
     });
 
     logEvent("quote_translation_request", {
@@ -74,6 +74,7 @@ export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, en
       identityKind: identity.identityKind,
       targetLanguage: payload.targetLanguage,
       inputLength: payload.text.length,
+      providerName: translation.providerName,
       latencyMs: Date.now() - startedAt
     });
 

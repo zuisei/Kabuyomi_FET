@@ -2,8 +2,10 @@ export { generateOpenAIChatAnswer } from "./client";
 export {
   DEFAULT_OPENAI_CHAT_MODEL,
   buildOpenAIChatRequest,
+  buildOpenAIQuoteTranslationRequest,
   buildOpenAIResponsesPromptRequest,
   invokeOpenAIChat,
+  invokeOpenAIQuoteTranslation,
   invokeOpenAIDashboardPrompt,
   resolveOpenAIPromptId,
   resolveOpenAIChatModel

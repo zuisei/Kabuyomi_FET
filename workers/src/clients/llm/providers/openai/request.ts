@@ -1,6 +1,6 @@
 import type { Env } from "../../../../env";
 import { logEvent } from "../../../../lib/logging";
-import { chatResponseJsonSchema } from "../../../gemini/prompts";
+import { chatResponseJsonSchema, quoteTranslationResponseJsonSchema } from "../../../gemini/prompts";
 import { buildOpenAIApiRequestError, classifyOpenAIHttpError } from "./errors";
 import { parseOpenAIChatCompletionPayload, parseOpenAIResponsesPayload } from "./response";
 import type { OpenAIChatCompletionPayload, OpenAIChatInvocationResult, OpenAIResponsesPayload } from "./types";
@@ -107,6 +107,104 @@ export async function invokeOpenAIChat(env: Env, prompt: string): Promise<OpenAI
       data: {},
       usage,
       failureReason: "json_parse_failed"
+    };
+  }
+
+  return {
+    data: parsed.data,
+    usage
+  };
+}
+
+export async function invokeOpenAIQuoteTranslation(env: Env, prompt: string): Promise<OpenAIChatInvocationResult> {
+  const model = resolveOpenAIChatModel(env);
+  const timeoutMs = resolveOpenAITimeoutMs(env);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
+  let response: Response;
+
+  try {
+    response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${env.OPENAI_API_KEY ?? ""}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(buildOpenAIQuoteTranslationRequest(model, prompt, {
+        reasoningEffort: resolveOpenAIReasoningEffort(env),
+        maxCompletionTokens: Math.min(resolveOpenAIMaxCompletionTokens(env), 700)
+      })),
+      signal: controller.signal
+    });
+  } catch (error) {
+    clearTimeout(timeout);
+    const timedOut =
+      (error instanceof Error && error.name === "AbortError") ||
+      (error instanceof DOMException && error.name === "AbortError");
+    logEvent("openai_request_failed", {
+      kind: "quote_translation",
+      model,
+      timeoutMs,
+      reason: timedOut ? "timeout" : "network_error"
+    });
+    throw buildOpenAIApiRequestError({
+      kind: timedOut ? "timeout" : "network_error",
+      model,
+      message: error instanceof Error ? error.message : "OpenAI network request failed.",
+      prompt
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    const bodyPreview = (await response.text()).slice(0, 240);
+    const classified = classifyOpenAIHttpError(response.status, bodyPreview);
+    logEvent("openai_request_failed", {
+      kind: "quote_translation",
+      model,
+      status: response.status,
+      bodyPreview,
+      errorKind: classified.kind
+    });
+    throw buildOpenAIApiRequestError({
+      kind: classified.kind,
+      status: response.status,
+      code: classified.code,
+      model,
+      message: bodyPreview || `OpenAI request failed (${response.status})`,
+      prompt
+    });
+  }
+
+  const latencyMs = Date.now() - startedAt;
+  logEvent("openai_request_succeeded", {
+    kind: "quote_translation",
+    model,
+    status: response.status,
+    latencyMs
+  });
+
+  const payload = await response.json<OpenAIChatCompletionPayload>();
+  const parsed = parseOpenAIChatCompletionPayload(payload);
+  const usage = [{
+    model,
+    promptTokenCount: payload.usage?.prompt_tokens ?? null,
+    candidatesTokenCount: payload.usage?.completion_tokens ?? null,
+    totalTokenCount: payload.usage?.total_tokens ?? null,
+    latencyMs
+  }];
+
+  if (parsed.failureReason !== undefined) {
+    logEvent("openai_invalid_response", {
+      kind: "quote_translation",
+      reason: parsed.failureReason
+    });
+    return {
+      data: {},
+      usage,
+      failureReason: parsed.failureReason
     };
   }
 
@@ -246,6 +344,35 @@ export function buildOpenAIChatRequest(
       }
     },
     max_completion_tokens: options.maxCompletionTokens ?? DEFAULT_OPENAI_MAX_COMPLETION_TOKENS
+  };
+}
+
+export function buildOpenAIQuoteTranslationRequest(
+  model: string,
+  prompt: string,
+  options: { reasoningEffort?: string; maxCompletionTokens?: number } = {}
+): Record<string, unknown> {
+  return {
+    model,
+    reasoning_effort: options.reasoningEffort ?? "minimal",
+    messages: [
+      {
+        role: "user",
+        content: prompt
+      }
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "kabuyomi_quote_translation",
+        strict: true,
+        schema: {
+          ...quoteTranslationResponseJsonSchema(),
+          additionalProperties: false
+        }
+      }
+    },
+    max_completion_tokens: options.maxCompletionTokens ?? 700
   };
 }
 

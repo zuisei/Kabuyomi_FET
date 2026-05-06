@@ -390,6 +390,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         storeUsage(usage, source: .quoteTranslation)
     }
 
+    func refreshUsageAfterQuoteTranslationFailure() async {
+        await refreshUsage()
+    }
+
     func loadSubscriptionProducts(showErrors: Bool = true) async {
         guard subscriptionProductLoadState != .loading else { return }
 

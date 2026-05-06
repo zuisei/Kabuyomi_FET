@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateModelChatAnswer, resolveLlmProvider } from "../src/clients/llm/provider";
+import {
+  generateModelChatAnswer,
+  generateModelQuoteTranslation,
+  isQuoteTranslationAvailable,
+  resolveLlmProvider
+} from "../src/clients/llm/provider";
 import {
   buildOpenAIChatRequest,
+  buildOpenAIQuoteTranslationRequest,
   buildOpenAIResponsesPromptRequest,
   classifyOpenAIError,
   classifyOpenAIHttpError,
@@ -49,6 +55,22 @@ describe("OpenAI provider config", () => {
     expect(JSON.stringify(request)).toContain("kabuyomi_chat_answer");
     expect(JSON.stringify(request)).toContain("additionalProperties");
     expect(JSON.stringify(request)).toContain("sourceIds");
+  });
+
+  it("builds a Quote Translation JSON-schema request for gpt-5-nano", () => {
+    const request = buildOpenAIQuoteTranslationRequest("gpt-5-nano", "Translate quote.");
+
+    expect(request).toMatchObject({
+      model: "gpt-5-nano",
+      reasoning_effort: "minimal",
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "kabuyomi_quote_translation",
+          strict: true
+        }
+      }
+    });
   });
 
   it("builds a Responses API request for a dashboard prompt", () => {
@@ -430,6 +452,138 @@ describe("OpenAI chat provider", () => {
     expect(response.usedRemoteModel).toBe(false);
     expect(response.answer.length).toBeGreaterThan(0);
     expect(response.geminiCalled).toBe(false);
+  });
+});
+
+describe("OpenAI quote translation provider", () => {
+  it("translates a quote through OpenAI without requiring Gemini config", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      expect(url).toBe("https://api.openai.com/v1/chat/completions");
+      const body = JSON.parse(String(init?.body));
+      expect(body.model).toBe("gpt-5-nano");
+      expect(body.response_format.json_schema.name).toBe("kabuyomi_quote_translation");
+      expect(String(body.messages[0].content)).toContain("Do not include investment advice");
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  translatedText: "売上高は前年同期比で増加しました。"
+                })
+              }
+            }
+          ],
+          usage: {
+            prompt_tokens: 42,
+            completion_tokens: 12,
+            total_tokens: 54
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(isQuoteTranslationAvailable({
+      LLM_PROVIDER: "openai",
+      OPENAI_API_KEY: "test-key"
+    } as never)).toBe(true);
+
+    const response = await generateModelQuoteTranslation(
+      {
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key",
+        OPENAI_CHAT_MODEL: "gpt-5-nano"
+      } as never,
+      {
+        text: "Revenue increased year over year.",
+        targetLanguage: "ja"
+      }
+    );
+
+    expect(response).toMatchObject({
+      translatedText: "売上高は前年同期比で増加しました。",
+      modelName: "gpt-5-nano",
+      providerName: "openai"
+    });
+    expect(response.llmUsage?.[0]).toMatchObject({
+      model: "gpt-5-nano",
+      promptTokenCount: 42,
+      candidatesTokenCount: 12,
+      totalTokenCount: 54
+    });
+  });
+
+  it("rejects non-Japanese quote translation output", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  translatedText: "Revenue increased year over year."
+                })
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    ));
+
+    await expect(generateModelQuoteTranslation(
+      {
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key"
+      } as never,
+      {
+        text: "Revenue increased year over year.",
+        targetLanguage: "ja"
+      }
+    )).rejects.toThrow("Japanese text");
+  });
+
+  it("rejects quote translations that introduce investment advice", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  translatedText: "この株は買い推奨です。"
+                })
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    ));
+
+    await expect(generateModelQuoteTranslation(
+      {
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key"
+      } as never,
+      {
+        text: "Revenue increased year over year.",
+        targetLanguage: "ja"
+      }
+    )).rejects.toThrow("investment advice");
+  });
+
+  it("treats missing Gemini config as irrelevant when OpenAI is configured", () => {
+    expect(isQuoteTranslationAvailable({
+      LLM_PROVIDER: "openai",
+      OPENAI_API_KEY: "test-key"
+    } as never)).toBe(true);
+    expect(isQuoteTranslationAvailable({
+      LLM_PROVIDER: "openai"
+    } as never)).toBe(false);
   });
 });
 

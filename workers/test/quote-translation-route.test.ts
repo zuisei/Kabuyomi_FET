@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/clients/gemini", () => ({
-  generateQuoteTranslation: vi.fn()
+vi.mock("../src/clients/llm/provider", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/clients/llm/provider")>()),
+  generateModelQuoteTranslation: vi.fn(),
+  isQuoteTranslationAvailable: vi.fn()
 }));
 
 vi.mock("../src/lib/quota", () => ({
@@ -18,12 +20,13 @@ vi.mock("../src/lib/quota", () => ({
   refundCredit: vi.fn()
 }));
 
-import { generateQuoteTranslation } from "../src/clients/gemini";
+import { generateModelQuoteTranslation, isQuoteTranslationAvailable } from "../src/clients/llm/provider";
 import { consumeCredit, InsufficientCreditsError, readQuotaIdentity, refundCredit } from "../src/lib/quota";
 import { DEFAULT_REMOTE_CONFIG } from "../src/lib/remote-config";
 import { handleTranslateQuoteRoute } from "../src/routes/translate-quote";
 
-const mockGenerateQuoteTranslation = vi.mocked(generateQuoteTranslation);
+const mockGenerateQuoteTranslation = vi.mocked(generateModelQuoteTranslation);
+const mockIsQuoteTranslationAvailable = vi.mocked(isQuoteTranslationAvailable);
 const mockConsumeCredit = vi.mocked(consumeCredit);
 const mockReadQuotaIdentity = vi.mocked(readQuotaIdentity);
 const mockRefundCredit = vi.mocked(refundCredit);
@@ -31,6 +34,7 @@ const mockRefundCredit = vi.mocked(refundCredit);
 describe("handleTranslateQuoteRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsQuoteTranslationAvailable.mockReturnValue(true);
     mockReadQuotaIdentity.mockResolvedValue({
       quotaSubject: "free:local:device-123",
       plan: "free",
@@ -63,7 +67,8 @@ describe("handleTranslateQuoteRoute", () => {
   it("returns a translated quote with the dedicated translation model name", async () => {
     mockGenerateQuoteTranslation.mockResolvedValue({
       translatedText: "売上高は前年同期比で増加しました。",
-      modelName: "gemma-4-26b-a4b-it"
+      modelName: "gpt-5-nano",
+      providerName: "openai"
     });
 
     const response = await handleTranslateQuoteRoute({
@@ -81,7 +86,8 @@ describe("handleTranslateQuoteRoute", () => {
       }),
       url: new URL("https://kabuyomi.test/v1/translate-quote"),
       env: {
-        GEMINI_API_KEY: "test-key"
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key"
       } as never,
       config: DEFAULT_REMOTE_CONFIG,
       ctx: {} as never
@@ -90,7 +96,7 @@ describe("handleTranslateQuoteRoute", () => {
     expect(response?.status).toBe(200);
     await expect(response?.json()).resolves.toMatchObject({
       translatedText: "売上高は前年同期比で増加しました。",
-      modelName: "gemma-4-26b-a4b-it",
+      modelName: "gpt-5-nano",
       creditsCharged: 1,
       creditsRemaining: 29
     });
@@ -131,7 +137,8 @@ describe("handleTranslateQuoteRoute", () => {
         }),
         url: new URL("https://kabuyomi.test/v1/translate-quote"),
         env: {
-          GEMINI_API_KEY: "test-key"
+          LLM_PROVIDER: "openai",
+          OPENAI_API_KEY: "test-key"
         } as never,
         config: DEFAULT_REMOTE_CONFIG,
         ctx: {} as never
@@ -169,7 +176,8 @@ describe("handleTranslateQuoteRoute", () => {
         }),
         url: new URL("https://kabuyomi.test/v1/translate-quote"),
         env: {
-          GEMINI_API_KEY: "test-key"
+          LLM_PROVIDER: "openai",
+          OPENAI_API_KEY: "test-key"
         } as never,
         config: DEFAULT_REMOTE_CONFIG,
         ctx: {} as never
@@ -197,7 +205,8 @@ describe("handleTranslateQuoteRoute", () => {
       }),
       url: new URL("https://kabuyomi.test/v1/translate-quote"),
       env: {
-        GEMINI_API_KEY: "test-key"
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key"
       } as never,
       config: DEFAULT_REMOTE_CONFIG,
       ctx: {} as never
@@ -213,6 +222,8 @@ describe("handleTranslateQuoteRoute", () => {
   });
 
   it("returns 503 when quote translation is disabled server-side", async () => {
+    mockIsQuoteTranslationAvailable.mockReturnValue(false);
+
     const response = await handleTranslateQuoteRoute({
       request: new Request("https://kabuyomi.test/v1/translate-quote", {
         method: "POST",

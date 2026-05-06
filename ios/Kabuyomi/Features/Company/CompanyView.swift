@@ -1100,7 +1100,7 @@ private struct SourceEvidenceSheet: View {
             switch previewTranslationState {
             case .ready(let translated):
                 return translated
-            case .idle, .loading, .failed:
+            case .idle, .loading, .failed, .unavailable:
                 return previewText
             }
         }
@@ -1112,7 +1112,7 @@ private struct SourceEvidenceSheet: View {
         switch previewTranslationState {
         case .idle, .loading:
             return true
-        case .ready, .failed:
+        case .ready, .failed, .unavailable:
             return false
         }
     }
@@ -1124,6 +1124,8 @@ private struct SourceEvidenceSheet: View {
         case .idle, .loading:
             return nil
         case .failed(let message):
+            return message
+        case .unavailable(let message):
             return message
         case .ready:
             return nil
@@ -1334,7 +1336,7 @@ private struct SourceEvidenceSheet: View {
 
                 Spacer(minLength: 0)
 
-                if offersPreviewTranslation {
+                if offersPreviewTranslation, !isPreviewTranslationUnavailable {
                     previewModeControl
                 }
             }
@@ -1443,15 +1445,26 @@ private struct SourceEvidenceSheet: View {
             previewTranslationState = .idle
         } catch APIError.insufficientCredits(let required, let remaining) {
             previewTranslationState = .failed("翻訳には \(required) credit 必要です。残り \(remaining) credits です。")
+        } catch APIError.serverStatus(let statusCode, _) where statusCode == 503 {
+            await appModel.refreshUsageAfterQuoteTranslationFailure()
+            previewTranslationState = .unavailable("翻訳は現在利用できません。creditは消費されていません。原文を表示しています。")
         } catch {
             Self.logger.error("request failed error=\(String(describing: error), privacy: .public)")
+            await appModel.refreshUsageAfterQuoteTranslationFailure()
             if let fallback = fallbackPreviewTranslation(for: trimmed) {
                 Self.logger.debug("fallback used outputLength=\(fallback.count, privacy: .public)")
                 previewTranslationState = .ready(fallback)
             } else {
-                previewTranslationState = .failed("翻訳を取得できなかったので、原文を表示しています。")
+                previewTranslationState = .failed("翻訳を取得できなかったので、原文を表示しています。creditは消費されていません。")
             }
         }
+    }
+
+    private var isPreviewTranslationUnavailable: Bool {
+        if case .unavailable = previewTranslationState {
+            return true
+        }
+        return false
     }
 }
 
@@ -1465,6 +1478,7 @@ private enum PreviewTranslationState: Equatable {
     case loading
     case ready(String)
     case failed(String)
+    case unavailable(String)
 }
 
 func shouldOfferPreviewTranslation(for text: String) -> Bool {
