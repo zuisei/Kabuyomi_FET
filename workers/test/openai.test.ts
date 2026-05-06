@@ -546,6 +546,74 @@ describe("OpenAI quote translation provider", () => {
     )).rejects.toThrow("Japanese text");
   });
 
+  it("retries when the model changes a required company name", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    translatedText: "Dominator Energy South CarolinaのDESCは、約80万の顧客に電力を供給しています。"
+                  })
+                }
+              }
+            ],
+            usage: {
+              prompt_tokens: 288,
+              completion_tokens: 73,
+              total_tokens: 361
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    translatedText: "Dominion Energy South Carolinaは、サウスカロライナ州の中央部、南部、南西部の約80万の顧客に電力の発電・送電・配電を行うDESCで構成されています。"
+                  })
+                }
+              }
+            ],
+            usage: {
+              prompt_tokens: 320,
+              completion_tokens: 65,
+              total_tokens: 385
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await generateModelQuoteTranslation(
+      {
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key"
+      } as never,
+      {
+        text: "DOMINION ENERGY SOUTH CAROLINA Dominion Energy South Carolina is composed of DESC's generation, transmission and distribution of electricity to approximately 0.8 million customers.",
+        targetLanguage: "ja"
+      }
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(response.translatedText).toContain("Dominion Energy South Carolina");
+    expect(response.translatedText).toContain("DESC");
+    expect(response.translatedText).not.toContain("Dominator");
+    expect(response.llmUsage).toHaveLength(2);
+    const retryBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(String(retryBody.messages[0].content)).toContain("previous translation was rejected");
+    expect(String(retryBody.messages[0].content)).toContain("Dominion Energy South Carolina");
+  });
+
   it("rejects quote translations that introduce investment advice", async () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response(

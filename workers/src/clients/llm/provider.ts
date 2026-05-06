@@ -69,34 +69,73 @@ async function generateOpenAIQuoteTranslation(
     throw new Error("OpenAI API key is missing");
   }
 
-  const invocation = await invokeOpenAIQuoteTranslation(env, buildOpenAIQuoteTranslationPrompt(input));
-  const translatedText = normalizeQuoteTranslationResponse(invocation.data);
-  if (!translatedText) {
-    throw new Error(invocation.failureReason ?? "Quote translation schema validation failed");
+  const exactTerms = exactTermsToPreserve(input.text);
+  const usages: GeminiInvocationUsage[] = [];
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const invocation = await invokeOpenAIQuoteTranslation(
+      env,
+      buildOpenAIQuoteTranslationPrompt(input, {
+        attempt,
+        exactTerms,
+        previousError: lastError?.message
+      })
+    );
+    usages.push(...invocation.usage);
+    const translatedText = normalizeQuoteTranslationResponse(invocation.data);
+    if (!translatedText) {
+      lastError = new Error(invocation.failureReason ?? "Quote translation schema validation failed");
+      continue;
+    }
+
+    try {
+      const guarded = guardQuoteTranslation(translatedText, input.text, exactTerms);
+      return {
+        translatedText: guarded,
+        modelName: resolveOpenAIChatModel(env),
+        providerName: "openai",
+        ...(usages.length > 0 ? { llmUsage: usages } : {})
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
   }
 
-  const guarded = guardQuoteTranslation(translatedText, input.text);
-  return {
-    translatedText: guarded,
-    modelName: resolveOpenAIChatModel(env),
-    providerName: "openai",
-    ...(invocation.usage.length > 0 ? { llmUsage: invocation.usage } : {})
-  };
+  throw lastError ?? new Error("Quote translation failed");
 }
 
-function buildOpenAIQuoteTranslationPrompt(input: QuoteTranslationPromptInput): string {
-  return [
+function buildOpenAIQuoteTranslationPrompt(
+  input: QuoteTranslationPromptInput,
+  options: { attempt?: number; exactTerms?: string[]; previousError?: string } = {}
+): string {
+  const lines = [
     buildQuoteTranslationPrompt(input),
     "",
     "Additional Kabuyomi v1 guardrails:",
     "- Output Japanese only, except unavoidable company names, ticker symbols, product names, filing terms, numbers, percentages, and dates.",
+    "- Copy company names, acronyms, ticker symbols, and official program/product names exactly as they appear in the source. Do not guess or autocorrect them.",
     "- Do not include investment advice, buy/sell recommendations, forecasts, target prices, or extra analysis.",
     "- If the excerpt is too long or unclear, return a concise faithful Japanese translation of only the supplied excerpt.",
     "- Return no raw internal wording, debug text, markdown, or source labels."
-  ].join("\n");
+  ];
+
+  if (options.exactTerms && options.exactTerms.length > 0) {
+    lines.push("", "These source terms must appear exactly unchanged in translatedText:", options.exactTerms.join(", "));
+  }
+  if ((options.attempt ?? 0) > 0) {
+    lines.push(
+      "",
+      "Retry instruction:",
+      `The previous translation was rejected: ${options.previousError ?? "quality guard failed"}.`,
+      "Return a corrected JSON response. Preserve every required source term exactly."
+    );
+  }
+
+  return lines.join("\n");
 }
 
-function guardQuoteTranslation(translatedText: string, sourceText: string): string {
+function guardQuoteTranslation(translatedText: string, sourceText: string, exactTerms: string[]): string {
   const cleaned = polishJapaneseText(stripAnswerFormattingArtifacts(translatedText));
   if (!containsJapanese(cleaned)) {
     throw new Error("Quote translation did not produce Japanese text");
@@ -106,6 +145,10 @@ function guardQuoteTranslation(translatedText: string, sourceText: string): stri
   }
   if (containsInvestmentAdvice(cleaned)) {
     throw new Error("Quote translation introduced investment advice");
+  }
+  const missingTerm = exactTerms.find((term) => !cleaned.includes(term));
+  if (missingTerm) {
+    throw new Error(`Quote translation changed required source term: ${missingTerm}`);
   }
   return cleaned;
 }
@@ -117,3 +160,54 @@ function containsJapanese(text: string): boolean {
 function containsInvestmentAdvice(text: string): boolean {
   return /(買い|売り|購入|売却|投資判断|推奨|目標株価|株価予想|buy|sell|target price|forecast)/i.test(text);
 }
+
+function exactTermsToPreserve(sourceText: string): string[] {
+  const terms = new Set<string>();
+  const normalized = sourceText.replace(/\s+/g, " ").trim();
+
+  for (const match of normalized.matchAll(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,5}\b/g)) {
+    const term = match[0].trim();
+    if (isPreservableProperNoun(term)) {
+      terms.add(term);
+    }
+  }
+
+  for (const match of normalized.matchAll(/\b[A-Z][A-Z&.-]{1,7}\b/g)) {
+    const term = match[0].trim();
+    if (!COMMON_UPPERCASE_WORDS.has(term)) {
+      terms.add(term);
+    }
+  }
+
+  return Array.from(terms).slice(0, 8);
+}
+
+function isPreservableProperNoun(term: string): boolean {
+  const lowered = term.toLowerCase();
+  if (COMMON_TITLE_CASE_PHRASES.has(lowered)) {
+    return false;
+  }
+  return /\b(Inc|Corp|Corporation|Company|Energy|Technologies|Systems|International|Holdings|Group|Bank|Financial|South|North|East|West)\b/.test(term);
+}
+
+const COMMON_TITLE_CASE_PHRASES = new Set([
+  "united states",
+  "south carolina",
+  "north carolina",
+  "new york",
+  "cash and cash equivalents",
+  "management discussion and analysis"
+]);
+
+const COMMON_UPPERCASE_WORDS = new Set([
+  "DOMINION",
+  "ENERGY",
+  "SOUTH",
+  "CAROLINA",
+  "UNITED",
+  "STATES",
+  "SEC",
+  "MD",
+  "AND",
+  "THE"
+]);
