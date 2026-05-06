@@ -304,6 +304,87 @@ describe("hard-intent source gate", () => {
     expect(result.identifiedDrivers[0]?.category).toContain("energy");
   });
 
+  it("passes energy revenue driver evidence when current-period crude price and production volumes explain revenue", () => {
+    const filing = makeFiling("XOM", "Exxon Mobil Corp", [revenueMetric(332_238_000_000, 349_585_000_000, -5.0)], [
+      source(
+        "S1",
+        "md_a",
+        "Sales and other operating revenue decreased 5% in fiscal 2025 compared with 2024, primarily due to lower crude prices and weaker natural gas price realizations, partially offset by higher production volumes in upstream operations."
+      ),
+      metricSource("S9", "売上高: 332238000000 USD / 比較値: 349585000000 / YoY: -5.0%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "減収の主な要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.failureLabels).not.toContain("energy_revenue_driver_context_too_broad");
+    expect(result.identifiedDrivers[0]?.category).toContain("energy");
+  });
+
+  it("rejects long-term commodity outlook alone as energy revenue driver evidence", () => {
+    const filing = makeFiling("XOM", "Exxon Mobil Corp", [revenueMetric(332_238_000_000, 349_585_000_000, -5.0)], [
+      source(
+        "S1",
+        "md_a",
+        "In 2025, crude prices remained within the 10-year historical range while robust demand helped move natural gas price above the top of the 10-year range. ExxonMobil believes prices over the long term will continue to be driven by market supply and demand, general economic activities, technology advances, consumer preference and government policies."
+      ),
+      metricSource("S9", "売上高: 332238000000 USD / 比較値: 349585000000 / YoY: -5.0%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "減収の主な要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.identifiedDrivers).toHaveLength(0);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "energy_revenue_driver_context_too_broad",
+      "missing_energy_period_result_driver",
+      "source_gate_failed"
+    ]));
+  });
+
+  it("rejects reserve and production-sharing mechanics alone as energy revenue driver evidence", () => {
+    const filing = makeFiling("XOM", "Exxon Mobil Corp", [revenueMetric(332_238_000_000, 349_585_000_000, -5.0)], [
+      source(
+        "S1",
+        "md_a",
+        "Proved reserves require management funding commitments and support infrastructure. Price effects on production sharing contracts and changes in capital investment timing can vary depending on the oil and gas price environment."
+      ),
+      metricSource("S9", "売上高: 332238000000 USD / 比較値: 349585000000 / YoY: -5.0%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "減収の主な要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.identifiedDrivers).toHaveLength(0);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "energy_reserve_context_not_revenue_driver",
+      "energy_revenue_driver_context_too_broad",
+      "missing_energy_period_result_driver",
+      "source_gate_failed"
+    ]));
+  });
+
   it("passes CAT-like revenue driver evidence when sales volume and price realization are supported", () => {
     const filing = makeFiling("CAT", "Caterpillar Inc.", [revenueMetric(67_589_000_000, 64_809_000_000, 4.3)], [
       source("CTX1", "md_a", "Total sales and revenues increased 4 percent compared with 2024. The increase reflected higher sales volume, partially offset by unfavorable price realization, and higher sales volume was primarily driven by higher sales of equipment to end users and healthy backlog."),

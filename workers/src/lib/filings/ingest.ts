@@ -292,6 +292,9 @@ export function hasPeriodSpecificRevenueDriverText(text: string): boolean {
   const hasSectorDriver =
     /(net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|card services|commodity prices?|crude demand|natural gas prices?|production volumes?|refining margins?|chemical margins?|upstream|downstream|sales volume|price realization|backlog|dealer inventory|equipment to end users|end-market demand|comparable sales|traffic|average ticket|transactions?|ecommerce|e-commerce|membership|unit volumes|iphone|product launches?|geographic segments?|services net sales|services revenue|product net sales|product revenue)/i.test(normalized);
   const hasCurrentPeriodCue = /(202[0-9]|fiscal|year ended|three months ended|quarter|current year|compared with|compared to|前年比|前年同期比|%)/i.test(normalized);
+  if (hasEnergyRevenueDriverTerm(normalized) && !hasCurrentPeriodEnergyResultContext(normalized)) {
+    return false;
+  }
 
   const hasStrongDriverExplanation = hasRevenueMovement && hasCausalLanguage && hasSectorDriver;
   return (hasCurrentPeriodCue || hasStrongDriverExplanation) && ((hasRevenueMovement && (hasCausalLanguage || hasSectorDriver)) || (hasCausalLanguage && hasSectorDriver)) &&
@@ -330,7 +333,7 @@ function splitRevenueSearchParagraphs(text: string): string[] {
 function chunkRevenueSearchText(text: string): string[] {
   const collapsed = text.replace(/\s+/g, " ").trim();
   const chunks: string[] = [];
-  const pattern = /total net revenue|net revenue|sales and revenues|net sales|comparable sales|record crude demand|refining margins|production volumes|sales volume|price realization|net interest income|noninterest revenue|investment banking fees/gi;
+  const pattern = /total net revenue|net revenue|sales and revenues|sales and other operating revenue|net sales|comparable sales|upstream earnings|downstream earnings|energy products sales|record crude demand|refining margins|production volumes|sales volume|price realization|net interest income|noninterest revenue|investment banking fees/gi;
   for (const match of collapsed.matchAll(pattern)) {
     const center = match.index ?? 0;
     const start = Math.max(0, center - 800);
@@ -349,7 +352,7 @@ function revenueDriverParagraphScore(paragraph: string): number {
   if (/(increased|decreased|up|down|higher|lower|growth|decline|%|compared)/i.test(paragraph)) score += 35;
   if (/(driven by|primarily due to|reflecting|reflected|attributable to|resulted from|partially offset|offset by)/i.test(paragraph)) score += 45;
   if (/(net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|card services)/i.test(paragraph)) score += 40;
-  if (/(commodity prices?|crude demand|natural gas prices?|production volumes?|refining margins?|chemical margins?|upstream|downstream)/i.test(paragraph)) score += 40;
+  if (/(commodity prices?|crude demand|natural gas prices?|production volumes?|refining margins?|chemical margins?|upstream earnings|downstream earnings|energy products sales|upstream|downstream)/i.test(paragraph)) score += 40;
   if (/(sales volume|price realization|backlog|dealer inventory|equipment to end users|end-market demand)/i.test(paragraph)) score += 40;
   if (/(comparable sales|traffic|average ticket|transactions?|ecommerce|e-commerce|membership|unit volumes)/i.test(paragraph)) score += 40;
   if (isRevenueDriverDistractor(paragraph)) score -= 120;
@@ -357,8 +360,28 @@ function revenueDriverParagraphScore(paragraph: string): number {
 }
 
 function isRevenueDriverDistractor(text: string): boolean {
-  return /(item 2\. properties|headquarters|office locations?|square footage|available information|corporate website|risk factors|forward-looking statements|opened our first|began our first international initiative|store footprint|remodeling existing locations)/i.test(text) &&
+  return /(item 2\. properties|headquarters|office locations?|square footage|available information|corporate website|risk factors|forward-looking statements|proved reserves?|reserve disclosures?|production sharing contracts?|energy transition|opened our first|began our first international initiative|store footprint|remodeling existing locations)/i.test(text) &&
     !/(total net revenue|net revenue|net sales|sales and revenues|comparable sales|sales volume|price realization|net interest income|noninterest revenue|refining margins|production volumes)/i.test(text);
+}
+
+function hasEnergyRevenueDriverTerm(text: string): boolean {
+  return /(commodity prices?|crude|oil prices?|brent|natural gas prices?|liquids?|gas production|production volumes?|refining margins?|refinery margins?|chemical margins?|upstream|downstream|energy products sales|production sharing contracts?|proved reserves?)/i.test(text);
+}
+
+function hasCurrentPeriodEnergyResultContext(text: string): boolean {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const hasEnergyResultMetric =
+    /(sales and other operating revenue|revenue|sales|earnings|operating results?|upstream earnings|downstream earnings|energy products sales).{0,240}(increase|decrease|up|down|higher|lower|decline|growth|compared|affected|impact|reflected|reflecting|driven|due to|resulting)/i.test(normalized) ||
+    /(increase|decrease|up|down|higher|lower|decline|growth|compared|affected|impact|reflected|reflecting|driven|due to|resulting).{0,240}(sales and other operating revenue|revenue|sales|earnings|operating results?|upstream earnings|downstream earnings|energy products sales)/i.test(normalized);
+  const hasCurrentPeriodCue = /(202[0-9]|fiscal|year ended|three months ended|quarter|current year|compared with|compared to|%)/i.test(normalized);
+  const hasResultDriver =
+    /(crude prices?|oil prices?|brent|natural gas prices?|price realizations?|production volumes?|liquids?|gas production|refining margins?|refinery margins?|chemical margins?|upstream|downstream|volume\/mix|volume mix|price mix)/i.test(normalized);
+  const isBroadOnly =
+    /(proved reserves?|reserve disclosures?|long[- ]term|over the long term|market supply and demand|general economic activities|levels of prosperity|technology advances|consumer preference|government policies|production sharing contracts?|price effects on production sharing contracts|energy transition|risk factors?)/i.test(normalized) &&
+    !/(sales and other operating revenue|revenue|earnings|operating results?).{0,240}(increase|decrease|up|down|higher|lower|decline|growth|affected|impact|reflected|reflecting|driven|due to|resulting)/i.test(normalized);
+
+  const hasStrongEnergyResultExplanation = hasEnergyResultMetric && hasResultDriver;
+  return (hasCurrentPeriodCue || hasStrongEnergyResultExplanation) && hasEnergyResultMetric && hasResultDriver && !isBroadOnly;
 }
 
 function isRevenueParagraphOverlap(left: string, right: string): boolean {

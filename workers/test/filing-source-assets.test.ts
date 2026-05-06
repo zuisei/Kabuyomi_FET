@@ -57,6 +57,49 @@ describe("revenue driver source assets", () => {
     expect(hasStrongRevenueDriverSource(chunks[0]!)).toBe(true);
   });
 
+  it("creates an energy source when current-period crude price and production impact revenue", () => {
+    const chunks = buildSourceChunks(filing("XOM", "Exxon Mobil Corporation"), genericMda(), [revenueMetric()], {
+      revenueDriverSearchText:
+        "Sales and other operating revenue decreased 5% in fiscal 2025 compared with the prior year, primarily due to lower crude prices and weaker natural gas price realizations, partially offset by higher production volumes in upstream operations."
+    });
+
+    expect(chunks[0]?.sectionTitle).toBe("Revenue driver discussion");
+    expect(chunks[0]?.text).toMatch(/crude prices|natural gas price|production volumes/i);
+    expect(hasStrongRevenueDriverSource(chunks[0]!)).toBe(true);
+    expect(sourceIdsAreValid(chunks)).toBe(true);
+  });
+
+  it("creates an energy source when refining and downstream margins affect current-period results", () => {
+    const chunks = buildSourceChunks(filing("XOM", "Exxon Mobil Corporation"), genericMda(), [revenueMetric()], {
+      revenueDriverSearchText:
+        "Energy products sales and downstream earnings increased in fiscal 2025 compared with the prior year, reflecting higher refining margins and stronger refinery utilization, partly offset by lower chemical margins."
+    });
+
+    expect(chunks[0]?.sectionTitle).toBe("Revenue driver discussion");
+    expect(chunks[0]?.text).toMatch(/downstream earnings|refining margins|chemical margins/i);
+    expect(hasStrongRevenueDriverSource(chunks[0]!)).toBe(true);
+  });
+
+  it("does not classify long-term commodity outlook as energy revenue-driver evidence", () => {
+    const chunks = buildSourceChunks(filing("XOM", "Exxon Mobil Corporation"), genericMda(), [revenueMetric()], {
+      revenueDriverSearchText:
+        "In 2025, crude prices remained within the 10-year historical range while robust demand helped move natural gas prices higher. ExxonMobil believes prices over the long term will continue to be driven by market supply and demand, general economic activities, technology advances, consumer preference and government policies."
+    });
+
+    expect(chunks.some(hasStrongRevenueDriverSource)).toBe(false);
+    expect(chunks[0]?.sectionTitle).not.toBe("Revenue driver discussion");
+  });
+
+  it("does not classify reserves disclosure as energy revenue-driver evidence", () => {
+    const chunks = buildSourceChunks(filing("XOM", "Exxon Mobil Corporation"), genericMda(), [revenueMetric()], {
+      revenueDriverSearchText:
+        "Proved reserves require significant funding commitments and support infrastructure. Production-sharing contract mechanics and long-term oil and gas price assumptions can affect reserve estimates but do not describe current-period revenue results."
+    });
+
+    expect(chunks.some(hasStrongRevenueDriverSource)).toBe(false);
+    expect(chunks[0]?.sectionTitle).not.toBe("Revenue driver discussion");
+  });
+
   it("does not classify Item 2 Properties as revenue driver evidence", () => {
     const chunks = buildSourceChunks(filing("JPM", "JPMorgan Chase & Co."), genericMda(), [revenueMetric()], {
       revenueDriverSearchText:

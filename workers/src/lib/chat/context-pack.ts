@@ -811,6 +811,9 @@ function revenueDriverWindowQualityScore(text: string): number {
   if (/risk factors?|forward-looking statements?|available information|properties|website/.test(haystack) && !/driven by|primarily due to|reflected|reflecting|total net revenue|net sales|sales and revenues/.test(haystack)) {
     score -= 80;
   }
+  if (isBroadEnergyContextWithoutPeriodResult(haystack)) {
+    score -= 140;
+  }
   if (!hasCausalLanguage && !hasConcreteSectorKpi) {
     score -= 120;
   }
@@ -828,7 +831,26 @@ function hasConcreteRevenueDriverWindow(text: string): boolean {
   const hasRetailEvidence = /comparable sales|transactions?|traffic|average ticket|ecommerce|e-commerce|membership|unit volumes/.test(haystack);
   const hasSectorEvidence = hasBankEvidence || hasEnergyEvidence || hasIndustrialEvidence || hasRetailEvidence;
 
+  if (hasEnergyEvidence && !hasCurrentPeriodEnergyResultContext(haystack)) {
+    return false;
+  }
+
   return (hasRevenueMovement && (hasCausalLanguage || hasSectorEvidence)) || (hasCausalLanguage && hasSectorEvidence);
+}
+
+function hasCurrentPeriodEnergyResultContext(text: string): boolean {
+  const hasEnergyResultMetric =
+    /(sales and other operating revenue|revenue|sales|earnings|operating results?|upstream earnings|downstream earnings|energy products sales).{0,240}(increase|decrease|up|down|higher|lower|decline|growth|compared|affected|impact|reflected|reflecting|driven|due to|resulting)/.test(text) ||
+    /(increase|decrease|up|down|higher|lower|decline|growth|compared|affected|impact|reflected|reflecting|driven|due to|resulting).{0,240}(sales and other operating revenue|revenue|sales|earnings|operating results?|upstream earnings|downstream earnings|energy products sales)/.test(text);
+  const hasCurrentPeriodCue = /(202[0-9]|fiscal|year ended|three months ended|quarter|current year|compared with|compared to|%)/.test(text);
+  const hasEnergyDriver = /(crude prices?|oil prices?|brent|natural gas prices?|production volumes?|liquids?|gas production|refining margins?|refinery margins?|chemical margins?|upstream|downstream|volume\/mix|volume mix|price mix)/.test(text);
+  const hasStrongEnergyResultExplanation = hasEnergyResultMetric && hasEnergyDriver;
+  return (hasCurrentPeriodCue || hasStrongEnergyResultExplanation) && hasEnergyResultMetric && hasEnergyDriver && !isBroadEnergyContextWithoutPeriodResult(text);
+}
+
+function isBroadEnergyContextWithoutPeriodResult(text: string): boolean {
+  return /(proved reserves?|reserve disclosures?|long[- ]term|over the long term|market supply and demand|general economic activities|levels of prosperity|technology advances|consumer preference|government policies|production sharing contracts?|price effects on production sharing contracts|energy transition|risk factors?)/.test(text) &&
+    !/(sales and other operating revenue|revenue|sales|earnings|operating results?).{0,240}(increase|decrease|up|down|higher|lower|decline|growth|affected|impact|reflected|reflecting|driven|due to|resulting)/.test(text);
 }
 
 function driverSpecificityScore(text: string): number {

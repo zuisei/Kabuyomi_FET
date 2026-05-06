@@ -135,7 +135,7 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
   }
 
   if (hardIntent === "revenue_driver") {
-    addRevenueDriverQualityFailureLabels(input.selectedSources, drivers.length > 0, hasStrongRevenueDriverEvidence, failureLabels);
+    addRevenueDriverQualityFailureLabels(input.selectedSources, sector, drivers.length > 0, hasStrongRevenueDriverEvidence, failureLabels);
   }
 
   const sourceSufficient = hardIntent === "revenue_driver"
@@ -418,6 +418,7 @@ function analyzeRevenueDriverCoverage(
 
 function addRevenueDriverQualityFailureLabels(
   sources: SourceChunkRecord[],
+  sector: SourceGateSector,
   hasDrivers: boolean,
   hasStrongRevenueDriverEvidence: boolean,
   failureLabels: Set<string>
@@ -440,6 +441,31 @@ function addRevenueDriverQualityFailureLabels(
   }
   if (!narrativeSources.some(hasSegmentRevenueSignal)) {
     failureLabels.add("missing_segment_revenue_context");
+  }
+  if (sector === "energy") {
+    addEnergyRevenueDriverFailureLabels(narrativeText, hasStrongRevenueDriverEvidence, failureLabels);
+  }
+}
+
+function addEnergyRevenueDriverFailureLabels(
+  narrativeText: string,
+  hasStrongRevenueDriverEvidence: boolean,
+  failureLabels: Set<string>
+): void {
+  if (!narrativeText.trim()) {
+    failureLabels.add("energy_xbrl_only");
+    return;
+  }
+  if (/(proved reserves?|reserve disclosures?)/i.test(narrativeText)) {
+    failureLabels.add("energy_reserve_context_not_revenue_driver");
+  }
+  if (
+    /(long[- ]term|over the long term|market supply and demand|general economic activities|levels of prosperity|technology advances|consumer preference|government policies|production sharing contracts?|price effects on production sharing contracts|energy transition|risk factors?)/i.test(narrativeText)
+  ) {
+    failureLabels.add("energy_revenue_driver_context_too_broad");
+  }
+  if (!hasStrongRevenueDriverEvidence) {
+    failureLabels.add("missing_energy_period_result_driver");
   }
 }
 
