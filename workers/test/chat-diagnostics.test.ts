@@ -200,6 +200,11 @@ describe("chat diagnostics helpers", () => {
       buildModelAttemptDebugFields({
         answer: "fallback",
         sourceIds: ["S1"],
+        requestedModelName: "gpt-5.4-nano",
+        effectiveModelName: "gpt-5.4-nano",
+        requestedReasoningEffort: "none",
+        effectiveReasoningEffort: "none",
+        reasoningEffortInvalid: false,
         retryDiagnostics: {
           retryAttempted: true,
           retryAllowed: true,
@@ -217,6 +222,11 @@ describe("chat diagnostics helpers", () => {
       retryOutcome: "fallback",
       retryWasted: true,
       firstCallFailureKind: "low_quality_answer",
+      requestedModelName: "gpt-5.4-nano",
+      effectiveModelName: "gpt-5.4-nano",
+      requestedReasoningEffort: "none",
+      effectiveReasoningEffort: "none",
+      reasoningEffortInvalid: false,
       sourceGateApplied: false,
       sourceGateSufficient: null,
       evidenceFallbackUsed: false,

@@ -88,6 +88,11 @@ export interface GeminiChatAnswer {
   modelUsage?: GeminiInvocationUsage[];
   modelProvider?: ChatModelProviderName;
   modelName?: string | null;
+  requestedModelName?: string | null;
+  effectiveModelName?: string | null;
+  requestedReasoningEffort?: string | null;
+  effectiveReasoningEffort?: string | null;
+  reasoningEffortInvalid?: boolean;
   modelApiError?: {
     modelApiErrorKind: GeminiApiErrorKind;
     modelApiErrorStatus?: number | null;
@@ -119,6 +124,11 @@ export interface GeminiInvocationUsage {
   candidatesTokenCount: number | null;
   totalTokenCount: number | null;
   latencyMs: number;
+  requestedModelName?: string | null;
+  effectiveModelName?: string | null;
+  requestedReasoningEffort?: string | null;
+  effectiveReasoningEffort?: string | null;
+  reasoningEffortInvalid?: boolean;
 }
 
 export type ChatFallbackKind =

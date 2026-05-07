@@ -66,6 +66,11 @@ export interface ChatResponseDebug {
   contextApplied?: boolean;
   modelName?: string | null;
   modelProvider?: import("../../clients/gemini/types").ChatModelProviderName | null;
+  requestedModelName?: string | null;
+  effectiveModelName?: string | null;
+  requestedReasoningEffort?: string | null;
+  effectiveReasoningEffort?: string | null;
+  reasoningEffortInvalid?: boolean;
   modelApiErrorKind?: import("../../clients/gemini/types").GeminiApiErrorKind | null;
   modelApiErrorStatus?: number | null;
   modelApiErrorCode?: string | null;

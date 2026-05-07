@@ -16,7 +16,9 @@ import {
   parseOpenAIChatCompletionPayload,
   parseOpenAIResponsesPayload,
   resolveOpenAIPromptId,
-  resolveOpenAIChatModel
+  resolveOpenAIChatModel,
+  resolveOpenAIReasoningConfig,
+  resolveOpenAIReasoningEffort
 } from "../src/clients/llm/providers/openai";
 import type { FilingCacheRecord } from "../src/env";
 
@@ -38,6 +40,23 @@ describe("OpenAI provider config", () => {
     expect(resolveOpenAIChatModel({ OPENAI_CHAT_MODEL: "gpt-5-nano" } as never)).toBe("gpt-5-nano");
   });
 
+  it("resolves explicit OpenAI reasoning effort including none", () => {
+    expect(resolveOpenAIReasoningEffort({} as never)).toBe("minimal");
+    expect(resolveOpenAIReasoningEffort({ OPENAI_REASONING_EFFORT: "none" } as never)).toBe("none");
+    expect(resolveOpenAIReasoningEffort({ OPENAI_REASONING_EFFORT: "minimal" } as never)).toBe("minimal");
+    expect(resolveOpenAIReasoningEffort({ OPENAI_REASONING_EFFORT: "low" } as never)).toBe("low");
+    expect(resolveOpenAIReasoningEffort({ OPENAI_REASONING_EFFORT: "medium" } as never)).toBe("medium");
+    expect(resolveOpenAIReasoningEffort({ OPENAI_REASONING_EFFORT: "high" } as never)).toBe("high");
+  });
+
+  it("keeps invalid reasoning effort visible in diagnostics while using a safe default", () => {
+    expect(resolveOpenAIReasoningConfig({ OPENAI_REASONING_EFFORT: "turbo" } as never)).toEqual({
+      requestedReasoningEffort: "turbo",
+      effectiveReasoningEffort: "minimal",
+      reasoningEffortInvalid: true
+    });
+  });
+
   it("builds a Chat Completions JSON-schema request for gpt-5-nano", () => {
     const request = buildOpenAIChatRequest("gpt-5-nano", "Return JSON.");
 
@@ -55,6 +74,25 @@ describe("OpenAI provider config", () => {
     expect(JSON.stringify(request)).toContain("kabuyomi_chat_answer");
     expect(JSON.stringify(request)).toContain("additionalProperties");
     expect(JSON.stringify(request)).toContain("sourceIds");
+  });
+
+  it("passes reasoning effort none through to OpenAI request builders", () => {
+    expect(buildOpenAIChatRequest("gpt-5.4-nano", "Return JSON.", { reasoningEffort: "none" })).toMatchObject({
+      model: "gpt-5.4-nano",
+      reasoning_effort: "none"
+    });
+    expect(buildOpenAIResponsesPromptRequest({
+      OPENAI_PROMPT_ID: "pmpt_test",
+      OPENAI_CHAT_MODEL: "gpt-5.4-nano",
+      OPENAI_REASONING_EFFORT: "none"
+    } as never, {
+      question: "なにで稼いでんのこの会社"
+    })).toMatchObject({
+      model: "gpt-5.4-nano",
+      reasoning: {
+        effort: "none"
+      }
+    });
   });
 
   it("builds a Quote Translation JSON-schema request for gpt-5-nano", () => {
@@ -86,6 +124,7 @@ describe("OpenAI provider config", () => {
 
     expect(resolveOpenAIPromptId({ OPENAI_PROMPT_ID: "pmpt_test" } as never)).toBe("pmpt_test");
     expect(request).toMatchObject({
+      model: DEFAULT_OPENAI_CHAT_MODEL,
       prompt: {
         id: "pmpt_test",
         version: "1",
@@ -258,15 +297,17 @@ describe("OpenAI chat provider", () => {
       expect(url).toBe("https://api.openai.com/v1/responses");
       const body = JSON.parse(String(init?.body));
       expect(body.prompt.id).toBe("pmpt_test");
+      expect(body.model).toBe("gpt-5.4-nano");
       expect(body.prompt.version).toBe("1");
       expect(body.prompt.variables.question).toBe("売上成長の要因は？");
       expect(body.prompt.variables.question_intent).toBe("mda_summary");
       expect(body.prompt.variables.filing_metadata_json).toContain("Test Corp");
       expect(body.prompt.variables.sources_json).toContain("S1");
       expect(body.text.format.name).toBe("kabuyomi_chat_answer");
+      expect(body.reasoning.effort).toBe("none");
       return new Response(
         JSON.stringify({
-          model: "gpt-5-nano",
+          model: "gpt-5.4-nano",
           output: [
             {
               type: "message",
@@ -296,9 +337,10 @@ describe("OpenAI chat provider", () => {
       {
         LLM_PROVIDER: "openai",
         OPENAI_API_KEY: "test-key",
-        OPENAI_CHAT_MODEL: "gpt-5-nano",
+        OPENAI_CHAT_MODEL: "gpt-5.4-nano",
         OPENAI_PROMPT_ID: "pmpt_test",
-        OPENAI_PROMPT_VERSION: "1"
+        OPENAI_PROMPT_VERSION: "1",
+        OPENAI_REASONING_EFFORT: "none"
       } as never,
       {
         filing: makeFiling(),
@@ -310,14 +352,20 @@ describe("OpenAI chat provider", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(response.usedRemoteModel).toBe(true);
     expect(response.modelProvider).toBe("openai");
-    expect(response.modelName).toBe("gpt-5-nano");
+    expect(response.modelName).toBe("gpt-5.4-nano");
+    expect(response.requestedReasoningEffort).toBe("none");
+    expect(response.effectiveReasoningEffort).toBe("none");
+    expect(response.reasoningEffortInvalid).toBe(false);
     expect(response.answer).toContain("製品需要");
     expect(response.sourceIds).toEqual(["S1"]);
     expect(response.llmUsage?.[0]).toMatchObject({
-      model: "gpt-5-nano",
+      model: "gpt-5.4-nano",
       promptTokenCount: 100,
       candidatesTokenCount: 20,
-      totalTokenCount: 120
+      totalTokenCount: 120,
+      requestedReasoningEffort: "none",
+      effectiveReasoningEffort: "none",
+      reasoningEffortInvalid: false
     });
   });
 

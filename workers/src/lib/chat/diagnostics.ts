@@ -97,6 +97,11 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
   | "geminiErrorOccurredBeforeResponse"
   | "modelName"
   | "modelProvider"
+  | "requestedModelName"
+  | "effectiveModelName"
+  | "requestedReasoningEffort"
+  | "effectiveReasoningEffort"
+  | "reasoningEffortInvalid"
   | "modelApiErrorKind"
   | "modelApiErrorStatus"
   | "modelApiErrorCode"
@@ -179,6 +184,15 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
     geminiErrorOccurredBeforeResponse: geminiApiError?.geminiErrorOccurredBeforeResponse ?? null,
     modelName: modelResponse.modelName ?? modelResponse.llmUsage?.[0]?.model ?? null,
     modelProvider: modelResponse.modelProvider ?? null,
+    requestedModelName: modelResponse.requestedModelName ?? modelResponse.llmUsage?.[0]?.requestedModelName ?? null,
+    effectiveModelName:
+      modelResponse.effectiveModelName ?? modelResponse.llmUsage?.[0]?.effectiveModelName ?? modelResponse.modelName ?? modelResponse.llmUsage?.[0]?.model ?? null,
+    requestedReasoningEffort:
+      modelResponse.requestedReasoningEffort ?? modelResponse.llmUsage?.[0]?.requestedReasoningEffort ?? null,
+    effectiveReasoningEffort:
+      modelResponse.effectiveReasoningEffort ?? modelResponse.llmUsage?.[0]?.effectiveReasoningEffort ?? null,
+    reasoningEffortInvalid:
+      modelResponse.reasoningEffortInvalid ?? modelResponse.llmUsage?.[0]?.reasoningEffortInvalid ?? false,
     modelApiErrorKind: modelApiError?.modelApiErrorKind ?? geminiApiError?.geminiApiErrorKind ?? null,
     modelApiErrorStatus: modelApiError?.modelApiErrorStatus ?? geminiApiError?.geminiApiErrorStatus ?? null,
     modelApiErrorCode: modelApiError?.modelApiErrorCode ?? geminiApiError?.geminiApiErrorCode ?? null,
@@ -360,6 +374,11 @@ export function buildChatQualityPipelinePayload({
     selectedSourceCharCount: answer.debug?.selectedSourceCharCount ?? selectedSourceChars,
     estimatedContextTokens: answer.debug?.estimatedContextTokens ?? estimateTokenCountFromChars(selectedSourceChars),
     modelName,
+    requestedModelName: answer.debug?.requestedModelName ?? null,
+    effectiveModelName: answer.debug?.effectiveModelName ?? answer.debug?.modelName ?? modelName,
+    requestedReasoningEffort: answer.debug?.requestedReasoningEffort ?? null,
+    effectiveReasoningEffort: answer.debug?.effectiveReasoningEffort ?? null,
+    reasoningEffortInvalid: answer.debug?.reasoningEffortInvalid ?? false,
     modelProvider: answer.debug?.modelProvider ?? null,
     latencyMs,
     selectedSourceIds: answer.debug?.selectedSourceIds ?? answer.sources.map((source) => source.sourceId),

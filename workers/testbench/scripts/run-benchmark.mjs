@@ -91,6 +91,16 @@ for (const row of rows) {
     guardLabels: payload.debug?.guardLabels ?? [],
     modelName: payload.modelName ?? payload.debug?.modelName ?? null,
     modelProvider: payload.debug?.modelProvider ?? null,
+    requestedModelName: payload.debug?.requestedModelName ?? process.env.OPENAI_CHAT_MODEL?.trim() ?? null,
+    effectiveModelName:
+      payload.debug?.effectiveModelName ??
+      payload.modelName ??
+      payload.debug?.modelName ??
+      payload.debug?.geminiModelName ??
+      null,
+    requestedReasoningEffort: payload.debug?.requestedReasoningEffort ?? process.env.OPENAI_REASONING_EFFORT?.trim() ?? null,
+    effectiveReasoningEffort: payload.debug?.effectiveReasoningEffort ?? process.env.OPENAI_REASONING_EFFORT?.trim() ?? null,
+    reasoningEffortInvalid: payload.debug?.reasoningEffortInvalid ?? false,
     promptTokenCount: payload.debug?.promptTokenCount ?? payload.promptTokenCount ?? null,
     completionTokenCount: payload.debug?.completionTokenCount ?? payload.completionTokenCount ?? null,
     totalTokenCount: payload.debug?.totalTokenCount ?? payload.totalTokenCount ?? null,
