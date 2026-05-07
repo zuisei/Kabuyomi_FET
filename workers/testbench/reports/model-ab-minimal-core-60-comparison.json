@@ -1,0 +1,71 @@
+{
+  "status": "blocked",
+  "recommendation": "INCONCLUSIVE: CONFIG FAILED PREFLIGHT",
+  "createdAt": "2026-05-07",
+  "branch": "v1.1-worker-quality-token-retrieval",
+  "head": "818387b",
+  "productionDeployed": false,
+  "testWorkerDeployed": false,
+  "testWorker": {
+    "name": "kabuyomi-api-test",
+    "url": "https://kabuyomi-api-test.dznqjmctk7.workers.dev"
+  },
+  "configs": [
+    {
+      "label": "gpt-5-nano-low",
+      "model": "gpt-5-nano",
+      "requestedReasoningEffort": "low",
+      "preflightStatus": "configurable"
+    },
+    {
+      "label": "gpt-5.4-nano-none",
+      "model": "gpt-5.4-nano",
+      "requestedReasoningEffort": "none",
+      "preflightStatus": "blocked",
+      "blocker": "Current Worker OpenAI reasoning resolver accepts only minimal, low, medium, and high; none would silently resolve to minimal."
+    }
+  ],
+  "runs": {
+    "gpt-5-nano-low": {
+      "run": false,
+      "artifact": null
+    },
+    "gpt-5.4-nano-none": {
+      "run": false,
+      "artifact": null
+    }
+  },
+  "metrics": {
+    "rows": null,
+    "tokenComparison": null,
+    "estimatedCostComparison": null,
+    "latencyComparison": null,
+    "qualityComparison": null,
+    "q03Comparison": null,
+    "q04Comparison": null,
+    "q06Comparison": null
+  },
+  "validation": {
+    "typecheck": "passed",
+    "unitTests": "passed",
+    "dryrunTest": "passed",
+    "testbenchValidate": "passed"
+  },
+  "dryRunChecks": [
+    "./node_modules/.bin/wrangler deploy --config wrangler.test.toml --dry-run --var OPENAI_CHAT_MODEL:gpt-5-nano --var OPENAI_REASONING_EFFORT:low",
+    "./node_modules/.bin/wrangler deploy --config wrangler.test.toml --dry-run --var OPENAI_CHAT_MODEL:gpt-5.4-nano --var OPENAI_REASONING_EFFORT:none"
+  ],
+  "priceInputsUsdPerMillionTokens": {
+    "gpt-5-nano": {
+      "input": 0.05,
+      "cachedInput": 0.005,
+      "output": 0.4
+    },
+    "gpt-5.4-nano": {
+      "input": 0.2,
+      "cachedInput": 0.02,
+      "output": 1.25
+    }
+  },
+  "nextStep": "Add or verify effective OPENAI_REASONING_EFFORT=none support before running one-row smoke and Minimal Core 60."
+}
