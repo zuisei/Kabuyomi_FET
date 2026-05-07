@@ -1,0 +1,102 @@
+{
+  "rows": 60,
+  "tickers": [
+    "AAPL",
+    "JPM",
+    "XOM",
+    "CAT",
+    "WMT"
+  ],
+  "sourceIdsValidFalse": 0,
+  "rawResponsePathBreakdown": {
+    "openai": 43,
+    "fallback": 12,
+    "deterministic": 5
+  },
+  "rawFallbackTotal": 12,
+  "rawFallbackKindBreakdown": {
+    "none": 48,
+    "evidence_slot": 5,
+    "language_guard_fallback": 3,
+    "low_quality": 2,
+    "api_error": 1,
+    "weak_grounding": 1
+  },
+  "rawFallbackReasonBreakdown": {
+    "low_quality_answer": 10,
+    "gemini_api_error": 1,
+    "weak_grounding": 1
+  },
+  "fallbackCategoryBreakdown": {
+    "none": 41,
+    "source_insufficient": 10,
+    "answer_quality_guard": 4,
+    "language_guard": 3,
+    "model_error": 1,
+    "sanitation_guard": 1
+  },
+  "fallbackUserReasonBreakdown": {
+    "none": 41,
+    "liquidity_sources_missing": 5,
+    "revenue_driver_sources_missing": 5,
+    "raw_english_detected": 3,
+    "answer_too_metric_only": 2,
+    "generic_watch_points": 2,
+    "malformed_currency_detected": 1,
+    "model_timeout": 1
+  },
+  "rawGeminiApiErrorBreakdown": {
+    "provider_server_error": 1,
+    "timeout": 1
+  },
+  "fallbackKindNoneOnFallbackRows": 0,
+  "rawEnglishInAnswer": 0,
+  "rawEnglishInDiagnostics": 3,
+  "rawEnglishSurfaced": 0,
+  "bannedFallbackPhraseHits": 0,
+  "bankTermsInNonBankSectors": 0,
+  "wrongSectorTerms": 0,
+  "infraContaminated": false,
+  "infraContaminationReasons": [],
+  "rateLimitRows": 0,
+  "rateLimitRate": 0,
+  "authErrorRows": 0,
+  "providerErrorRows": 1,
+  "networkErrorRows": 0,
+  "engineeringErrorRows": 0,
+  "qualityRows": 59,
+  "qualityRowsExcluded": 1,
+  "qualityFallbackTotal": 11,
+  "qualityFallbackRate": 0.1864406779661017,
+  "qualityHardIntentFallback": 7,
+  "qualityQ03Q04Q06Fallback": 7,
+  "qualityMetricWithoutDriver": 0,
+  "qualityTemporalityNotAssessed": 0,
+  "qualityEvasiveAnswer": 0,
+  "retryAttempted": 7,
+  "retryWasted": 3,
+  "rateLimitRetrySucceeded": 0,
+  "benchmarkRateLimitRetryCount": 0,
+  "latency": {
+    "p50": 8671,
+    "p95": 18291,
+    "p99": 21235
+  },
+  "qualityLatency": {
+    "p50": 9636,
+    "p95": 18406,
+    "p99": 21235
+  },
+  "benchmarkControls": {
+    "concurrency": 1,
+    "effectiveConcurrency": 1,
+    "minDelayMsBetweenRequests": 1500,
+    "maxRetriesOnRateLimit": 2,
+    "initialRateLimitBackoffMs": 5000,
+    "maxRateLimitBackoffMs": 30000,
+    "respectRetryAfterHeader": true,
+    "jitterMs": 500,
+    "stopRunOnRateLimitThreshold": null,
+    "markInfraContaminatedOnRateLimitThreshold": null
+  }
+}

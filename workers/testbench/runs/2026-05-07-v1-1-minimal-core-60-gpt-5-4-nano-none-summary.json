@@ -1,0 +1,92 @@
+{
+  "rows": 60,
+  "tickers": [
+    "AAPL",
+    "JPM",
+    "XOM",
+    "CAT",
+    "WMT"
+  ],
+  "sourceIdsValidFalse": 0,
+  "rawResponsePathBreakdown": {
+    "openai": 43,
+    "fallback": 12,
+    "deterministic": 5
+  },
+  "rawFallbackTotal": 12,
+  "rawFallbackKindBreakdown": {
+    "none": 48,
+    "evidence_slot": 6,
+    "low_quality": 3,
+    "language_guard_fallback": 2,
+    "weak_grounding": 1
+  },
+  "rawFallbackReasonBreakdown": {
+    "low_quality_answer": 11,
+    "weak_grounding": 1
+  },
+  "fallbackCategoryBreakdown": {
+    "none": 49,
+    "source_insufficient": 6,
+    "answer_quality_guard": 3,
+    "language_guard": 2
+  },
+  "fallbackUserReasonBreakdown": {
+    "none": 49,
+    "revenue_driver_sources_missing": 6,
+    "generic_watch_points": 2,
+    "raw_english_detected": 2,
+    "answer_too_metric_only": 1
+  },
+  "rawGeminiApiErrorBreakdown": {},
+  "fallbackKindNoneOnFallbackRows": 0,
+  "rawEnglishInAnswer": 0,
+  "rawEnglishInDiagnostics": 2,
+  "rawEnglishSurfaced": 0,
+  "bannedFallbackPhraseHits": 0,
+  "bankTermsInNonBankSectors": 0,
+  "wrongSectorTerms": 0,
+  "infraContaminated": false,
+  "infraContaminationReasons": [],
+  "rateLimitRows": 0,
+  "rateLimitRate": 0,
+  "authErrorRows": 0,
+  "providerErrorRows": 0,
+  "networkErrorRows": 0,
+  "engineeringErrorRows": 0,
+  "qualityRows": 60,
+  "qualityRowsExcluded": 0,
+  "qualityFallbackTotal": 12,
+  "qualityFallbackRate": 0.2,
+  "qualityHardIntentFallback": 8,
+  "qualityQ03Q04Q06Fallback": 8,
+  "qualityMetricWithoutDriver": 0,
+  "qualityTemporalityNotAssessed": 0,
+  "qualityEvasiveAnswer": 0,
+  "retryAttempted": 6,
+  "retryWasted": 4,
+  "rateLimitRetrySucceeded": 0,
+  "benchmarkRateLimitRetryCount": 0,
+  "latency": {
+    "p50": 4260,
+    "p95": 7919,
+    "p99": 8711
+  },
+  "qualityLatency": {
+    "p50": 4260,
+    "p95": 7919,
+    "p99": 8711
+  },
+  "benchmarkControls": {
+    "concurrency": 1,
+    "effectiveConcurrency": 1,
+    "minDelayMsBetweenRequests": 1500,
+    "maxRetriesOnRateLimit": 2,
+    "initialRateLimitBackoffMs": 5000,
+    "maxRateLimitBackoffMs": 30000,
+    "respectRetryAfterHeader": true,
+    "jitterMs": 500,
+    "stopRunOnRateLimitThreshold": null,
+    "markInfraContaminatedOnRateLimitThreshold": null
+  }
+}
