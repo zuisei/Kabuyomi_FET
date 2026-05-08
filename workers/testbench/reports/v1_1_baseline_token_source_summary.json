@@ -1,0 +1,56 @@
+{
+  "generatedAt": "2026-05-06T00:00:00+09:00",
+  "basis": [
+    "workers/testbench/runs/2026-05-05-v1-safety-minimal-core-60-row-summary.json",
+    "workers/testbench/runs/2026-05-05-v1-safety-production-smoke-20-summary.json",
+    "docs/quality/WORKER_ARCHITECTURE_BRIEF.md"
+  ],
+  "minimalCore60": {
+    "rows": 60,
+    "sourceIdsValidFalse": 0,
+    "qualityFallbackTotal": 19,
+    "qualityFallbackRate": 0.31666666666666665,
+    "qualityHardIntentFallback": 15,
+    "retryAttempted": 4,
+    "retryWasted": 3,
+    "latencyMs": {
+      "p50": 3365,
+      "p95": 6415,
+      "p99": 9028
+    }
+  },
+  "productionSmoke20": {
+    "rows": 20,
+    "sourceIdsValidFalse": 0,
+    "qualityFallbackTotal": 7,
+    "qualityFallbackRate": 0.35,
+    "qualityHardIntentFallback": 6,
+    "retryAttempted": 0,
+    "retryWasted": 0,
+    "latencyMs": {
+      "p50": 3053,
+      "p95": 5777,
+      "p99": 7101
+    }
+  },
+  "hardIntentFallbackRates": {
+    "revenue_driver": "5/5",
+    "driver_durability_followup": "5/5",
+    "margin_durability_followup": "5/5"
+  },
+  "firstClassSourceFamiliesBeforeV1_1": [
+    "md_a",
+    "xbrl_metric"
+  ],
+  "tokenObservabilityBeforeV1_1": {
+    "logsHaveTokenCounts": true,
+    "productionRowsHaveDebugTokenCounts": false,
+    "benchmarkRowsHadExplicitTokenAttribution": false
+  },
+  "tokenObservabilityAfterPhase1Patch": {
+    "testDebugCanExposeAggregateTokenCounts": true,
+    "benchmarkRowsPersistExactTokenCountsWhenPresent": true,
+    "benchmarkRowsPersistEstimatedTokenAttribution": true,
+    "productionDebugLeakageIntroduced": false
+  }
+}

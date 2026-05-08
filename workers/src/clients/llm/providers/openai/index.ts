@@ -8,7 +8,9 @@ export {
   invokeOpenAIQuoteTranslation,
   invokeOpenAIDashboardPrompt,
   resolveOpenAIPromptId,
-  resolveOpenAIChatModel
+  resolveOpenAIChatModel,
+  resolveOpenAIReasoningConfig,
+  resolveOpenAIReasoningEffort
 } from "./request";
 export { parseOpenAIChatCompletionPayload, parseOpenAIResponsesPayload } from "./response";
 export {

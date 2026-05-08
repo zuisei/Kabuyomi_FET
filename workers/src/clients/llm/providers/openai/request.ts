@@ -8,9 +8,18 @@ import type { OpenAIChatCompletionPayload, OpenAIChatInvocationResult, OpenAIRes
 export const DEFAULT_OPENAI_CHAT_MODEL = "gpt-5-nano";
 const DEFAULT_OPENAI_TIMEOUT_MS = 12_000;
 const DEFAULT_OPENAI_MAX_COMPLETION_TOKENS = 1_800;
+const DEFAULT_OPENAI_REASONING_EFFORT = "minimal";
+export type OpenAIReasoningEffort = "none" | "minimal" | "low" | "medium" | "high";
+export type OpenAIReasoningConfig = {
+  requestedReasoningEffort: string | null;
+  effectiveReasoningEffort: OpenAIReasoningEffort;
+  reasoningEffortInvalid: boolean;
+};
 
 export async function invokeOpenAIChat(env: Env, prompt: string): Promise<OpenAIChatInvocationResult> {
   const model = resolveOpenAIChatModel(env);
+  const reasoningConfig = resolveOpenAIReasoningConfig(env);
+  logInvalidReasoningEffortIfNeeded("chat", model, reasoningConfig);
   const timeoutMs = resolveOpenAITimeoutMs(env);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -25,7 +34,7 @@ export async function invokeOpenAIChat(env: Env, prompt: string): Promise<OpenAI
         "content-type": "application/json"
       },
       body: JSON.stringify(buildOpenAIChatRequest(model, prompt, {
-        reasoningEffort: resolveOpenAIReasoningEffort(env),
+        reasoningEffort: reasoningConfig.effectiveReasoningEffort,
         maxCompletionTokens: resolveOpenAIMaxCompletionTokens(env)
       })),
       signal: controller.signal
@@ -86,7 +95,10 @@ export async function invokeOpenAIChat(env: Env, prompt: string): Promise<OpenAI
     promptTokenCount: payload.usage?.prompt_tokens ?? null,
     candidatesTokenCount: payload.usage?.completion_tokens ?? null,
     totalTokenCount: payload.usage?.total_tokens ?? null,
-    latencyMs
+    latencyMs,
+    requestedModelName: requestedOpenAIChatModel(env),
+    effectiveModelName: model,
+    ...reasoningConfig
   }];
 
   if (parsed.failureReason === "schema_invalid") {
@@ -118,6 +130,8 @@ export async function invokeOpenAIChat(env: Env, prompt: string): Promise<OpenAI
 
 export async function invokeOpenAIQuoteTranslation(env: Env, prompt: string): Promise<OpenAIChatInvocationResult> {
   const model = resolveOpenAIChatModel(env);
+  const reasoningConfig = resolveOpenAIReasoningConfig(env);
+  logInvalidReasoningEffortIfNeeded("quote_translation", model, reasoningConfig);
   const timeoutMs = resolveOpenAITimeoutMs(env);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -132,7 +146,7 @@ export async function invokeOpenAIQuoteTranslation(env: Env, prompt: string): Pr
         "content-type": "application/json"
       },
       body: JSON.stringify(buildOpenAIQuoteTranslationRequest(model, prompt, {
-        reasoningEffort: resolveOpenAIReasoningEffort(env),
+        reasoningEffort: reasoningConfig.effectiveReasoningEffort,
         maxCompletionTokens: Math.min(resolveOpenAIMaxCompletionTokens(env), 700)
       })),
       signal: controller.signal
@@ -193,7 +207,10 @@ export async function invokeOpenAIQuoteTranslation(env: Env, prompt: string): Pr
     promptTokenCount: payload.usage?.prompt_tokens ?? null,
     candidatesTokenCount: payload.usage?.completion_tokens ?? null,
     totalTokenCount: payload.usage?.total_tokens ?? null,
-    latencyMs
+    latencyMs,
+    requestedModelName: requestedOpenAIChatModel(env),
+    effectiveModelName: model,
+    ...reasoningConfig
   }];
 
   if (parsed.failureReason !== undefined) {
@@ -224,6 +241,8 @@ export async function invokeOpenAIDashboardPrompt(
   if (!promptId) {
     return invokeOpenAIChat(env, fallbackPrompt);
   }
+  const reasoningConfig = resolveOpenAIReasoningConfig(env);
+  logInvalidReasoningEffortIfNeeded("responses", model, reasoningConfig);
 
   const timeoutMs = resolveOpenAITimeoutMs(env);
   const controller = new AbortController();
@@ -300,7 +319,10 @@ export async function invokeOpenAIDashboardPrompt(
     promptTokenCount: payload.usage?.input_tokens ?? null,
     candidatesTokenCount: payload.usage?.output_tokens ?? null,
     totalTokenCount: payload.usage?.total_tokens ?? null,
-    latencyMs
+    latencyMs,
+    requestedModelName: requestedOpenAIChatModel(env),
+    effectiveModelName: model,
+    ...reasoningConfig
   }];
 
   if (parsed.failureReason !== undefined) {
@@ -387,6 +409,7 @@ export function buildOpenAIResponsesPromptRequest(env: Env, variables: Record<st
   }
 
   return {
+    model: resolveOpenAIChatModel(env),
     prompt,
     text: {
       format: {
@@ -408,6 +431,10 @@ export function resolveOpenAIChatModel(env: Env): string {
   return env.OPENAI_CHAT_MODEL?.trim() || DEFAULT_OPENAI_CHAT_MODEL;
 }
 
+export function requestedOpenAIChatModel(env: Env): string | null {
+  return env.OPENAI_CHAT_MODEL?.trim() || null;
+}
+
 export function resolveOpenAIPromptId(env: Env): string | null {
   return env.OPENAI_PROMPT_ID?.trim() || null;
 }
@@ -417,9 +444,40 @@ function resolveOpenAITimeoutMs(env: Env): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_OPENAI_TIMEOUT_MS;
 }
 
-function resolveOpenAIReasoningEffort(env: Env): "minimal" | "low" | "medium" | "high" {
+export function resolveOpenAIReasoningEffort(env: Env): OpenAIReasoningEffort {
+  return resolveOpenAIReasoningConfig(env).effectiveReasoningEffort;
+}
+
+export function resolveOpenAIReasoningConfig(env: Env): OpenAIReasoningConfig {
   const raw = env.OPENAI_REASONING_EFFORT?.trim();
-  return raw === "low" || raw === "medium" || raw === "high" || raw === "minimal" ? raw : "minimal";
+  if (isOpenAIReasoningEffort(raw)) {
+    return {
+      requestedReasoningEffort: raw,
+      effectiveReasoningEffort: raw,
+      reasoningEffortInvalid: false
+    };
+  }
+  return {
+    requestedReasoningEffort: raw || null,
+    effectiveReasoningEffort: DEFAULT_OPENAI_REASONING_EFFORT,
+    reasoningEffortInvalid: Boolean(raw)
+  };
+}
+
+function isOpenAIReasoningEffort(value: string | undefined): value is OpenAIReasoningEffort {
+  return value === "none" || value === "minimal" || value === "low" || value === "medium" || value === "high";
+}
+
+function logInvalidReasoningEffortIfNeeded(kind: string, model: string, config: OpenAIReasoningConfig): void {
+  if (!config.reasoningEffortInvalid) {
+    return;
+  }
+  logEvent("openai_invalid_reasoning_effort", {
+    kind,
+    model,
+    requestedReasoningEffort: config.requestedReasoningEffort,
+    effectiveReasoningEffort: config.effectiveReasoningEffort
+  });
 }
 
 function resolveOpenAIMaxCompletionTokens(env: Env): number {

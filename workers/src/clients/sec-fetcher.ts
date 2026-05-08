@@ -247,6 +247,14 @@ async function fetcherRequest<ResponseType>(
 
 async function waitForSecRateLimit(env: Env, path: string): Promise<void> {
   if (!env.SEC_RATE_LIMITER) {
+    logErrorEvent("sec_rate_limiter_missing", {
+      path,
+      environment: env.KABUYOMI_ENV ?? env.ENVIRONMENT ?? "unknown",
+      behavior: isTestEnvironment(env) ? "test_bypass" : "fail_closed"
+    });
+    if (!isTestEnvironment(env)) {
+      throw new AppError(503, "SEC data is temporarily unavailable", "SEC rate limiter binding is missing");
+    }
     return;
   }
 
@@ -257,6 +265,13 @@ async function waitForSecRateLimit(env: Env, path: string): Promise<void> {
   if (!response.ok) {
     throw new AppError(503, "SEC data is temporarily unavailable", "SEC rate limiter request failed");
   }
+}
+
+function isTestEnvironment(env: Env): boolean {
+  if (env.KABUYOMI_ENV === "test" || env.ENVIRONMENT === "test") {
+    return true;
+  }
+  return !env.KABUYOMI_ENV && !env.ENVIRONMENT;
 }
 
 function parsePositiveInt(rawValue: string | undefined, fallback: number): number {

@@ -5,7 +5,15 @@ import { resolveGeminiModel } from "../../clients/gemini/request";
 import { resolveOpenAIChatModel } from "../../clients/llm/providers/openai/request";
 import { ChatRequestSchema } from "../contracts";
 import { consumeBillableCredits, refundBillableCredits } from "../credit-operation";
-import { enqueueContentUpgrade, isMetricsOnlyRecord, upgradeMetricsOnlyRecord } from "../filings/content-upgrade";
+import {
+  backfillMarginSourceAssets,
+  backfillRevenueDriverSourceAssets,
+  enqueueContentUpgrade,
+  isMetricsOnlyRecord,
+  needsMarginSourceBackfill,
+  needsRevenueDriverSourceBackfill,
+  upgradeMetricsOnlyRecord
+} from "../filings/content-upgrade";
 import {
   consumeChatQuota,
   readQuotaIdentity,
@@ -16,7 +24,7 @@ import { logErrorEvent, logEvent } from "../logging";
 import { isCreditBillingEnabledForIdentity, type RemoteConfig } from "../remote-config";
 import { buildChatResponse } from "./orchestrator";
 import { formatChatAnswerForDisplay } from "./answer-format";
-import { resolveContextualQuestion } from "./context";
+import { type ChatContextMessage, resolveContextualQuestion } from "./context";
 import {
   buildAnswerQualityFlags,
   buildChatQualityPipelinePayload,
@@ -60,6 +68,7 @@ export async function answerChatUsecase({
   });
   const startedAt = Date.now();
   const resolvedQuestion = resolveContextualQuestion(payload.question, payload.conversationContext);
+  const followupContext = summarizeFollowupContext(payload.conversationContext);
   const answer = await buildChatResponseWithRefund({
     filing: preparedFiling,
     question: resolvedQuestion,
@@ -69,7 +78,8 @@ export async function answerChatUsecase({
     identity,
     creditBillingEnabled,
     chatCharge,
-    creditOperationId
+    creditOperationId,
+    followupContext
   });
   const latencyMs = Date.now() - startedAt;
   const responsePath = resolveChatResponsePath(answer);
@@ -146,6 +156,7 @@ export async function answerChatUsecase({
       sourceCount: answer.sources.length,
       sourceIds: answer.sources.map((source) => source.sourceId),
       contextApplied: resolvedQuestion !== payload.question,
+      rewrittenQuestion: resolvedQuestion,
       modelName,
       answerQualityFlags
     };
@@ -180,7 +191,8 @@ async function buildChatResponseWithRefund({
   identity,
   creditBillingEnabled,
   chatCharge,
-  creditOperationId
+  creditOperationId,
+  followupContext
 }: {
   filing: FilingCacheRecord;
   question: string;
@@ -191,10 +203,15 @@ async function buildChatResponseWithRefund({
   creditBillingEnabled: boolean;
   chatCharge: ChatChargeResult;
   creditOperationId: string;
+  followupContext: FollowupContextSummary;
 }): ReturnType<typeof buildChatResponse> {
   try {
+    const options: Parameters<typeof buildChatResponse>[4] = { executionContext: ctx };
+    if (followupContext.previousQuestion || followupContext.previousAnswer) {
+      options.followupContext = followupContext;
+    }
     return await buildChatResponse(filing, question, env, config, {
-      executionContext: ctx
+      ...options
     });
   } catch (error) {
     return refundAfterChatGenerationFailure({
@@ -208,6 +225,20 @@ async function buildChatResponseWithRefund({
       creditOperationId
     });
   }
+}
+
+interface FollowupContextSummary {
+  previousQuestion?: string;
+  previousAnswer?: string;
+}
+
+function summarizeFollowupContext(context: ChatContextMessage[] = []): FollowupContextSummary {
+  const previousQuestion = [...context].reverse().find((message) => message.role === "user")?.content?.trim();
+  const previousAnswer = [...context].reverse().find((message) => message.role === "assistant")?.content?.trim();
+  return {
+    previousQuestion: previousQuestion ? previousQuestion.slice(0, 500) : undefined,
+    previousAnswer: previousAnswer ? previousAnswer.slice(0, 1_500) : undefined
+  };
 }
 
 async function refundAfterChatGenerationFailure({
@@ -355,6 +386,28 @@ async function prepareFilingForChat(
   ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<FilingCacheRecord> {
   if (!isMetricsOnlyRecord(filing)) {
+    if (isTestEnvironment(env) && needsRevenueDriverSourceBackfill(filing)) {
+      try {
+        filing = await backfillRevenueDriverSourceAssets(filing, env);
+      } catch (error) {
+        logErrorEvent("chat_revenue_driver_source_backfill_failed", {
+          filingKey: filing.filingKey,
+          ticker: filing.ticker,
+          reason: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+    if (isTestEnvironment(env) && needsMarginSourceBackfill(filing)) {
+      try {
+        return await backfillMarginSourceAssets(filing, env);
+      } catch (error) {
+        logErrorEvent("chat_margin_source_backfill_failed", {
+          filingKey: filing.filingKey,
+          ticker: filing.ticker,
+          reason: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
     return filing;
   }
 
@@ -376,5 +429,9 @@ async function prepareFilingForChat(
 }
 
 function shouldIncludeChatDebug(env: Env): boolean {
+  return env.KABUYOMI_ENV === "test" || env.ENVIRONMENT === "test";
+}
+
+function isTestEnvironment(env: Env): boolean {
   return env.KABUYOMI_ENV === "test" || env.ENVIRONMENT === "test";
 }

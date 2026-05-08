@@ -1,0 +1,74 @@
+{
+  "rows": 10,
+  "tickers": [
+    "AAPL",
+    "JPM",
+    "XOM",
+    "CAT",
+    "WMT"
+  ],
+  "sourceIdsValidFalse": 0,
+  "rawResponsePathBreakdown": {
+    "fallback": 9,
+    "openai": 1
+  },
+  "rawFallbackTotal": 9,
+  "rawFallbackKindBreakdown": {
+    "unknown_fallback": 9,
+    "none": 1
+  },
+  "rawFallbackReasonBreakdown": {
+    "http_503": 9
+  },
+  "fallbackCategoryBreakdown": {
+    "model_error": 9,
+    "none": 1
+  },
+  "fallbackUserReasonBreakdown": {
+    "model_unavailable": 9,
+    "none": 1
+  },
+  "rawGeminiApiErrorBreakdown": {
+    "provider_server_error": 9
+  },
+  "fallbackKindNoneOnFallbackRows": 0,
+  "rawEnglishInAnswer": 0,
+  "rawEnglishInDiagnostics": 0,
+  "rawEnglishSurfaced": 0,
+  "bannedFallbackPhraseHits": 0,
+  "bankTermsInNonBankSectors": 0,
+  "wrongSectorTerms": 0,
+  "infraContaminated": true,
+  "infraContaminationReasons": [
+    "provider_error_rows>3"
+  ],
+  "rateLimitRows": 0,
+  "rateLimitRate": 0,
+  "authErrorRows": 0,
+  "providerErrorRows": 9,
+  "networkErrorRows": 0,
+  "engineeringErrorRows": 0,
+  "qualityRows": 1,
+  "qualityRowsExcluded": 9,
+  "qualityFallbackTotal": 0,
+  "qualityFallbackRate": 0,
+  "qualityHardIntentFallback": 0,
+  "qualityQ03Q04Q06Fallback": 0,
+  "qualityMetricWithoutDriver": 0,
+  "qualityTemporalityNotAssessed": 0,
+  "qualityEvasiveAnswer": 0,
+  "retryAttempted": 0,
+  "retryWasted": 0,
+  "rateLimitRetrySucceeded": 0,
+  "benchmarkRateLimitRetryCount": 0,
+  "latency": {
+    "p50": 1272,
+    "p95": 5271,
+    "p99": 5271
+  },
+  "qualityLatency": {
+    "p50": 3913,
+    "p95": 3913,
+    "p99": 3913
+  }
+}

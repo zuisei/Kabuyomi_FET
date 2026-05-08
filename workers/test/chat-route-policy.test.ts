@@ -17,7 +17,7 @@ describe("chat route policy helpers", () => {
   it("lets Gemini try before deterministic only for model-worthy deterministic strategies", () => {
     expect(shouldLetModelTryBeforeDeterministic({ GEMINI_API_KEY: "key" } as Env, deterministic("business_overview"))).toBe(true);
     expect(shouldLetModelTryBeforeDeterministic({ GEMINI_API_KEY: "key" } as Env, deterministic("revenue_drivers"))).toBe(true);
-    expect(shouldLetModelTryBeforeDeterministic({ GEMINI_API_KEY: "key" } as Env, deterministic("margin_snapshot"))).toBe(false);
+    expect(shouldLetModelTryBeforeDeterministic({ GEMINI_API_KEY: "key" } as Env, deterministic("margin_snapshot"))).toBe(true);
     expect(shouldLetModelTryBeforeDeterministic({} as Env, deterministic("revenue_drivers"))).toBe(false);
   });
 

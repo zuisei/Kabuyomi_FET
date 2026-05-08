@@ -171,7 +171,11 @@ export function buildBenchmarkSummary(rows, options = {}) {
     fallbackKindNoneOnFallbackRows: decoratedRows.filter(
       (row) => row.responsePath === "fallback" && (row.fallbackKind == null || row.fallbackKind === "none")
     ).length,
-    rawEnglishSurfaced: decoratedRows.filter((row) => row.finalAnswerRawExcerptLike === true || hasLabel(row, "raw_english_excerpt")).length,
+    rawEnglishInAnswer: decoratedRows.filter((row) => hasUserVisibleRawEnglish(row)).length,
+    rawEnglishInDiagnostics: decoratedRows.filter((row) =>
+      !hasUserVisibleRawEnglish(row) && (row.finalAnswerRawExcerptLike === true || hasLabel(row, "raw_english_excerpt"))
+    ).length,
+    rawEnglishSurfaced: decoratedRows.filter((row) => hasUserVisibleRawEnglish(row)).length,
     bannedFallbackPhraseHits: decoratedRows.reduce(
       (sum, row) => sum + (Array.isArray(row.bannedFallbackPhraseHits) ? row.bannedFallbackPhraseHits.length : 0),
       0
@@ -262,6 +266,18 @@ function hasLabel(row, label) {
     ...(row.finalAnswerLanguageLabels ?? []),
     ...(row.languageGuardViolationLabels ?? [])
   ].includes(label);
+}
+
+function hasUserVisibleRawEnglish(row) {
+  const answer = String(row.answer ?? "");
+  const answerContainsLongEnglish = /[A-Za-z]{4,}(?:\s+[A-Za-z]{4,}){7,}/.test(answer);
+  if (answerContainsLongEnglish) {
+    return true;
+  }
+  if (hasLabel(row, "answer_rewritten_to_japanese_fallback") || hasLabel(row, "answer_repaired_to_japanese")) {
+    return false;
+  }
+  return row.finalAnswerRawExcerptLike === true && row.languageGuardOk !== true;
 }
 
 function isHardIntent(intent) {

@@ -26,6 +26,7 @@ vi.mock("../src/lib/filings/cache", () => ({
 }));
 
 vi.mock("../src/lib/filings/content-upgrade", () => ({
+  backfillRevenueDriverSourceAssets: vi.fn(async (record) => record),
   backfillCompanyWebsite: vi.fn(async (record: { companyWebsiteUrl?: string }) =>
     record.companyWebsiteUrl ? record : { ...record, companyWebsiteUrl: "https://www.circle.com/" }
   ),
@@ -34,6 +35,7 @@ vi.mock("../src/lib/filings/content-upgrade", () => ({
   needsCompanyWebsiteBackfill: vi.fn((record: { companyWebsiteUrl?: string; contentMode?: string }) =>
     record.contentMode !== "metrics_only" && !record.companyWebsiteUrl
   ),
+  needsRevenueDriverSourceBackfill: vi.fn(() => false),
   isMetricsOnlyRecord: vi.fn((record: { contentMode?: string }) => record.contentMode === "metrics_only"),
   upgradeMetricsOnlyRecord: vi.fn(async (record: { contentMode?: string }) =>
     record.contentMode === "metrics_only" ? { ...record, contentMode: "full", mdaText: "upgraded md&a" } : record

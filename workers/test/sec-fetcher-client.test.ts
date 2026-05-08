@@ -59,6 +59,48 @@ describe("sec fetcher client", () => {
     expect(limiterFetch.mock.invocationCallOrder[0]).toBeLessThan(fetchMock.mock.invocationCallOrder[0]);
   });
 
+  it("fails closed when the SEC rate limiter binding is missing outside test", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchSubmissionsFromFetcher("0000320193", {
+        SEC_FETCHER_BASE_URL: "http://127.0.0.1:8789",
+        KABUYOMI_ENV: "production"
+      } as never)
+    ).rejects.toThrow("SEC rate limiter binding is missing");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("\"event\":\"sec_rate_limiter_missing\""));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("\"behavior\":\"fail_closed\""));
+  });
+
+  it("allows an explicit test-environment bypass when the SEC rate limiter binding is missing", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchSubmissionsFromFetcher("0000320193", {
+      SEC_FETCHER_BASE_URL: "http://127.0.0.1:8789",
+      KABUYOMI_ENV: "test"
+    } as never);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("\"event\":\"sec_rate_limiter_missing\""));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("\"behavior\":\"test_bypass\""));
+  });
+
   it("can request expanded submission history only for history-aware paths", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } }), {

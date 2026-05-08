@@ -63,6 +63,51 @@ describe("resolveContextualQuestion", () => {
     );
   });
 
+  it("extracts Japanese driver labels from supported Q03 answers", () => {
+    const industrialContext = [
+      { role: "user" as const, content: "売上成長の要因は？" },
+      {
+        role: "assistant" as const,
+        content:
+          "本文の要因: 売上増加は主に販売量の増加による。価格実現が不利だったため一部相殺されました。機械をエンドユーザーへ多く販売したことが主因です。"
+      }
+    ];
+
+    expect(resolveContextualQuestion("その要因は一時的？", industrialContext)).toBe(
+      "前問で挙げた売上高の要因（pricing、volume）は一時的ですか？継続性と不明点を分けて説明してください。"
+    );
+  });
+
+  it("preserves AAPL-like revenue drivers without turning the handoff into a margin question", () => {
+    const appleContext = [
+      { role: "user" as const, content: "売上成長、または減収の主な要因は？" },
+      {
+        role: "assistant" as const,
+        content:
+          "本文で説明されている要因: 主な要因は製品とサービスの売上構成の変化と需要、マクロ経済条件・関税等の影響。製品は構成の違いにより粗利が改善、サービスは売上高の増加とサービスの構成の違いが寄与。市場環境としてインフレ・金利・部品価格・為替などが影響。"
+      }
+    ];
+
+    expect(resolveContextualQuestion("その要因は一時的？それとも続きそう？", appleContext)).toBe(
+      "前問で挙げた売上高の要因（product mix、Services、foreign exchange、demand）は一時的ですか？継続性と不明点を分けて説明してください。"
+    );
+  });
+
+  it("does not recover a concrete AAPL driver from generic revenue movement alone", () => {
+    const genericAppleContext = [
+      { role: "user" as const, content: "売上成長、または減収の主な要因は？" },
+      {
+        role: "assistant" as const,
+        content:
+          "売上高は前年同期比で増加しました。ただし、選択された資料だけではiPhone、Services、地域、FXなどのどれが主因かは確認できません。"
+      }
+    ];
+
+    expect(resolveContextualQuestion("その要因は一時的？", genericAppleContext)).toBe(
+      "前問では売上高の具体的なdriverが十分に特定できていません。売上高の一時要因と継続要因を、確認できる範囲と不明点に分けて説明してください。"
+    );
+  });
+
   it("marks durability follow-ups unresolved when the previous answer did not identify a driver", () => {
     const unresolvedRevenueContext = [
       { role: "user" as const, content: "売上成長の要因は？" },

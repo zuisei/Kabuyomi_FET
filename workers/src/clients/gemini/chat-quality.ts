@@ -1,6 +1,10 @@
 import type { ChatPromptInput } from "./types";
 
 export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: string, sourceIds: string[]): boolean {
+  return classifyLowQualityChatAnswer(input, answer, sourceIds) !== null;
+}
+
+export function classifyLowQualityChatAnswer(input: ChatPromptInput, answer: string, sourceIds: string[]): string | null {
   const normalizedQuestion = input.question.replace(/\s+/g, "").toLowerCase();
   const normalizedAnswer = answer.toLowerCase();
   const asksBusinessOverview =
@@ -8,7 +12,7 @@ export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer
       normalizedQuestion
     ) || /(whatdoes.*companydo|whatcompany|whatbusiness|businessmodel)/.test(normalizedQuestion);
   const asksProfitCause =
-    /(赤字|黒字|損失|欠損|純利益|利益|net income|net loss|profit|income|earnings|loss)/.test(normalizedQuestion) &&
+    /(赤字|黒字|損失|欠損|純利益|利益|net income|net loss|profit|loss)/.test(normalizedQuestion) &&
     /(主因|要因|原因|理由|なぜ|背景|何が|driver|cause|why)/.test(normalizedQuestion);
   const asksRevenueCause =
     /(売上|増収|revenue|sales|growth)/.test(normalizedQuestion) &&
@@ -39,7 +43,7 @@ export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer
       normalizedAnswer
     )
   ) {
-    return true;
+    return "boilerplate_filing_structure";
   }
 
   if (asksBroadStockContext) {
@@ -51,13 +55,13 @@ export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer
       /(売上高|営業利益|純利益|前年比|前年同期比|revenue|operating income|net income)/.test(normalizedAnswer);
 
     if (leansOnMetricsOnly && !mentionsStockContext) {
-      return true;
+      return "stock_context_metric_only";
     }
   }
 
   if (asksBusinessOverview) {
     if (/^[\s、。,]*(?:は|が|を|に|で)(?:[、。,\s]|$)/.test(answer)) {
-      return true;
+      return "business_overview_fragment";
     }
 
     const sourceCandidates = input.contextPack?.sourceChunks ?? input.filing.sourceChunks;
@@ -79,15 +83,15 @@ export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer
     );
 
     if (citesOnlyMetrics || boilerplateIndex >= 0) {
-      return true;
+      return citesOnlyMetrics ? "business_overview_metrics_only" : "business_overview_boilerplate";
     }
 
     if (metricIndex >= 0 && (businessIndex === -1 || metricIndex < businessIndex)) {
-      return true;
+      return "business_overview_metric_lead";
     }
 
     if (/確認できません|分かりません|わかりません|not enough context|cannot confirm/.test(normalizedAnswer) && businessIndex === -1) {
-      return true;
+      return "business_overview_unavailable";
     }
   }
 
@@ -101,7 +105,7 @@ export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer
     );
 
     if (!mentionsDurability || leansOnBoilerplate) {
-      return true;
+      return leansOnBoilerplate ? "durability_boilerplate" : "durability_missing_assessment";
     }
   }
 
@@ -109,7 +113,7 @@ export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer
     const mentionsRevenue = /(売上|増収|revenue|sales)/.test(normalizedAnswer);
     const leansOnProfitOnly = /(営業利益|純利益|利益率|eps|operating income|net income|profit|earnings)/.test(normalizedAnswer);
     if (leansOnProfitOnly && !mentionsRevenue) {
-      return true;
+      return "revenue_driver_profit_only";
     }
 
     const declinesDriverAnswer =
@@ -120,7 +124,7 @@ export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer
         normalizedAnswer
       );
     if (declinesDriverAnswer && (hasRevenueDriverContext(input) || hasRevenueDiscussionContext(input))) {
-      return true;
+      return "revenue_driver_declined_despite_context";
     }
   }
 
@@ -133,7 +137,7 @@ export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer
       );
 
     if ((leansOnRevenue || leansOnBoilerplate) && !mentionsProfitContext) {
-      return true;
+      return leansOnBoilerplate ? "profit_cause_boilerplate" : "profit_cause_revenue_only";
     }
   }
 
@@ -145,7 +149,7 @@ export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer
       );
 
     if (answerLooksUnavailableOnly) {
-      return true;
+      return "contextual_reasoning_unavailable_only";
     }
 
     const answerLooksMetricOnly =
@@ -157,13 +161,13 @@ export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer
       );
 
     if (answerLooksMetricOnly) {
-      return true;
+      return "contextual_reasoning_metric_only";
     }
   }
 
   const latinCount = (answer.match(/[A-Za-z]/g) ?? []).length;
   const japaneseCount = (answer.match(/[ぁ-んァ-ヶ一-龠]/g) ?? []).length;
-  return !asksAboutFilingStructure && latinCount >= 40 && japaneseCount <= 12;
+  return !asksAboutFilingStructure && latinCount >= 40 && japaneseCount <= 12 ? "english_heavy_answer" : null;
 }
 
 function hasRevenueDriverContext(input: ChatPromptInput): boolean {

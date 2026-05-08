@@ -40,7 +40,6 @@ export function contextProfile(questionIntent: QuestionIntent, mode: ChatContext
 
 export function shouldLeadWithMetrics(questionIntent: QuestionIntent): boolean {
   return (
-    questionIntent === "margin_profitability" ||
     questionIntent === "cash_flow" ||
     questionIntent === "historical_comparison"
   );

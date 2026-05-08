@@ -15,7 +15,7 @@ export interface Env {
   OPENAI_PROMPT_ID?: string;
   OPENAI_PROMPT_VERSION?: string;
   OPENAI_TIMEOUT_MS?: string;
-  OPENAI_REASONING_EFFORT?: "minimal" | "low" | "medium" | "high";
+  OPENAI_REASONING_EFFORT?: "none" | "minimal" | "low" | "medium" | "high";
   OPENAI_MAX_COMPLETION_TOKENS?: string;
   HARD_INTENT_TARGETED_RETRIEVAL_MODE?: "off" | "diagnostic" | "active";
   ADMOB_REWARDED_AD_UNIT_ID?: string;

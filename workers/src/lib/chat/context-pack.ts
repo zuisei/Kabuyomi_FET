@@ -160,14 +160,18 @@ export function buildChatContextPack(
 
   removeRiskDistractorSources(selected, questionIntent);
 
-  const expandedChunks = filterExpandedRiskDistractorSources(
-    filing,
+  const expandedChunks = filterRevenueDriverDistractorSources(
     questionIntent,
-    expandSelectedSourceChunks(
+    filing,
+    filterExpandedRiskDistractorSources(
       filing,
-      orderSelectedSources([...selected.values()], questionIntent).slice(0, profile.maxSources),
       questionIntent,
-      profile
+      expandSelectedSourceChunks(
+        filing,
+        orderSelectedSources([...selected.values()], questionIntent).slice(0, profile.maxSources),
+        questionIntent,
+        profile
+      )
     )
   );
   const selectedChunks = trimToBudget(expandedChunks, profile.tokenBudget);
@@ -211,9 +215,85 @@ function filterExpandedRiskDistractorSources(
   });
 }
 
+function filterRevenueDriverDistractorSources(
+  questionIntent: QuestionIntent,
+  filing: FilingCacheRecord,
+  sourceChunks: SourceChunkRecord[]
+): SourceChunkRecord[] {
+  if (!shouldLeadWithDriverNarrative(questionIntent)) {
+    return sourceChunks;
+  }
+
+  const concreteNarrativeCount = sourceChunks.filter((source) =>
+    source.sectionType === "md_a" && isConcreteRevenueDriverSource(source)
+  ).length;
+  if (concreteNarrativeCount < 2) {
+    return sourceChunks;
+  }
+
+  return sourceChunks.filter((source) => {
+    if (source.sectionType !== "md_a" || isConcreteRevenueDriverSource(source)) {
+      return true;
+    }
+    const original = filing.sourceChunks.find((chunk) => chunk.sourceId === source.sourceId);
+    const text = `${source.sectionTitle} ${source.sourceLabel} ${source.text} ${original?.text ?? ""}`;
+    return !isRevenueDriverBusinessDistractor(text);
+  }).map((source) => {
+    if (source.sectionType !== "md_a") {
+      return source;
+    }
+    const cleanedText = removeRevenueDriverDistractorSentences(source.text);
+    return cleanedText === source.text
+      ? source
+      : {
+        ...source,
+        text: cleanedText,
+        endOffset: source.startOffset + cleanedText.length
+      };
+  });
+}
+
+function isConcreteRevenueDriverSource(source: SourceChunkRecord): boolean {
+  if (isRevenueDriverBusinessDistractor(`${source.sectionTitle} ${source.sourceLabel} ${source.text}`)) {
+    return false;
+  }
+  return hasConcreteRevenueDriverWindow(source.text) && revenueDriverWindowQualityScore(source.text) >= 45;
+}
+
+function isRevenueDriverBusinessDistractor(text: string): boolean {
+  const haystack = text.toLowerCase();
+  if (hasCurrentPeriodDriverSignal(haystack)) {
+    return false;
+  }
+
+  return hasRevenueDriverBusinessDistractorCue(haystack);
+}
+
+function hasRevenueDriverBusinessDistractorCue(text: string): boolean {
+  const haystack = text.toLowerCase();
+  return /(item\s+2\.?\s+properties|headquarters|office locations?|opened our first|began our first|store footprint|available information|corporate website|business description|history|table of contents|item\s+7a\s+quantitative|item\s+8\s+financial statements)/i.test(haystack) ||
+    /(financial subsidiaries|below-market interest rate programs|broad array of financial merchandising programs|primarily responsible for supporting customers|majority of machine sales|nature of customer demand|developing economies)/i.test(haystack) ||
+    /(opening new stores and clubs|remodeling existing locations|physical footprint|technology, automation, and our associates|customer experience|omnichannel capabilities|broader set of offerings|site-to-store|pickup or delivery services at over|locations globally|seasonal aspects of operations|suppliers, supply chain and distribution|highest sales volume.*fourth quarter)/i.test(haystack) ||
+    (/we operate|we provide|we offer|customer experience|omnichannel capabilities|physical footprint/i.test(haystack));
+}
+
+function hasCurrentPeriodDriverSignal(text: string): boolean {
+  return /driven by|primarily due to|attributable to|resulted from|reflected|reflecting|partially offset|offset by|total net revenue|net sales|sales and revenues|comparable sales|sales volume|price realization|transactions?|average ticket|unit volumes?|ecommerce sales|member engagement|expected stronger sales|dealer inventor/i.test(text);
+}
+
 function isOffIntentRiskNarrative(questionIntent: QuestionIntent, text: string): boolean {
   if (questionIntent === "risk_factors") {
     return isAccountingEstimateRiskDistractor(text);
+  }
+
+  if (questionIntent === "margin_profitability") {
+    const haystack = text.toLowerCase();
+    const hasSpecificMarginResult =
+      /(gross margin|operating margin|profit margin|gross profit|operating income|segment operating income|segment operating profit|cost of sales|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|price realization|manufacturing cost|markdown|shrink|refining margins?|chemical margins?).{0,220}(increased|decreased|improved|declined|higher|lower|driven by|due to|reflecting|partially offset|offset by)/i.test(haystack) ||
+      /(increased|decreased|improved|declined|higher|lower|driven by|due to|reflecting|partially offset|offset by).{0,220}(gross margin|operating margin|profit margin|gross profit|operating income|segment operating income|segment operating profit|cost of sales|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|price realization|manufacturing cost|markdown|shrink|refining margins?|chemical margins?)/i.test(haystack);
+    if (hasOffIntentRiskTerms(haystack) && !hasSpecificMarginResult) {
+      return true;
+    }
   }
 
   if (questionIntent !== "yoy_change" && questionIntent !== "mda_summary") {
@@ -296,6 +376,9 @@ function sourceOrderScore(source: SourceChunkRecord, questionIntent: QuestionInt
   score += Math.min(30, Math.floor(normalizeWhitespace(source.text).length / 100));
   const intentScore = intentSourceScore(source, questionIntent);
   score += Math.min(80, Math.floor(intentScore / 3));
+  if (questionIntent === "yoy_change" || questionIntent === "mda_summary") {
+    score += Math.min(70, Math.max(-70, revenueDriverWindowQualityScore(source.text)));
+  }
   return score;
 }
 
@@ -491,7 +574,16 @@ function buildSupplementalContextChunks(
       continue;
     }
 
-    const clippedWindow = clipToSourceExcerpt(window, profile.sourceExcerptChars);
+    const clippedWindow = shouldLeadWithDriverNarrative(questionIntent)
+      ? clipToRevenueDriverExcerpt(window, profile.sourceExcerptChars)
+      : clipToSourceExcerpt(window, profile.sourceExcerptChars);
+    if (
+      shouldLeadWithDriverNarrative(questionIntent) &&
+      (revenueDriverWindowQualityScore(clippedWindow) < 20 || !hasConcreteRevenueDriverWindow(clippedWindow))
+    ) {
+      diagnostics.rejectedLowTextQualityCount += 1;
+      continue;
+    }
     result.push({
       sourceId: `${SUPPLEMENTAL_SOURCE_PREFIX}${index}`,
       sectionType: "md_a",
@@ -519,8 +611,19 @@ function buildIntentTextWindows(
   windowChars: number,
   diagnostics: MutableSelectionDiagnostics
 ): string[] {
-  const matches = [...text.matchAll(pattern)].slice(0, 24);
-  const windows = matches.map((match) => extractWindow(text, match.index ?? 0, windowChars));
+  const priorityPattern = supplementalPriorityPattern(questionIntent);
+  const priorityMatches = priorityPattern ? [...text.matchAll(priorityPattern)].slice(0, 80) : [];
+  const fallbackMatches = [...text.matchAll(pattern)].slice(0, shouldLeadWithDriverNarrative(questionIntent) ? 140 : 40);
+  const seenMatchIndexes = new Set<number>();
+  const windows = [
+    ...priorityMatches.map((match) => {
+      seenMatchIndexes.add(match.index ?? -1);
+      return extractFocusedWindow(text, match.index ?? 0, windowChars);
+    }),
+    ...fallbackMatches
+      .filter((match) => !seenMatchIndexes.has(match.index ?? -1))
+      .map((match) => extractWindow(text, match.index ?? 0, windowChars))
+  ];
 
   if (windows.length === 0 && shouldUseOpeningContext(questionIntent)) {
     windows.push(text.slice(0, windowChars).trim());
@@ -533,6 +636,13 @@ function buildIntentTextWindows(
       diagnostics.rejectedLowTextQualityCount += 1;
       continue;
     }
+    if (
+      shouldLeadWithDriverNarrative(questionIntent) &&
+      (revenueDriverWindowQualityScore(window) < 20 || !hasConcreteRevenueDriverWindow(window))
+    ) {
+      diagnostics.rejectedLowTextQualityCount += 1;
+      continue;
+    }
     const quality = assessNarrativeQuality(window);
     if (shouldRejectNarrativeSource(questionIntent, quality)) {
       recordRejectedNarrative(diagnostics, quality);
@@ -542,6 +652,13 @@ function buildIntentTextWindows(
   }
 
   return usable.sort((a, b) => supplementalWindowScore(b, questionIntent) - supplementalWindowScore(a, questionIntent));
+}
+
+function supplementalPriorityPattern(questionIntent: QuestionIntent): RegExp | null {
+  if (questionIntent !== "yoy_change" && questionIntent !== "mda_summary") {
+    return null;
+  }
+  return /total net revenue|sales and revenues|net sales|revenue was|revenues were|revenue increased|revenue decreased|net sales increased|net sales decreased|driven by|primarily due to|reflected|reflecting|partially offset|offset by|net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|commodity prices?|crude demand|natural gas prices?|production volumes?|refining margins?|chemical margins?|sales volume|price realization|backlog|dealer inventory|equipment to end users|comparable sales|average ticket|transactions?|traffic|ecommerce|e-commerce|membership income|unit volumes/gi;
 }
 
 function supplementalPattern(questionIntent: QuestionIntent): RegExp {
@@ -590,7 +707,7 @@ function supplementalSectionTitle(questionIntent: QuestionIntent): string {
     case "yoy_change":
     case "historical_comparison":
     case "unknown":
-      return "Filing context";
+      return questionIntent === "yoy_change" ? "Segment and revenue context" : "Filing context";
   }
 }
 
@@ -615,6 +732,24 @@ function extractWindow(text: string, center: number, size: number): string {
   return text.slice(start, end).trim();
 }
 
+function extractFocusedWindow(text: string, center: number, size: number): string {
+  const before = Math.floor(size * 0.25);
+  let start = Math.max(0, center - before);
+  let end = Math.min(text.length, start + size);
+  if (end - start < size) {
+    start = Math.max(0, end - size);
+  }
+  const startBoundary = text.lastIndexOf(". ", start);
+  if (startBoundary > 0 && center - startBoundary < size) {
+    start = startBoundary + 2;
+  }
+  const endBoundary = text.indexOf(". ", end);
+  if (endBoundary > center && endBoundary - center < size) {
+    end = endBoundary + 1;
+  }
+  return text.slice(start, end).trim();
+}
+
 function clipToSourceExcerpt(text: string, maxChars: number): string {
   const normalized = normalizeWhitespace(text);
   if (normalized.length <= maxChars) {
@@ -636,6 +771,87 @@ function clipToSourceExcerpt(text: string, maxChars: number): string {
   return clipped.slice(0, wordBoundary > Math.floor(maxChars * 0.75) ? wordBoundary : maxChars).trim();
 }
 
+function clipToRevenueDriverExcerpt(text: string, maxChars: number): string {
+  const normalized = normalizeWhitespace(text);
+  if (normalized.length <= maxChars && !hasRevenueDriverBusinessDistractorCue(normalized)) {
+    return normalized;
+  }
+
+  const pattern = supplementalPriorityPattern("yoy_change");
+  const match = bestRevenueDriverFocusMatch(normalized, pattern, maxChars);
+  pattern && (pattern.lastIndex = 0);
+  if (match == null) {
+    return clipToSourceExcerpt(normalized, maxChars);
+  }
+
+  const shouldAvoidDistractorLead = hasRevenueDriverBusinessDistractorCue(normalized);
+  const half = Math.floor(maxChars / 2);
+  let start = shouldAvoidDistractorLead
+    ? Math.max(0, normalized.lastIndexOf(". ", match - 1) + 2)
+    : Math.max(0, match - half);
+  let end = Math.min(normalized.length, start + maxChars);
+  if (end - start < maxChars) {
+    start = Math.max(0, end - maxChars);
+  }
+  const startBoundary = normalized.lastIndexOf(". ", start);
+  if (!shouldAvoidDistractorLead && startBoundary > 0 && match - startBoundary < maxChars) {
+    start = startBoundary + 2;
+  }
+  const endBoundary = normalized.indexOf(". ", end);
+  if (endBoundary > match && endBoundary - match < maxChars) {
+    end = endBoundary + 1;
+  }
+  return removeRevenueDriverDistractorSentences(normalized.slice(start, end).trim());
+}
+
+function bestRevenueDriverFocusMatch(text: string, pattern: RegExp | null, maxChars: number): number | null {
+  if (!pattern) {
+    return null;
+  }
+
+  const matches = [...text.matchAll(pattern)];
+  if (matches.length === 0) {
+    return null;
+  }
+
+  const scored = matches
+    .filter((match) => match.index != null && !isRevenueDriverBusinessDistractor(sentenceAround(text, match.index)))
+    .map((match) => {
+      const index = match.index ?? 0;
+      const window = extractFocusedWindow(text, index, maxChars);
+      const score = revenueDriverWindowQualityScore(window) + driverSpecificityScore(window) -
+        (hasRevenueDriverBusinessDistractorCue(window) ? 60 : 0);
+      return { index, score };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  return scored[0]?.index ?? matches[0]?.index ?? null;
+}
+
+function sentenceAround(text: string, index: number | undefined): string {
+  const center = Math.max(0, index ?? 0);
+  const start = Math.max(0, text.lastIndexOf(". ", center - 1) + 2);
+  const endBoundary = text.indexOf(". ", center);
+  const end = endBoundary === -1 ? text.length : endBoundary + 1;
+  return text.slice(start, end);
+}
+
+function removeRevenueDriverDistractorSentences(text: string): string {
+  if (!hasRevenueDriverBusinessDistractorCue(text)) {
+    return text;
+  }
+
+  const sentences = text.split(/(?<=\.)\s+/).filter((sentence) => sentence.trim().length > 0);
+  const kept = sentences.filter((sentence) =>
+    !hasRevenueDriverBusinessDistractorCue(sentence) ||
+    (hasConcreteRevenueDriverWindow(sentence) && !isRevenueDriverBusinessDistractor(sentence))
+  );
+  if (kept.length === 0 || kept.length === sentences.length) {
+    return text;
+  }
+  return kept.join(" ").trim();
+}
+
 function supplementalWindowScore(text: string, questionIntent: QuestionIntent): number {
   const base = intentSourceScore(
     {
@@ -651,8 +867,80 @@ function supplementalWindowScore(text: string, questionIntent: QuestionIntent): 
     questionIntent
   );
   return questionIntent === "yoy_change" || questionIntent === "mda_summary"
-    ? base + driverSpecificityScore(text)
+    ? base + driverSpecificityScore(text) + revenueDriverWindowQualityScore(text)
     : base;
+}
+
+function revenueDriverWindowQualityScore(text: string): number {
+  const haystack = text.toLowerCase();
+  const hasCausalLanguage = /driven by|primarily due to|reflected|reflecting|partially offset|offset by|largely offset|resulting in/.test(haystack);
+  const hasConcreteSectorKpi =
+    /net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|card services|commodity prices?|crude|natural gas|production volumes?|refining margins?|chemical margins?|upstream|downstream|sales volume|price realization|backlog|dealer inventory|equipment to end users|construction industries|resource industries|power & energy|comparable sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership|average ticket|unit volumes/.test(haystack);
+  let score = 0;
+  if (/(total net revenue|net sales|sales and revenues|sales|revenue).{0,220}(up|down|increased|decreased|growth|decline|higher|lower|compared)/.test(haystack)) {
+    score += 45;
+  }
+  if (/(up|down|increased|decreased|growth|decline|higher|lower).{0,220}(total net revenue|net sales|sales and revenues|sales|revenue)/.test(haystack)) {
+    score += 35;
+  }
+  if (hasCausalLanguage) {
+    score += 45;
+  }
+  if (/net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|card services/.test(haystack)) {
+    score += 35;
+  }
+  if (/commodity prices?|crude|natural gas|production volumes?|refining margins?|chemical margins?|upstream|downstream/.test(haystack)) {
+    score += 35;
+  }
+  if (/sales volume|price realization|backlog|dealer inventory|equipment to end users|construction industries|resource industries|power & energy/.test(haystack)) {
+    score += 35;
+  }
+  if (/comparable sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership|average ticket|unit volumes/.test(haystack)) {
+    score += 35;
+  }
+  if (/risk factors?|forward-looking statements?|available information|properties|website/.test(haystack) && !/driven by|primarily due to|reflected|reflecting|total net revenue|net sales|sales and revenues/.test(haystack)) {
+    score -= 80;
+  }
+  if (isBroadEnergyContextWithoutPeriodResult(haystack)) {
+    score -= 140;
+  }
+  if (!hasCausalLanguage && !hasConcreteSectorKpi) {
+    score -= 120;
+  }
+  return score;
+}
+
+function hasConcreteRevenueDriverWindow(text: string): boolean {
+  const haystack = text.toLowerCase();
+  const hasRevenueMovement =
+    /(total net revenue|net sales|sales and revenues|sales|revenue|comparable sales).{0,220}(up|down|increased|decreased|growth|decline|higher|lower|compared)|(?:up|down|increased|decreased|growth|decline|higher|lower).{0,220}(total net revenue|net sales|sales and revenues|sales|revenue|comparable sales)/.test(haystack);
+  const hasCausalLanguage = /driven by|primarily due to|reflected|reflecting|partially offset|offset by|resulting in/.test(haystack);
+  const hasBankEvidence = /net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|card services/.test(haystack);
+  const hasEnergyEvidence = /commodity prices?|crude demand|natural gas prices?|production volumes?|refining margins?|chemical margins?|upstream|downstream/.test(haystack);
+  const hasIndustrialEvidence = /sales volume|price realization|backlog|dealer inventory|equipment to end users|construction industries|resource industries|power & energy/.test(haystack);
+  const hasRetailEvidence = /comparable sales|transactions?|traffic|average ticket|ecommerce|e-commerce|membership|unit volumes/.test(haystack);
+  const hasSectorEvidence = hasBankEvidence || hasEnergyEvidence || hasIndustrialEvidence || hasRetailEvidence;
+
+  if (hasEnergyEvidence && !hasCurrentPeriodEnergyResultContext(haystack)) {
+    return false;
+  }
+
+  return (hasRevenueMovement && (hasCausalLanguage || hasSectorEvidence)) || (hasCausalLanguage && hasSectorEvidence);
+}
+
+function hasCurrentPeriodEnergyResultContext(text: string): boolean {
+  const hasEnergyResultMetric =
+    /(sales and other operating revenue|revenue|sales|earnings|operating results?|upstream earnings|downstream earnings|energy products sales).{0,240}(increase|decrease|up|down|higher|lower|decline|growth|compared|affected|impact|reflected|reflecting|driven|due to|resulting)/.test(text) ||
+    /(increase|decrease|up|down|higher|lower|decline|growth|compared|affected|impact|reflected|reflecting|driven|due to|resulting).{0,240}(sales and other operating revenue|revenue|sales|earnings|operating results?|upstream earnings|downstream earnings|energy products sales)/.test(text);
+  const hasCurrentPeriodCue = /(202[0-9]|fiscal|year ended|three months ended|quarter|current year|compared with|compared to|%)/.test(text);
+  const hasEnergyDriver = /(crude prices?|oil prices?|brent|natural gas prices?|production volumes?|liquids?|gas production|refining margins?|refinery margins?|chemical margins?|upstream|downstream|volume\/mix|volume mix|price mix)/.test(text);
+  const hasStrongEnergyResultExplanation = hasEnergyResultMetric && hasEnergyDriver;
+  return (hasCurrentPeriodCue || hasStrongEnergyResultExplanation) && hasEnergyResultMetric && hasEnergyDriver && !isBroadEnergyContextWithoutPeriodResult(text);
+}
+
+function isBroadEnergyContextWithoutPeriodResult(text: string): boolean {
+  return /(proved reserves?|reserve disclosures?|long[- ]term|over the long term|market supply and demand|general economic activities|levels of prosperity|technology advances|consumer preference|government policies|production sharing contracts?|price effects on production sharing contracts|energy transition|risk factors?)/.test(text) &&
+    !/(sales and other operating revenue|revenue|sales|earnings|operating results?).{0,240}(increase|decrease|up|down|higher|lower|decline|growth|affected|impact|reflected|reflecting|driven|due to|resulting)/.test(text);
 }
 
 function driverSpecificityScore(text: string): number {
@@ -715,7 +1003,9 @@ function expandSelectedSourceChunk(
   }
 
   if (chunk.sourceId.startsWith(SUPPLEMENTAL_SOURCE_PREFIX)) {
-    const clipped = clipToSourceExcerpt(chunk.text, profile.sourceExcerptChars);
+    const clipped = shouldLeadWithDriverNarrative(questionIntent)
+      ? clipToRevenueDriverExcerpt(chunk.text, profile.sourceExcerptChars)
+      : clipToSourceExcerpt(chunk.text, profile.sourceExcerptChars);
     return {
       ...chunk,
       text: clipped,
@@ -765,7 +1055,8 @@ function buildNeighborExpandedText(
       source.sectionTitle === chunk.sectionTitle &&
       (source.sourceId === chunk.sourceId ||
         (!shouldRejectNarrativeSource(questionIntent, assessNarrativeQuality(source.text)) &&
-          !isOffIntentRiskNarrative(questionIntent, `${source.sectionTitle} ${source.sourceLabel} ${source.text}`)))
+          !isOffIntentRiskNarrative(questionIntent, `${source.sectionTitle} ${source.sourceLabel} ${source.text}`) &&
+          !(shouldLeadWithDriverNarrative(questionIntent) && isRevenueDriverBusinessDistractor(source.text))))
   );
 
   const joined = normalizeWhitespace(candidates.map((source) => source.text).join(" "));
@@ -789,6 +1080,13 @@ function buildOffsetExpandedText(
     (questionIntent === "yoy_change" || questionIntent === "mda_summary") &&
     hasOffIntentRiskTerms(window) &&
     !hasOffIntentRiskTerms(chunk.text)
+  ) {
+    return null;
+  }
+  if (
+    shouldLeadWithDriverNarrative(questionIntent) &&
+    hasRevenueDriverBusinessDistractorCue(window) &&
+    !hasRevenueDriverBusinessDistractorCue(chunk.text)
   ) {
     return null;
   }

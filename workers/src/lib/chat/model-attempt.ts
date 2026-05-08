@@ -31,13 +31,17 @@ export async function buildValidatedModelAnswer({
   question,
   env,
   questionIntent,
-  timings
+  timings,
+  previousQuestion,
+  previousAnswer
 }: {
   filing: FilingCacheRecord;
   question: string;
   env: Env;
   questionIntent: QuestionIntent;
   timings: ChatTimingTracker;
+  previousQuestion?: string;
+  previousAnswer?: string;
 }): Promise<{
   contextPack: ChatContextPack;
   modelResponse: GeminiChatAnswer;
@@ -50,6 +54,8 @@ export async function buildValidatedModelAnswer({
     companyName: filing.companyName,
     questionIntent,
     question,
+    previousQuestion,
+    previousAnswer,
     selectedSources: contextPack.sourceChunks,
     metrics: contextPack.metrics.length > 0 ? contextPack.metrics : filing.metrics
   });
@@ -90,6 +96,8 @@ export async function buildValidatedModelAnswer({
       sector,
       questionIntent,
       question,
+      previousAnswer,
+      conversationContext: previousQuestion ? `${previousQuestion}\n${previousAnswer ?? ""}` : previousAnswer,
       sourceGateResult: initialGate,
       sourceGateMissingSourceTypes: initialGate.missingSourceTypes,
       selectedSourceLabels: contextPack.sourceChunks.map((source) => source.sourceLabel),
@@ -115,6 +123,8 @@ export async function buildValidatedModelAnswer({
         companyName: filing.companyName,
         questionIntent,
         question,
+        previousQuestion,
+        previousAnswer,
         selectedSources: expandedContextPack.sourceChunks,
         metrics: expandedContextPack.metrics.length > 0 ? expandedContextPack.metrics : filing.metrics
       });
@@ -442,6 +452,7 @@ function attachQualityControl(
       sourceGateSufficient: sourceGateResult.sourceGateApplied ? sourceGateResult.sourceSufficient : null,
       sourceGateMissingSourceTypes: sourceGateResult.missingSourceTypes,
       sourceGateFailureLabels: [...new Set([...sourceGateResult.failureLabels, ...evidenceSlots.failureLabels])],
+      sourceGateEvidenceSlots: summarizeEvidenceSlots(evidenceSlots),
       sourceGateRetrievalRetryRecommended: sourceGateResult.retrievalRetryRecommended,
       retrievalRetryUsed: options.retrievalRetryUsed,
       retrievalRetryOutcome: options.retrievalRetryOutcome,
@@ -453,6 +464,27 @@ function attachQualityControl(
       genericFallbackPhraseDetected: options.genericFallbackPhraseDetected,
       ...hardRetrievalDiagnostics
     }
+  };
+}
+
+function summarizeEvidenceSlots(evidenceSlots: EvidenceSlots): Record<string, unknown> {
+  return {
+    confirmedMetricMovement: evidenceSlots.confirmedMetricMovement ?? null,
+    companyExplainedDrivers: evidenceSlots.companyExplainedDrivers.map((driver) => ({
+      category: driver.category,
+      driver: driver.driver.slice(0, 220),
+      sourceIds: driver.sourceIds,
+      confidence: driver.confidence
+    })),
+    segmentOrBusinessSignals: evidenceSlots.segmentOrBusinessSignals.map((signal) => ({
+      fact: signal.fact.slice(0, 220),
+      sourceIds: signal.sourceIds,
+      confidence: signal.confidence
+    })),
+    marginDriverCount: evidenceSlots.marginDrivers.length,
+    unknowns: evidenceSlots.unknowns,
+    sourceLimitations: evidenceSlots.sourceLimitations,
+    failureLabels: evidenceSlots.failureLabels
   };
 }
 

@@ -14,14 +14,16 @@ describe("chat question intent and context packing", () => {
     expect(context.sourceChunks[0]?.text).toContain("supply chain");
   });
 
-  it("selects metrics context for margin questions", () => {
+  it("selects margin narrative before metrics for margin questions", () => {
     const filing = makeIntentFiling();
     const intent = classifyQuestionIntent("利益率はどう？");
     const context = buildChatContextPack(filing, intent);
 
     expect(intent).toBe("margin_profitability");
     expect(context.metrics.map((metric) => metric.logicalName)).toEqual(["revenue", "operatingIncome", "netIncome"]);
-    expect(context.sourceChunks.slice(0, 3).map((chunk) => chunk.sourceId)).toEqual(["S9", "S10", "S11"]);
+    expect(context.sourceChunks[0]?.sourceId).toBe("S2");
+    expect(context.sourceChunks[0]?.text).toMatch(/Gross margin|operating expenses/i);
+    expect(context.sourceChunks.map((chunk) => chunk.sourceId)).toEqual(expect.arrayContaining(["S9", "S10", "S11"]));
   });
 
   it("keeps numeric metric context for previous-filing comparison questions", () => {
@@ -49,6 +51,12 @@ describe("chat question intent and context packing", () => {
 
     expect(classifyQuestionIntent("営業CFが変化した理由は？")).toBe("cash_flow");
     expect(classifyQuestionIntent("利益率が悪化した理由は？")).toBe("margin_profitability");
+  });
+
+  it("keeps revenue-driver durability rewrites out of margin intent when AAPL-like drivers are present", () => {
+    expect(
+      classifyQuestionIntent("前問で挙げた売上高の要因（product mix、Services、foreign exchange、demand）は一時的ですか？継続性と不明点を分けて説明してください。")
+    ).toBe("yoy_change");
   });
 
   it("classifies management-emphasis questions as MD&A-style context requests", () => {
@@ -281,7 +289,6 @@ describe("chat question intent and context packing", () => {
     };
 
     const context = buildChatContextPack(filing, "yoy_change");
-
     expect(context.contextTokenBudget).toBeGreaterThanOrEqual(8_000);
     expect(context.sourceChunks[0]?.sourceId).toBe("S2");
     expect(context.sourceChunks[0]?.text).toContain("primarily due to comparable store sales growth");
@@ -362,6 +369,123 @@ describe("chat question intent and context packing", () => {
     expect(context.sourceChunks[0]?.text).toContain("refining margins");
   });
 
+  it("finds JPM-like revenue driver windows after early generic filing matches", () => {
+    const driverText =
+      "Total net revenue was $182.4 billion, up 3%, reflecting net interest income of $95.4 billion, up 3%, driven by higher Markets net interest income, higher revolving balances in Card Services, higher wholesale deposit balances, and the impact of investment securities activity. Noninterest revenue was $87.0 billion, up 2%, reflecting higher Markets noninterest revenue and higher investment banking fees.";
+    const filing = makeLongRevenueDriverFiling("JPM", "JPMorgan Chase & Co.", driverText);
+
+    const context = buildChatContextPack(filing, "yoy_change");
+    const driverSource = context.sourceChunks.find((chunk) => chunk.text.includes("Total net revenue was $182.4 billion"));
+
+    expect(driverSource?.sourceId).toMatch(/^CTX/);
+    expect(driverSource?.sourceLabel).toContain("Segment and revenue context");
+    expect(driverSource?.text).toContain("driven by higher Markets net interest income");
+  });
+
+  it("finds XOM-like commodity and segment windows after early generic filing matches", () => {
+    const driverText =
+      "Markets remained broadly balanced. Record crude demand was met by increasing industry supply, resulting in modestly lower prices. Natural gas prices rose due to robust demand. Industry refining margins improved in 2025, supported by record full-year demand and an increase in supply disruptions driving higher margins. Permian production volumes averaged a record level, approximately higher than the previous year.";
+    const filing = makeLongRevenueDriverFiling("XOM", "Exxon Mobil Corp", driverText);
+
+    const context = buildChatContextPack(filing, "yoy_change");
+    const driverSource = context.sourceChunks.find((chunk) => chunk.text.includes("Record crude demand"));
+
+    expect(driverSource?.text).toContain("Record crude demand");
+    expect(context.sourceChunks.some((chunk) => /refining margins|production volumes/.test(chunk.text))).toBe(true);
+  });
+
+  it("finds CAT-like sales volume and price realization windows after early generic filing matches", () => {
+    const driverText =
+      "Total sales and revenues for 2025 were $67.589 billion, an increase of $2.780 billion, or 4 percent, compared with 2024. The increase reflected higher sales volume, partially offset by unfavorable price realization. Higher sales volume was primarily driven by higher sales of equipment to end users. The strong backlog coupled with healthy end markets supports expectations for sales volume growth.";
+    const filing = makeLongRevenueDriverFiling("CAT", "Caterpillar Inc.", driverText);
+
+    const context = buildChatContextPack(filing, "yoy_change");
+    const driverSource = context.sourceChunks.find((chunk) => chunk.text.includes("Total sales and revenues for 2025"));
+
+    expect(driverSource?.text).toContain("Total sales and revenues for 2025");
+    expect(driverSource?.text).toContain("higher sales volume");
+    expect(driverSource?.text).toContain("unfavorable price realization");
+  });
+
+  it("finds WMT-like comparable sales windows after early generic filing matches", () => {
+    const driverText =
+      "Walmart U.S. comparable sales increased 4.3% in fiscal 2026. Comparable sales in fiscal 2026 were driven by growth in average ticket and transactions, and also reflected growth in unit volumes and strength in all merchandise categories. Walmart U.S. eCommerce sales positively contributed to comparable sales, reflecting continued strength in customer and Walmart+ member engagement with omnichannel offerings.";
+    const filing = makeLongRevenueDriverFiling("WMT", "Walmart Inc.", driverText);
+
+    const context = buildChatContextPack(filing, "yoy_change");
+    const driverSource = context.sourceChunks.find((chunk) => chunk.text.includes("comparable sales increased"));
+
+    expect(driverSource?.text).toContain("comparable sales increased");
+    expect(driverSource?.text).toContain("driven by growth in average ticket and transactions");
+    expect(context.sourceChunks.some((chunk) => /eCommerce sales positively contributed|eCommerce/i.test(chunk.text))).toBe(true);
+  });
+
+  it("prefers CAT Q04 durability sources over generic segment and finance descriptions", () => {
+    const genericFinanceText =
+      "Cat Financial also own financial subsidiaries and provides below-market interest rate programs to support machine sales. The broader organization provides financial merchandising programs and segment descriptions around the world.";
+    const genericSegmentText =
+      "Construction Industries is primarily responsible for supporting customers using machinery in infrastructure and building construction applications. The majority of machine sales are made in construction, rental, quarry and mining industries.";
+    const driverText =
+      "Total sales and revenues for 2025 increased compared with 2024. The increase reflected higher sales volume, partially offset by unfavorable price realization. Higher sales volume was primarily driven by higher sales of equipment to end users.";
+    const outlookText =
+      "In the first quarter of 2026, we expect stronger sales and revenues primarily due to higher sales volume and favorable price realization. We expect machine dealer inventory to increase during the first quarter.";
+    const filing = {
+      ...makeIntentFiling(),
+      ticker: "CAT",
+      companyName: "Caterpillar Inc.",
+      mdaText: [genericFinanceText, driverText, genericSegmentText, outlookText].join(" "),
+      sourceChunks: [
+        chunk("S1", genericFinanceText, 1),
+        chunk("S2", driverText, 2),
+        chunk("S3", genericSegmentText, 3),
+        chunk("S4", outlookText, 4),
+        ...makeIntentFiling().sourceChunks.filter((source) => source.sectionType === "xbrl_metric")
+      ]
+    };
+
+    const context = buildChatContextPack(filing, "yoy_change");
+    const selectedText = context.sourceChunks.map((source) => source.text).join(" ");
+
+    expect(selectedText).toContain("higher sales volume");
+    expect(selectedText).toContain("dealer inventory");
+    expect(selectedText).not.toContain("below-market interest rate programs");
+    expect(selectedText).not.toContain("primarily responsible for supporting customers");
+  });
+
+  it("prefers WMT Q04 comparable-sales and engagement sources over store history and broad strategy", () => {
+    const historyText =
+      "In 1996, we began our first eCommerce initiative by creating walmart.com. Since then, our eCommerce presence has continued to grow. Today, customers can access pickup or delivery services at over 8,400 locations globally.";
+    const strategyText =
+      "Seasonal Aspects of Operations. Historically, our highest sales volume for each segment has occurred in the fourth quarter. We provide customers a broader set of offerings by opening new stores and strengthening our physical footprint.";
+    const driverText =
+      "Walmart U.S. comparable sales increased in fiscal 2026. Comparable sales were driven by growth in average ticket and transactions, and also reflected growth in unit volumes and strength in all merchandise categories.";
+    const engagementText =
+      "Walmart U.S. eCommerce sales positively contributed to comparable sales. This growth reflects continued strength in customer and Walmart+ member engagement with omnichannel offerings.";
+    const filing = {
+      ...makeIntentFiling(),
+      ticker: "WMT",
+      companyName: "Walmart Inc.",
+      mdaText: [historyText, strategyText, driverText, engagementText].join(" "),
+      sourceChunks: [
+        chunk("S1", historyText, 1),
+        chunk("S2", strategyText, 2),
+        chunk("S3", driverText, 3),
+        chunk("S4", engagementText, 4),
+        ...makeIntentFiling().sourceChunks.filter((source) => source.sectionType === "xbrl_metric")
+      ]
+    };
+
+    const context = buildChatContextPack(filing, "yoy_change");
+    const selectedText = context.sourceChunks.map((source) => source.text).join(" ");
+
+    expect(selectedText).toContain("Comparable sales were driven by growth in average ticket and transactions");
+    expect(selectedText).toContain("continued strength in customer and Walmart+ member engagement");
+    expect(selectedText).not.toContain("began our first eCommerce initiative");
+    expect(selectedText).not.toContain("pickup or delivery services at over");
+    expect(selectedText).not.toContain("highest sales volume for each segment");
+    expect(selectedText).not.toContain("strengthening our physical footprint");
+  });
+
   it("filters disaster risk windows out of revenue-growth context", () => {
     const riskText =
       "Natural disasters and other catastrophic events such as public health crises could affect our personnel, data centers, service providers, manufacturing vendors, and logistics providers. Climate change could increase the frequency or severity of these events, which could affect revenue timing.";
@@ -410,6 +534,19 @@ describe("chat question intent and context packing", () => {
     expect(classifyQuestionIntent("bull bearで強みと弱みを見て")).toBe("investment_view");
   });
 });
+
+function chunk(sourceId: string, text: string, sortOrder: number) {
+  return {
+    sourceId,
+    sectionType: "md_a" as const,
+    sectionTitle: "Item 7",
+    sourceLabel: "10-K Item 7",
+    text,
+    startOffset: 0,
+    endOffset: text.length,
+    sortOrder
+  };
+}
 
 function makeIntentFiling(): FilingCacheRecord {
   return {
@@ -464,6 +601,17 @@ function makeIntentFiling(): FilingCacheRecord {
         sortOrder: 1
       },
       {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Part I, Item 2",
+        sourceLabel: "10-Q Profitability context",
+        text:
+          "Gross margin improved because product mix shifted toward services, partially offset by higher operating expenses and research and development spending.",
+        startOffset: 58,
+        endOffset: 200,
+        sortOrder: 2
+      },
+      {
         sourceId: "S3",
         sectionType: "md_a",
         sectionTitle: "Risk Factors",
@@ -512,5 +660,33 @@ function makeIntentFiling(): FilingCacheRecord {
     generatedAt: "2026-04-14T00:00:00.000Z",
     extractorVersion: "v1",
     promptVersion: "v1"
+  };
+}
+
+function makeLongRevenueDriverFiling(ticker: string, companyName: string, driverText: string): FilingCacheRecord {
+  const earlyNoise = Array.from({ length: 36 }, (_, index) =>
+    `Generic filing context ${index + 1}: customer demand, revenue, sales, growth and market conditions may change over time, but this paragraph does not explain the actual period driver.`
+  ).join(" ");
+  const filing = makeIntentFiling();
+  return {
+    ...filing,
+    ticker,
+    companyName,
+    formType: "10-K",
+    filedAt: "2026-02-13",
+    mdaText: `${earlyNoise} ${driverText}`,
+    sourceChunks: [
+      {
+        sourceId: "S1",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Item 7",
+        text: "Management's Discussion and Analysis of Financial Condition and Results of Operations",
+        startOffset: 0,
+        endOffset: 78,
+        sortOrder: 1
+      },
+      ...filing.sourceChunks.filter((chunk) => chunk.sectionType === "xbrl_metric")
+    ]
   };
 }

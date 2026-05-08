@@ -19,6 +19,7 @@
     "testbench:validate": "node ./testbench/scripts/validate-testbench.mjs",
     "testbench:run": "npm run testbench:validate && node ./testbench/scripts/run-benchmark.mjs",
     "testbench:summarize": "node ./testbench/scripts/summarize-runs.mjs",
+    "testbench:diff": "node ./testbench/scripts/diff-runs.mjs",
     "smoke:staging": "node ./smoke/staging-worker.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

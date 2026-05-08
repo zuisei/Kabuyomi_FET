@@ -2,6 +2,7 @@ import type { FilingCacheRecord } from "../../env";
 import type { GeminiChatAnswer } from "../../clients/gemini/types";
 import type { ChatContextPack } from "./context-pack";
 import type { ChatResponseDebug, ChatResponsePayload, ChatResponsePath } from "./grounding";
+import { selectedSourceSectionFamilies, selectedSourceTypes } from "./source-family";
 
 export function buildContextDebugFields(contextPack: ChatContextPack): Pick<
   ChatResponseDebug,
@@ -12,7 +13,13 @@ export function buildContextDebugFields(contextPack: ChatContextPack): Pick<
   | "sourceSelectionStrategy"
   | "selectedSourceIds"
   | "selectedSourceLabels"
+  | "selectedSourceTypes"
+  | "selectedSourceSectionFamilies"
+  | "selectedSourceFamilies"
+  | "selectedSourceExcerpts"
+  | "selectedSourceTextPreview"
 > {
+  const selectedFamilies = selectedSourceSectionFamilies(contextPack.sourceChunks);
   return {
     contextTokenBudget: contextPack.contextTokenBudget,
     selectedSourceCount: contextPack.selectedSourceCount,
@@ -20,7 +27,12 @@ export function buildContextDebugFields(contextPack: ChatContextPack): Pick<
     estimatedContextTokens: contextPack.selectionDiagnostics.estimatedContextTokens,
     sourceSelectionStrategy: contextPack.sourceSelectionStrategy,
     selectedSourceIds: contextPack.sourceChunks.map((source) => source.sourceId),
-    selectedSourceLabels: contextPack.sourceChunks.map((source) => source.sourceLabel)
+    selectedSourceLabels: contextPack.sourceChunks.map((source) => source.sourceLabel),
+    selectedSourceTypes: selectedSourceTypes(contextPack.sourceChunks),
+    selectedSourceSectionFamilies: selectedFamilies,
+    selectedSourceFamilies: selectedFamilies,
+    selectedSourceExcerpts: contextPack.sourceChunks.map((source) => source.text.slice(0, 420)),
+    selectedSourceTextPreview: contextPack.sourceChunks.map((source) => source.text.slice(0, 320))
   };
 }
 
@@ -33,9 +45,11 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
   | "retryWasted"
   | "firstCallFailureKind"
   | "sourceGateApplied"
+  | "sourceGatePassed"
   | "sourceGateSufficient"
   | "sourceGateMissingSourceTypes"
   | "sourceGateFailureLabels"
+  | "sourceGateEvidenceSlots"
   | "sourceGateRetrievalRetryRecommended"
   | "retrievalRetryUsed"
   | "retrievalRetryOutcome"
@@ -83,6 +97,11 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
   | "geminiErrorOccurredBeforeResponse"
   | "modelName"
   | "modelProvider"
+  | "requestedModelName"
+  | "effectiveModelName"
+  | "requestedReasoningEffort"
+  | "effectiveReasoningEffort"
+  | "reasoningEffortInvalid"
   | "modelApiErrorKind"
   | "modelApiErrorStatus"
   | "modelApiErrorCode"
@@ -93,11 +112,18 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
   | "modelRequestSourceCount"
   | "modelRequestContextCharCount"
   | "modelErrorOccurredBeforeResponse"
+  | "promptTokenCount"
+  | "completionTokenCount"
+  | "totalTokenCount"
+  | "modelCallLatencyMs"
+  | "modelRawAnswerPreview"
+  | "lowQualityReason"
 > {
   const diagnostics = modelResponse.retryDiagnostics;
   const qualityControl = modelResponse.qualityControl;
   const geminiApiError = modelResponse.geminiApiError;
   const modelApiError = modelResponse.modelApiError;
+  const usage = summarizeInvocationUsage(modelResponse.llmUsage);
   return {
     retryAttempted: diagnostics?.retryAttempted ?? false,
     retryAllowed: diagnostics?.retryAllowed ?? false,
@@ -106,9 +132,11 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
     retryWasted: diagnostics?.retryWasted ?? false,
     firstCallFailureKind: diagnostics?.firstCallFailureKind ?? null,
     sourceGateApplied: qualityControl?.sourceGateApplied ?? false,
+    sourceGatePassed: qualityControl?.sourceGateSufficient ?? null,
     sourceGateSufficient: qualityControl?.sourceGateSufficient ?? null,
     sourceGateMissingSourceTypes: qualityControl?.sourceGateMissingSourceTypes ?? [],
     sourceGateFailureLabels: qualityControl?.sourceGateFailureLabels ?? [],
+    sourceGateEvidenceSlots: qualityControl?.sourceGateEvidenceSlots ?? {},
     sourceGateRetrievalRetryRecommended: qualityControl?.sourceGateRetrievalRetryRecommended ?? false,
     retrievalRetryUsed: qualityControl?.retrievalRetryUsed ?? false,
     retrievalRetryOutcome: qualityControl?.retrievalRetryOutcome ?? "not_used",
@@ -156,6 +184,15 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
     geminiErrorOccurredBeforeResponse: geminiApiError?.geminiErrorOccurredBeforeResponse ?? null,
     modelName: modelResponse.modelName ?? modelResponse.llmUsage?.[0]?.model ?? null,
     modelProvider: modelResponse.modelProvider ?? null,
+    requestedModelName: modelResponse.requestedModelName ?? modelResponse.llmUsage?.[0]?.requestedModelName ?? null,
+    effectiveModelName:
+      modelResponse.effectiveModelName ?? modelResponse.llmUsage?.[0]?.effectiveModelName ?? modelResponse.modelName ?? modelResponse.llmUsage?.[0]?.model ?? null,
+    requestedReasoningEffort:
+      modelResponse.requestedReasoningEffort ?? modelResponse.llmUsage?.[0]?.requestedReasoningEffort ?? null,
+    effectiveReasoningEffort:
+      modelResponse.effectiveReasoningEffort ?? modelResponse.llmUsage?.[0]?.effectiveReasoningEffort ?? null,
+    reasoningEffortInvalid:
+      modelResponse.reasoningEffortInvalid ?? modelResponse.llmUsage?.[0]?.reasoningEffortInvalid ?? false,
     modelApiErrorKind: modelApiError?.modelApiErrorKind ?? geminiApiError?.geminiApiErrorKind ?? null,
     modelApiErrorStatus: modelApiError?.modelApiErrorStatus ?? geminiApiError?.geminiApiErrorStatus ?? null,
     modelApiErrorCode: modelApiError?.modelApiErrorCode ?? geminiApiError?.geminiApiErrorCode ?? null,
@@ -165,7 +202,13 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
     modelRequestEstimatedTokens: modelApiError?.modelRequestEstimatedTokens ?? geminiApiError?.geminiRequestEstimatedTokens ?? null,
     modelRequestSourceCount: modelApiError?.modelRequestSourceCount ?? geminiApiError?.geminiRequestSourceCount ?? null,
     modelRequestContextCharCount: modelApiError?.modelRequestContextCharCount ?? geminiApiError?.geminiRequestContextCharCount ?? null,
-    modelErrorOccurredBeforeResponse: modelApiError?.modelErrorOccurredBeforeResponse ?? geminiApiError?.geminiErrorOccurredBeforeResponse ?? null
+    modelErrorOccurredBeforeResponse: modelApiError?.modelErrorOccurredBeforeResponse ?? geminiApiError?.geminiErrorOccurredBeforeResponse ?? null,
+    promptTokenCount: usage.promptTokenCount,
+    completionTokenCount: usage.completionTokenCount,
+    totalTokenCount: usage.totalTokenCount,
+    modelCallLatencyMs: usage.modelCallLatencyMs,
+    modelRawAnswerPreview: modelResponse.modelRawAnswerPreview ?? null,
+    lowQualityReason: modelResponse.lowQualityReason ?? null
   };
 }
 
@@ -188,6 +231,9 @@ export function buildAnswerQualityFlags(
   }
   if (debug?.fallbackReason) {
     flags.add(`fallback:${debug.fallbackReason}`);
+  }
+  if (debug?.lowQualityReason) {
+    flags.add(`low_quality:${debug.lowQualityReason}`);
   }
   if (debug?.sourceIdsValid === false) {
     flags.add("invalid_source_ids");
@@ -328,10 +374,22 @@ export function buildChatQualityPipelinePayload({
     selectedSourceCharCount: answer.debug?.selectedSourceCharCount ?? selectedSourceChars,
     estimatedContextTokens: answer.debug?.estimatedContextTokens ?? estimateTokenCountFromChars(selectedSourceChars),
     modelName,
+    requestedModelName: answer.debug?.requestedModelName ?? null,
+    effectiveModelName: answer.debug?.effectiveModelName ?? answer.debug?.modelName ?? modelName,
+    requestedReasoningEffort: answer.debug?.requestedReasoningEffort ?? null,
+    effectiveReasoningEffort: answer.debug?.effectiveReasoningEffort ?? null,
+    reasoningEffortInvalid: answer.debug?.reasoningEffortInvalid ?? false,
     modelProvider: answer.debug?.modelProvider ?? null,
     latencyMs,
     selectedSourceIds: answer.debug?.selectedSourceIds ?? answer.sources.map((source) => source.sourceId),
     selectedSourceLabels: answer.debug?.selectedSourceLabels ?? answer.sources.map((source) => source.sourceLabel),
+    selectedSourceTypes: answer.debug?.selectedSourceTypes ?? answer.sources.map((source) => source.sectionType),
+    selectedSourceSectionFamilies: answer.debug?.selectedSourceSectionFamilies ?? [],
+    selectedSourceFamilies: answer.debug?.selectedSourceFamilies ?? answer.debug?.selectedSourceSectionFamilies ?? [],
+    selectedSourceExcerpts: answer.debug?.selectedSourceExcerpts ?? answer.sources.map((source) => source.excerpt).filter(Boolean),
+    selectedSourceTextPreview: answer.debug?.selectedSourceTextPreview ?? answer.sources.map((source) => source.excerpt).filter(Boolean),
+    modelRawAnswerPreview: answer.debug?.modelRawAnswerPreview ?? null,
+    lowQualityReason: answer.debug?.lowQualityReason ?? null,
     answerQualityFlags,
     sourceIdsValid: answer.debug?.sourceIdsValid ?? null,
     geminiCalled: answer.debug?.geminiCalled ?? false,
@@ -346,9 +404,11 @@ export function buildChatQualityPipelinePayload({
     retryWasted: answer.debug?.retryWasted ?? false,
     firstCallFailureKind: answer.debug?.firstCallFailureKind ?? null,
     sourceGateApplied: answer.debug?.sourceGateApplied ?? false,
+    sourceGatePassed: answer.debug?.sourceGatePassed ?? answer.debug?.sourceGateSufficient ?? null,
     sourceGateSufficient: answer.debug?.sourceGateSufficient ?? null,
     sourceGateMissingSourceTypes: answer.debug?.sourceGateMissingSourceTypes ?? [],
     sourceGateFailureLabels: answer.debug?.sourceGateFailureLabels ?? [],
+    sourceGateEvidenceSlots: answer.debug?.sourceGateEvidenceSlots ?? {},
     sourceGateRetrievalRetryRecommended: answer.debug?.sourceGateRetrievalRetryRecommended ?? false,
     retrievalRetryUsed: answer.debug?.retrievalRetryUsed ?? false,
     retrievalRetryOutcome: answer.debug?.retrievalRetryOutcome ?? "not_used",
@@ -402,6 +462,10 @@ export function buildChatQualityPipelinePayload({
     modelRequestSourceCount: answer.debug?.modelRequestSourceCount ?? null,
     modelRequestContextCharCount: answer.debug?.modelRequestContextCharCount ?? null,
     modelErrorOccurredBeforeResponse: answer.debug?.modelErrorOccurredBeforeResponse ?? null,
+    promptTokenCount: answer.debug?.promptTokenCount ?? null,
+    completionTokenCount: answer.debug?.completionTokenCount ?? null,
+    totalTokenCount: answer.debug?.totalTokenCount ?? null,
+    modelCallLatencyMs: answer.debug?.modelCallLatencyMs ?? null,
     fallbackKindSource: answer.debug?.fallbackKindSource ?? null,
     responsePathFallbackButKindNone: answer.debug?.responsePathFallbackButKindNone ?? false,
     finalAnswerJapaneseRatio: answer.debug?.finalAnswerJapaneseRatio ?? null,
@@ -439,4 +503,35 @@ export function selectedResponseSourceCharCount(answer: ChatResponsePayload): nu
 
 export function estimateTokenCountFromChars(charCount: number): number {
   return Math.ceil(charCount / 4);
+}
+
+function summarizeInvocationUsage(llmUsage: GeminiChatAnswer["llmUsage"]): {
+  promptTokenCount: number | null;
+  completionTokenCount: number | null;
+  totalTokenCount: number | null;
+  modelCallLatencyMs: number | null;
+} {
+  if (!llmUsage || llmUsage.length === 0) {
+    return {
+      promptTokenCount: null,
+      completionTokenCount: null,
+      totalTokenCount: null,
+      modelCallLatencyMs: null
+    };
+  }
+
+  return {
+    promptTokenCount: sumNullableCounts(llmUsage.map((usage) => usage.promptTokenCount)),
+    completionTokenCount: sumNullableCounts(llmUsage.map((usage) => usage.candidatesTokenCount)),
+    totalTokenCount: sumNullableCounts(llmUsage.map((usage) => usage.totalTokenCount)),
+    modelCallLatencyMs: sumNullableCounts(llmUsage.map((usage) => usage.latencyMs))
+  };
+}
+
+function sumNullableCounts(values: Array<number | null | undefined>): number | null {
+  const numeric = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (numeric.length === 0) {
+    return null;
+  }
+  return numeric.reduce((sum, value) => sum + value, 0);
 }

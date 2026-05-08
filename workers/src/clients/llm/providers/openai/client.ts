@@ -1,6 +1,6 @@
 import type { Env } from "../../../../env";
 import { logEvent } from "../../../../lib/logging";
-import { polishChatAnswerForQuestion, shouldRecoverLowQualityChatAnswer } from "../../../gemini/chat-quality";
+import { classifyLowQualityChatAnswer, polishChatAnswerForQuestion } from "../../../gemini/chat-quality";
 import { localChatFallback, recoverBroaderFallbackIfNeeded } from "../../../gemini/fallback";
 import {
   normalizeChatResponse,
@@ -11,16 +11,24 @@ import {
 import { buildChatPrompt, buildChatPromptTemplateVariables } from "../../../gemini/prompts";
 import type { ChatPromptInput, GeminiChatAnswer } from "../../../gemini/types";
 import { classifyOpenAIError } from "./errors";
-import { invokeOpenAIChat, invokeOpenAIDashboardPrompt, resolveOpenAIChatModel, resolveOpenAIPromptId } from "./request";
+import {
+  invokeOpenAIChat,
+  invokeOpenAIDashboardPrompt,
+  requestedOpenAIChatModel,
+  resolveOpenAIChatModel,
+  resolveOpenAIPromptId,
+  resolveOpenAIReasoningConfig
+} from "./request";
 
 export async function generateOpenAIChatAnswer(env: Env, input: ChatPromptInput): Promise<GeminiChatAnswer> {
+  const modelConfigDiagnostics = openAIModelConfigDiagnostics(env);
   if (!env.OPENAI_API_KEY) {
     logEvent("openai_fallback_used", { kind: "chat", reason: "missing_api_key" });
     return attachProviderMeta(attachChatDecisionMeta(localChatFallback(input), {
       geminiCalled: false,
       geminiSucceeded: false,
       schemaValid: false
-    }), false);
+    }), false, modelConfigDiagnostics);
   }
 
   const prompt = buildChatPrompt(input);
@@ -48,7 +56,7 @@ export async function generateOpenAIChatAnswer(env: Env, input: ChatPromptInput)
         geminiSucceeded: false,
         fallbackReason,
         schemaValid: false
-      }), false),
+      }), false, modelConfigDiagnostics),
       modelApiError
     });
   }
@@ -63,7 +71,7 @@ export async function generateOpenAIChatAnswer(env: Env, input: ChatPromptInput)
       schemaValid: false,
       retryAttempt: input.retryInstruction?.attempt ?? 0,
       retryReason: input.retryInstruction?.reason
-    }), false);
+    }), false, modelConfigDiagnostics);
   }
 
   const remoteAnswer: GeminiChatAnswer = {
@@ -86,16 +94,21 @@ export async function generateOpenAIChatAnswer(env: Env, input: ChatPromptInput)
         : "weak_grounding"
       : undefined,
     schemaValid: true
-  }), recoveredWithoutUsage.usedRemoteModel === true);
+  }), recoveredWithoutUsage.usedRemoteModel === true, modelConfigDiagnostics);
 
-  if (shouldRecoverLowQualityChatAnswer(input, recovered.answer, recovered.sourceIds)) {
+  const lowQualityReason = classifyLowQualityChatAnswer(input, recovered.answer, recovered.sourceIds);
+  if (lowQualityReason) {
     logEvent("openai_fallback_used", { kind: "chat", reason: "low_quality_answer" });
     return attachProviderMeta(attachChatDecisionMeta(attachLlmUsage(localChatFallback(input), invocation.usage), {
       geminiCalled: true,
       geminiSucceeded: true,
       fallbackReason: "low_quality_answer",
       schemaValid: true
-    }), false);
+    }), false, {
+      ...modelConfigDiagnostics,
+      modelRawAnswerPreview: recovered.answer.slice(0, 500),
+      lowQualityReason
+    });
   }
 
   return recovered;
@@ -122,11 +135,37 @@ function attachChatDecisionMeta(
   };
 }
 
-function attachProviderMeta(answer: GeminiChatAnswer, usedRemoteModel: boolean): GeminiChatAnswer {
+function attachProviderMeta(
+  answer: GeminiChatAnswer,
+  usedRemoteModel: boolean,
+  diagnostics: Pick<
+    Partial<GeminiChatAnswer>,
+    | "modelRawAnswerPreview"
+    | "lowQualityReason"
+    | "requestedModelName"
+    | "effectiveModelName"
+    | "requestedReasoningEffort"
+    | "effectiveReasoningEffort"
+    | "reasoningEffortInvalid"
+  > = {}
+): GeminiChatAnswer {
   return {
     ...answer,
+    ...diagnostics,
     modelProvider: "openai",
     modelName: usedRemoteModel ? answer.modelName ?? answer.llmUsage?.[0]?.model ?? null : answer.modelName ?? null
+  };
+}
+
+function openAIModelConfigDiagnostics(env: Env): Pick<
+  GeminiChatAnswer,
+  "requestedModelName" | "effectiveModelName" | "requestedReasoningEffort" | "effectiveReasoningEffort" | "reasoningEffortInvalid"
+> {
+  const reasoningConfig = resolveOpenAIReasoningConfig(env);
+  return {
+    requestedModelName: requestedOpenAIChatModel(env),
+    effectiveModelName: resolveOpenAIChatModel(env),
+    ...reasoningConfig
   };
 }
 

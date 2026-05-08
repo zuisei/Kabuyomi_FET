@@ -11,8 +11,12 @@ vi.mock("../src/lib/filings/cache", () => ({
 }));
 
 vi.mock("../src/lib/filings/content-upgrade", () => ({
+  backfillMarginSourceAssets: vi.fn(async (record) => record),
+  backfillRevenueDriverSourceAssets: vi.fn(async (record) => record),
   enqueueContentUpgrade: vi.fn(),
   isMetricsOnlyRecord: vi.fn((record: { contentMode?: string }) => record.contentMode === "metrics_only"),
+  needsMarginSourceBackfill: vi.fn(() => false),
+  needsRevenueDriverSourceBackfill: vi.fn(() => false),
   upgradeMetricsOnlyRecord: vi.fn(async (record: { contentMode?: string }) =>
     record.contentMode === "metrics_only" ? { ...record, contentMode: "full", mdaText: "upgraded md&a" } : record
   )
@@ -251,7 +255,13 @@ describe("handleChatRoute", () => {
       "営業CFが変化した理由は？",
       expect.anything(),
       expect.anything(),
-      { executionContext: ctx }
+      {
+        executionContext: ctx,
+        followupContext: {
+          previousQuestion: "営業CF",
+          previousAnswer: "営業キャッシュフローはマイナスで、前年比で減少しました。"
+        }
+      }
     );
   });
 

@@ -52,6 +52,7 @@ export interface ChatResponsePayload {
 
 export interface ChatResponseDebug {
   questionIntent?: string;
+  rewrittenQuestion?: string;
   responsePath?: ChatResponsePath;
   fallbackReason?: string | null;
   fallbackCategory?: FallbackCategory;
@@ -65,6 +66,11 @@ export interface ChatResponseDebug {
   contextApplied?: boolean;
   modelName?: string | null;
   modelProvider?: import("../../clients/gemini/types").ChatModelProviderName | null;
+  requestedModelName?: string | null;
+  effectiveModelName?: string | null;
+  requestedReasoningEffort?: string | null;
+  effectiveReasoningEffort?: string | null;
+  reasoningEffortInvalid?: boolean;
   modelApiErrorKind?: import("../../clients/gemini/types").GeminiApiErrorKind | null;
   modelApiErrorStatus?: number | null;
   modelApiErrorCode?: string | null;
@@ -75,6 +81,10 @@ export interface ChatResponseDebug {
   modelRequestSourceCount?: number | null;
   modelRequestContextCharCount?: number | null;
   modelErrorOccurredBeforeResponse?: boolean | null;
+  promptTokenCount?: number | null;
+  completionTokenCount?: number | null;
+  totalTokenCount?: number | null;
+  modelCallLatencyMs?: number | null;
   contentMode?: "full" | "metrics_only";
   geminiCalled?: boolean;
   geminiSucceeded?: boolean;
@@ -88,9 +98,11 @@ export interface ChatResponseDebug {
   retryWasted?: boolean;
   firstCallFailureKind?: string | null;
   sourceGateApplied?: boolean;
+  sourceGatePassed?: boolean | null;
   sourceGateSufficient?: boolean | null;
   sourceGateMissingSourceTypes?: string[];
   sourceGateFailureLabels?: string[];
+  sourceGateEvidenceSlots?: Record<string, unknown>;
   sourceGateRetrievalRetryRecommended?: boolean;
   retrievalRetryUsed?: boolean;
   retrievalRetryOutcome?: "improved" | "no_improvement" | "not_used";
@@ -156,6 +168,13 @@ export interface ChatResponseDebug {
   sourceSelectionStrategy?: string | null;
   selectedSourceIds?: string[];
   selectedSourceLabels?: string[];
+  selectedSourceTypes?: string[];
+  selectedSourceSectionFamilies?: string[];
+  selectedSourceFamilies?: string[];
+  selectedSourceExcerpts?: string[];
+  selectedSourceTextPreview?: string[];
+  modelRawAnswerPreview?: string | null;
+  lowQualityReason?: string | null;
   answerQualityFlags?: string[];
   totalPipelineMs?: number;
   historicalLookupMs?: number;

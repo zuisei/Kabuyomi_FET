@@ -114,6 +114,31 @@ describe("benchmark infra and quality metric separation", () => {
     expect(summary.fallbackUserReasonBreakdown.raw_english_detected).toBe(1);
   });
 
+  it("separates user-visible raw English from diagnostic/source-repair raw English", () => {
+    const summary = quality.buildBenchmarkSummary([
+      makeRow({
+        answer: "修復後の回答は日本語です。",
+        finalAnswerLanguageLabels: ["raw_english_excerpt", "answer_repaired_to_japanese"],
+        languageGuardOk: true
+      }),
+      makeRow({
+        answer: "前問の具体的な要因を十分に特定できていないため、この資料だけで一時要因か継続要因かは分類しません。",
+        finalAnswerRawExcerptLike: true,
+        finalAnswerLanguageLabels: ["raw_english_excerpt", "answer_rewritten_to_japanese_fallback"],
+        languageGuardOk: false
+      }),
+      makeRow({
+        answer: "This answer copied a full English source sentence into the final user response.",
+        finalAnswerRawExcerptLike: true,
+        languageGuardOk: false
+      })
+    ]);
+
+    expect(summary.rawEnglishInDiagnostics).toBe(2);
+    expect(summary.rawEnglishInAnswer).toBe(1);
+    expect(summary.rawEnglishSurfaced).toBe(1);
+  });
+
   it("keeps active hard retrieval disabled by default", () => {
     expect(resolveHardIntentRetrievalMode(undefined)).not.toBe("active");
   });

@@ -426,6 +426,10 @@ function sourceScore(source: SourceChunkRecord, plan: HardIntentRetrievalPlan, h
     return 0;
   }
 
+  if (hardIntent === "margin_durability_followup") {
+    return marginDurabilitySourceScore(haystack, plan);
+  }
+
   let score = 0;
   for (const query of plan.queries) {
     const terms = significantTerms(query.query);
@@ -437,8 +441,58 @@ function sourceScore(source: SourceChunkRecord, plan: HardIntentRetrievalPlan, h
   if (/segment results|reportable segments?|operating segments?|segment revenue|segment operating income/.test(haystack)) score += 40;
   if (/revenue|net sales|sales|gross margin|operating margin|operating income/.test(haystack)) score += 20;
   if (/primarily due to|driven by|attributable to|resulted from|because|reflecting|offset by/.test(haystack)) score += 35;
-  if (hardIntent === "margin_durability_followup" && /cost|expense|margin|pricing|mix|volume|provision|restructuring|impairment/.test(haystack)) score += 35;
   return score;
+}
+
+function marginDurabilitySourceScore(haystack: string, plan: HardIntentRetrievalPlan): number {
+  if (isWeakQ06MarginRetrievalSource(haystack)) {
+    return 0;
+  }
+
+  let score = 0;
+  for (const query of plan.queries) {
+    const terms = significantTerms(query.query);
+    const hits = terms.filter((term) => haystack.includes(term)).length;
+    score += hits * 10 + phraseHits(haystack, query.query) * 20;
+  }
+
+  if (/management.?s discussion|md&a|results of operations/.test(haystack)) score += 35;
+  if (/gross margin|operating margin|profit margin|gross profit|operating income|segment operating profit|profitability/.test(haystack)) score += 60;
+  if (/cost of sales|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|credit loss expense|sg&a|sga|r&d|research and development/.test(haystack)) score += 55;
+  if (/price realization|price-cost|manufacturing costs?|material costs?|volume leverage|cost absorption|dealer inventor/.test(haystack)) score += 55;
+  if (/gross margin rate|markdowns?|shrink|inventory|fulfillment costs?|wage|labor|fuel price|operating expense leverage|operating expense deleverage/.test(haystack)) score += 55;
+  if (/refining margins?|chemical margins?|upstream earnings|downstream earnings|production costs?|operating expenses?|impairment|restructuring/.test(haystack)) score += 55;
+  if (/products? gross margin|services gross margin|product mix|services mix|tariff|foreign exchange|channel inventory/.test(haystack)) score += 45;
+  if (/temporary|transitory|one-time|recurring|continue|continued|expected|expects|outlook|guidance|trend|uncertain|uncertainty|risk|headwind|tailwind|normalization|structural/.test(haystack)) score += 45;
+  if (/primarily due to|driven by|attributable to|resulted from|because|reflect(?:ed|ing)|partially offset|offset by/.test(haystack)) score += 35;
+  if (/three months ended|year ended|quarter|fiscal|202[0-9]|compared|%/.test(haystack)) score += 15;
+
+  if (isQ06RevenueOnlyContext(haystack)) score -= 90;
+  if (isQ06TableOnlyMarginContext(haystack)) score -= 80;
+  return Math.max(0, score);
+}
+
+function isWeakQ06MarginRetrievalSource(text: string): boolean {
+  if (isQ06TableOnlyMarginContext(text)) {
+    return true;
+  }
+  if (isQ06RevenueOnlyContext(text)) {
+    return true;
+  }
+  return /(properties|website|table of contents|available information|business description|opened our first|store footprint|proved reserves?|reserve disclosures?|long[- ]term supply|long[- ]term demand|production sharing contract|forward-looking statements?)/.test(text) &&
+    !/(gross margin|operating margin|operating income|segment operating profit|cost|expense|provision|refining margins?|chemical margins?|markdown|shrink|inventory|price-cost|manufacturing)/.test(text);
+}
+
+function isQ06RevenueOnlyContext(text: string): boolean {
+  return /(revenue|net sales|sales and revenues|comparable sales|traffic|ticket|ecommerce|e-commerce|membership engagement|sales volume|demand|product revenue|services revenue)/.test(text) &&
+    !/(gross margin|operating margin|profit margin|gross profit|operating income|segment operating profit|cost of sales|cost of revenue|operating expenses?|noninterest expense|provision|credit loss|manufacturing costs?|cost absorption|price-cost|volume leverage|markdowns?|shrink|inventory|fulfillment costs?|labor costs?|wage|refining margins?|chemical margins?|depreciation|depletion|impairment|restructuring)/.test(text);
+}
+
+function isQ06TableOnlyMarginContext(text: string): boolean {
+  const numberTokens = text.match(/\$?\d[\d,.%]*/g)?.length ?? 0;
+  return numberTokens >= 8 &&
+    /\b(?:three months ended|year ended|gross margin percentage|dollars in millions|percentage of total net sales|total gross margin|operating expenses?)\b/i.test(text) &&
+    !/(primarily due to|driven by|attributable to|resulted from|because|reflect(?:ed|ing)|expected|outlook|continue|continued|risk|uncertain|temporary|one-time|restructuring|impairment|headwind|tailwind)/i.test(text);
 }
 
 function buildMdaWindowCandidates(

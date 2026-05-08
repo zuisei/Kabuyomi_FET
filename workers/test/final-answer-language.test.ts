@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Env, FilingCacheRecord, SourceChunkRecord } from "../src/env";
 import {
   buildJapaneseLanguageGuardFallback,
+  buildJapaneseLanguageGuardRepair,
   checkFinalAnswerJapaneseOnly
 } from "../src/lib/chat/final-answer-language";
 import { finalizeChatResponse } from "../src/lib/chat/response-finalizer";
@@ -21,6 +22,63 @@ describe("Japanese-only final answer guard", () => {
   it("allows Japanese answers with short financial KPI terms", () => {
     const answer = "主因を見るには、net interest income、noninterest income、provision for credit losses、segment results を追加確認する必要があります。";
     expect(checkFinalAnswerJapaneseOnly(answer).ok).toBe(true);
+  });
+
+  it("allows Japanese CAT durability wording with bounded English financial terms", () => {
+    const answer = "CATのConstruction Industriesでは、backlog、dealer inventory、price realization の推移を見る必要があります。継続性は提出資料だけでは断定しません。";
+    expect(checkFinalAnswerJapaneseOnly(answer).ok).toBe(true);
+  });
+
+  it("repairs supported CAT durability answers without allowing raw English excerpts", () => {
+    const repair = buildJapaneseLanguageGuardRepair({
+      question: "その要因は一時的？それとも続きそう？",
+      questionIntent: "driver_durability_followup",
+      sourceGateSufficient: true,
+      sourceGateEvidenceSlots: {
+        companyExplainedDrivers: [
+          {
+            category: "industrial",
+            driver: "Total sales and revenues for 2025 were $67.589 billion, an increase of $2.780 billion, or 4 percent. The increase reflected higher sales volume, partially offset by unfavorable price realization and higher sales of equipment to end users.",
+            sourceIds: ["S1"],
+            confidence: "high"
+          },
+          {
+            category: "industrial",
+            driver: "In the first quarter of 2026 we expect stronger sales and revenues primarily due to higher sales volume and favorable price realization, partially offset by changes in dealer inventory.",
+            sourceIds: ["S3"],
+            confidence: "high"
+          }
+        ],
+        segmentOrBusinessSignals: []
+      }
+    });
+
+    expect(repair).toContain("販売数量");
+    expect(repair).toContain("価格実現");
+    expect(repair).toContain("dealer inventory");
+    expect(repair).toContain("継続性は断定しません");
+    expect(repair).not.toContain("Total sales and revenues");
+    expect(repair).not.toContain("stronger sales and revenues");
+    expect(checkFinalAnswerJapaneseOnly(repair ?? "").ok).toBe(true);
+  });
+
+  it("does not repair unsafe durability answers without sufficient source gate evidence", () => {
+    const repair = buildJapaneseLanguageGuardRepair({
+      questionIntent: "driver_durability_followup",
+      sourceGateSufficient: false,
+      sourceGateEvidenceSlots: {
+        companyExplainedDrivers: [
+          {
+            category: "industrial",
+            driver: "Operating within the industrial sector presents generic long-term risks.",
+            sourceIds: ["S1"],
+            confidence: "low"
+          }
+        ]
+      }
+    });
+
+    expect(repair).toBeNull();
   });
 
   it("builds a safe Japanese fallback without quoting raw English excerpts", () => {
@@ -79,6 +137,327 @@ describe("Japanese-only final answer guard", () => {
     expect(response.debug?.originalAnswerBeforeLanguageGuardSample).not.toContain("Operating within the financial services industry");
     expect(response.answer).toContain("前問の具体的な要因");
     expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("repairs source-supported CAT durability answers instead of falling back", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "前問の要因は、Total sales and revenues for 2025 were $67.589 billion, an increase of $2.780 billion, or 4 percent. The increase reflected higher sales volume, partially offset by unfavorable price realization.です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        sourceGateEvidenceSlots: {
+          companyExplainedDrivers: [
+            {
+              category: "industrial",
+              driver: "Total sales and revenues for 2025 were $67.589 billion, an increase of $2.780 billion, or 4 percent. The increase reflected higher sales volume, partially offset by unfavorable price realization and higher sales of equipment to end users.",
+              sourceIds: ["S1"],
+              confidence: "high"
+            },
+            {
+              category: "industrial",
+              driver: "In the first quarter of 2026 we expect stronger sales and revenues primarily due to higher sales volume and favorable price realization, partially offset by changes in dealer inventory.",
+              sourceIds: ["S3"],
+              confidence: "high"
+            }
+          ],
+          segmentOrBusinessSignals: []
+        },
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackKind).toBe("none");
+    expect(response.debug?.fallbackCategory).toBe("none");
+    expect(response.debug?.languageGuardOk).toBe(true);
+    expect(response.debug?.languageGuardFallbackUsed).toBe(false);
+    expect(response.debug?.finalAnswerLanguageLabels).toEqual(expect.arrayContaining([
+      "english_answer_leak",
+      "answer_repaired_to_japanese"
+    ]));
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["language_guard_source_backed_repair"]));
+    expect(response.answer).toContain("販売数量");
+    expect(response.answer).toContain("価格実現");
+    expect(response.answer).not.toContain("Total sales and revenues");
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+    expect(response.debug?.sourceIdsValid).toBe(true);
+  });
+
+  it("softens overconfident WMT durability wording while keeping source-backed evidence", async () => {
+    const filing = makeFiling({ ticker: "WMT", companyName: "Walmart Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "Walmart US eCommerceの売上寄与が継続的に高まり、会員エンゲージメントとOmnichannelがComparable salesを押し上げました。eCommerce の貢献は安定成長を示しています。次回も同じ指標を確認します。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        sourceGateEvidenceSlots: {
+          companyExplainedDrivers: [
+            {
+              category: "retail_driver_durability_followup",
+              driver: "Walmart US eCommerce positively contributed approximately 4.3% to comparable sales. Growth reflects continued strength in customer and Walmart+ member engagement with omnichannel offerings.",
+              sourceIds: ["S1"],
+              confidence: "high"
+            }
+          ],
+          segmentOrBusinessSignals: []
+        },
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.answer).toContain("eCommerce");
+    expect(response.answer).toContain("会員エンゲージメント");
+    expect(response.answer).toContain("継続性は断定できません");
+    expect(response.answer).not.toContain("継続的に高まり");
+    expect(response.answer).not.toContain("安定成長を示しています");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q04_durability_wording_softened"]));
+    expect(response.debug?.fallbackCategory).toBe("none");
+    expect(response.debug?.sourceIdsValid).toBe(true);
+  });
+
+  it("does not soften Q04 durability wording when the source gate is insufficient", async () => {
+    const filing = makeFiling({ ticker: "WMT", companyName: "Walmart Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "Walmart US eCommerceの売上寄与が継続的に高まりました。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: false,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("継続的に高まり");
+    expect(response.debug?.sourceRepairLabels ?? []).not.toContain("q04_durability_wording_softened");
+  });
+
+  it("repairs WMT Q04 post-gate underanswers from source-backed retail durability evidence", async () => {
+    const filing = makeFiling({ ticker: "WMT", companyName: "Walmart Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "前問の具体的な要因が十分に特定できていません。そのため、選択された資料だけで一時要因か継続要因かは分類しません。判断には、経営陣による業績説明、comparable sales、traffic、ticket、eCommerce、membership income の追加確認が必要です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        sourceGateEvidenceSlots: {
+          companyExplainedDrivers: [
+            {
+              category: "retail_driver_durability_followup",
+              driver: "Comparable sales were driven by transactions and unit volumes, with strong sales in grocery and health & wellness. Walmart US eCommerce sales positively contributed to comparable sales. This growth reflects continued strength in customer and Walmart+ member engagement with omnichannel offerings.",
+              sourceIds: ["S1"],
+              confidence: "high"
+            }
+          ],
+          segmentOrBusinessSignals: []
+        },
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("このfilingだけでは継続性は断定できません");
+    expect(response.answer).toContain("comparable sales");
+    expect(response.answer).toContain("eCommerce");
+    expect(response.answer).toContain("member engagement");
+    expect(response.answer).toContain("継続性を見る材料");
+    expect(response.answer).not.toContain("継続的に高まり");
+    expect(response.answer).not.toContain("持続的に伸びる");
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackReason).toBeNull();
+    expect(response.debug?.fallbackCategory).toBe("none");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q04_retail_durability_source_backed_repair"]));
+    expect(response.debug?.sourceIdsValid).toBe(true);
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("repairs JPM Q04 post-gate underanswers from source-backed NII and NIR evidence", async () => {
+    const filing = makeFiling({ ticker: "JPM", companyName: "JPMorgan Chase & Co." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "純利益は570.5億ドルで前年同期比2.4%減です。セグメント・地域別の強弱はこの資料では十分に分解できません。確認すべき箇所は、セグメント実績、地域別売上、製品・カテゴリ別売上、業種固有のセグメントKPIです。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        lowQualityReason: "durability_missing_assessment",
+        sourceGateEvidenceSlots: {
+          confirmedMetricMovement: {
+            metric: "revenue",
+            label: "売上高",
+            value: "1,824.5億ドル",
+            change: "2.8%"
+          },
+          companyExplainedDrivers: [
+            {
+              category: "bank_driver_durability_followup",
+              driver: "Net interest income was up 3%, driven by higher Markets NII, Card Services revolving balances, wholesale deposit balances and investment securities activity, predominantly offset by deposit margin compression and lower rates.",
+              sourceIds: ["S9"],
+              confidence: "high"
+            },
+            {
+              category: "bank_driver_durability_followup",
+              driver: "Noninterest revenue was up 2%, reflecting Markets noninterest revenue, asset management fees, Payments fees, investment banking fees and a First Republic-related gain.",
+              sourceIds: ["S10"],
+              confidence: "high"
+            }
+          ],
+          segmentOrBusinessSignals: []
+        },
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("このfilingだけでは継続性は断定できません");
+    expect(response.answer).toContain("NII");
+    expect(response.answer).toContain("NIR");
+    expect(response.answer).toContain("金利環境次第");
+    expect(response.answer).toContain("市場関連収益や一時利益は変動しやすい");
+    expect(response.answer).not.toContain("今後も伸びる");
+    expect(response.answer).not.toContain("買うべき");
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackReason).toBeNull();
+    expect(response.debug?.fallbackCategory).toBe("none");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q04_bank_durability_source_backed_repair"]));
+    expect(response.debug?.sourceIdsValid).toBe(true);
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("does not repair JPM Q04 underanswers without source-gate sufficiency", async () => {
+    const filing = makeFiling({ ticker: "JPM", companyName: "JPMorgan Chase & Co." });
+    const answer = "セグメント・地域別の強弱はこの資料では十分に分解できません。";
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer,
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: false,
+        lowQualityReason: "durability_missing_assessment",
+        sourceGateEvidenceSlots: {
+          companyExplainedDrivers: [
+            {
+              category: "bank_driver_durability_followup",
+              driver: "Net interest income increased.",
+              sourceIds: ["S1"],
+              confidence: "low"
+            }
+          ]
+        },
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toBe(answer);
+    expect(response.debug?.sourceRepairLabels ?? []).not.toContain("q04_bank_durability_source_backed_repair");
   });
 
   it("rewrites globally banned generic phrases before returning a final answer", async () => {
@@ -698,11 +1077,192 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).toContain("601.0億ドル");
     expect(response.answer).toContain("3.8億ドル");
     expect(response.answer).toContain("前年同期の比較値");
-    expect(response.debug?.fallbackCategory).toBe("sanitation_guard");
-    expect(response.debug?.fallbackUserReason).toBe("malformed_currency_detected");
+    expect(response.debug?.fallbackCategory).not.toBe("sanitation_guard");
+    expect(response.debug?.fallbackUserReason).not.toBe("malformed_currency_detected");
     expect(response.answer).not.toContain("601,0億ドル");
     expect(response.answer).not.toContain("379,600,000 USD");
     expect(response.answer).not.toContain("前年同468,?");
+  });
+
+  it("normalizes mixed CJK USD units without emitting malformed currency labels", async () => {
+    const filing = makeFiling({ ticker: "JPM", companyName: "JPMorgan Chase & Co." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "売上高 1,824억4700万 USD、総売上高は 7131.63 亿 USD、WMT売上高7131.63亿美元、比較値680.985亿美元、2025年売上高67.589十億 USD、7.9十億ドルの影響、純利益は57億ドルです。2026年第1四半期の在庫増加が1兆円超の規模と seasonality に依存します。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("1824.5億ドル");
+    expect(response.answer).toContain("7131.6億ドル");
+    expect(response.answer).toContain("681.0億ドル");
+    expect(response.answer).toContain("675.9億ドル");
+    expect(response.answer).toContain("79.0億ドル");
+    expect(response.answer).toContain("金額規模");
+    expect(response.answer).toContain("季節性");
+    expect(response.answer).not.toContain("억");
+    expect(response.answer).not.toContain("亿");
+    expect(response.answer).not.toContain("美元");
+    expect(response.answer).not.toContain("十億 USD");
+    expect(response.answer).not.toContain("十億ドル");
+    expect(response.answer).not.toContain("兆円");
+    expect(response.debug?.fallbackCategory).not.toBe("sanitation_guard");
+    expect(response.debug?.fallbackUserReason).not.toBe("malformed_currency_detected");
+    expect(response.debug?.guardLabels).not.toContain("malformed_currency_detected");
+  });
+
+  it("suppresses stale malformed currency labels when the final visible answer is clean", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "2025年の売上高は675.9億ドル、前年同期比4.3%増。機械ディーラー在庫が2026年第一四半期に1.0億 USD超増加する見通しです。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("1.0億ドル");
+    expect(response.debug?.fallbackCategory).toBe("none");
+    expect(response.debug?.fallbackUserReason).toBe("none");
+    expect(response.debug?.guardLabels).not.toContain("malformed_currency_detected");
+  });
+
+  it("cleans CAT Q06 finance terms and suspicious million-dollar net income units", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "売上高は約678.9億ドル、営業利益は111.51億ドル、純利益は88.82百万ドル。要因としては、販売量の増加とprice realizationの不利がある一方、manufacturing costやcost、tariffs、developing economiesの影響が押し下げ要因です。利益率の変動要因は一時的というより、需要の変動とコスト構造の影響が組み合わさっています。Construction Industriesの継続性はこのfilingだけでは断定できません。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "margin_durability_followup",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        selectedSourceExcerpts: [
+          "Total sales and revenues for 2025 were $67.589 billion, an increase of $2.780 billion, or 4 percent.",
+          "売上高: 67589000000 USD / 比較値: 64809000000 / YoY: 4.3%"
+        ],
+        sourceGateEvidenceSlots: {
+          confirmedMetricMovement: {
+            metricName: "純利益",
+            currentValue: "88.8億ドル",
+            comparisonValue: "107.9億ドル",
+            changePct: "-17.7%"
+          }
+        },
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("売上高は約675.9億ドル");
+    expect(response.answer).toContain("純利益は88.8億ドル");
+    expect(response.answer).toContain("一時的か構造的かは、このfilingだけでは断定できません");
+    expect(response.answer).toContain("価格実現");
+    expect(response.answer).toContain("製造コスト");
+    expect(response.answer).toContain("コスト");
+    expect(response.answer).toContain("関税");
+    expect(response.answer).toContain("新興国");
+    expect(response.answer).toContain("Construction Industries");
+    expect(response.answer).not.toContain("678.9億ドル");
+    expect(response.answer).not.toContain("88.82百万ドル");
+    expect(response.answer).not.toContain("一時的というより");
+    expect(response.answer).not.toContain("price realization");
+    expect(response.answer).not.toContain("manufacturing cost");
+    expect(response.answer).not.toContain("tariffs");
+    expect(response.answer).not.toContain("developing economies");
+    expect(response.answer).not.toMatch(/\bcost\b/i);
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining([
+      "cat_q06_revenue_unit_corrected_from_source",
+      "cat_q06_net_income_unit_corrected_from_source",
+      "cat_q06_temporality_wording_softened"
+    ]));
+    expect(response.debug?.fallbackCategory).toBe("none");
+    expect(response.debug?.fallbackUserReason).toBe("none");
+    expect(response.debug?.sourceIdsValid).toBe(true);
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("adds a cautious CAT Q06 temporality caveat when the answer omits temporary-versus-structural framing", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "売上高・営業利益・純利益: 2025年は売上高675億ドル、営業利益111.5億ドル、純利益88.8億ドル。価格実現と製造コストの不利要因が利益を押し下げました。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "margin_durability_followup",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("一時要因か構造的変化かは断定できません");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["cat_q06_temporality_caveat_added"]));
+    expect(response.debug?.sourceIdsValid).toBe(true);
   });
 
   it("removes raw XBRL tags and mixed driver wording from final answers", async () => {

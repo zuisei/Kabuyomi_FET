@@ -34,7 +34,13 @@ export async function buildChatResponse(
   question: string,
   env: Env,
   config?: Partial<RemoteConfig>,
-  options: { executionContext?: Pick<ExecutionContext, "waitUntil"> } = {}
+  options: {
+    executionContext?: Pick<ExecutionContext, "waitUntil">;
+    followupContext?: {
+      previousQuestion?: string;
+      previousAnswer?: string;
+    };
+  } = {}
 ): Promise<ChatResponsePayload> {
   const resolvedConfig: RemoteConfig = {
     ...DEFAULT_REMOTE_CONFIG,
@@ -165,7 +171,9 @@ export async function buildChatResponse(
     question,
     env,
     questionIntent,
-    timings
+    timings,
+    previousQuestion: options.followupContext?.previousQuestion,
+    previousAnswer: options.followupContext?.previousAnswer
   });
   const { contextPack, modelResponse, sourceValidation } = modelAttempt;
   const fallbackValidSourceIds = buildFallbackValidSourceIds(filing, contextPack);

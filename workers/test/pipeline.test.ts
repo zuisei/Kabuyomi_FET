@@ -1701,6 +1701,22 @@ describe("buildChatResponse", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("skips web supplementation when the remote flag is omitted", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filing = makeTestFiling();
+    const response = await buildChatResponse(
+      filing,
+      "どの変化が売上成長を支えた？",
+      {} as never
+    );
+
+    expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S7"]);
+    expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("does not search for supplements when the filing answer is already exact and sufficient", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
