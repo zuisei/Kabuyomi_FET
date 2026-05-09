@@ -91,8 +91,10 @@ function createEvalGrantEnv() {
 
 async function createCreditPurchaseEnv() {
   const quota = new UserQuotaDO(createQuotaState() as never);
+  const entitlement = new EntitlementDO(createEntitlementState() as never);
   const purchaseTransactions = new Map<string, Record<string, unknown>>();
   const creditLedgerRows: Record<string, unknown>[] = [];
+  const monthlyGrantRows: Record<string, unknown>[] = [];
 
   const prepare = vi.fn((sql: string) => ({
     bind: vi.fn((...args: unknown[]) => ({
@@ -123,10 +125,21 @@ async function createCreditPurchaseEnv() {
         }
         if (sql.includes("INSERT OR IGNORE INTO credit_ledger")) {
           creditLedgerRows.push({
+            user_id: args[1],
             operation_id: args[2],
             type: args[3],
             delta: args[4],
             reference_id: args[9]
+          });
+        }
+        if (sql.includes("INSERT INTO monthly_grants")) {
+          monthlyGrantRows.push({
+            user_id: args[1],
+            plan: args[2],
+            period_start: args[3],
+            period_end: args[4],
+            credits_granted: args[5],
+            operation_id: args[6]
           });
         }
         return {};
@@ -155,10 +168,16 @@ async function createCreditPurchaseEnv() {
           fetch: (input: RequestInfo | URL, init?: RequestInit) => quota.fetch(new Request(input, init))
         })
       },
+      ENTITLEMENT: {
+        getByName: vi.fn().mockReturnValue({
+          fetch: (request: Request) => entitlement.fetch(request)
+        })
+      },
       DB: { prepare }
     },
     purchaseTransactions,
-    creditLedgerRows
+    creditLedgerRows,
+    monthlyGrantRows
   };
 }
 
@@ -254,7 +273,7 @@ describe("worker routing", () => {
         headers: { "content-type": "application/json", "x-device-key": "device-123" },
         body: JSON.stringify({
           originalTransactionId: "tx-1",
-          productId: "app.kabuyomi.pro.monthly",
+          productId: "kabuyomi.sub.pro.monthly",
           active: true
         })
       }),
@@ -304,13 +323,16 @@ describe("worker routing", () => {
 
   it("syncs inactive billing state as free without minting pro", async () => {
     const entitlement = new EntitlementDO(createEntitlementState() as never);
+    const quota = new UserQuotaDO(createQuotaState() as never);
+    const dbRun = vi.fn().mockResolvedValue({});
+    const dbBind = vi.fn().mockReturnValue({ run: dbRun });
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/v1/billing/sync", {
         method: "POST",
         headers: { "content-type": "application/json", "x-device-key": "device-123" },
         body: JSON.stringify({
           originalTransactionId: "tx-1",
-          productId: "app.kabuyomi.pro.monthly",
+          productId: "kabuyomi.sub.pro.monthly",
           active: false
         })
       }),
@@ -322,6 +344,14 @@ describe("worker routing", () => {
           getByName: vi.fn().mockReturnValue({
             fetch: (request: Request) => entitlement.fetch(request)
           })
+        },
+        USER_QUOTA: {
+          getByName: vi.fn().mockReturnValue({
+            fetch: (input: RequestInfo | URL, init?: RequestInit) => quota.fetch(new Request(input, init))
+          })
+        },
+        DB: {
+          prepare: vi.fn().mockReturnValue({ bind: dbBind })
         }
       } as never,
       executionContext
@@ -336,8 +366,217 @@ describe("worker routing", () => {
     };
     expect(payload.plan).toBe("free");
     expect(payload.productId).toBeNull();
-    expect(payload.quotaSubject).toMatch(/^free:[a-f0-9]{64}$/);
+    expect(payload.quotaSubject).toBe("free:local:device-123");
     expect(typeof payload.syncedAt).toBe("string");
+  });
+
+  it("syncs an active Lite subscription and grants the verified monthly period once", async () => {
+    const { env, monthlyGrantRows, creditLedgerRows } = await createCreditPurchaseEnv();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "sub-tx-lite-1",
+      originalTransactionId: "orig-sub-lite-1",
+      productId: "kabuyomi.sub.lite.monthly",
+      bundleId: "app.kabuyomi.ios",
+      purchaseDate: Date.parse("2026-05-01T00:00:00.000Z"),
+      expiresDate: Date.parse("2026-06-01T00:00:00.000Z")
+    });
+    const fetch = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ signedTransactionInfo }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const request = new Request("https://kabuyomi.test/v1/ios/subscriptions/sync", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-device-key": "device-123" },
+      body: JSON.stringify({
+        originalTransactionId: "orig-sub-lite-1",
+        transactionId: "sub-tx-lite-1",
+        productId: "kabuyomi.sub.lite.monthly",
+        active: true,
+        signedTransactionInfo
+      })
+    });
+
+    const first = await worker.fetch(request.clone() as Request, env as never, executionContext);
+    const second = await worker.fetch(request.clone() as Request, env as never, executionContext);
+
+    expect(first.status).toBe(200);
+    await expect(first.json()).resolves.toMatchObject({
+      plan: "lite",
+      productId: "kabuyomi.sub.lite.monthly",
+      quotaSubject: "free:local:device-123",
+      activeSubscription: {
+        plan: "lite",
+        productId: "kabuyomi.sub.lite.monthly",
+        periodStart: "2026-05-01T00:00:00.000Z",
+        periodEnd: "2026-06-01T00:00:00.000Z",
+        monthlyCredits: 400
+      },
+      usage: {
+        plan: "lite",
+        credits: {
+          monthlyLimit: 400,
+          monthlyRemaining: 400,
+          purchasedRemaining: 0,
+          totalRemaining: 400,
+          resetsAt: "2026-06-01T00:00:00.000Z"
+        }
+      }
+    });
+    expect(second.status).toBe(200);
+    await expect(second.json()).resolves.toMatchObject({
+      usage: {
+        credits: {
+          monthlyRemaining: 400,
+          totalRemaining: 400
+        }
+      }
+    });
+    expect(monthlyGrantRows).toHaveLength(1);
+    expect(monthlyGrantRows[0]).toMatchObject({
+      plan: "lite",
+      period_start: "2026-05-01T00:00:00.000Z",
+      period_end: "2026-06-01T00:00:00.000Z",
+      credits_granted: 400
+    });
+    expect(creditLedgerRows.filter((row) => row.type === "monthly_grant")).toHaveLength(1);
+  });
+
+  it("keeps paid credits on the same device quota subject when subscription credits are granted", async () => {
+    const { env } = await createCreditPurchaseEnv();
+    const creditSignedTransactionInfo = fakeJws({
+      transactionId: "tx-50",
+      originalTransactionId: "orig-tx-50",
+      productId: "kabuyomi.credits.50",
+      bundleId: "app.kabuyomi.ios"
+    });
+    const subscriptionSignedTransactionInfo = fakeJws({
+      transactionId: "sub-tx-pro-1",
+      originalTransactionId: "orig-sub-pro-1",
+      productId: "kabuyomi.sub.pro.monthly",
+      bundleId: "app.kabuyomi.ios",
+      purchaseDate: Date.parse("2026-05-01T00:00:00.000Z"),
+      expiresDate: Date.parse("2026-06-01T00:00:00.000Z")
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ signedTransactionInfo: creditSignedTransactionInfo }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ signedTransactionInfo: subscriptionSignedTransactionInfo }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      );
+    vi.stubGlobal("fetch", fetch);
+
+    const purchase = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/ios/purchases/credits/complete", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-device-key": "device-123" },
+        body: JSON.stringify({
+          productId: "kabuyomi.credits.50",
+          transactionId: "tx-50",
+          originalTransactionId: "orig-tx-50",
+          signedTransactionInfo: creditSignedTransactionInfo
+        })
+      }),
+      env as never,
+      executionContext
+    );
+    expect(purchase.status).toBe(200);
+
+    const sync = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/billing/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-device-key": "device-123" },
+        body: JSON.stringify({
+          originalTransactionId: "orig-sub-pro-1",
+          transactionId: "sub-tx-pro-1",
+          productId: "kabuyomi.sub.pro.monthly",
+          active: true,
+          signedTransactionInfo: subscriptionSignedTransactionInfo
+        })
+      }),
+      env as never,
+      executionContext
+    );
+
+    expect(sync.status).toBe(200);
+    await expect(sync.json()).resolves.toMatchObject({
+      usage: {
+        plan: "pro",
+        credits: {
+          monthlyLimit: 900,
+          monthlyRemaining: 900,
+          purchasedRemaining: 50,
+          totalRemaining: 950
+        }
+      }
+    });
+  });
+
+  it.each([
+    ["kabuyomi.sub.pro.monthly", "pro", 900],
+    ["kabuyomi.sub.max.monthly", "pro_max", 2000]
+  ])("syncs %s and grants its configured monthly credits", async (productId, plan, monthlyCredits) => {
+    const { env } = await createCreditPurchaseEnv();
+    const signedTransactionInfo = fakeJws({
+      transactionId: `sub-tx-${plan}`,
+      originalTransactionId: `orig-sub-${plan}`,
+      productId,
+      bundleId: "app.kabuyomi.ios",
+      purchaseDate: Date.parse("2026-05-01T00:00:00.000Z"),
+      expiresDate: Date.parse("2026-06-01T00:00:00.000Z")
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ signedTransactionInfo }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+    );
+
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/billing/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-device-key": "device-123" },
+        body: JSON.stringify({
+          originalTransactionId: `orig-sub-${plan}`,
+          transactionId: `sub-tx-${plan}`,
+          productId,
+          active: true,
+          signedTransactionInfo
+        })
+      }),
+      env as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      plan,
+      productId,
+      usage: {
+        plan,
+        credits: {
+          monthlyLimit: monthlyCredits,
+          monthlyRemaining: monthlyCredits,
+          totalRemaining: monthlyCredits
+        }
+      }
+    });
   });
 
   it("returns 415 for chat requests without a JSON content type", async () => {

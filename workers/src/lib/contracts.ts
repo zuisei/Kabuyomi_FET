@@ -57,7 +57,12 @@ export const BillingSyncRequestSchema = z.object({
 
 export const EntitlementRequestSchema = BillingSyncRequestSchema.extend({
   serverVerified: z.boolean().default(false),
-  boundDeviceHash: z.string().trim().min(1).max(128).optional()
+  boundDeviceHash: z.string().trim().min(1).max(128).optional(),
+  boundQuotaSubject: z.string().trim().min(1).max(256).optional(),
+  subscriptionPeriodStart: z.string().trim().min(1).max(64).optional(),
+  subscriptionPeriodEnd: z.string().trim().min(1).max(64).optional(),
+  subscriptionExpiresAt: z.string().trim().min(1).max(64).optional(),
+  monthlyGrantOperationId: z.string().trim().min(1).max(256).optional()
 });
 
 const CreditPurchaseGrantBaseRequestSchema = z.object({
@@ -110,7 +115,10 @@ export const QuotaRequestSchema = z.object({
   chatLimit: z.number().int().min(0),
   stockLimit: z.number().int().min(0),
   monthlyCreditLimit: z.number().int().min(0).optional(),
-  operationId: z.string().trim().min(1).max(128).optional(),
+  operationId: z.string().trim().min(1).max(256).optional(),
+  monthlyCreditPeriodStart: z.string().trim().min(1).max(64).optional(),
+  monthlyCreditPeriodEnd: z.string().trim().min(1).max(64).optional(),
+  monthlyGrantOperationId: z.string().trim().min(1).max(256).optional(),
   originalOperationId: z.string().trim().min(1).max(128).optional(),
   creditsRequired: z.number().int().min(1).max(100).optional(),
   credits: z.number().int().min(1).max(1_000).optional(),

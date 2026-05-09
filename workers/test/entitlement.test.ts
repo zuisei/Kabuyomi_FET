@@ -27,7 +27,7 @@ describe("EntitlementDO", () => {
         body: JSON.stringify({
           originalTransactionId: "tx-123",
           active: true,
-          productId: "app.kabuyomi.pro.monthly"
+          productId: "kabuyomi.sub.pro.monthly"
         })
       })
     );
@@ -50,7 +50,7 @@ describe("EntitlementDO", () => {
         body: JSON.stringify({
           originalTransactionId: "tx-123",
           active: true,
-          productId: "app.kabuyomi.pro.monthly",
+          productId: "kabuyomi.sub.pro.monthly",
           serverVerified: true
         })
       })
@@ -60,7 +60,7 @@ describe("EntitlementDO", () => {
     await expect(response.json()).resolves.toMatchObject({
       plan: "pro",
       quotaSubject: expect.stringMatching(/^pro:[a-f0-9]{64}$/),
-      productId: "app.kabuyomi.pro.monthly",
+      productId: "kabuyomi.sub.pro.monthly",
       boundDeviceHash: "device-hash-1"
     });
   });
@@ -75,7 +75,7 @@ describe("EntitlementDO", () => {
         body: JSON.stringify({
           originalTransactionId: "tx-123",
           active: true,
-          productId: "app.kabuyomi.pro.monthly",
+          productId: "kabuyomi.sub.pro.monthly",
           serverVerified: true
         })
       })
@@ -104,7 +104,7 @@ describe("EntitlementDO", () => {
         body: JSON.stringify({
           originalTransactionId: "tx-123",
           active: true,
-          productId: "app.kabuyomi.pro_max.monthly",
+          productId: "kabuyomi.sub.max.monthly",
           serverVerified: true
         })
       })
@@ -114,7 +114,7 @@ describe("EntitlementDO", () => {
     await expect(response.json()).resolves.toMatchObject({
       plan: "pro_max",
       quotaSubject: expect.stringMatching(/^pro_max:[a-f0-9]{64}$/),
-      productId: "app.kabuyomi.pro_max.monthly"
+      productId: "kabuyomi.sub.max.monthly"
     });
   });
 
@@ -143,7 +143,7 @@ describe("EntitlementDO", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          productId: "app.kabuyomi.pro.monthly"
+          productId: "kabuyomi.sub.pro.monthly"
         })
       })
     );

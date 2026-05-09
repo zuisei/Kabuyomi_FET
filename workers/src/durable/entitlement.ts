@@ -39,7 +39,13 @@ export class EntitlementDO {
 
     const payload = await buildSyncedEntitlement(body.originalTransactionId, body.productId, body.active, {
       serverVerified: body.serverVerified,
-      boundDeviceHash: body.boundDeviceHash ?? readDeviceBindingHash(request) ?? undefined
+      boundDeviceHash: body.boundDeviceHash ?? readDeviceBindingHash(request) ?? undefined,
+      boundQuotaSubject: body.boundQuotaSubject,
+      transactionId: body.transactionId,
+      subscriptionPeriodStart: body.subscriptionPeriodStart,
+      subscriptionPeriodEnd: body.subscriptionPeriodEnd,
+      subscriptionExpiresAt: body.subscriptionExpiresAt,
+      monthlyGrantOperationId: body.monthlyGrantOperationId
     });
     await this.state.storage.put(CURRENT_ENTITLEMENT_KEY, payload);
     return this.reply(payload, 200);

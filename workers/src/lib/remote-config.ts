@@ -59,14 +59,14 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   creditBillingEnabled: true,
   planCredits: {
     free: 50,
-    lite: 150,
-    pro: 500,
-    pro_max: 1200
+    lite: 400,
+    pro: 900,
+    pro_max: 2000
   },
   freeMonthlyCreditLimit: 50,
-  liteMonthlyCreditLimit: 150,
-  proMonthlyCreditLimit: 500,
-  proMaxMonthlyCreditLimit: 1200,
+  liteMonthlyCreditLimit: 400,
+  proMonthlyCreditLimit: 900,
+  proMaxMonthlyCreditLimit: 2000,
   maintenanceMode: false,
   extractorVersion: CURRENT_EXTRACTOR_VERSION,
   promptVersion: "v1",
