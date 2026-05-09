@@ -408,7 +408,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "credit購入",
-                body: "v1.0 では買い切りの追加 credit を App Store のアプリ内課金として提供します。表示する paid credit 商品は kabuyomi.credits.100 のみで、100 paid credits を ¥200 で付与します。paid credit は失効しません。free/promotional credit と ad credit は paid credit と分けて管理され、表示された期限がある場合はその期限に従います。購入、返金、請求、購入履歴、購入復元は Apple ID と App Store の仕組みおよび適用法に従います。"
+                body: "Kabuyomi では App Store のアプリ内課金として、買い切りの paid credit と月額自動更新サブスクリプションを提供します。表示する主要な paid credit 商品は kabuyomi.credits.50 で、50 paid credits を付与します。kabuyomi.credits.100 は互換性のためサポートします。月額プランは Lite、Pro、Max で、それぞれ毎月 400 / 900 / 2000 credits を付与します。paid credit は失効しません。free/promotional credit、ad credit、月額プラン分 credit、paid credit はサーバー側で分けて管理され、表示された期限がある場合はその期限に従います。購入、返金、請求、購入履歴、購入復元は Apple ID と App Store の仕組みおよび適用法に従います。"
             ),
             LegalSection(
                 title: "外部サービス",
@@ -466,7 +466,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "販売価格",
-                body: "v1.0 の paid credit 商品は kabuyomi.credits.100 のみです。販売価格は ¥200、付与数は 100 paid credits です。App Store の表示価格と税・手数料の扱いは Apple の決済画面に従います。"
+                body: "paid credit 商品は kabuyomi.credits.50 を主要商品として表示し、50 paid credits を付与します。kabuyomi.credits.100 は互換性のためサポートします。月額自動更新サブスクリプションは kabuyomi.sub.lite.monthly、kabuyomi.sub.pro.monthly、kabuyomi.sub.max.monthly で、それぞれ毎月 400 / 900 / 2000 credits を付与します。販売価格、税・手数料、更新条件は App Store の購入画面に表示される内容に従います。"
             ),
             LegalSection(
                 title: "支払時期 / 支払方法",

@@ -112,6 +112,8 @@ enum TestFixtures {
     static func usagePayload() -> UsagePayload {
         UsagePayload(
             plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
             chatsUsed: 1,
             chatLimit: 10,
             stocksUsed: 1,

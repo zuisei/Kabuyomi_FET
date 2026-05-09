@@ -279,6 +279,8 @@ final class AppModelTests: XCTestCase {
         let model = makeAppModel(persistence: persistence)
         model.usage = UsagePayload(
             plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
             chatsUsed: 0,
             chatLimit: 10,
             stocksUsed: 0,
@@ -318,6 +320,8 @@ final class AppModelTests: XCTestCase {
         model.setAIConsent(true)
         model.usage = UsagePayload(
             plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
             chatsUsed: 0,
             chatLimit: 10,
             stocksUsed: 1,
@@ -352,6 +356,8 @@ final class AppModelTests: XCTestCase {
         let model = makeAppModel()
         model.usage = UsagePayload(
             plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
             chatsUsed: 0,
             chatLimit: 10,
             stocksUsed: 0,
@@ -376,15 +382,82 @@ final class AppModelTests: XCTestCase {
             throw URLError(.badServerResponse)
         }
 
-        await model.purchaseCreditPack(productId: "kabuyomi.credits.100")
+        await model.purchaseCreditPack(productId: "kabuyomi.credits.50")
 
         XCTAssertEqual(model.activeAlert?.message, "追加credit購入は現在利用できません。時間をおいてからもう一度お試しください。")
         XCTAssertFalse(model.billingActionInFlight)
     }
 
     func testMiniConsumableUsesProductionStoreKitProductId() {
-        XCTAssertEqual(SubscriptionStore.miniCreditProductID, "kabuyomi.credits.100")
-        XCTAssertEqual(SubscriptionStore.creditPackProductIDs, ["kabuyomi.credits.100"])
+        XCTAssertEqual(SubscriptionStore.miniCreditProductID, "kabuyomi.credits.50")
+        XCTAssertEqual(SubscriptionStore.creditPackProductIDs, ["kabuyomi.credits.50", "kabuyomi.credits.100"])
+    }
+
+    func testSubscriptionCatalogUsesV102StoreKitProducts() {
+        XCTAssertEqual(SubscriptionStore.subscriptionProductIDs, [
+            "kabuyomi.sub.lite.monthly",
+            "kabuyomi.sub.pro.monthly",
+            "kabuyomi.sub.max.monthly"
+        ])
+        XCTAssertEqual(BillingCatalog.lite.monthlyCredits, 400)
+        XCTAssertEqual(BillingCatalog.pro.monthlyCredits, 900)
+        XCTAssertEqual(BillingCatalog.proMax.monthlyCredits, 2000)
+        XCTAssertEqual(BillingCatalog.proMax.title, "Max")
+    }
+
+    func testCreditPackPresentationKeepsPrimaryAndCompatibilityRowsSeparate() {
+        let products = CreditPackPresentation.visibleProducts(from: [
+            CreditPackProduct(id: "kabuyomi.credits.100", credits: 100, displayPrice: "¥200", isAvailable: true),
+            CreditPackProduct(id: "kabuyomi.credits.50", credits: 50, displayPrice: "¥100", isAvailable: true)
+        ])
+
+        XCTAssertEqual(products.map(\.id), ["kabuyomi.credits.50", "kabuyomi.credits.100"])
+        XCTAssertEqual(CreditPackPresentation.primaryProduct(from: products)?.id, "kabuyomi.credits.50")
+        XCTAssertEqual(CreditPackPresentation.secondaryProducts(from: products).map(\.id), ["kabuyomi.credits.100"])
+    }
+
+    func testAccountStatusDisplayModelUsesServerUsageAndHandlesMissingActiveSubscription() {
+        let usage = UsagePayload(
+            plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
+            chatsUsed: 0,
+            chatLimit: 25,
+            stocksUsed: 0,
+            stockLimit: 3,
+            dateJST: "2026-05-09",
+            savedTickers: [],
+            accessMode: nil,
+            credits: CreditUsagePayload(
+                monthlyRemaining: 50,
+                monthlyLimit: 50,
+                rewardedAdRemaining: nil,
+                rewardedAdExpiresAt: nil,
+                purchasedRemaining: 100,
+                totalRemaining: 150,
+                resetsAt: "2026-06-01T00:00:00+09:00"
+            ),
+            creditBillingEnabled: true
+        )
+
+        let viewModel = AccountStatusDisplayModel(
+            apiEnvironment: "prod",
+            apiBaseURL: "https://example.com",
+            appVersion: "1.0.2(4)",
+            deviceKeySuffix: "abc123",
+            usage: usage,
+            lastUsageRefreshAt: nil,
+            lastBillingSyncStatus: "not_started",
+            lastBillingSyncAt: nil,
+            healthReport: nil
+        )
+
+        let rows = Dictionary(uniqueKeysWithValues: viewModel.rows.map { ($0.title, $0.value) })
+        XCTAssertEqual(rows["Plan"], "無料")
+        XCTAssertEqual(rows["Total credits"], "150")
+        XCTAssertEqual(rows["Monthly/subscription"], "50 / 50")
+        XCTAssertEqual(rows["Paid credits"], "100")
+        XCTAssertEqual(rows["Device"], "…abc123")
     }
 
     func testResetLocalDataClearsRecentStateAndKeepsDeviceIdentity() async throws {

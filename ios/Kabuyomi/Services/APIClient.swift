@@ -12,6 +12,29 @@ struct QuotaRequestContext {
     }
 }
 
+struct BillingAPIHealthReport: Equatable {
+    let checkedAt: Date
+    let entries: [BillingAPIHealthEntry]
+
+    var hasRouteMissing: Bool {
+        entries.contains { $0.statusCode == 404 }
+    }
+}
+
+struct BillingAPIHealthEntry: Identifiable, Equatable {
+    let id: String
+    let label: String
+    let method: String
+    let path: String
+    let statusCode: Int?
+    let message: String
+
+    var statusSummary: String {
+        guard let statusCode else { return message }
+        return "HTTP \(statusCode): \(message)"
+    }
+}
+
 enum APIEnvironment: String {
     case production
     #if DEBUG
@@ -157,6 +180,18 @@ struct APIClient {
         baseURL.appending(path: "/v1/admob/reward-intents").absoluteString
     }
 
+    var subscriptionSyncEndpointDisplayString: String {
+        endpointDisplayString(path: Self.subscriptionSyncPath)
+    }
+
+    var creditPurchaseEndpointDisplayString: String {
+        endpointDisplayString(path: Self.creditPurchaseCompletePath)
+    }
+
+    var usageEndpointDisplayString: String {
+        endpointDisplayString(path: Self.usagePath)
+    }
+
     func adMobRewardStatusURLDisplayString(rewardIntentId: String) -> String {
         var components = URLComponents(
             url: baseURL.appending(path: "/v1/admob/reward-status"),
@@ -260,14 +295,14 @@ struct APIClient {
 
     func fetchUsage() async throws -> UsagePayload {
         try await sendRequest(
-            path: "/v1/usage",
+            path: Self.usagePath,
             headers: requestHeaders()
         )
     }
 
     func syncBilling(_ request: BillingSyncRequest) async throws -> BillingSyncResponse {
         try await sendRequest(
-            path: "/v1/billing/sync",
+            path: Self.subscriptionSyncPath,
             method: "POST",
             headers: requestHeaders(),
             body: request
@@ -276,11 +311,21 @@ struct APIClient {
 
     func grantCreditPurchase(_ request: CreditPurchaseGrantRequest) async throws -> CreditPurchaseGrantResponse {
         try await sendRequest(
-            path: "/v1/ios/purchases/credits/complete",
+            path: Self.creditPurchaseCompletePath,
             method: "POST",
             headers: requestHeaders(),
             body: request
         )
+    }
+
+    func checkBillingAPIHealth() async -> BillingAPIHealthReport {
+        let entries = await [
+            probeEndpoint(label: "Usage", method: "GET", path: Self.usagePath, body: Optional<EmptyRequestBody>.none),
+            probeEndpoint(label: "Subscription sync", method: "POST", path: Self.subscriptionSyncPath, body: EmptyRequestBody()),
+            probeEndpoint(label: "Credit purchase complete", method: "POST", path: Self.creditPurchaseCompletePath, body: EmptyRequestBody())
+        ]
+
+        return BillingAPIHealthReport(checkedAt: Date(), entries: entries)
     }
 
     func createAdMobRewardIntent() async throws -> AdMobRewardIntentResponse {
@@ -341,6 +386,52 @@ struct APIClient {
         return try await decodeResponse(for: request)
     }
 
+    private func probeEndpoint(
+        label: String,
+        method: String,
+        path: String,
+        body: (some Encodable)?
+    ) async -> BillingAPIHealthEntry {
+        do {
+            let request = try buildRequest(
+                url: baseURL.appending(path: path),
+                method: method,
+                headers: requestHeaders(),
+                body: body
+            )
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return BillingAPIHealthEntry(
+                    id: path,
+                    label: label,
+                    method: method,
+                    path: path,
+                    statusCode: nil,
+                    message: "invalid_response"
+                )
+            }
+            let payload = try? JSONDecoder().decode(APIErrorPayload.self, from: data)
+            let message = payload?.error ?? (200..<300 ~= httpResponse.statusCode ? "ok" : "HTTP \(httpResponse.statusCode)")
+            return BillingAPIHealthEntry(
+                id: path,
+                label: label,
+                method: method,
+                path: path,
+                statusCode: httpResponse.statusCode,
+                message: message
+            )
+        } catch {
+            return BillingAPIHealthEntry(
+                id: path,
+                label: label,
+                method: method,
+                path: path,
+                statusCode: nil,
+                message: error.localizedDescription
+            )
+        }
+    }
+
     private func buildRequest(
         url: URL,
         method: String,
@@ -374,6 +465,14 @@ struct APIClient {
                     remaining: payload?.creditsRemaining ?? 0
                 )
             }
+            if httpResponse.statusCode == 404 {
+                throw APIError.routeMissing(
+                    statusCode: httpResponse.statusCode,
+                    path: request.url?.path ?? "unknown",
+                    url: request.url?.absoluteString ?? "unknown",
+                    message: payload?.error ?? "Not found"
+                )
+            }
             throw APIError.serverStatus(
                 statusCode: httpResponse.statusCode,
                 message: payload?.error ?? "HTTP \(httpResponse.statusCode)"
@@ -392,6 +491,14 @@ struct APIClient {
         configuration.urlCache = nil
         return URLSession(configuration: configuration)
     }
+
+    private func endpointDisplayString(path: String) -> String {
+        baseURL.appending(path: path).absoluteString
+    }
+
+    private static let usagePath = "/v1/usage"
+    private static let subscriptionSyncPath = "/v1/ios/subscriptions/sync"
+    private static let creditPurchaseCompletePath = "/v1/ios/purchases/credits/complete"
 }
 
 private struct APIErrorPayload: Decodable {
@@ -406,6 +513,7 @@ enum APIError: LocalizedError, Equatable {
     case invalidResponse
     case server(String)
     case serverStatus(statusCode: Int, message: String)
+    case routeMissing(statusCode: Int, path: String, url: String, message: String)
     case insufficientCredits(required: Int, remaining: Int)
 
     var errorDescription: String? {
@@ -416,6 +524,8 @@ enum APIError: LocalizedError, Equatable {
             message
         case .serverStatus(let statusCode, let message):
             "HTTP \(statusCode): \(message)"
+        case .routeMissing(let statusCode, let path, _, let message):
+            "HTTP \(statusCode): \(path): \(message)"
         case .insufficientCredits(let required, let remaining):
             "creditが不足しています。必要: \(required)、残り: \(remaining)"
         }

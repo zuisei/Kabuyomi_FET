@@ -4,21 +4,29 @@ import Security
 @MainActor
 final class DeviceIdentityStore {
     static let shared = DeviceIdentityStore()
+    private static var cachedDeviceKey: String?
 
     private let service = "app.kabuyomi.identity"
     private let account = "deviceKey"
 
     func deviceKey() -> String {
+        if let cached = Self.cachedDeviceKey {
+            return cached
+        }
+
         if let existing = readValue() {
+            Self.cachedDeviceKey = existing
             return existing
         }
 
         let newValue = UUID().uuidString.lowercased()
+        Self.cachedDeviceKey = newValue
         saveValue(newValue)
         return newValue
     }
 
     func reset() {
+        Self.cachedDeviceKey = nil
         SecItemDelete(queryAttributes as CFDictionary)
     }
 
