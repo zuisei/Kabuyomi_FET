@@ -24,6 +24,17 @@ const forbiddenClaims = [
 ];
 
 const failures = [];
+const appAdsPath = join(publicDir.pathname, "app-ads.txt");
+const expectedAppAdsLine = "google.com, pub-1248492954379402, DIRECT, f08c47fec0942fa0";
+
+if (!existsSync(appAdsPath)) {
+  failures.push("Missing app-ads.txt");
+} else {
+  const appAdsContent = readFileSync(appAdsPath, "utf8");
+  if (appAdsContent !== `${expectedAppAdsLine}\n`) {
+    failures.push("app-ads.txt must contain exactly the authorized Google AdMob seller line");
+  }
+}
 
 for (const page of pages) {
   const filePath = join(publicDir.pathname, page);
