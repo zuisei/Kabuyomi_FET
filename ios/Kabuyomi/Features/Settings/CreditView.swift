@@ -14,19 +14,31 @@ private enum RewardedCreditReviewUI {
 
 enum CreditInitialSheet {
     case plans
+    case insufficientCredits(requiredCredits: Int)
 }
 
 struct CreditView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
     @State private var activeSheet: CreditSheet?
+    @State private var recoveryRequiredCredits: Int?
 
     init(initialSheet: CreditInitialSheet? = nil) {
         _activeSheet = State(initialValue: {
             switch initialSheet {
             case .plans:
                 return .plans
+            case .insufficientCredits:
+                return nil
             case nil:
+                return nil
+            }
+        }())
+        _recoveryRequiredCredits = State(initialValue: {
+            switch initialSheet {
+            case .insufficientCredits(let requiredCredits):
+                return requiredCredits
+            case .plans, nil:
                 return nil
             }
         }())
@@ -49,6 +61,9 @@ struct CreditView: View {
 
                 ScrollView {
                     VStack(spacing: 16) {
+                        if let recoveryRequiredCredits {
+                            insufficientCreditRecoveryCard(requiredCredits: recoveryRequiredCredits)
+                        }
                         balanceCard
                         addCreditsCard
                         purchaseManagementCard
@@ -100,6 +115,8 @@ struct CreditView: View {
             Spacer()
 
             Button("閉じる") {
+                appModel.markRewardedAdCreditsClosedByUser()
+                appModel.dismissInsufficientCreditRecovery()
                 dismiss()
             }
             .font(.system(.body, design: .rounded, weight: .semibold))
@@ -385,6 +402,94 @@ struct CreditView: View {
         }
     }
 
+    private func insufficientCreditRecoveryCard(requiredCredits: Int) -> some View {
+        card {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("クレジットが不足しています")
+                        .font(.system(.title3, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Text(recoveryBodyText(requiredCredits: requiredCredits))
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if appModel.hasRecoveredEnoughCreditsForPendingRecovery {
+                    Label("送信できます。元の画面で質問をもう一度送信してください。", systemImage: "checkmark.circle.fill")
+                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.positive)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(KabuyomiTheme.positive.opacity(0.1))
+                        )
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("続ける方法")
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+
+                    if shouldShowRewardedCreditUI {
+                        VStack(alignment: .leading, spacing: 6) {
+                            RewardedAdCreditButton(
+                                state: appModel.rewardedAdCreditState,
+                                message: appModel.rewardedAdStatusMessage,
+                                earn: {
+                                    appModel.prepareRewardedAdReturnDestination(
+                                        .credits,
+                                        visibleSurface: "insufficient_credit_recovery"
+                                    )
+                                    appModel.logRewardedAdButtonTapped()
+                                    Task {
+                                        await appModel.earnRewardedAdCredits()
+                                    }
+                                }
+                            )
+                            Text("任意の広告を見て、無料/ad creditを2 credits獲得")
+                                .font(.caption)
+                                .foregroundStyle(KabuyomiTheme.inkMuted)
+                        }
+                    }
+
+                    recoveryActionButton(
+                        title: "50 creditsを購入",
+                        systemImage: "plus.circle.fill",
+                        isLoading: appModel.billingActionInFlight || appModel.creditPackProductLoadInFlight,
+                        isDisabled: appModel.billingActionInFlight || primaryCreditPackProduct?.isAvailable != true
+                    ) {
+                        guard let productId = primaryCreditPackProduct?.id else { return }
+                        Task {
+                            await appModel.purchaseCreditPack(productId: productId)
+                        }
+                    }
+
+                    recoveryActionButton(
+                        title: "サブスクを見る",
+                        systemImage: "crown.fill",
+                        isLoading: appModel.subscriptionProductLoadState == .loading,
+                        isDisabled: false
+                    ) {
+                        activeSheet = .plans
+                    }
+
+                    recoveryActionButton(
+                        title: "購入を復元",
+                        systemImage: "arrow.triangle.2.circlepath",
+                        isLoading: appModel.billingActionInFlight,
+                        isDisabled: appModel.billingActionInFlight
+                    ) {
+                        Task {
+                            await appModel.restorePurchases()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private var morePacksSheet: some View {
         NavigationStack {
             ScrollView {
@@ -449,6 +554,7 @@ struct CreditView: View {
                     state: appModel.rewardedAdCreditState,
                     message: appModel.rewardedAdStatusMessage,
                     earn: {
+                        appModel.prepareRewardedAdReturnDestination(.credits, visibleSurface: "credits")
                         appModel.logRewardedAdButtonTapped()
                         Task {
                             await appModel.earnRewardedAdCredits()
@@ -648,6 +754,51 @@ struct CreditView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
             .kabuyomiCard(.primary, radius: 16)
+    }
+
+    private func recoveryBodyText(requiredCredits: Int) -> String {
+        let currentCredits = appModel.creditUsage?.totalRemaining ?? appModel.insufficientCreditRecovery?.remainingCredits ?? 0
+        if appModel.hasRecoveredEnoughCreditsForPendingRecovery {
+            return "現在の残高は \(currentCredits) credits です。この質問には \(requiredCredits) credits が必要です。"
+        }
+        return "この質問には\(requiredCredits) creditsが必要です。広告視聴、クレジット購入、またはサブスクで続けられます。"
+    }
+
+    private func recoveryActionButton(
+        title: String,
+        systemImage: String,
+        isLoading: Bool,
+        isDisabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 16, height: 16)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(width: 18)
+                }
+                Text(title)
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+            }
+            .foregroundStyle(isDisabled ? KabuyomiTheme.inkMuted : KabuyomiTheme.ink)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(KabuyomiTheme.fill(for: .muted))
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.72 : 1)
     }
 
     private func formattedResetDate(_ rawValue: String) -> String {

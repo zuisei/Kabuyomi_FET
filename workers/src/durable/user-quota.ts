@@ -87,12 +87,20 @@ interface ChatRefundRecord {
   createdAt: string;
 }
 
+interface RewardedAdDailyCapRecord {
+  dateKey: string;
+  count: number;
+  transactionIds: string[];
+  updatedAt: string;
+}
+
 const SAVED_TICKERS_KEY = "saved_tickers";
 const CREDIT_STATE_KEY = "credit_state";
 const CREDIT_OPERATION_PREFIX = "credit_operation:";
 const MONTHLY_GRANT_PREFIX = "monthly_grant:";
 const PURCHASE_TRANSACTION_PREFIX = "purchase_transaction:";
 const CHAT_REFUND_PREFIX = "chat_refund:";
+const REWARDED_AD_DAILY_CAP_PREFIX = "rewarded_ad_daily_cap:";
 const CREDIT_OPERATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DAILY_KEY_PREFIX = "daily:";
 const LEGACY_DAILY_KEY_LIMIT = 30;
@@ -281,7 +289,10 @@ export class UserQuotaDO {
         const credits = body.credits;
         const referenceId = body.referenceId;
         const promoExpiresAt = body.promoExpiresAt;
-        if (!operationId || !credits || !referenceId || !promoExpiresAt) {
+        const transactionId = body.transactionId;
+        const dailyRewardDateKey = body.dailyRewardDateKey;
+        const dailyRewardCap = body.dailyRewardCap;
+        if (!operationId || !credits || !referenceId || !promoExpiresAt || !transactionId || !dailyRewardDateKey || !dailyRewardCap) {
           return {
             status: 400,
             payload: { error: "Invalid quota payload", usage: currentUsage(), didMutate }
@@ -293,19 +304,25 @@ export class UserQuotaDO {
           operationId,
           credits,
           referenceId,
-          promoExpiresAt
+          promoExpiresAt,
+          transactionId,
+          dailyRewardDateKey,
+          dailyRewardCap
         });
         if (monthlyGrant) {
           await this.saveMonthlyGrant(monthlyGrant);
         }
         return {
-          status: 200,
+          status: creditResult.status,
           payload: {
             usage: currentUsage(),
             didMutate: creditResult.didMutate,
             creditOperation: creditResult.operation,
             monthlyGrant,
-            creditsRemaining: totalCreditRemaining(creditState)
+            creditsRemaining: totalCreditRemaining(creditState),
+            dailyRewardsUsed: creditResult.dailyRewardsUsed,
+            dailyRewardsRemaining: creditResult.dailyRewardsRemaining,
+            error: creditResult.error
           }
         };
       }
@@ -325,7 +342,8 @@ export class UserQuotaDO {
           payload: {
             usage: currentUsage(),
             didMutate: monthlyGrant ? true : didMutate,
-            monthlyGrant
+            monthlyGrant,
+            creditOperation: creditStateResult.monthlyAdjustment
           }
         };
       }
@@ -506,7 +524,7 @@ export class UserQuotaDO {
       periodEnd?: string;
       monthlyGrantOperationId?: string;
     } = {}
-  ): Promise<{ creditState: CreditStateRecord; monthlyGrant?: MonthlyGrantRecord }> {
+  ): Promise<{ creditState: CreditStateRecord; monthlyGrant?: MonthlyGrantRecord; monthlyAdjustment?: CreditOperationRecord }> {
     const period = buildCreditPeriod(dateJST, options);
     const now = new Date().toISOString();
     const existing = (await this.state.storage.get<CreditStateRecord>(CREDIT_STATE_KEY)) as
@@ -536,18 +554,36 @@ export class UserQuotaDO {
       };
     }
 
-    const limitDelta = monthlyCreditLimit - existing.monthlyLimit;
+    const previousMonthlyLimit = existing.monthlyLimit;
+    const limitDelta = monthlyCreditLimit - previousMonthlyLimit;
     existing.plan = plan;
     expireRewardedAdCreditsIfNeeded(existing, now);
-    existing.monthlyLimit = monthlyCreditLimit;
-    existing.monthlyRemaining = Math.max(0, Math.min(monthlyCreditLimit, existing.monthlyRemaining + limitDelta));
+    let monthlyAdjustment: CreditOperationRecord | undefined;
+    if (limitDelta > 0) {
+      existing.monthlyLimit = monthlyCreditLimit;
+      existing.monthlyRemaining = Math.max(0, Math.min(monthlyCreditLimit, existing.monthlyRemaining + limitDelta));
+    } else if (limitDelta < 0) {
+      existing.monthlyLimit = Math.max(previousMonthlyLimit, existing.monthlyRemaining);
+      existing.monthlyRemaining = Math.max(0, existing.monthlyRemaining);
+      monthlyAdjustment = await this.buildMonthlyNoClawbackOperationIfNeeded(
+        existing,
+        previousMonthlyLimit,
+        monthlyCreditLimit,
+        now,
+        options.monthlyGrantOperationId
+      );
+    } else {
+      existing.monthlyLimit = monthlyCreditLimit;
+      existing.monthlyRemaining = Math.max(0, Math.min(monthlyCreditLimit, existing.monthlyRemaining));
+    }
     existing.updatedAt = now;
     return {
       creditState: existing,
       monthlyGrant:
         limitDelta > 0
           ? await this.buildMonthlyGrantIfNeeded(existing, limitDelta, now, options.monthlyGrantOperationId)
-          : undefined
+          : undefined,
+      monthlyAdjustment
     };
   }
 
@@ -791,23 +827,69 @@ export class UserQuotaDO {
     operationId,
     credits,
     referenceId,
-    promoExpiresAt
+    promoExpiresAt,
+    transactionId,
+    dailyRewardDateKey,
+    dailyRewardCap
   }: {
     creditState: CreditStateRecord;
     operationId: string;
     credits: number;
     referenceId: string;
     promoExpiresAt: string;
-  }): Promise<{ didMutate: boolean; operation: CreditOperationRecord }> {
+    transactionId: string;
+    dailyRewardDateKey: string;
+    dailyRewardCap: number;
+  }): Promise<{
+    status: number;
+    didMutate: boolean;
+    operation: CreditOperationRecord;
+    dailyRewardsUsed: number;
+    dailyRewardsRemaining: number;
+    error?: string;
+  }> {
     const existing = await this.loadCreditOperation(operationId);
+    const dailyCap = await this.loadRewardedAdDailyCap(dailyRewardDateKey);
     if (existing) {
-      return { didMutate: false, operation: existing };
+      return {
+        status: existing.status === "noop" ? 429 : 200,
+        didMutate: false,
+        operation: existing,
+        dailyRewardsUsed: dailyCap.count,
+        dailyRewardsRemaining: Math.max(0, dailyRewardCap - dailyCap.count),
+        error: existing.status === "noop" ? "daily_cap_reached" : undefined
+      };
     }
 
     const now = new Date().toISOString();
+    if (dailyCap.count >= dailyRewardCap) {
+      const operation = buildCreditOperation({
+        operationId,
+        type: "admob_rewarded_grant",
+        status: "noop",
+        delta: 0,
+        creditState,
+        referenceType: "admob_rewarded",
+        referenceId,
+        createdAt: now
+      });
+      await this.saveCreditOperation(operation);
+      return {
+        status: 429,
+        didMutate: false,
+        operation,
+        dailyRewardsUsed: dailyCap.count,
+        dailyRewardsRemaining: 0,
+        error: "daily_cap_reached"
+      };
+    }
+
     creditState.rewardedAdRemaining = (creditState.rewardedAdRemaining ?? 0) + credits;
     creditState.rewardedAdExpiresAt = promoExpiresAt;
     creditState.updatedAt = now;
+    dailyCap.count += 1;
+    dailyCap.transactionIds = [...new Set([...dailyCap.transactionIds, transactionId])];
+    dailyCap.updatedAt = now;
     const operation = buildCreditOperation({
       operationId,
       type: "admob_rewarded_grant",
@@ -820,10 +902,17 @@ export class UserQuotaDO {
     });
     await Promise.all([
       this.state.storage.put(CREDIT_STATE_KEY, creditState),
-      this.saveCreditOperation(operation)
+      this.saveCreditOperation(operation),
+      this.saveRewardedAdDailyCap(dailyCap)
     ]);
     await this.pruneOldCreditOperations(now);
-    return { didMutate: true, operation };
+    return {
+      status: 200,
+      didMutate: true,
+      operation,
+      dailyRewardsUsed: dailyCap.count,
+      dailyRewardsRemaining: Math.max(0, dailyRewardCap - dailyCap.count)
+    };
   }
 
   private async loadCreditOperation(operationId: string): Promise<CreditOperationRecord | undefined> {
@@ -882,6 +971,39 @@ export class UserQuotaDO {
     await this.state.storage.put(buildMonthlyGrantKey(grant.operationId), grant);
   }
 
+  private async buildMonthlyNoClawbackOperationIfNeeded(
+    creditState: CreditStateRecord,
+    previousMonthlyLimit: number,
+    requestedMonthlyLimit: number,
+    createdAt: string,
+    _operationIdOverride?: string
+  ): Promise<CreditOperationRecord | undefined> {
+    const operationId = buildMonthlyDowngradeNoClawbackOperationId(
+      creditState.plan,
+      previousMonthlyLimit,
+      requestedMonthlyLimit,
+      creditState.periodStart,
+      creditState.periodEnd
+    );
+    const existing = await this.loadCreditOperation(operationId);
+    if (existing) {
+      return undefined;
+    }
+
+    const operation = buildCreditOperation({
+      operationId,
+      type: "monthly_grant",
+      status: "noop",
+      delta: 0,
+      creditState,
+      referenceType: "subscription_downgrade_no_clawback",
+      referenceId: `${creditState.plan}:${previousMonthlyLimit}->${requestedMonthlyLimit}:${creditState.periodStart}:${creditState.periodEnd}`,
+      createdAt
+    });
+    await this.saveCreditOperation(operation);
+    return operation;
+  }
+
   private async loadChatRefund(operationId: string): Promise<ChatRefundRecord | undefined> {
     return (await this.state.storage.get<ChatRefundRecord>(buildChatRefundKey(operationId))) as
       | ChatRefundRecord
@@ -890,6 +1012,23 @@ export class UserQuotaDO {
 
   private async saveChatRefund(refund: ChatRefundRecord): Promise<void> {
     await this.state.storage.put(buildChatRefundKey(refund.operationId), refund);
+  }
+
+  private async loadRewardedAdDailyCap(dateKey: string): Promise<RewardedAdDailyCapRecord> {
+    return (
+      ((await this.state.storage.get<RewardedAdDailyCapRecord>(buildRewardedAdDailyCapKey(dateKey))) as
+        | RewardedAdDailyCapRecord
+        | undefined) ?? {
+        dateKey,
+        count: 0,
+        transactionIds: [],
+        updatedAt: new Date().toISOString()
+      }
+    );
+  }
+
+  private async saveRewardedAdDailyCap(record: RewardedAdDailyCapRecord): Promise<void> {
+    await this.state.storage.put(buildRewardedAdDailyCapKey(record.dateKey), record);
   }
 
   private async pruneOldCreditOperations(nowIso: string): Promise<void> {
@@ -1056,8 +1195,22 @@ function buildChatRefundKey(operationId: string): string {
   return `${CHAT_REFUND_PREFIX}${operationId}`;
 }
 
+function buildRewardedAdDailyCapKey(dateKey: string): string {
+  return `${REWARDED_AD_DAILY_CAP_PREFIX}${dateKey}`;
+}
+
 function buildMonthlyGrantOperationId(plan: AccessPlan, periodStart: string, periodEnd: string): string {
   return `monthly-grant:${plan}:${periodStart}:${periodEnd}`;
+}
+
+function buildMonthlyDowngradeNoClawbackOperationId(
+  plan: AccessPlan,
+  previousMonthlyLimit: number,
+  requestedMonthlyLimit: number,
+  periodStart: string,
+  periodEnd: string
+): string {
+  return `monthly-downgrade-no-clawback:${plan}:${previousMonthlyLimit}->${requestedMonthlyLimit}:${periodStart}:${periodEnd}`;
 }
 
 function maxIsoTimestamp(left: string, right: string): string {

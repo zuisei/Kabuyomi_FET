@@ -122,6 +122,8 @@ export const QuotaRequestSchema = z.object({
   originalOperationId: z.string().trim().min(1).max(128).optional(),
   creditsRequired: z.number().int().min(1).max(100).optional(),
   credits: z.number().int().min(1).max(1_000).optional(),
+  dailyRewardDateKey: z.string().trim().min(1).max(32).optional(),
+  dailyRewardCap: z.number().int().min(1).max(100).optional(),
   promoExpiresAt: z.string().trim().min(1).max(64).optional(),
   purchaseCredits: z.number().int().min(1).max(10_000).optional(),
   productId: z.string().trim().min(1).max(128).optional(),

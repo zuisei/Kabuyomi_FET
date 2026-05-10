@@ -129,7 +129,12 @@ async function createCreditPurchaseEnv() {
             operation_id: args[2],
             type: args[3],
             delta: args[4],
-            reference_id: args[9]
+            balance_after: args[5],
+            monthly_balance_after: args[6],
+            purchased_balance_after: args[7],
+            reference_type: args[8],
+            reference_id: args[9],
+            metadata_json: args[10]
           });
         }
         if (sql.includes("INSERT INTO monthly_grants")) {
@@ -201,6 +206,7 @@ function base64Encode(bytes: Uint8Array): string {
 
 describe("worker routing", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -579,6 +585,211 @@ describe("worker routing", () => {
     });
   });
 
+  it("uses no-clawback semantics for same-period subscription downgrade and leaves paid credits untouched", async () => {
+    const { env, monthlyGrantRows, creditLedgerRows } = await createCreditPurchaseEnv();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const creditSignedTransactionInfo = fakeJws({
+      transactionId: "tx-downgrade-paid-50",
+      originalTransactionId: "orig-downgrade-paid-50",
+      productId: "kabuyomi.credits.50",
+      bundleId: "app.kabuyomi.ios"
+    });
+    const proSignedTransactionInfo = fakeJws({
+      transactionId: "sub-tx-downgrade-pro",
+      originalTransactionId: "orig-sub-downgrade",
+      productId: "kabuyomi.sub.pro.monthly",
+      bundleId: "app.kabuyomi.ios",
+      purchaseDate: Date.parse("2026-05-01T00:00:00.000Z"),
+      expiresDate: Date.parse("2026-06-01T00:00:00.000Z")
+    });
+    const liteSignedTransactionInfo = fakeJws({
+      transactionId: "sub-tx-downgrade-lite",
+      originalTransactionId: "orig-sub-downgrade",
+      productId: "kabuyomi.sub.lite.monthly",
+      bundleId: "app.kabuyomi.ios",
+      purchaseDate: Date.parse("2026-05-01T00:00:00.000Z"),
+      expiresDate: Date.parse("2026-06-01T00:00:00.000Z")
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ signedTransactionInfo: creditSignedTransactionInfo }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ signedTransactionInfo: proSignedTransactionInfo }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }))
+        .mockImplementation(() =>
+          Promise.resolve(new Response(JSON.stringify({ signedTransactionInfo: liteSignedTransactionInfo }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }))
+        )
+    );
+
+    const purchase = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/ios/purchases/credits/complete", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-device-key": "device-123" },
+        body: JSON.stringify({
+          productId: "kabuyomi.credits.50",
+          transactionId: "tx-downgrade-paid-50",
+          originalTransactionId: "orig-downgrade-paid-50",
+          signedTransactionInfo: creditSignedTransactionInfo
+        })
+      }),
+      env as never,
+      executionContext
+    );
+    expect(purchase.status).toBe(200);
+
+    const proSync = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/billing/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-device-key": "device-123" },
+        body: JSON.stringify({
+          originalTransactionId: "orig-sub-downgrade",
+          transactionId: "sub-tx-downgrade-pro",
+          productId: "kabuyomi.sub.pro.monthly",
+          active: true,
+          signedTransactionInfo: proSignedTransactionInfo
+        })
+      }),
+      env as never,
+      executionContext
+    );
+    expect(proSync.status).toBe(200);
+
+    const liteSync = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/billing/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-device-key": "device-123" },
+        body: JSON.stringify({
+          originalTransactionId: "orig-sub-downgrade",
+          transactionId: "sub-tx-downgrade-lite",
+          productId: "kabuyomi.sub.lite.monthly",
+          active: true,
+          signedTransactionInfo: liteSignedTransactionInfo
+        })
+      }),
+      env as never,
+      executionContext
+    );
+    const duplicateLiteSync = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/billing/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-device-key": "device-123" },
+        body: JSON.stringify({
+          originalTransactionId: "orig-sub-downgrade",
+          transactionId: "sub-tx-downgrade-lite",
+          productId: "kabuyomi.sub.lite.monthly",
+          active: true,
+          signedTransactionInfo: liteSignedTransactionInfo
+        })
+      }),
+      env as never,
+      executionContext
+    );
+
+    expect(liteSync.status).toBe(200);
+    await expect(liteSync.json()).resolves.toMatchObject({
+      plan: "lite",
+      activePlan: "lite",
+      activeSubscription: {
+        plan: "lite",
+        monthlyCredits: 400
+      },
+      usage: {
+        plan: "lite",
+        credits: {
+          monthlyLimit: 900,
+          monthlyRemaining: 900,
+          purchasedRemaining: 50,
+          totalRemaining: 950
+        }
+      }
+    });
+    expect(duplicateLiteSync.status).toBe(200);
+    await expect(duplicateLiteSync.json()).resolves.toMatchObject({
+      usage: {
+        plan: "lite",
+        credits: {
+          monthlyLimit: 900,
+          monthlyRemaining: 900,
+          purchasedRemaining: 50,
+          totalRemaining: 950
+        }
+      }
+    });
+
+    const subscriptionGrantRows = monthlyGrantRows.filter((row) => row.plan !== "free");
+    expect(subscriptionGrantRows).toHaveLength(1);
+    expect(subscriptionGrantRows[0]).toMatchObject({
+      plan: "pro",
+      credits_granted: 900
+    });
+    const noClawbackRows = creditLedgerRows.filter((row) => row.reference_type === "subscription_downgrade_no_clawback");
+    expect(noClawbackRows).toHaveLength(1);
+    expect(noClawbackRows[0]).toMatchObject({
+      type: "monthly_grant",
+      delta: 0,
+      monthly_balance_after: 900,
+      purchased_balance_after: 50
+    });
+    const joinedLogs = logSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(joinedLogs).toContain("subscription_downgrade_no_clawback");
+    expect(joinedLogs).toContain("operationIdSuffix");
+    expect(joinedLogs).toContain("quotaSubjectHash");
+    expect(joinedLogs).not.toContain("orig-sub-downgrade");
+    expect(joinedLogs).not.toContain("sub-tx-downgrade-lite");
+    expect(joinedLogs).not.toContain("free:local:device-123");
+    logSpy.mockRestore();
+  });
+
+  it("does not grant new subscription credits when billing sync reports inactive expiration", async () => {
+    const { env, monthlyGrantRows, creditLedgerRows } = await createCreditPurchaseEnv();
+
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/billing/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-device-key": "device-123" },
+        body: JSON.stringify({
+          originalTransactionId: "orig-sub-expired-sync",
+          transactionId: "sub-tx-expired-sync",
+          productId: "kabuyomi.sub.pro.monthly",
+          active: false
+        })
+      }),
+      env as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      plan: "free",
+      activePlan: null,
+      activeSubscription: null,
+      usage: {
+        plan: "free",
+        credits: {
+          monthlyLimit: 50,
+          monthlyRemaining: 50,
+          purchasedRemaining: 0,
+          totalRemaining: 50
+        }
+      }
+    });
+    expect(monthlyGrantRows).toHaveLength(1);
+    expect(monthlyGrantRows[0]).toMatchObject({
+      plan: "free",
+      credits_granted: 50
+    });
+    expect(creditLedgerRows.filter((row) => row.reference_id === "pro:2026-05-01T00:00:00.000Z:2026-06-01T00:00:00.000Z")).toHaveLength(0);
+  });
+
   it("returns 415 for chat requests without a JSON content type", async () => {
     const response = await worker.fetch(
       new Request("https://kabuyomi.test/v1/chat", {
@@ -738,6 +949,64 @@ describe("worker routing", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Invalid cleanup payload"
     });
+  });
+
+  it("requires the internal token for credit audit repair", async () => {
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/internal/credit-audit/repair", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}"
+      }),
+      {
+        BACKFILL_SHARED_SECRET: "secret",
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized"
+    });
+  });
+
+  it("runs the internal credit audit repair endpoint with count-only output", async () => {
+    const db = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({
+          all: vi.fn().mockResolvedValue({ results: [] })
+        }))
+      }))
+    };
+    const response = await worker.fetch(
+      new Request("https://kabuyomi.test/v1/internal/credit-audit/repair", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-internal-token": "secret"
+        },
+        body: JSON.stringify({ limit: 5 })
+      }),
+      {
+        BACKFILL_SHARED_SECRET: "secret",
+        DB: db,
+        KABUYOMI_CACHE: {
+          get: vi.fn().mockResolvedValue(null)
+        }
+      } as never,
+      executionContext
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      scanned: 0,
+      repaired: 0,
+      failed: 0
+    });
+    expect(db.prepare).toHaveBeenCalledWith(expect.stringContaining("FROM credit_audit_repair_queue"));
   });
 
   it("requires the internal token for credit purchase grants", async () => {

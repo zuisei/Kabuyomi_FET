@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   consumeCredit,
   grantEvalCredits,
@@ -16,6 +16,10 @@ const identity: QuotaIdentity = {
   plan: "free",
   identityKind: "local_device"
 };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function createDb() {
   const run = vi.fn().mockResolvedValue({});
@@ -302,6 +306,8 @@ describe("credit quota bridge", () => {
           },
           didMutate: true,
           creditsRemaining: 32,
+          dailyRewardsUsed: 1,
+          dailyRewardsRemaining: 2,
           creditOperation: {
             operationId: "admob-reward:tx-admob-1",
             type: "admob_rewarded_grant",
@@ -334,13 +340,18 @@ describe("credit quota bridge", () => {
         rewardIntentId: "intent-1",
         transactionId: "tx-admob-1",
         credits: 2,
-        expiresAt: "2026-05-16T00:00:00.000Z"
+        expiresAt: "2026-05-16T00:00:00.000Z",
+        dailyDateKey: "2026-04-16",
+        dailyCap: 3
       }
     );
 
     expect(result.operationId).toBe("admob-reward:tx-admob-1");
+    expect(result.status).toBe("granted");
     expect(result.creditsGranted).toBe(2);
     expect(result.creditsRemaining).toBe(32);
+    expect(result.dailyRewardsUsed).toBe(1);
+    expect(result.dailyRewardsRemaining).toBe(2);
     expect(db.db.prepare).toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE INTO credit_ledger"));
     expect(db.bind).toHaveBeenCalledWith(
       expect.any(String),
@@ -863,5 +874,82 @@ describe("credit quota bridge", () => {
       expect.stringContaining('"originalOperationId":"chat-op-1"'),
       "2026-04-25T00:00:01.000Z"
     );
+  });
+
+  it("redacts quota subject and operation id in credit consume/refund logs", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const db = createDb();
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            usage: usagePayload(),
+            didMutate: true,
+            creditsRemaining: 28,
+            creditOperation: {
+              operationId: "chat-operation-redaction-1234567890",
+              type: "consume",
+              status: "applied",
+              delta: -2,
+              balanceAfter: 28,
+              monthlyBalanceAfter: 28,
+              purchasedBalanceAfter: 0,
+              referenceType: "chat",
+              referenceId: "filing-1",
+              createdAt: "2026-04-25T00:00:01.000Z"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            usage: usagePayload(),
+            didMutate: true,
+            creditsRemaining: 30,
+            creditOperation: {
+              operationId: "refund:chat-operation-redaction-1234567890",
+              type: "refund",
+              status: "applied",
+              delta: 2,
+              balanceAfter: 30,
+              monthlyBalanceAfter: 30,
+              purchasedBalanceAfter: 0,
+              originalOperationId: "chat-operation-redaction-1234567890",
+              referenceType: "chat_refund",
+              referenceId: "filing-1",
+              createdAt: "2026-04-25T00:00:02.000Z"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      );
+    const env = {
+      DB: db.db,
+      USER_QUOTA: {
+        getByName: vi.fn().mockReturnValue({ fetch })
+      }
+    } as never;
+
+    await consumeCredit(identity, env, DEFAULT_REMOTE_CONFIG, {
+      operationId: "chat-operation-redaction-1234567890",
+      creditsRequired: 2,
+      reference: { type: "chat", id: "filing-1" }
+    });
+    await refundCredit(identity, env, DEFAULT_REMOTE_CONFIG, {
+      originalOperationId: "chat-operation-redaction-1234567890",
+      refundOperationId: "refund:chat-operation-redaction-1234567890",
+      credits: 2,
+      reference: { type: "chat_refund", id: "filing-1" }
+    });
+
+    const lines = logSpy.mock.calls.map((call) => String(call[0]));
+    expect(lines.some((line) => line.includes('"quotaSubjectHash"'))).toBe(true);
+    expect(lines.some((line) => line.includes('"operationIdSuffix"'))).toBe(true);
+    expect(lines.join("\n")).not.toContain(identity.quotaSubject);
+    expect(lines.join("\n")).not.toContain("chat-operation-redaction-1234567890");
+    expect(lines.join("\n")).not.toContain("refund:chat-operation-redaction-1234567890");
   });
 });

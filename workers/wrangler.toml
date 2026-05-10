@@ -18,6 +18,9 @@ r2_buckets = [
   { binding = "FILINGS_BUCKET", bucket_name = "kabuyomi-filings", preview_bucket_name = "kabuyomi-filings-dev" }
 ]
 
+[limits]
+cpu_ms = 30000
+
 [vars]
 SEC_USER_AGENT = "Kabuyomi admin@kabuyomi.app"
 SEC_FETCHER_BASE_URL = "https://kabuyomifet-production.up.railway.app"

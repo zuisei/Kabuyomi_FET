@@ -2,7 +2,7 @@ import { generateModelQuoteTranslation, isQuoteTranslationAvailable } from "../c
 import { TranslateQuoteRequestSchema } from "../lib/contracts";
 import { consumeBillableCredits, refundBillableCredits, type CreditChargeResult } from "../lib/credit-operation";
 import { logLlmUsage } from "../lib/llm-usage";
-import { logErrorEvent, logEvent } from "../lib/logging";
+import { hashForLog, logErrorEvent, logEvent, suffixForLog } from "../lib/logging";
 import { isCreditBillingEnabledForIdentity } from "../lib/remote-config";
 import { InsufficientCreditsError, readQuotaIdentity } from "../lib/quota";
 import { parseJsonBody } from "../lib/request";
@@ -70,7 +70,7 @@ export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, en
     });
 
     logEvent("quote_translation_request", {
-      quotaSubject: identity.quotaSubject,
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
       identityKind: identity.identityKind,
       targetLanguage: payload.targetLanguage,
       inputLength: payload.text.length,
@@ -100,15 +100,15 @@ export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, en
         });
       } catch (refundError) {
         logErrorEvent("quote_translation_refund_failed", {
-          quotaSubject: identity.quotaSubject,
-          operationId,
+          quotaSubjectHash: hashForLog(identity.quotaSubject),
+          operationIdSuffix: suffixForLog(operationId),
           reason: refundError instanceof Error ? refundError.message : String(refundError)
         });
       }
     }
 
     logErrorEvent("quote_translation_failed", {
-      quotaSubject: identity.quotaSubject,
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
       identityKind: identity.identityKind,
       targetLanguage: payload.targetLanguage,
       inputLength: payload.text.length,

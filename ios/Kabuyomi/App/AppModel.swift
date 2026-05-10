@@ -64,6 +64,22 @@ enum RewardedAdCreditState: Equatable {
     }
 }
 
+enum RewardedAdReturnDestination: String, Equatable {
+    case credits
+}
+
+enum InsufficientCreditRecoverySource: String, Equatable {
+    case chatComposer
+    case localChatPreflight
+    case serverChatResponse
+}
+
+struct InsufficientCreditRecoveryState: Equatable {
+    let requiredCredits: Int
+    let remainingCredits: Int
+    let source: InsufficientCreditRecoverySource
+}
+
 private enum UsageUpdateSource {
     case refresh
     case chat
@@ -126,6 +142,12 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var rewardedAdCreditState: RewardedAdCreditState = .idle
     var rewardedAdStatusMessage: String?
     var rewardedAdLastDebugReason: String = "none"
+    private(set) var rewardedAdReturnDestination: RewardedAdReturnDestination?
+    private(set) var rewardedAdReturnRestorationRequestID: UUID?
+    private var rewardedAdReturnFlowID: UUID?
+    private var rewardedAdReturnUserNavigatedAway = false
+    private(set) var insufficientCreditRecovery: InsufficientCreditRecoveryState?
+    private(set) var insufficientCreditRecoveryRequestID: UUID?
     var subscriptionProductLoadState: SubscriptionProductLoadState = .idle
     var subscriptionProductLoadErrorMessage: String?
     var subscriptionProducts: [SubscriptionProduct] = BillingCatalog.subscriptionTiers.map {
@@ -309,6 +331,15 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         usage?.creditBillingEnabled == true
     }
 
+    var hasRecoveredEnoughCreditsForPendingRecovery: Bool {
+        guard let recovery = insufficientCreditRecovery,
+              usage?.creditBillingEnabled == true,
+              let credits = usage?.credits else {
+            return false
+        }
+        return credits.totalRemaining >= recovery.requiredCredits
+    }
+
     var currentDeviceKeyDisplay: String {
         deviceIdentity.deviceKey()
     }
@@ -340,6 +371,100 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         if let disabledReason {
             rewardedAdLastDebugReason = disabledReason
         }
+    }
+
+    func requestInsufficientCreditRecovery(
+        requiredCredits: Int? = nil,
+        remainingCredits: Int? = nil,
+        source: InsufficientCreditRecoverySource
+    ) {
+        let required = max(1, requiredCredits ?? chatCreditCost)
+        let remaining = max(0, remainingCredits ?? usage?.credits?.totalRemaining ?? 0)
+        insufficientCreditRecovery = InsufficientCreditRecoveryState(
+            requiredCredits: required,
+            remainingCredits: remaining,
+            source: source
+        )
+        insufficientCreditRecoveryRequestID = UUID()
+    }
+
+    func dismissInsufficientCreditRecovery() {
+        insufficientCreditRecovery = nil
+        insufficientCreditRecoveryRequestID = nil
+    }
+
+    var shouldRestoreRewardedAdReturnDestination: Bool {
+        guard rewardedAdReturnDestination != nil else { return false }
+        return !rewardedAdReturnUserNavigatedAway
+    }
+
+    func prepareRewardedAdReturnDestination(_ destination: RewardedAdReturnDestination, visibleSurface: String) {
+        rewardedAdReturnDestination = destination
+        rewardedAdReturnFlowID = UUID()
+        rewardedAdReturnUserNavigatedAway = false
+        logRewardedAdDiagnostic(
+            "rewarded_ad_return_destination_set",
+            fields: [
+                "destination": destination.rawValue,
+                "visibleSurface": visibleSurface,
+                "flow": redactedRewardedAdReturnFlowID
+            ]
+        )
+        logRewardedAdDiagnostic(
+            "selected_tab_before_rewarded_ad",
+            fields: [
+                "selectedTab": "company_root",
+                "visibleSurface": visibleSurface,
+                "flow": redactedRewardedAdReturnFlowID
+            ]
+        )
+    }
+
+    func markRewardedAdCreditsClosedByUser() {
+        guard rewardedAdReturnDestination != nil else { return }
+        rewardedAdReturnUserNavigatedAway = true
+        logRewardedAdDiagnostic(
+            "rewarded_ad_return_destination_skipped_user_navigated",
+            fields: [
+                "reason": "credits_closed_by_user",
+                "flow": redactedRewardedAdReturnFlowID
+            ]
+        )
+        clearRewardedAdReturnDestination()
+    }
+
+    func handleRewardedAdScenePhaseChanged(_ phase: String) {
+        logRewardedAdDiagnostic(
+            "rewarded_ad_scene_phase_changed",
+            fields: [
+                "phase": phase,
+                "returnDestination": rewardedAdReturnDestination?.rawValue ?? "none",
+                "flow": redactedRewardedAdReturnFlowID
+            ]
+        )
+        if phase == "active" {
+            requestRewardedAdReturnDestinationRestore(reason: "scene_active")
+        }
+    }
+
+    func confirmRewardedAdReturnDestinationRestored(visibleSurface: String) {
+        guard let destination = rewardedAdReturnDestination else { return }
+        logRewardedAdDiagnostic(
+            "rewarded_ad_return_destination_restored",
+            fields: [
+                "destination": destination.rawValue,
+                "visibleSurface": visibleSurface,
+                "flow": redactedRewardedAdReturnFlowID
+            ]
+        )
+        logRewardedAdDiagnostic(
+            "selected_tab_after_rewarded_ad",
+            fields: [
+                "selectedTab": "credits",
+                "visibleSurface": visibleSurface,
+                "flow": redactedRewardedAdReturnFlowID
+            ]
+        )
     }
 
     func bootstrap() async {
@@ -610,6 +735,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 message: "広告報酬creditは現在利用できません。時間をおいてからもう一度お試しください。",
                 kind: .dismissOnly
             )
+            requestRewardedAdReturnDestinationRestore(reason: "credit_billing_disabled")
             return
         }
         #if DEBUG
@@ -621,6 +747,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             )
             rewardedAdCreditState = .idle
             rewardedAdStatusMessage = debugDemoAdUnitCannotVerifyProductionSSVMessage
+            requestRewardedAdReturnDestinationRestore(reason: "debug_demo_ad_unit_blocked")
             return
         }
         #endif
@@ -630,7 +757,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         do {
             logRewardedAdDiagnostic(
                 "create_reward_intent_started",
-                fields: ["requestURL": apiClient.adMobRewardIntentURLDisplayString]
+                fields: ["requestPath": "/v1/admob/reward-intents"]
             )
             let intent = try await apiClient.createAdMobRewardIntent()
             logRewardedAdDiagnostic(
@@ -647,6 +774,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 logRewardedAdDiagnostic("reward_intent_daily_cap_reached")
                 rewardedAdCreditState = .dailyCapReached
                 rewardedAdStatusMessage = "本日の広告報酬上限に達しました。"
+                requestRewardedAdReturnDestinationRestore(reason: "daily_cap_reached")
                 return
             }
 
@@ -657,15 +785,17 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 logRewardedAdDiagnostic("rewarded_ad_dismissed_without_reward")
                 rewardedAdCreditState = .idle
                 rewardedAdStatusMessage = RewardedAdServiceError.dismissedWithoutReward.localizedDescription
+                requestRewardedAdReturnDestinationRestore(reason: "dismissed_without_reward")
                 return
             }
 
             rewardedAdCreditState = .pendingGrant
+            requestRewardedAdReturnDestinationRestore(reason: "pending_grant")
             logRewardedAdDiagnostic(
                 "reward_status_polling_started",
                 fields: [
                     "rewardIntentId": RewardedAdDiagnostics.redact(intent.rewardIntentId),
-                    "requestURL": apiClient.adMobRewardStatusURLDisplayString(rewardIntentId: intent.rewardIntentId)
+                    "requestPath": "/v1/admob/reward-status"
                 ]
             )
             let status = try await pollRewardStatus(rewardIntentId: intent.rewardIntentId)
@@ -673,6 +803,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             rewardedAdCreditState = status.dailyRemaining <= 0 ? .dailyCapReached : .idle
             rewardedAdStatusMessage = "\(status.rewardCredits)無料/ad creditを獲得しました。"
             setRewardedAdDebugReason("granted")
+            requestRewardedAdReturnDestinationRestore(reason: "granted")
             logRewardedAdDiagnostic(
                 "reward_status_granted",
                 fields: [
@@ -689,6 +820,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 )
                 rewardedAdCreditState = .dailyCapReached
                 rewardedAdStatusMessage = "本日の広告報酬上限に達しました。"
+                requestRewardedAdReturnDestinationRestore(reason: "daily_cap_reached_error")
                 return
             }
             setRewardedAdDebugReason(debugReason(forRewardedAdError: error))
@@ -698,6 +830,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             )
             rewardedAdCreditState = .idle
             rewardedAdStatusMessage = presentableRewardedAdMessage(for: error)
+            requestRewardedAdReturnDestinationRestore(reason: "failed")
         }
     }
 
@@ -710,7 +843,8 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 "reward_status_poll_attempt",
                 fields: [
                     "attempt": String(attempt + 1),
-                    "requestURL": apiClient.adMobRewardStatusURLDisplayString(rewardIntentId: rewardIntentId)
+                    "requestPath": "/v1/admob/reward-status",
+                    "rewardIntentId": RewardedAdDiagnostics.redact(rewardIntentId)
                 ]
             )
             let status = try await apiClient.fetchAdMobRewardStatus(rewardIntentId: rewardIntentId)
@@ -757,6 +891,43 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     private func setRewardedAdDebugReason(_ reason: String) {
         rewardedAdLastDebugReason = reason
+    }
+
+    private var redactedRewardedAdReturnFlowID: String {
+        guard let flow = rewardedAdReturnFlowID?.uuidString else { return "none" }
+        return RewardedAdDiagnostics.redact(flow)
+    }
+
+    private func requestRewardedAdReturnDestinationRestore(reason: String) {
+        guard let destination = rewardedAdReturnDestination else { return }
+        guard !rewardedAdReturnUserNavigatedAway else {
+            logRewardedAdDiagnostic(
+                "rewarded_ad_return_destination_skipped_user_navigated",
+                fields: [
+                    "destination": destination.rawValue,
+                    "reason": reason,
+                    "flow": redactedRewardedAdReturnFlowID
+                ]
+            )
+            return
+        }
+        guard shouldRestoreRewardedAdReturnDestination else { return }
+
+        rewardedAdReturnRestorationRequestID = UUID()
+        logRewardedAdDiagnostic(
+            "rewarded_ad_return_destination_restore_requested",
+            fields: [
+                "destination": destination.rawValue,
+                "reason": reason,
+                "flow": redactedRewardedAdReturnFlowID
+            ]
+        )
+    }
+
+    private func clearRewardedAdReturnDestination() {
+        rewardedAdReturnDestination = nil
+        rewardedAdReturnFlowID = nil
+        rewardedAdReturnRestorationRequestID = nil
     }
 
     private func rewardedAdButtonDisabledReason() -> String? {
@@ -851,7 +1022,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             "apiKind": apiClient.baseURLKindDisplayString,
             "apiBaseURL": apiClient.baseURLDisplayString,
             "adUnitKind": AdMobConfig.rewardedCreditAdUnitKind,
-            "adUnit": AdMobConfig.rewardedCreditAdUnitID,
+            "adUnit": RewardedAdDiagnostics.redact(AdMobConfig.rewardedCreditAdUnitID),
             "runtimeMode": AdMobConfig.rewardedAdRuntimeMode.rawValue,
             "ssvSmokeMode": AdMobConfig.rewardedCreditSSVSmokeModeStatus,
             "googleMobileAdsTestDeviceMode": String(AdMobConfig.isGoogleMobileAdsTestDeviceModeConfigured),
@@ -1048,7 +1219,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             return false
         }
         guard hasChatCreditAvailable else {
-            requestCreditOptions()
+            requestInsufficientCreditRecovery(
+                requiredCredits: chatCreditCost,
+                remainingCredits: usage?.credits?.totalRemaining,
+                source: .localChatPreflight
+            )
             return false
         }
 
@@ -1077,6 +1252,15 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             return true
         } catch {
             guard stateGeneration == self.stateGeneration else {
+                await ensureMinimumPendingChatDuration(since: pendingStartedAt)
+                return false
+            }
+            if case let APIError.insufficientCredits(required, remaining) = error {
+                requestInsufficientCreditRecovery(
+                    requiredCredits: required,
+                    remainingCredits: remaining,
+                    source: .serverChatResponse
+                )
                 await ensureMinimumPendingChatDuration(since: pendingStartedAt)
                 return false
             }
@@ -1239,13 +1423,10 @@ credit残高に使う端末識別情報は維持されます。
 
     func requestCreditOptions() {
         let currentCredits = usage?.credits?.totalRemaining ?? 0
-        activeAlert = AppAlertState(
-            message: """
-クレジットが不足しています
-この質問には \(chatCreditCost) credits が必要です。
-現在の残高: \(currentCredits) credits
-""",
-            kind: .dismissOnly
+        requestInsufficientCreditRecovery(
+            requiredCredits: chatCreditCost,
+            remainingCredits: currentCredits,
+            source: .chatComposer
         )
     }
 
@@ -1791,7 +1972,9 @@ credit残高に使う端末識別情報は維持されます。
             return "本文抽出に失敗しました。時間を置いて再試行するか、原文を直接確認してください。"
         }
 
-        if rawMessage.contains("Chat response is temporarily unavailable") || rawMessage.contains("Internal server error") {
+        if rawMessage.contains("Chat response is temporarily unavailable")
+            || rawMessage.contains("Internal server error")
+            || rawMessage.contains("HTTP 503") {
             return "チャット応答を現在生成できません。少し待ってから、もう一度お試しください。"
         }
 

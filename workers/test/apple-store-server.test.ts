@@ -7,6 +7,7 @@ import {
 
 describe("apple store server verification", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -82,6 +83,40 @@ describe("apple store server verification", () => {
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(fetch.mock.calls[0][0])).toContain("api.storekit.itunes.apple.com/inApps/v1/transactions/tx-100");
+  });
+
+  it("redacts transaction ids in Apple verification logs", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const privateKey = await testPrivateKeyPem();
+    const transactionId = "tx-production-log-redaction-abcdefghijklmnopqrstuvwxyz";
+    const signedTransactionInfo = fakeJws({
+      transactionId,
+      originalTransactionId: "orig-tx-production-log-redaction-abcdefghijklmnopqrstuvwxyz",
+      productId: "kabuyomi.credits.100",
+      bundleId: "app.kabuyomi.ios"
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(successResponse(signedTransactionInfo)));
+
+    await verifyCreditPurchaseWithApple(
+      {
+        APPLE_APP_STORE_ISSUER_ID: "33b3d98d-ad68-4d93-874a-b9bc38db405d",
+        APPLE_APP_STORE_KEY_ID: "QT2X2QH4G6",
+        APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+        APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+        APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
+      } as never,
+      {
+        productId: "kabuyomi.credits.100",
+        transactionId,
+        signedTransactionInfo
+      }
+    );
+
+    const lines = logSpy.mock.calls.map((call) => String(call[0]));
+    expect(lines.some((line) => line.includes('"transactionIdSuffix"'))).toBe(true);
+    expect(lines.join("\n")).not.toContain(transactionId);
+    expect(lines.join("\n")).not.toContain("orig-tx-production-log-redaction-abcdefghijklmnopqrstuvwxyz");
+    expect(lines.join("\n")).not.toContain(signedTransactionInfo);
   });
 
   it("auto mode uses production success without calling sandbox", async () => {

@@ -43,6 +43,18 @@ interface TransactionRow {
   operation_id: string;
 }
 
+interface RepairQueueRow {
+  id: string;
+  status: "pending" | "repaired" | "failed";
+  kind: string;
+  operation_id: string | null;
+  quota_subject_hash: string | null;
+  transaction_id_suffix: string | null;
+  reward_intent_id_suffix: string | null;
+  source: string;
+  payload_json: string;
+}
+
 function usage(totalRemaining = 32) {
   return {
     plan: "free",
@@ -64,9 +76,15 @@ function usage(totalRemaining = 32) {
   };
 }
 
-function createDb(seed?: { intents?: IntentRow[]; transactions?: TransactionRow[] }) {
+function createDb(seed?: {
+  intents?: IntentRow[];
+  transactions?: TransactionRow[];
+  failRewardTransactionInsert?: boolean;
+}) {
   const intents = [...(seed?.intents ?? [])];
   const transactions = [...(seed?.transactions ?? [])];
+  const repairQueue: RepairQueueRow[] = [];
+  let failRewardTransactionInsert = seed?.failRewardTransactionInsert ?? false;
   const prepare = vi.fn((sql: string) => ({
     bind: (...args: unknown[]) => ({
       async first<T>() {
@@ -104,6 +122,10 @@ function createDb(seed?: { intents?: IntentRow[]; transactions?: TransactionRow[
           });
         }
         if (sql.includes("INSERT OR IGNORE INTO admob_reward_transactions")) {
+          if (failRewardTransactionInsert) {
+            failRewardTransactionInsert = false;
+            throw new Error("admob reward transaction write failed");
+          }
           if (!transactions.some((transaction) => transaction.transaction_id === args[0])) {
             transactions.push({
               transaction_id: args[0] as string,
@@ -130,11 +152,31 @@ function createDb(seed?: { intents?: IntentRow[]; transactions?: TransactionRow[
             intent.transaction_id = args[0] as string;
           }
         }
+        if (sql.includes("INSERT INTO credit_audit_repair_queue")) {
+          const existing = repairQueue.find((row) => row.id === args[0]);
+          if (existing) {
+            existing.status = existing.status === "repaired" ? "repaired" : "pending";
+            existing.source = args[9] as string;
+            existing.payload_json = args[12] as string;
+          } else {
+            repairQueue.push({
+              id: args[0] as string,
+              status: args[3] as RepairQueueRow["status"],
+              kind: args[4] as string,
+              operation_id: (args[5] as string | null) ?? null,
+              quota_subject_hash: (args[6] as string | null) ?? null,
+              transaction_id_suffix: (args[7] as string | null) ?? null,
+              reward_intent_id_suffix: (args[8] as string | null) ?? null,
+              source: args[9] as string,
+              payload_json: args[12] as string
+            });
+          }
+        }
         return {};
       }
     })
   }));
-  return { db: { prepare }, intents, transactions };
+  return { db: { prepare }, intents, transactions, repairQueue };
 }
 
 function envWithDb(db: unknown) {
@@ -165,8 +207,11 @@ describe("AdMob rewarded credits route", () => {
       usage: usage(32),
       didMutate: true,
       operationId: "admob-reward:tx-1",
+      status: "granted",
       creditsGranted: 2,
-      creditsRemaining: 32
+      creditsRemaining: 32,
+      dailyRewardsUsed: 1,
+      dailyRewardsRemaining: 2
     } as never);
     mockVerifySsv.mockResolvedValue(true);
   });
@@ -353,7 +398,9 @@ describe("AdMob rewarded credits route", () => {
       rewardIntentId: "intent-1",
       transactionId: "tx-1",
       credits: 2,
-      expiresAt: expect.any(String)
+      expiresAt: expect.any(String),
+      dailyDateKey: "2026-05-03",
+      dailyCap: 3
     });
     expect(transactions).toHaveLength(1);
     expect(intents[0]).toMatchObject({
@@ -361,6 +408,125 @@ describe("AdMob rewarded credits route", () => {
       transaction_id: "tx-1",
       credits_remaining: 32
     });
+  });
+
+  it("queues repair state if a D1 AdMob audit write fails after the DO grant", async () => {
+    const { db, intents, transactions, repairQueue } = createDb({
+      failRewardTransactionInsert: true,
+      intents: [
+        {
+          id: "intent-audit-repair",
+          user_id: "free:local:device-123",
+          custom_data: "custom-audit-repair",
+          reward_credits: 2,
+          status: "pending",
+          daily_date_key: "2026-05-03",
+          expires_at: "2999-01-01T00:00:00.000Z",
+          created_at: "2026-05-03T00:00:00.000Z",
+          granted_at: null,
+          transaction_id: null,
+          credits_remaining: null
+        }
+      ]
+    });
+    const url = ssvUrl({
+      transaction_id: "tx-audit-repair",
+      ad_unit: "ca-app-pub-3940256099942544/1712485313",
+      custom_data: "custom-audit-repair"
+    });
+
+    await expect(
+      handleAdMobRewardRoutes({
+        request: new Request(url),
+        url,
+        env: envWithDb(db),
+        config: DEFAULT_REMOTE_CONFIG,
+        ctx: {} as never
+      })
+    ).rejects.toThrow("admob reward transaction write failed");
+
+    expect(mockGrantRewardedAdCredits).toHaveBeenCalledOnce();
+    expect(transactions).toHaveLength(0);
+    expect(intents[0]).toMatchObject({ status: "pending", transaction_id: null });
+    expect(repairQueue).toHaveLength(1);
+    expect(repairQueue[0]).toMatchObject({
+      status: "pending",
+      kind: "admob_reward_transaction",
+      transaction_id_suffix: "t-repair",
+      reward_intent_id_suffix: "t-repair"
+    });
+    const payload = JSON.parse(repairQueue[0].payload_json) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      transactionId: "tx-audit-repair",
+      userId: "free:local:device-123",
+      rewardIntentId: "intent-audit-repair",
+      rewardCredits: 2,
+      creditsRemaining: 32
+    });
+  });
+
+  it("redacts AdMob SSV identifiers in production log payloads", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const transactionId = "tx-admob-log-redaction-abcdefghijklmnopqrstuvwxyz";
+    const rewardIntentId = "intent-log-redaction-abcdefghijklmnopqrstuvwxyz";
+    const adUnit = "ca-app-pub-3940256099942544/1712485313";
+    mockGrantRewardedAdCredits.mockResolvedValueOnce({
+      usage: usage(32),
+      didMutate: true,
+      operationId: `admob-reward:${transactionId}`,
+      status: "granted",
+      creditsGranted: 2,
+      creditsRemaining: 32,
+      dailyRewardsUsed: 1,
+      dailyRewardsRemaining: 2
+    } as never);
+    const { db } = createDb({
+      intents: [
+        {
+          id: rewardIntentId,
+          user_id: "free:local:device-123",
+          custom_data: `${rewardIntentId}.custom-secret-redaction-value`,
+          reward_credits: 2,
+          status: "pending",
+          daily_date_key: "2026-05-03",
+          expires_at: "2999-01-01T00:00:00.000Z",
+          created_at: "2026-05-03T00:00:00.000Z",
+          granted_at: null,
+          transaction_id: null,
+          credits_remaining: null
+        }
+      ]
+    });
+
+    const response = await handleAdMobRewardRoutes({
+      request: new Request("https://kabuyomi.test/v1/admob/ssv"),
+      url: ssvUrl({
+        custom_data: `${rewardIntentId}.custom-secret-redaction-value`,
+        transaction_id: transactionId,
+        ad_unit: adUnit,
+        reward_amount: "2",
+        reward_item: "credits",
+        signature: "raw-signature-should-not-log",
+        key_id: "3335741209"
+      }),
+      env: envWithDb(db),
+      config: DEFAULT_REMOTE_CONFIG,
+      ctx: {} as never
+    });
+
+    expect(response?.status).toBe(200);
+    const lines = logSpy.mock.calls.map((call) => String(call[0]));
+    const joined = lines.join("\n");
+    expect(joined).toContain('"transactionIdSuffix"');
+    expect(joined).toContain('"rewardIntentIdSuffix"');
+    expect(joined).toContain('"quotaSubjectHash"');
+    expect(joined).not.toContain(transactionId);
+    expect(joined).not.toContain(rewardIntentId);
+    expect(joined).not.toContain(adUnit);
+    expect(joined).not.toContain("free:local:device-123");
+    expect(joined).not.toContain("custom-secret-redaction-value");
+    expect(joined).not.toContain("raw-signature-should-not-log");
+    logSpy.mockRestore();
   });
 
   it("valid SSV with reward amount and item grants only the configured +2 credits", async () => {
@@ -406,7 +572,9 @@ describe("AdMob rewarded credits route", () => {
       rewardIntentId: "intent-1",
       transactionId: "tx-1",
       credits: 2,
-      expiresAt: expect.any(String)
+      expiresAt: expect.any(String),
+      dailyDateKey: "2026-05-03",
+      dailyCap: 3
     });
   });
 
@@ -897,7 +1065,149 @@ describe("AdMob rewarded credits route", () => {
     expect(mockGrantRewardedAdCredits).not.toHaveBeenCalled();
   });
 
+  it("handles concurrent valid callbacks by accepting at most three same-day grants", async () => {
+    const pendingIntent = (index: number): IntentRow => ({
+      id: `intent-${index}`,
+      user_id: "free:local:device-123",
+      custom_data: `custom-${index}`,
+      reward_credits: 2,
+      status: "pending",
+      daily_date_key: "2026-05-03",
+      expires_at: "2999-01-01T00:00:00.000Z",
+      created_at: "2026-05-03T00:00:00.000Z",
+      granted_at: null,
+      transaction_id: null,
+      credits_remaining: null
+    });
+    const { db, intents, transactions } = createDb({
+      intents: [1, 2, 3, 4, 5].map(pendingIntent)
+    });
+    mockGrantRewardedAdCredits.mockImplementation(async (_identity, _env, _config, options) => {
+      const index = Number.parseInt(options.transactionId.replace("tx-", ""), 10);
+      if (index > 3) {
+        return {
+          usage: usage(36),
+          didMutate: false,
+          operationId: `admob-reward:${options.transactionId}`,
+          status: "cap_reached",
+          creditsGranted: 0,
+          creditsRemaining: 36,
+          dailyRewardsUsed: 3,
+          dailyRewardsRemaining: 0
+        } as never;
+      }
+      return {
+        usage: usage(30 + index * 2),
+        didMutate: true,
+        operationId: `admob-reward:${options.transactionId}`,
+        status: "granted",
+        creditsGranted: 2,
+        creditsRemaining: 30 + index * 2,
+        dailyRewardsUsed: index,
+        dailyRewardsRemaining: 3 - index
+      } as never;
+    });
+
+    const settled = await Promise.allSettled(
+      [1, 2, 3, 4, 5].map((index) =>
+        handleAdMobRewardRoutes({
+          request: new Request("https://kabuyomi.test/v1/admob/ssv"),
+          url: ssvUrl({
+            transaction_id: `tx-${index}`,
+            ad_unit: "ca-app-pub-3940256099942544/1712485313",
+            custom_data: `custom-${index}`
+          }),
+          env: envWithDb(db),
+          config: DEFAULT_REMOTE_CONFIG,
+          ctx: {} as never
+        })
+      )
+    );
+
+    expect(settled.filter((result) => result.status === "fulfilled")).toHaveLength(3);
+    expect(
+      settled.filter(
+        (result) => result.status === "rejected" && typeof result.reason === "object" && result.reason?.status === 429
+      )
+    ).toHaveLength(2);
+    expect(transactions).toHaveLength(3);
+    expect(intents.filter((intent) => intent.status === "granted")).toHaveLength(3);
+    expect(intents.filter((intent) => intent.status === "rejected")).toHaveLength(2);
+  });
+
+  it("handles concurrent duplicate callbacks for the same transaction as one grant", async () => {
+    const { db, intents, transactions } = createDb({
+      intents: [
+        {
+          id: "intent-duplicate",
+          user_id: "free:local:device-123",
+          custom_data: "custom-duplicate",
+          reward_credits: 2,
+          status: "pending",
+          daily_date_key: "2026-05-03",
+          expires_at: "2999-01-01T00:00:00.000Z",
+          created_at: "2026-05-03T00:00:00.000Z",
+          granted_at: null,
+          transaction_id: null,
+          credits_remaining: null
+        }
+      ]
+    });
+    let calls = 0;
+    mockGrantRewardedAdCredits.mockImplementation(async () => {
+      calls += 1;
+      return {
+        usage: usage(32),
+        didMutate: calls === 1,
+        operationId: "admob-reward:tx-duplicate",
+        status: calls === 1 ? "granted" : "duplicate_ignored",
+        creditsGranted: calls === 1 ? 2 : 0,
+        creditsRemaining: 32,
+        dailyRewardsUsed: 1,
+        dailyRewardsRemaining: 2
+      } as never;
+    });
+    const url = ssvUrl({
+      transaction_id: "tx-duplicate",
+      ad_unit: "ca-app-pub-3940256099942544/1712485313",
+      custom_data: "custom-duplicate"
+    });
+
+    const responses = await Promise.all([
+      handleAdMobRewardRoutes({
+        request: new Request("https://kabuyomi.test/v1/admob/ssv"),
+        url,
+        env: envWithDb(db),
+        config: DEFAULT_REMOTE_CONFIG,
+        ctx: {} as never
+      }),
+      handleAdMobRewardRoutes({
+        request: new Request("https://kabuyomi.test/v1/admob/ssv"),
+        url,
+        env: envWithDb(db),
+        config: DEFAULT_REMOTE_CONFIG,
+        ctx: {} as never
+      })
+    ]);
+
+    const payloads = (await Promise.all(responses.map((response) => response?.json()))) as Array<Record<string, unknown>>;
+    expect(payloads.filter((payload) => payload.status === "granted")).toHaveLength(1);
+    expect(payloads.filter((payload) => payload.status === "duplicate_ignored")).toHaveLength(1);
+    expect(transactions).toHaveLength(1);
+    expect(intents.filter((intent) => intent.status === "granted")).toHaveLength(1);
+  });
+
   it("enforces the daily cap server-side before granting an SSV callback", async () => {
+    mockGrantRewardedAdCredits.mockResolvedValueOnce({
+      usage: usage(36),
+      didMutate: false,
+      operationId: "admob-reward:tx-4",
+      status: "cap_reached",
+      creditsGranted: 0,
+      creditsRemaining: 36,
+      dailyRewardsUsed: 3,
+      dailyRewardsRemaining: 0
+    } as never);
     const grantedIntent = (index: number): IntentRow => ({
       id: `granted-${index}`,
       user_id: "free:local:device-123",
@@ -949,7 +1259,7 @@ describe("AdMob rewarded credits route", () => {
       status: 429,
       publicMessage: "Rewarded ad daily cap reached"
     });
-    expect(mockGrantRewardedAdCredits).not.toHaveBeenCalled();
+    expect(mockGrantRewardedAdCredits).toHaveBeenCalledOnce();
     expect(intents.find((intent) => intent.id === "intent-4")).toMatchObject({
       status: "rejected",
       transaction_id: "tx-4"

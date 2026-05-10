@@ -100,7 +100,6 @@ struct CompanyView: View {
     @State private var librarySearchTask: Task<Void, Never>?
     @State private var creditsPresented = false
     @State private var creditInitialSheet: CreditInitialSheet?
-    @State private var insufficientCreditOptionsPresented = false
     @State private var settingsPresented = false
     @State private var settingsDismissInputShield = false
     @State private var searchPresented = false
@@ -371,6 +370,15 @@ struct CompanyView: View {
                 question = restoredDraft
             }
         }
+        .onChange(of: appModel.rewardedAdReturnRestorationRequestID) { _, _ in
+            restoreRewardedAdReturnDestinationIfNeeded(trigger: "restore_request")
+        }
+        .onChange(of: appModel.insufficientCreditRecoveryRequestID) { _, _ in
+            openInsufficientCreditRecovery()
+        }
+        .onAppear {
+            restoreRewardedAdReturnDestinationIfNeeded(trigger: "company_view_appeared")
+        }
         .fullScreenCover(isPresented: $creditsPresented) {
             CreditView(initialSheet: creditInitialSheet)
                 .interactiveDismissDisabled(true)
@@ -381,21 +389,6 @@ struct CompanyView: View {
             }
             creditInitialSheet = nil
             shieldSettingsDismissInput()
-        }
-        .confirmationDialog(
-            "クレジットが不足しています",
-            isPresented: $insufficientCreditOptionsPresented,
-            titleVisibility: .visible
-        ) {
-            Button("50 creditsを追加") {
-                openCreditsScreen()
-            }
-            Button("月額プランを見る") {
-                openCreditPlansScreen()
-            }
-            Button("キャンセル", role: .cancel) {}
-        } message: {
-            Text("この質問には \(appModel.chatCreditCost) credits が必要です。現在の残高: \(appModel.creditUsage?.totalRemaining ?? 0) credits")
         }
         .fullScreenCover(isPresented: $settingsPresented) {
             SettingsView()
@@ -864,6 +857,24 @@ struct CompanyView: View {
         }
     }
 
+    private func restoreRewardedAdReturnDestinationIfNeeded(trigger: String) {
+        guard appModel.rewardedAdReturnDestination == .credits else { return }
+        guard appModel.shouldRestoreRewardedAdReturnDestination else { return }
+
+        dismissKeyboard()
+        closePanels()
+        creditInitialSheet = nil
+        settingsPresented = false
+
+        guard !creditsPresented else {
+            appModel.confirmRewardedAdReturnDestinationRestored(visibleSurface: "credits_already_visible")
+            return
+        }
+
+        creditsPresented = true
+        appModel.confirmRewardedAdReturnDestinationRestored(visibleSurface: "credits_\(trigger)")
+    }
+
     private func openCreditPlansScreen() {
         dismissKeyboard()
         closePanels()
@@ -875,8 +886,24 @@ struct CompanyView: View {
     }
 
     private func showInsufficientCreditOptions() {
+        appModel.requestInsufficientCreditRecovery(
+            requiredCredits: appModel.chatCreditCost,
+            remainingCredits: appModel.creditUsage?.totalRemaining,
+            source: .chatComposer
+        )
+        openInsufficientCreditRecovery()
+    }
+
+    private func openInsufficientCreditRecovery() {
         dismissKeyboard()
-        insufficientCreditOptionsPresented = true
+        closePanels()
+        let requiredCredits = appModel.insufficientCreditRecovery?.requiredCredits ?? appModel.chatCreditCost
+        creditInitialSheet = .insufficientCredits(requiredCredits: requiredCredits)
+        settingsPresented = false
+        Task {
+            try? await Task.sleep(for: .milliseconds(180))
+            creditsPresented = true
+        }
     }
 
     private func shieldSettingsDismissInput() {
