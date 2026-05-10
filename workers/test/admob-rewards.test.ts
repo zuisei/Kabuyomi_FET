@@ -197,6 +197,118 @@ describe("AdMob rewarded credits route", () => {
       status: "pending",
       daily_date_key: "2026-05-03"
     });
+    expect(mockGrantRewardedAdCredits).not.toHaveBeenCalled();
+  });
+
+  it("keeps a client-created reward intent pending until a verified SSV callback arrives", async () => {
+    const { db, intents } = createDb();
+    const intentResponse = await handleAdMobRewardRoutes({
+      request: new Request("https://kabuyomi.test/v1/admob/reward-intents", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-device-key": "device-123" },
+        body: "{}"
+      }),
+      url: new URL("https://kabuyomi.test/v1/admob/reward-intents"),
+      env: envWithDb(db),
+      config: DEFAULT_REMOTE_CONFIG,
+      ctx: {} as never
+    });
+    const intentPayload = (await intentResponse?.json()) as { rewardIntentId: string };
+    const statusUrl = new URL(`https://kabuyomi.test/v1/admob/reward-status?id=${intentPayload.rewardIntentId}`);
+
+    const statusResponse = await handleAdMobRewardRoutes({
+      request: new Request(statusUrl, { headers: { "x-device-key": "device-123" } }),
+      url: statusUrl,
+      env: envWithDb(db),
+      config: DEFAULT_REMOTE_CONFIG,
+      ctx: {} as never
+    });
+
+    expect(intents[0]).toMatchObject({ status: "pending", credits_remaining: null });
+    await expect(statusResponse?.json()).resolves.toMatchObject({
+      rewardIntentId: intentPayload.rewardIntentId,
+      status: "pending",
+      rewardCredits: 2
+    });
+    expect(mockGrantRewardedAdCredits).not.toHaveBeenCalled();
+  });
+
+  it("returns reward status with server usage for the owning device identity", async () => {
+    const { db } = createDb({
+      intents: [
+        {
+          id: "intent-1",
+          user_id: "free:local:device-123",
+          custom_data: "custom-1",
+          reward_credits: 2,
+          status: "granted",
+          daily_date_key: "2026-05-03",
+          expires_at: "2999-01-01T00:00:00.000Z",
+          created_at: "2026-05-03T00:00:00.000Z",
+          granted_at: "2026-05-03T00:01:00.000Z",
+          transaction_id: "tx-1",
+          credits_remaining: 32
+        }
+      ]
+    });
+    const url = new URL("https://kabuyomi.test/v1/admob/reward-status?id=intent-1");
+
+    const response = await handleAdMobRewardRoutes({
+      request: new Request(url, { headers: { "x-device-key": "device-123" } }),
+      url,
+      env: envWithDb(db),
+      config: DEFAULT_REMOTE_CONFIG,
+      ctx: {} as never
+    });
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({
+      rewardIntentId: "intent-1",
+      status: "granted",
+      rewardCredits: 2,
+      creditsRemaining: 32,
+      dailyRemaining: 2,
+      usage: {
+        credits: {
+          rewardedAdRemaining: 2,
+          totalRemaining: 32
+        }
+      }
+    });
+  });
+
+  it("does not expose another device identity reward status", async () => {
+    const { db } = createDb({
+      intents: [
+        {
+          id: "intent-1",
+          user_id: "free:local:other-device",
+          custom_data: "custom-1",
+          reward_credits: 2,
+          status: "pending",
+          daily_date_key: "2026-05-03",
+          expires_at: "2999-01-01T00:00:00.000Z",
+          created_at: "2026-05-03T00:00:00.000Z",
+          granted_at: null,
+          transaction_id: null,
+          credits_remaining: null
+        }
+      ]
+    });
+    const url = new URL("https://kabuyomi.test/v1/admob/reward-status?id=intent-1");
+
+    await expect(
+      handleAdMobRewardRoutes({
+        request: new Request(url, { headers: { "x-device-key": "device-123" } }),
+        url,
+        env: envWithDb(db),
+        config: DEFAULT_REMOTE_CONFIG,
+        ctx: {} as never
+      })
+    ).rejects.toMatchObject({
+      status: 404,
+      publicMessage: "Reward intent not found"
+    });
   });
 
   it("valid SSV grants exactly +2 promotional credits and records the transaction", async () => {
@@ -249,6 +361,135 @@ describe("AdMob rewarded credits route", () => {
       transaction_id: "tx-1",
       credits_remaining: 32
     });
+  });
+
+  it("valid SSV with reward amount and item grants only the configured +2 credits", async () => {
+    const { db } = createDb({
+      intents: [
+        {
+          id: "intent-1",
+          user_id: "free:local:device-123",
+          custom_data: "custom-1",
+          reward_credits: 2,
+          status: "pending",
+          daily_date_key: "2026-05-03",
+          expires_at: "2999-01-01T00:00:00.000Z",
+          created_at: "2026-05-03T00:00:00.000Z",
+          granted_at: null,
+          transaction_id: null,
+          credits_remaining: null
+        }
+      ]
+    });
+    const url = ssvUrl({
+      transaction_id: "tx-1",
+      ad_unit: "ca-app-pub-3940256099942544/1712485313",
+      custom_data: "custom-1",
+      reward_amount: "2",
+      reward_item: "credits"
+    });
+
+    const response = await handleAdMobRewardRoutes({
+      request: new Request(url),
+      url,
+      env: envWithDb(db),
+      config: DEFAULT_REMOTE_CONFIG,
+      ctx: {} as never
+    });
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({
+      status: "granted",
+      creditsGranted: 2
+    });
+    expect(mockGrantRewardedAdCredits).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), {
+      rewardIntentId: "intent-1",
+      transactionId: "tx-1",
+      credits: 2,
+      expiresAt: expect.any(String)
+    });
+  });
+
+  it("rejects signed SSV callbacks with mismatched reward_amount", async () => {
+    const { db } = createDb({
+      intents: [
+        {
+          id: "intent-1",
+          user_id: "free:local:device-123",
+          custom_data: "custom-1",
+          reward_credits: 2,
+          status: "pending",
+          daily_date_key: "2026-05-03",
+          expires_at: "2999-01-01T00:00:00.000Z",
+          created_at: "2026-05-03T00:00:00.000Z",
+          granted_at: null,
+          transaction_id: null,
+          credits_remaining: null
+        }
+      ]
+    });
+    const url = ssvUrl({
+      transaction_id: "tx-1",
+      ad_unit: "ca-app-pub-3940256099942544/1712485313",
+      custom_data: "custom-1",
+      reward_amount: "10",
+      reward_item: "credits"
+    });
+
+    await expect(
+      handleAdMobRewardRoutes({
+        request: new Request(url),
+        url,
+        env: envWithDb(db),
+        config: DEFAULT_REMOTE_CONFIG,
+        ctx: {} as never
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      publicMessage: "Invalid rewarded ad amount"
+    });
+    expect(mockGrantRewardedAdCredits).not.toHaveBeenCalled();
+  });
+
+  it("rejects signed SSV callbacks with mismatched reward_item", async () => {
+    const { db } = createDb({
+      intents: [
+        {
+          id: "intent-1",
+          user_id: "free:local:device-123",
+          custom_data: "custom-1",
+          reward_credits: 2,
+          status: "pending",
+          daily_date_key: "2026-05-03",
+          expires_at: "2999-01-01T00:00:00.000Z",
+          created_at: "2026-05-03T00:00:00.000Z",
+          granted_at: null,
+          transaction_id: null,
+          credits_remaining: null
+        }
+      ]
+    });
+    const url = ssvUrl({
+      transaction_id: "tx-1",
+      ad_unit: "ca-app-pub-3940256099942544/1712485313",
+      custom_data: "custom-1",
+      reward_amount: "2",
+      reward_item: "coins"
+    });
+
+    await expect(
+      handleAdMobRewardRoutes({
+        request: new Request(url),
+        url,
+        env: envWithDb(db),
+        config: DEFAULT_REMOTE_CONFIG,
+        ctx: {} as never
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      publicMessage: "Invalid rewarded ad item"
+    });
+    expect(mockGrantRewardedAdCredits).not.toHaveBeenCalled();
   });
 
   it("rejects invalid SSV signatures before reading callback grant fields", async () => {
@@ -712,6 +953,95 @@ describe("AdMob rewarded credits route", () => {
     expect(intents.find((intent) => intent.id === "intent-4")).toMatchObject({
       status: "rejected",
       transaction_id: "tx-4"
+    });
+
+    const statusUrl = new URL("https://kabuyomi.test/v1/admob/reward-status?id=intent-4");
+    const statusResponse = await handleAdMobRewardRoutes({
+      request: new Request(statusUrl, { headers: { "x-device-key": "device-123" } }),
+      url: statusUrl,
+      env: envWithDb(db),
+      config: DEFAULT_REMOTE_CONFIG,
+      ctx: {} as never
+    });
+
+    await expect(statusResponse?.json()).resolves.toMatchObject({
+      status: "rejected",
+      dailyRemaining: 0
+    });
+  });
+
+  it("allows the third same-day reward and then reports zero remaining", async () => {
+    const grantedIntent = (index: number): IntentRow => ({
+      id: `granted-${index}`,
+      user_id: "free:local:device-123",
+      custom_data: `granted-custom-${index}`,
+      reward_credits: 2,
+      status: "granted",
+      daily_date_key: "2026-05-03",
+      expires_at: "2999-01-01T00:00:00.000Z",
+      created_at: "2026-05-03T00:00:00.000Z",
+      granted_at: "2026-05-03T00:01:00.000Z",
+      transaction_id: `granted-tx-${index}`,
+      credits_remaining: 32
+    });
+    const { db, intents } = createDb({
+      intents: [
+        grantedIntent(1),
+        grantedIntent(2),
+        {
+          id: "intent-3",
+          user_id: "free:local:device-123",
+          custom_data: "custom-3",
+          reward_credits: 2,
+          status: "pending",
+          daily_date_key: "2026-05-03",
+          expires_at: "2999-01-01T00:00:00.000Z",
+          created_at: "2026-05-03T00:00:00.000Z",
+          granted_at: null,
+          transaction_id: null,
+          credits_remaining: null
+        }
+      ]
+    });
+    const url = ssvUrl({
+      transaction_id: "tx-3",
+      ad_unit: "ca-app-pub-3940256099942544/1712485313",
+      custom_data: "custom-3",
+      reward_amount: "2",
+      reward_item: "credits"
+    });
+
+    const response = await handleAdMobRewardRoutes({
+      request: new Request(url),
+      url,
+      env: envWithDb(db),
+      config: DEFAULT_REMOTE_CONFIG,
+      ctx: {} as never
+    });
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({
+      status: "granted",
+      creditsGranted: 2
+    });
+    expect(mockGrantRewardedAdCredits).toHaveBeenCalledOnce();
+    expect(intents.find((intent) => intent.id === "intent-3")).toMatchObject({
+      status: "granted",
+      transaction_id: "tx-3"
+    });
+
+    const statusUrl = new URL("https://kabuyomi.test/v1/admob/reward-status?id=intent-3");
+    const statusResponse = await handleAdMobRewardRoutes({
+      request: new Request(statusUrl, { headers: { "x-device-key": "device-123" } }),
+      url: statusUrl,
+      env: envWithDb(db),
+      config: DEFAULT_REMOTE_CONFIG,
+      ctx: {} as never
+    });
+
+    await expect(statusResponse?.json()).resolves.toMatchObject({
+      status: "granted",
+      dailyRemaining: 0
     });
   });
 });

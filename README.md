@@ -21,7 +21,7 @@ Kabuyomi is an iOS + Cloudflare Workers app for reading SEC filings in Japanese 
 - v1.0.2 monetization includes the visible `kabuyomi.credits.50` paid credit pack plus Lite / Pro / Max monthly subscriptions.
 - `kabuyomi.credits.100` remains supported for compatibility, but it is not the primary visible paid credit pack.
 - Paid credits do not expire. Free/promotional credits, ad credits, monthly subscription credits, and paid credits are separate server-side buckets.
-- AdMob rewarded-credit infrastructure exists, but the normal rewarded-credit UI is hidden for v1 App Review and deferred to v1.1 / post-approval.
+- Rewarded ads are release-visible in v1.0.2 when the AdMob rewarded config is present. They are optional and grant free/ad credits only after server-side Google AdMob SSV verification.
 - App Attest, DeviceCheck, account systems, 8-K support, and web search are v1.1+ or later.
 - Public legal pages are served from `https://kabuyomi-legal-site.pages.dev`. Worker `/legal/*` routes are legacy API-hosted fallback copies, not the preferred App Store metadata surface.
 - Workers routes live under `workers/src/routes/`; shared logic is split across `workers/src/lib/` and `workers/src/clients/gemini/`.

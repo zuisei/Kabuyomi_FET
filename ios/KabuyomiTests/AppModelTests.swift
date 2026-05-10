@@ -349,7 +349,15 @@ final class AppModelTests: XCTestCase {
         let didSend = await model.sendChat(question: "売上高は？", ticker: "AAPL")
 
         XCTAssertFalse(didSend)
-        XCTAssertEqual(model.activeAlert?.message, "creditが不足しています。設定のクレジット画面で追加creditを確認してください。")
+        XCTAssertEqual(
+            model.activeAlert?.message,
+            """
+クレジットが不足しています
+この質問には 2 credits が必要です。
+現在の残高: 0 credits
+"""
+        )
+        XCTAssertEqual(model.usage?.credits?.totalRemaining, 0)
     }
 
     func testPurchaseCreditPackBlocksWhenCreditBillingIsDisabled() async {
@@ -384,7 +392,7 @@ final class AppModelTests: XCTestCase {
 
         await model.purchaseCreditPack(productId: "kabuyomi.credits.50")
 
-        XCTAssertEqual(model.activeAlert?.message, "追加credit購入は現在利用できません。時間をおいてからもう一度お試しください。")
+        XCTAssertEqual(model.activeAlert?.message, "追加クレジット購入は現在利用できません。時間をおいてからもう一度お試しください。")
         XCTAssertFalse(model.billingActionInFlight)
     }
 
@@ -453,11 +461,62 @@ final class AppModelTests: XCTestCase {
         )
 
         let rows = Dictionary(uniqueKeysWithValues: viewModel.rows.map { ($0.title, $0.value) })
-        XCTAssertEqual(rows["Plan"], "無料")
-        XCTAssertEqual(rows["Total credits"], "150")
-        XCTAssertEqual(rows["Monthly/subscription"], "50 / 50")
-        XCTAssertEqual(rows["Paid credits"], "100")
-        XCTAssertEqual(rows["Device"], "…abc123")
+        let normalRows = Dictionary(uniqueKeysWithValues: viewModel.normalRows.map { ($0.title, $0.value) })
+        let debugRows = Dictionary(uniqueKeysWithValues: viewModel.debugRows.map { ($0.title, $0.value) })
+        XCTAssertEqual(rows["接続状態"], "未確認")
+        XCTAssertEqual(rows["環境"], "本番")
+        XCTAssertEqual(rows["現在のプラン"], "無料")
+        XCTAssertEqual(rows["合計クレジット"], "150")
+        XCTAssertEqual(rows["月額/初回分"], "50 / 50")
+        XCTAssertEqual(rows["購入分"], "100")
+        XCTAssertNil(normalRows["Device"])
+        XCTAssertNil(normalRows["API"])
+        XCTAssertNil(normalRows["Route detail"])
+        XCTAssertFalse(viewModel.rows.contains { $0.value.contains("https://example.com") })
+        XCTAssertEqual(debugRows["端末ID末尾"], "…abc123")
+        XCTAssertNil(debugRows["API"])
+    }
+
+    func testAccountStatusDisplayModelHidesRouteMissingDetailsFromDisplayRows() {
+        let viewModel = AccountStatusDisplayModel(
+            apiEnvironment: "prod",
+            apiBaseURL: "https://example.com",
+            appVersion: "1.0.2(4)",
+            deviceKeySuffix: "abc123",
+            usage: nil,
+            lastUsageRefreshAt: nil,
+            lastBillingSyncStatus: "route_missing HTTP 404 /v1/ios/subscriptions/sync",
+            lastBillingSyncAt: nil,
+            healthReport: nil
+        )
+
+        let normalRows = Dictionary(uniqueKeysWithValues: viewModel.normalRows.map { ($0.title, $0.value) })
+        let debugRows = Dictionary(uniqueKeysWithValues: viewModel.debugRows.map { ($0.title, $0.value) })
+        XCTAssertEqual(normalRows["接続状態"], "エラー")
+        XCTAssertNil(normalRows["Route detail"])
+        XCTAssertNil(debugRows["Route detail"])
+        XCTAssertFalse(viewModel.rows.contains { $0.value.contains("/v1/ios/subscriptions/sync") })
+        XCTAssertFalse(viewModel.rows.contains { $0.value.contains("https://example.com") })
+    }
+
+    func testSubscriptionStoreErrorMessagesUseReleaseSafePurchaseCopy() {
+        XCTAssertEqual(SubscriptionStoreError.purchasePending.errorDescription, "購入は保留中です。App Store側の処理が完了すると反映されます。")
+        XCTAssertEqual(SubscriptionStoreError.purchaseUnverified.errorDescription, "購入を確認できませんでした。購入を復元してください。")
+    }
+
+    func testProjectVersionMetadataIsV102Build4() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let projectYML = try String(contentsOf: repoRoot.appendingPathComponent("ios/project.yml"), encoding: .utf8)
+        let pbxproj = try String(contentsOf: repoRoot.appendingPathComponent("ios/Kabuyomi.xcodeproj/project.pbxproj"), encoding: .utf8)
+
+        XCTAssertTrue(projectYML.contains("MARKETING_VERSION: 1.0.2"))
+        XCTAssertTrue(projectYML.contains("CURRENT_PROJECT_VERSION: 4"))
+        XCTAssertTrue(pbxproj.contains("MARKETING_VERSION = 1.0.2;"))
+        XCTAssertTrue(pbxproj.contains("CURRENT_PROJECT_VERSION = 4;"))
     }
 
     func testResetLocalDataClearsRecentStateAndKeepsDeviceIdentity() async throws {
@@ -1891,7 +1950,7 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(rewardedAdService.presentedCustomData, "intent-1.nonce")
         XCTAssertEqual(model.rewardedAdCreditState, .idle)
-        XCTAssertEqual(model.rewardedAdStatusMessage, "2クレジットを獲得しました。")
+        XCTAssertEqual(model.rewardedAdStatusMessage, "2無料/ad creditを獲得しました。")
         XCTAssertEqual(model.creditUsage?.rewardedAdRemaining, 2)
         XCTAssertEqual(model.creditUsage?.totalRemaining, 52)
         XCTAssertEqual(model.rewardedAdLastDebugReason, "granted")

@@ -117,8 +117,8 @@ struct ConversationTimeline: View {
                         .frame(height: 2)
                         .id("conversation-bottom")
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
                 .padding(.bottom, 18)
             }
             .scrollDismissesKeyboard(.interactively)
@@ -235,32 +235,32 @@ private struct ConversationSessionHeader: View {
     let selectQuestion: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(company.formType == "10-Q" ? "最新 10-Q を起点に会話中" : "最新 10-K を起点に会話中")
+                    Text("根拠資料")
                         .font(.system(.footnote, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.accentDeep)
 
-                    Text("\(company.companyName) ・ filed \(company.filedAt)")
+                    Text("\(company.formType) ・ \(company.filedAt) 提出")
                         .font(.system(.caption, design: .rounded, weight: .medium))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
                 Spacer()
 
-                Text(company.formType)
+                Text("選択中")
                     .font(.system(.caption2, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.accentDeep)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
-                    .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.55)))
+                    .background(Capsule().fill(Color.white.opacity(0.66)))
             }
 
-            HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 if let followUpQuestion {
                     ConversationMiniPromptChip(
-                        text: followUpQuestion,
+                        text: shortTimelineSuggestion(followUpQuestion),
                         systemImage: "arrow.turn.down.right",
                         action: { selectQuestion(followUpQuestion) }
                     )
@@ -268,17 +268,30 @@ private struct ConversationSessionHeader: View {
 
                 if let historicalQuestion {
                     ConversationMiniPromptChip(
-                        text: historicalQuestion,
+                        text: shortTimelineSuggestion(historicalQuestion),
                         systemImage: "clock.arrow.circlepath",
                         action: { selectQuestion(historicalQuestion) }
                     )
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .kabuyomiGlass(radius: 20, tint: Color.white.opacity(0.2), stroke: Color.white.opacity(0.48))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .kabuyomiGlass(radius: 16, tint: Color.white.opacity(0.16), stroke: Color.white.opacity(0.42))
     }
+}
+
+private func shortTimelineSuggestion(_ question: String) -> String {
+    if question.contains("売上") {
+        return "売上成長の要因は？"
+    }
+    if question.contains("利益率") {
+        return "利益率は改善した？"
+    }
+    if question.contains("前回") || question.contains("違い") {
+        return "前回との差は？"
+    }
+    return question
 }
 
 struct ConversationContextCard: View {
@@ -458,14 +471,14 @@ struct ConversationPromptChip: View {
                     .foregroundStyle(KabuyomiTheme.accentDeep.opacity(0.48))
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.white.opacity(0.72))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(0.62))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color.white.opacity(0.82), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.72), lineWidth: 1)
                     )
             )
         }
@@ -486,18 +499,18 @@ private struct ConversationMiniPromptChip: View {
                     .font(.system(size: 11, weight: .bold))
                 Text(text)
                     .font(.system(.caption, design: .rounded, weight: .semibold))
-                    .lineLimit(2)
+                    .lineLimit(1)
                     .multilineTextAlignment(.leading)
             }
             .foregroundStyle(KabuyomiTheme.accentDeep)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
             .background(
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .fill(Color.white.opacity(0.84))
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.white.opacity(0.68))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 15, style: .continuous)
-                            .stroke(Color.white.opacity(0.94), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .stroke(Color.white.opacity(0.78), lineWidth: 1)
                     )
             )
         }

@@ -62,6 +62,18 @@ func investorFacingSourceLabel(rawLabel: String, in company: CompanyPayload) -> 
         return "\(company.formType) リスク要因"
     }
 
+    if lowered.contains("revenue") || lowered.contains("net sales") {
+        return "売上高"
+    }
+
+    if lowered.contains("operating income") || lowered.contains("operating margin") {
+        return "営業利益"
+    }
+
+    if lowered.contains("net income") || lowered.contains("earnings") {
+        return "純利益"
+    }
+
     if let range = raw.range(of: #"Part\s+[IVXLC]+\s+Item\s+\d+[A-Za-z]?"#, options: .regularExpression) {
         return "\(company.formType) \(translatedItemLabel(from: String(raw[range])))"
     }

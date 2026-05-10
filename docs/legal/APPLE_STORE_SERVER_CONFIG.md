@@ -1,6 +1,6 @@
 # Apple Store Server API Configuration
 
-Kabuyomi v1 grants paid credits only after the Worker verifies the StoreKit transaction with Apple's App Store Server API. The iOS client payload and client JWS are not sufficient to grant credits.
+Kabuyomi v1.0.2 grants paid and subscription credits only after the Worker verifies the StoreKit transaction with Apple's App Store Server API. The iOS client payload and client JWS are not sufficient to grant credits.
 
 ## Required Worker Values
 
@@ -62,13 +62,15 @@ The public iOS completion route is:
 POST /v1/ios/purchases/credits/complete
 ```
 
-The route verifies the transaction with Apple before calling the paid-credit grant path.
+The route verifies the transaction with Apple before calling the paid-credit grant path. Subscription sync uses `POST /v1/ios/subscriptions/sync` and also requires Apple-verifiable transaction data before subscription credits are granted.
 
 Expected behavior:
 
 - Missing Apple config returns `503` with `Apple transaction verification is not configured`.
 - Invalid or fake Apple transaction returns no grant.
-- `kabuyomi.credits.100` grants exactly 100 paid credits only after Apple verification.
+- `kabuyomi.credits.50` grants exactly 50 paid credits only after Apple verification.
+- `kabuyomi.credits.100` remains supported as an existing compatibility product when present and grants exactly 100 paid credits only after Apple verification.
+- Lite / Pro / Max subscriptions grant server-authoritative monthly subscription credits only after Apple verification.
 - Duplicate transaction IDs return `already_granted` and do not double grant.
 - iOS finishes the StoreKit transaction only after backend grant or `already_granted`.
 
@@ -130,8 +132,10 @@ In `auto`, Kabuyomi never treats fallback itself as success. A paid-credit grant
 
 1. Deploy the Worker only after the three secrets are set.
 2. Install the latest TestFlight build.
-3. Purchase `kabuyomi.credits.100`.
+3. Purchase `kabuyomi.credits.50`.
 4. Confirm logs include `apple_transaction_verified` with `environment=sandbox`.
 5. Confirm the backend response is `granted` or `already_granted`.
 6. Confirm `mini_iap_transaction_finished` appears after backend success.
-7. Confirm `/v1/usage` shows `purchasedRemaining` increased by 100 once.
+7. Confirm `/v1/usage` shows `purchasedRemaining` increased by 50 once.
+8. Repeat for `kabuyomi.credits.100` if App Store Connect returns the compatibility product.
+9. Run a Lite subscription purchase/restore smoke and confirm `/v1/ios/subscriptions/sync` refreshes usage with 400 subscription credits and no duplicate grant on restore.

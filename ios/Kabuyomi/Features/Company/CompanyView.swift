@@ -99,6 +99,8 @@ struct CompanyView: View {
     @State private var activePanel: CompanySidePanel?
     @State private var librarySearchTask: Task<Void, Never>?
     @State private var creditsPresented = false
+    @State private var creditInitialSheet: CreditInitialSheet?
+    @State private var insufficientCreditOptionsPresented = false
     @State private var settingsPresented = false
     @State private var settingsDismissInputShield = false
     @State private var searchPresented = false
@@ -370,12 +372,30 @@ struct CompanyView: View {
             }
         }
         .fullScreenCover(isPresented: $creditsPresented) {
-            CreditView()
+            CreditView(initialSheet: creditInitialSheet)
                 .interactiveDismissDisabled(true)
         }
         .onChange(of: creditsPresented) { _, isPresented in
-            guard !isPresented else { return }
+            if isPresented {
+                return
+            }
+            creditInitialSheet = nil
             shieldSettingsDismissInput()
+        }
+        .confirmationDialog(
+            "クレジットが不足しています",
+            isPresented: $insufficientCreditOptionsPresented,
+            titleVisibility: .visible
+        ) {
+            Button("50 creditsを追加") {
+                openCreditsScreen()
+            }
+            Button("月額プランを見る") {
+                openCreditPlansScreen()
+            }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("この質問には \(appModel.chatCreditCost) credits が必要です。現在の残高: \(appModel.creditUsage?.totalRemaining ?? 0) credits")
         }
         .fullScreenCover(isPresented: $settingsPresented) {
             SettingsView()
@@ -456,7 +476,7 @@ struct CompanyView: View {
                 creditStatusText: appModel.chatCreditStatusText,
                 hasEnoughCredits: appModel.hasChatCreditAvailable,
                 applyPrompt: { question = $0 },
-                openCreditOptions: openSettingsScreen,
+                openCreditOptions: showInsufficientCreditOptions,
                 sendAction: sendCurrentQuestion
             )
         }
@@ -479,7 +499,7 @@ struct CompanyView: View {
             return "最新データ取得後に質問できます"
         }
 
-        return "この決算で気になる点を聞く"
+        return "確認論点を質問する"
     }
 
     private func overlayBackdrop(screenWidth: CGFloat) -> some View {
@@ -844,6 +864,21 @@ struct CompanyView: View {
         }
     }
 
+    private func openCreditPlansScreen() {
+        dismissKeyboard()
+        closePanels()
+        creditInitialSheet = .plans
+        Task {
+            try? await Task.sleep(for: .milliseconds(180))
+            creditsPresented = true
+        }
+    }
+
+    private func showInsufficientCreditOptions() {
+        dismissKeyboard()
+        insufficientCreditOptionsPresented = true
+    }
+
     private func shieldSettingsDismissInput() {
         settingsDismissInputShield = true
         Task { @MainActor in
@@ -1068,6 +1103,17 @@ private struct SourceEvidenceSheet: View {
         matchedSourceChunk(for: source, in: company)
     }
 
+    private var matchedMetric: MetricPayload? {
+        if let tagName = matchedChunk?.tagName {
+            return company.metrics.first { $0.tagUsed == tagName }
+        }
+
+        let label = source.sourceLabelSnapshot.lowercased()
+        return company.metrics.first { metric in
+            label.contains(metric.tagUsed.lowercased()) || label.contains(metric.logicalName.lowercased())
+        }
+    }
+
     private var sourceURL: URL? {
         resolvedSourceURL(for: source, in: company)
     }
@@ -1089,21 +1135,27 @@ private struct SourceEvidenceSheet: View {
     }
 
     private var offersPreviewTranslation: Bool {
-        shouldOfferPreviewTranslation(for: previewText)
+        guard matchedMetric == nil else { return false }
+        return shouldOfferPreviewTranslation(for: previewText)
     }
 
     private var displayedPreviewText: String {
         switch previewMode {
         case .original:
-            return previewText
+            return metricReadablePreviewText ?? previewText
         case .translated:
             switch previewTranslationState {
             case .ready(let translated):
                 return translated
             case .idle, .loading, .failed, .unavailable:
-                return previewText
+                return metricReadablePreviewText ?? previewText
             }
         }
+    }
+
+    private var metricReadablePreviewText: String? {
+        guard let matchedMetric else { return nil }
+        return "\(MetricLabeler.title(for: matchedMetric.logicalName))のXBRL抽出値です。上の表で今回値、前年同期、増減率を確認してください。"
     }
 
     private var isPreviewTranslationPending: Bool {
@@ -1150,9 +1202,9 @@ private struct SourceEvidenceSheet: View {
     private var openButtonTitle: String {
         switch source.sourceKind {
         case .webSupplement:
-            return "外部サイトを開く"
+            return "ブラウザで開く"
         case .secFiling, .historicalFiling:
-            return "該当箇所を原文で開く"
+            return "SEC原文を開く"
         }
     }
 
@@ -1172,6 +1224,10 @@ private struct SourceEvidenceSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     sourceSummaryCard
+
+                    if let matchedMetric {
+                        SourceMetricSummaryCard(metric: matchedMetric)
+                    }
 
                     quotePreviewSection
 
@@ -1221,7 +1277,7 @@ private struct SourceEvidenceSheet: View {
                 if source.sourceKind != .webSupplement,
                    let sourceURL {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button("Safari") {
+                        Button("ブラウザで開く") {
                             openURL(sourceURL)
                         }
                         .font(.system(.body, design: .rounded, weight: .semibold))
@@ -1468,6 +1524,91 @@ private struct SourceEvidenceSheet: View {
     }
 }
 
+private struct SourceMetricSummaryCard: View {
+    let metric: MetricPayload
+
+    private var currentValue: String {
+        formattedMetricValue(metric)
+    }
+
+    private var comparisonValue: String {
+        metric.comparisonValue.map {
+            formattedMetricValue($0, logicalName: metric.logicalName, unit: metric.unit)
+        } ?? "未提供"
+    }
+
+    private var yoyValue: String {
+        metricYoYDisplay(for: metric)?.text ?? metric.yoyPercent.map(formattedSignedYoY) ?? "未提供"
+    }
+
+    private var yoyTint: Color {
+        metricYoYDisplay(for: metric)?.tint ?? KabuyomiTheme.inkMuted
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text(MetricLabeler.title(for: metric.logicalName))
+                    .font(.system(.headline, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+
+                Spacer(minLength: 8)
+
+                Text("XBRL")
+                    .font(.system(.caption2, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(KabuyomiTheme.accentMist))
+            }
+
+            VStack(spacing: 0) {
+                SourceMetricValueRow(title: "今回", value: currentValue, tint: KabuyomiTheme.ink)
+                Divider().overlay(KabuyomiTheme.mist)
+                SourceMetricValueRow(title: "前年同期", value: comparisonValue, tint: KabuyomiTheme.inkSoft)
+                Divider().overlay(KabuyomiTheme.mist)
+                SourceMetricValueRow(title: "増減率", value: yoyValue, tint: yoyTint)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(KabuyomiTheme.fill(for: .input))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(KabuyomiTheme.stroke(for: .input), lineWidth: 1)
+                    )
+            )
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .kabuyomiCard(.primary, radius: 16)
+    }
+}
+
+private struct SourceMetricValueRow: View {
+    let title: String
+    let value: String
+    let tint: Color
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+                .frame(width: 70, alignment: .leading)
+
+            Text(value)
+                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                .foregroundStyle(tint)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+}
+
 private enum SourcePreviewMode {
     case original
     case translated
@@ -1702,7 +1843,7 @@ private struct SourceDocumentViewerSheet: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Safari") {
+                    Button("ブラウザで開く") {
                         openURL(request.url)
                     }
                     .font(.system(.body, design: .rounded, weight: .semibold))

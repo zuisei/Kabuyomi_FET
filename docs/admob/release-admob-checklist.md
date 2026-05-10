@@ -1,6 +1,6 @@
 # Rewarded AdMob Credits Release Checklist
 
-This checklist is for the installed TestFlight / App Store build. DEBUG smoke mode is a developer diagnostic path only and is not part of release readiness. For v1 App Review, the normal rewarded-credit UI is hidden. AdMob rewarded-credit infrastructure remains in place for v1.1 / post-approval.
+This checklist is for the installed TestFlight / App Store build. DEBUG smoke mode is a developer diagnostic path only and is not part of release readiness. For the current v1.0.2 App Review path, rewarded-credit UI is release-visible when the required AdMob rewarded config is present. Rewarded ads are optional and credits are reflected only after server-side Google AdMob SSV.
 
 ## Pre-upload
 
@@ -10,11 +10,11 @@ This checklist is for the installed TestFlight / App Store build. DEBUG smoke mo
 - Release build does not expose SSV smoke mode controls.
 - Release build does not expose test device ID controls.
 - Release build does not use the Google demo rewarded ad unit.
-- Rewarded-ad credit feature is hidden in the normal v1 App Review Release credit screen.
-- Reward amount remains `+2 credits` in infrastructure for v1.1 / post-approval.
-- Rewarded grants remain capped at 3 valid grants per user per JST day when the UI is re-enabled.
+- Rewarded-ad credit feature is visible in the normal v1.0.2 App Review Release credit screen when the required AdMob rewarded config is present.
+- Reward amount remains `+2 credits` in infrastructure.
+- Rewarded grants remain capped at 3 valid grants / +6 ad credits per user per JST day when the UI is enabled.
 - Rewarded ad credits expire 30 days after grant when granted.
-- Reward grant waits for AdMob server-side verification before credits are reflected when the UI is re-enabled.
+- Reward grant waits for AdMob server-side verification before credits are reflected.
 - Invalid signatures, invalid ad units, malformed callbacks, expired intents, and duplicate transactions do not grant extra credits.
 - Rewarded credits are free/ad credits and remain separate from paid credits.
 - Error messages distinguish ad display failure, ad unavailability/no-fill, and server confirmation timeout.
@@ -23,21 +23,23 @@ This checklist is for the installed TestFlight / App Store build. DEBUG smoke mo
 - Archive/export passes if signing credentials and export configuration are available.
 - App Store Connect upload passes if credentials and upload configuration are available.
 
-## Mini Consumable IAP
+## v1.0.2 StoreKit Products
 
-- Consumable IAP product ID is `kabuyomi.credits.100`.
-- App Store Connect reference name is `Kabuyomi Credits 100`.
-- App Store Connect product exists: yes.
-- App Store Connect product status: Ready to Submit.
-- Product grants exactly `+100` purchased credits.
+- Primary consumable IAP product ID is `kabuyomi.credits.50`.
+- `kabuyomi.credits.50` grants exactly `+50` paid credits.
+- `kabuyomi.credits.100` remains supported as an existing compatibility consumable when App Store Connect returns it.
+- Subscription group is `Kabuyomi_sus`.
+- `kabuyomi.sub.lite.monthly` grants 400 subscription credits/month.
+- `kabuyomi.sub.pro.monthly` grants 900 subscription credits/month.
+- `kabuyomi.sub.max.monthly` grants 2,000 subscription credits/month.
 - The app displays the localized StoreKit price when product metadata is available.
 - Product loading has a finite timeout and surfaces `クレジット商品を読み込めませんでした。少し時間をおいて再試行してください。` instead of staying indefinitely on price/loading text.
 - Purchase completion is sent to `/v1/ios/purchases/credits/complete`.
 - Worker verifies the Apple transaction through App Store Server before granting credits.
-- The server ignores client-side credit amounts and resolves the grant amount from `kabuyomi.credits.100`.
+- The server ignores client-side credit amounts and resolves the grant amount from the verified product ID.
 - Duplicate Apple `transactionId` returns an already-granted result and does not double-grant.
 - StoreKit transactions are finished only after the Worker grants or confirms the purchase was already granted.
-- Production Worker deploy with Mini route: not confirmed.
+- Production Worker route availability for credit and subscription sync has a v1.0.2 report, but real StoreKit purchase/restore smoke remains manual.
 - App version IAP attachment: manual check required.
 - TestFlight product load: not verified.
 - TestFlight sandbox purchase: not verified.
@@ -52,18 +54,18 @@ This checklist is for the installed TestFlight / App Store build. DEBUG smoke mo
 - IPA export: pass with App Store Connect export options and Xcode-managed distribution signing.
 - App Store Connect upload: blocked unless App Store Connect upload credentials or an authenticated Xcode account with an associated provider are available.
 - Export options template: `ios/ExportOptions.appstore.template.plist`.
-- Production ad config scan: pass when the Release archive contains the production API, keeps rewarded-credit UI hidden for v1 App Review, and does not expose demo/test/debug setup strings.
+- Production ad config scan: pass when the Release archive contains the production API, uses the production rewarded ad unit, shows rewarded-credit UI only when config is present, and does not expose demo/test/debug setup strings.
 
 ## App Review Notes
 
-For v1 App Review, notes should not claim that users can earn credits by watching rewarded ads. They may say AdMob rewarded-credit infrastructure exists but the rewarded-credit UI is hidden for v1 and deferred to v1.1 / post-approval. Paid IAP remains available as `kabuyomi.credits.100`.
+For v1.0.2 App Review, notes may describe rewarded ads as an optional way to earn free/ad credits. They must say credits are granted only after server-side Google AdMob SSV, are capped at 3 successful rewards / +6 ad credits per JST day, and ad availability is not guaranteed. Paid IAP and subscriptions remain available according to the v1.0.2 release truth.
 
 ## Manual Rewarded-Credit Verification
 
 1. Install the TestFlight or Release build.
 2. Open the credit/settings screen.
-3. For v1 App Review, confirm the rewarded-credit UI is hidden.
-4. For v1.1 / post-approval rewarded-credit verification only, use a build that intentionally enables the UI, then tap the rewarded-ad button.
+3. Confirm the rewarded-credit UI is visible when required AdMob rewarded config is present.
+4. Tap the rewarded-ad button.
 5. Confirm the ad loads and completes.
 6. Confirm `/v1/admob/reward-intents` created a pending reward intent.
 7. Confirm the Google SSV callback reached `/v1/admob/ssv`.
@@ -82,7 +84,7 @@ For v1 App Review, notes should not claim that users can earn credits by watchin
 - Confirm the build is available in App Store Connect / TestFlight.
 - Install the build from TestFlight / App Store, not from Xcode DEBUG.
 - Confirm developer-only controls are absent.
-- Confirm the rewarded-ad credit button is hidden for v1 App Review.
+- Confirm the rewarded-ad credit button is visible when required AdMob rewarded config is present and its copy says the ad is optional.
 - Confirm the AdMob app is linked to the App Store listing when available.
 - Monitor AdMob app readiness status.
 - Monitor production Worker logs for `/v1/admob/ssv`.
@@ -107,4 +109,4 @@ For v1 App Review, notes should not claim that users can earn credits by watchin
 - Daily cap is not enforced.
 - Mini consumable purchase grants credits from an unverified client payload.
 - Mini consumable duplicate transaction grants credits more than once.
-- v1 App Review build exposes rewarded-credit UI or review notes claim rewarded-credit earning.
+- v1.0.2 App Review build grants rewarded credits without server-side Google SSV or review notes imply guaranteed ad availability.

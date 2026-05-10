@@ -1,6 +1,6 @@
 # Current Shipping Truth
 
-Last updated: 2026-05-05 JST
+Last updated: 2026-05-10 JST
 
 This file is the shared snapshot of what Kabuyomi currently is.
 It is intentionally narrower than old product specs.
@@ -21,7 +21,7 @@ The center of the experience is:
 - get a source-grounded answer
 - inspect summary and supporting evidence
 
-v1 submission scope is consumable credits only. Public subscription plans are not part of v1.
+Current `v1.0.2-subscription-rewarded-credits` branch scope includes consumable credits and monthly subscription credit plans. Older v1 docs that say subscription plans are absent are superseded for this branch.
 
 ---
 
@@ -75,14 +75,18 @@ In scope:
 - filing summary
 - source-grounded chat
 - explicit historical comparison prompts where implemented for 10-K / 10-Q
-- consumable credit balance and the Mini paid credit pack
+- consumable credit balance
+- `kabuyomi.credits.50` primary paid credit pack
+- `kabuyomi.credits.100` compatibility paid credit pack when present
+- Lite / Pro / Max monthly subscription credit plans
+- optional rewarded-credit UI when the required AdMob rewarded config is present
 
 Out of scope:
 - 20-F
 - 6-K
 - 8-K
 - push notifications
-- visible rewarded-credit UI unless real Google SSV is verified end-to-end
+- rewarded-credit behavior that grants credits without server-side Google SSV
 - broad cross-company comparison product
 - broad web-first investing product
 
@@ -93,11 +97,18 @@ Out of scope:
 Billing is enabled in the current v1 path.
 
 Current truth:
-- iOS uses StoreKit for the consumable product `kabuyomi.credits.100`
-- `kabuyomi.credits.100` grants 100 paid credits for ¥200
+- iOS uses StoreKit for consumables and subscriptions.
+- `kabuyomi.credits.50` grants 50 paid credits for ¥100.
+- `kabuyomi.credits.100` remains supported as an existing compatibility product and grants 100 paid credits when present.
+- Subscription group is `Kabuyomi_sus`.
+- `kabuyomi.sub.lite.monthly` grants 400 subscription credits/month for ¥640/month.
+- `kabuyomi.sub.pro.monthly` grants 900 subscription credits/month for ¥1,280/month.
+- `kabuyomi.sub.max.monthly` grants 2,000 subscription credits/month for ¥2,560/month.
 - Workers verify Apple transactions through App Store Server API before granting paid credits
 - duplicate consumable transactions must be no-op / already-granted
 - paid credits do not expire
+- rewarded-ad credits grant +2 per verified reward, are capped at 3 rewards / +6 ad credits per JST day, expire after 30 days, and are granted only after server-side Google AdMob SSV
+- normal chat cost is 2 credits
 - DEBUG-only detached dev access is a removable non-shipping path and is not part of the public product contract
 
 ---

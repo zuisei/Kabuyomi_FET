@@ -1,13 +1,14 @@
 # TestFlight StoreKit Diagnostics
 
-This note is for Kabuyomi v1 TestFlight troubleshooting when StoreKit returns no products for the only visible paid IAP:
+This note is for Kabuyomi v1.0.2 TestFlight troubleshooting when StoreKit returns no products for the expected monetization products:
 
-- `kabuyomi.credits.100`
-- consumable
-- 100 paid credits
-- price truth: JPY 200
+- `kabuyomi.credits.50`: consumable, 50 paid credits, price truth JPY 100.
+- `kabuyomi.credits.100`: existing compatibility consumable, 100 paid credits when App Store Connect returns it.
+- `kabuyomi.sub.lite.monthly`: auto-renewable subscription, group `Kabuyomi_sus`, 400 credits/month, price truth JPY 640/month.
+- `kabuyomi.sub.pro.monthly`: auto-renewable subscription, group `Kabuyomi_sus`, 900 credits/month, price truth JPY 1,280/month.
+- `kabuyomi.sub.max.monthly`: auto-renewable subscription, group `Kabuyomi_sus`, 2,000 credits/month, price truth JPY 2,560/month.
 
-The diagnostics are read-only. They do not expose subscriptions, the deferred 500 yen pack, environment switching, or any manual credit grant.
+The diagnostics are read-only. They do not expose the deferred 500 yen pack, environment switching, or any manual credit grant.
 
 ## How to Open
 
@@ -37,7 +38,7 @@ Capture one screenshot that includes the full `購入診断` section after the p
 - `localStoreKitConfiguration`
 - `purchaseButtonVisibilityReason`
 
-Also capture the credit purchase UI showing whether the 100-credit purchase row is available.
+Also capture the credit purchase UI showing whether the 50-credit pack, 100-credit compatibility pack, and Lite / Pro / Max subscription rows are available or correctly disabled with retry state.
 
 ## Logs to Filter
 
@@ -70,7 +71,7 @@ Relevant events:
 
 ### `returnedProductCount: 0`
 
-StoreKit completed the request but did not return `kabuyomi.credits.100`. If the product ID in `requestedProductIds` is correct, likely causes are outside the app binary:
+StoreKit completed the request but did not return the expected v1.0.2 product IDs. If the product IDs in `requestedProductIds` are correct, likely causes are outside the app binary:
 
 - App Store Connect propagation delay.
 - The TestFlight build is stale and does not contain the current bundle/configuration.
@@ -109,10 +110,11 @@ As of this diagnostics pass, the repo-side and App Store Connect checklist from 
 - Bank and tax setup are active.
 - Bundle ID is `app.kabuyomi.ios`.
 - In-App Purchase capability is enabled.
-- IAP product exists.
-- Product ID is `kabuyomi.credits.100`.
-- Product type is consumable.
-- Price is JPY 200.
+- IAP products exist for the intended v1.0.2 set.
+- Product IDs include `kabuyomi.credits.50`, `kabuyomi.credits.100`, `kabuyomi.sub.lite.monthly`, `kabuyomi.sub.pro.monthly`, and `kabuyomi.sub.max.monthly`.
+- Subscription group is `Kabuyomi_sus`.
+- Product types are consumable for credit packs and auto-renewable subscription for Lite / Pro / Max.
+- Price truth is JPY 100 for the 50-credit pack, JPY 640/month for Lite, JPY 1,280/month for Pro, and JPY 2,560/month for Max. The 100-credit compatibility product price should match App Store Connect if it is returned.
 - Availability has been expanded.
 - IAP is attached to the app version.
 - IAP review screenshot exists.
@@ -126,7 +128,7 @@ Do not treat these as newly verified by code. Re-check App Store Connect if scre
 2. Save the `mini_iap_` log lines from launch through product load.
 3. Confirm the `buildNumber` matches the uploaded TestFlight build.
 4. Confirm `bundleIdentifier` is `app.kabuyomi.ios`.
-5. Confirm `requestedProductIds` is exactly `kabuyomi.credits.100`.
+5. Confirm `requestedProductIds` contains the intended v1.0.2 product set.
 6. If `returnedProductCount` remains `0` with `canMakePayments: true`, wait for App Store Connect propagation, reinstall the build, and retry with a Japanese storefront sandbox account.
 7. If the same result continues after propagation, open Apple Developer support / feedback with the screenshot, logs, bundle ID, product ID, build number, and App Store Connect product status.
 
@@ -144,7 +146,7 @@ If Worker logs show `apple_transaction_verification_failed status=401 environmen
 
 ```text
 apple_transaction_verified environment=sandbox
-credit_purchase_grant productId=kabuyomi.credits.100 delta=100
+credit_purchase_grant productId=kabuyomi.credits.50 delta=50
 ```
 
 If both production and sandbox fail, no paid credits should be granted. Keep `auto` for production release; use `sandbox` only for isolated TestFlight verification.

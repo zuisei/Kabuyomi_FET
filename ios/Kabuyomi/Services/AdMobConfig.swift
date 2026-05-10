@@ -98,6 +98,10 @@ enum AdMobConfig {
         rewardedAdRuntimeMode.adUnitKind
     }
 
+    static var hasRewardedCreditAdConfig: Bool {
+        !rewardedCreditAdUnitID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     static var rewardedAdRuntimeMode: RewardedAdRuntimeMode {
         #if DEBUG
         guard isRewardedCreditSSVSmokeModeEnabled else {

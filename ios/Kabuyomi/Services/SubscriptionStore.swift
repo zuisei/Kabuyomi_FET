@@ -694,9 +694,9 @@ enum SubscriptionStoreError: LocalizedError {
         case .productNotFound, .productLoadTimedOut:
             "クレジット商品を読み込めませんでした。少し時間をおいて再試行してください。"
         case .purchaseUnverified:
-            "購入を確認できませんでした。少し時間をおいて再試行してください。"
+            "購入を確認できませんでした。購入を復元してください。"
         case .purchasePending:
-            "購入が保留中です。承認後にクレジットが反映されます。"
+            "購入は保留中です。App Store側の処理が完了すると反映されます。"
         case .purchaseUnknown:
             "購入を完了できませんでした。少し時間をおいて再試行してください。"
         }

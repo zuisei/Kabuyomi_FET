@@ -5,6 +5,7 @@ import UIKit
 struct AdMobBannerView: View {
     let placement: Placement
     var horizontalPadding: CGFloat = 20
+    @State private var bannerHeight = AdSizeBanner.size.height
 
     enum Placement {
         case watchlist
@@ -19,7 +20,8 @@ struct AdMobBannerView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let adSize = AdSizeBanner
+            let availableWidth = max(1, proxy.size.width - horizontalPadding * 2)
+            let adSize = largeAnchoredAdaptiveBanner(width: availableWidth)
 
             HStack {
                 Spacer(minLength: 0)
@@ -29,9 +31,16 @@ struct AdMobBannerView: View {
                     .accessibilityLabel("広告")
                 Spacer(minLength: 0)
             }
+            .padding(.horizontal, horizontalPadding)
             .frame(width: proxy.size.width, height: adSize.size.height)
+            .onAppear {
+                bannerHeight = adSize.size.height
+            }
+            .onChange(of: adSize.size.height) { _, height in
+                bannerHeight = height
+            }
         }
-        .frame(height: 50)
+        .frame(height: bannerHeight)
     }
 }
 

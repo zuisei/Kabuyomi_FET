@@ -179,8 +179,8 @@ struct SummaryDrawer: View {
         ZStack(alignment: .leading) {
             LinearGradient(
                 colors: [
-                    Color(red: 0.99, green: 0.98, blue: 0.96),
-                    Color(red: 0.95, green: 0.92, blue: 0.88)
+                    Color(red: 0.995, green: 0.985, blue: 0.97),
+                    Color(red: 0.97, green: 0.94, blue: 0.89)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -194,8 +194,8 @@ struct SummaryDrawer: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            KabuyomiTheme.accentDeep.opacity(0.34),
-                            KabuyomiTheme.accent.opacity(0.08),
+                            KabuyomiTheme.accentDeep.opacity(0.24),
+                            KabuyomiTheme.accent.opacity(0.06),
                             .clear
                         ],
                         startPoint: .top,
@@ -207,7 +207,7 @@ struct SummaryDrawer: View {
             Rectangle()
                 .stroke(Color.white.opacity(0.55), lineWidth: 1)
         }
-        .shadow(color: Color.black.opacity(0.12), radius: 18, x: -8, y: 0)
+        .shadow(color: KabuyomiTheme.shadow(for: .primary), radius: 18, x: -8, y: 0)
     }
 }
 
@@ -219,16 +219,16 @@ private struct SummaryDrawerHeader: View {
     var body: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("要点")
+                Text("提出資料サマリー")
                     .font(.system(.caption, design: .rounded, weight: .heavy))
-                    .kerning(1.2)
+                    .kerning(0.8)
                     .foregroundStyle(KabuyomiTheme.accentDeep)
 
                 Text(ticker)
                     .font(.system(.title2, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.ink)
 
-                Text("\(formType) を会話前にざっと掴む")
+                Text("\(formType) の事実関係と確認論点")
                     .font(.system(.footnote, design: .rounded, weight: .medium))
                     .foregroundStyle(KabuyomiTheme.inkMuted)
             }
@@ -262,7 +262,7 @@ private struct SummaryLeadCard: View {
             header
 
             VStack(alignment: .leading, spacing: 10) {
-                Text(summarySentence ?? "この決算資料の要点を短く押さえ、そのまま会話で深掘りできます。")
+                Text(summarySentence ?? "提出資料から確認できる事実と、次に読むべき論点を整理します。")
                     .font(.system(.title3, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.ink)
                     .lineSpacing(4)
@@ -294,9 +294,9 @@ private struct SummaryLeadCard: View {
     @ViewBuilder
     private var header: some View {
         let titleBlock = VStack(alignment: .leading, spacing: 7) {
-            Text("まずここ")
+            Text("FILING BRIEF")
                 .font(.system(.caption, design: .rounded, weight: .heavy))
-                .kerning(1.1)
+                .kerning(0.8)
                 .foregroundStyle(tone.tint.opacity(0.92))
             Text(company.companyName)
                 .font(.system(.title2, design: .rounded, weight: .bold))
@@ -329,30 +329,13 @@ private struct SummaryLeadCard: View {
     }
 
     private var background: some View {
-        RoundedRectangle(cornerRadius: 28, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.96),
-                        tone.tint.opacity(0.08),
-                        KabuyomiTheme.paper
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(KabuyomiTheme.fill(for: .primary))
             .overlay(
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .stroke(Color.white.opacity(0.92), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(KabuyomiTheme.stroke(for: .primary), lineWidth: 1)
             )
-            .overlay(alignment: .topTrailing) {
-                Circle()
-                    .fill(tone.tint.opacity(0.12))
-                    .frame(width: 138, height: 138)
-                    .blur(radius: 12)
-                    .offset(x: 18, y: -24)
-            }
-            .shadow(color: tone.tint.opacity(0.12), radius: 18, x: 0, y: 10)
+            .shadow(color: KabuyomiTheme.shadow(for: .primary), radius: 10, x: 0, y: 5)
     }
 }
 
@@ -399,15 +382,15 @@ private struct SummarySignalMeter: View {
     private var countBadges: some View {
         if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 8) {
-                OverviewCountBadge(title: "良い", count: positiveCount, tint: KabuyomiTheme.positive)
+                OverviewCountBadge(title: "改善", count: positiveCount, tint: KabuyomiTheme.positive)
                 OverviewCountBadge(title: "注意", count: negativeCount, tint: KabuyomiTheme.negative)
-                OverviewCountBadge(title: "論点", count: focusCount, tint: KabuyomiTheme.accentDeep)
+                OverviewCountBadge(title: "確認論点", count: focusCount, tint: KabuyomiTheme.accentDeep)
             }
         } else {
             HStack(spacing: 8) {
-                OverviewCountBadge(title: "良い", count: positiveCount, tint: KabuyomiTheme.positive)
+                OverviewCountBadge(title: "改善", count: positiveCount, tint: KabuyomiTheme.positive)
                 OverviewCountBadge(title: "注意", count: negativeCount, tint: KabuyomiTheme.negative)
-                OverviewCountBadge(title: "論点", count: focusCount, tint: KabuyomiTheme.accentDeep)
+                OverviewCountBadge(title: "確認論点", count: focusCount, tint: KabuyomiTheme.accentDeep)
             }
         }
     }
@@ -679,19 +662,21 @@ private struct InvestorHistoricalTrendBoard: View {
     }
 
     var body: some View {
-        SummaryBoardCard(
-            eyebrow: copy.eyebrow,
-            title: copy.title,
-            subtitle: copy.subtitle,
-            systemImage: "chart.bar.xaxis"
-        ) {
+        VStack(alignment: .leading, spacing: 12) {
+            AnalyticalSectionHeader(
+                eyebrow: copy.eyebrow,
+                title: copy.title,
+                subtitle: copy.subtitle,
+                systemImage: "chart.bar.xaxis"
+            )
+
             if let metricSummaryText {
                 Text(metricSummaryText)
                     .font(.system(.caption, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.42)))
             }
 
             historicalContent
@@ -700,6 +685,7 @@ private struct InvestorHistoricalTrendBoard: View {
                 .font(.system(.caption, design: .rounded, weight: .medium))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
         }
+        .padding(.vertical, 4)
     }
 
     @ViewBuilder
@@ -751,6 +737,16 @@ private struct InvestorHistoricalSeriesChartCard: View {
             header
 
             InvestorHistoricalBarChart(points: orderedPoints)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(KabuyomiTheme.paper.opacity(0.58))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .stroke(KabuyomiTheme.accentDeep.opacity(0.12), lineWidth: 1)
+                        )
+                )
 
             VStack(spacing: 0) {
                 ForEach(Array(orderedPoints.enumerated()), id: \.element.id) { index, point in
@@ -762,7 +758,7 @@ private struct InvestorHistoricalSeriesChartCard: View {
                 }
             }
         }
-        .padding(14)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(cardBackground)
     }
@@ -775,11 +771,11 @@ private struct InvestorHistoricalSeriesChartCard: View {
             .fixedSize(horizontal: false, vertical: true)
 
         let yoyBadge = Text(latestYoYText)
-            .font(.system(.footnote, design: .rounded, weight: .bold))
+            .font(.system(.caption, design: .rounded, weight: .bold))
             .foregroundStyle(latestYoYTint)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(latestYoYTint.opacity(0.14)))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(latestYoYTint.opacity(0.14)))
 
         if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 8) {
@@ -796,11 +792,11 @@ private struct InvestorHistoricalSeriesChartCard: View {
     }
 
     private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(Color.white.opacity(0.72))
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(KabuyomiTheme.fill(for: .input))
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(Color.white.opacity(0.88), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(KabuyomiTheme.accentDeep.opacity(0.16), lineWidth: 1)
             )
     }
 }
@@ -836,8 +832,8 @@ private struct InvestorHistoricalBarChart: View {
                 context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(tint.opacity(0.72)))
             }
         }
-        .frame(height: 86)
-        .padding(.vertical, 6)
+        .frame(height: 58)
+        .padding(.vertical, 2)
         .accessibilityHidden(true)
     }
 }
@@ -872,10 +868,11 @@ private struct InvestorHistoricalValueRow: View {
                     .minimumScaleFactor(0.78)
             }
             .padding(.vertical, 9)
+            .padding(.horizontal, 2)
 
             if !isLast {
                 Divider()
-                    .overlay(Color.white.opacity(0.7))
+                    .overlay(KabuyomiTheme.accentDeep.opacity(0.12))
             }
         }
     }
@@ -899,41 +896,34 @@ private struct InvestorOriginalDocumentCard: View {
             HStack(spacing: 12) {
                 Image(systemName: "arrow.up.right.square")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(Color.white)
-                    .frame(width: 40, height: 40)
-                    .background(Circle().fill(KabuyomiTheme.accentDeep))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .frame(width: 34, height: 34)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(KabuyomiTheme.accentSoft.opacity(0.78)))
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("原文に戻る")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(Color.white)
-                    Text("最後は提出資料で裏取りする")
+                    Text("SEC原文を開く")
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Text("必要に応じて提出資料で確認")
                         .font(.system(.footnote, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.8))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
                 Spacer()
 
                 Text("SEC")
                     .font(.system(.subheadline, design: .rounded, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.92))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             }
-            .padding(18)
+            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [KabuyomiTheme.accentDeep, KabuyomiTheme.accent],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.white.opacity(0.76))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(KabuyomiTheme.mist.opacity(0.95), lineWidth: 1)
                     )
-                    .shadow(color: KabuyomiTheme.accentDeep.opacity(0.18), radius: 14, x: 0, y: 8)
             )
         }
         .buttonStyle(.plain)
@@ -1005,17 +995,15 @@ private struct OverviewCountBadge: View {
 private struct InvestorMetricMapCard: View {
     let metrics: [MetricPayload]
 
-    private var maxMagnitude: Double {
-        max(metrics.compactMap(\.yoyPercent).map(abs).max() ?? 0, 10)
-    }
-
     var body: some View {
-        SummaryBoardCard(
+        VStack(alignment: .leading, spacing: 12) {
+            AnalyticalSectionHeader(
             eyebrow: "数字",
             title: "主要指標",
-            subtitle: "いまの値と前年同期をひと目で確認",
-            systemImage: "chart.bar.xaxis"
-        ) {
+            subtitle: "指標 / 今回 / 前年同期 / YoY",
+            systemImage: "tablecells"
+            )
+
             if metrics.isEmpty {
                 Text("比較できる主要指標はまだ抽出されていません。")
                     .font(.system(.footnote, design: .rounded))
@@ -1024,11 +1012,156 @@ private struct InvestorMetricMapCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .kabuyomiCard(.muted, radius: 18)
             } else {
-                ForEach(metrics) { metric in
-                    InvestorMetricMapRow(metric: metric, maxMagnitude: maxMagnitude)
+                VStack(spacing: 0) {
+                    InvestorMetricTableHeader()
+                    ForEach(Array(metrics.enumerated()), id: \.element.id) { index, metric in
+                        InvestorMetricTableRow(metric: metric, isLast: index == metrics.count - 1)
+                    }
                 }
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(KabuyomiTheme.fill(for: .input))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(KabuyomiTheme.accentDeep.opacity(0.18), lineWidth: 1.2)
+                        )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
         }
+    }
+}
+
+private struct InvestorMetricTableHeader: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            metricHeader("指標", minWidth: 72)
+            metricHeader("今回", minWidth: 82, alignment: .trailing)
+            metricHeader("前年同期", minWidth: 78, alignment: .trailing)
+            metricHeader("YoY", minWidth: 58, alignment: .trailing)
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(KabuyomiTheme.accentMist.opacity(0.86))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(KabuyomiTheme.accentDeep.opacity(0.16))
+                .frame(height: 1)
+        }
+    }
+
+    private func metricHeader(
+        _ text: String,
+        minWidth: CGFloat,
+        alignment: Alignment = .leading
+    ) -> some View {
+        Text(text)
+            .font(.system(.caption2, design: .rounded, weight: .bold))
+            .foregroundStyle(KabuyomiTheme.inkMuted)
+            .frame(minWidth: minWidth, maxWidth: .infinity, alignment: alignment)
+    }
+}
+
+private struct InvestorMetricTableRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    let metric: MetricPayload
+    let isLast: Bool
+
+    private var currentValueText: String {
+        formattedMetricValue(metric)
+    }
+
+    private var comparisonValueText: String {
+        metric.comparisonValue.map {
+            formattedMetricValue($0, logicalName: metric.logicalName, unit: metric.unit)
+        } ?? "—"
+    }
+
+    private var yoyDisplay: MetricYoYDisplay? {
+        metricYoYDisplay(for: metric)
+    }
+
+    private var yoyText: String {
+        yoyDisplay?.text ?? "—"
+    }
+
+    private var yoyTint: Color {
+        yoyDisplay?.tint ?? KabuyomiTheme.inkMuted
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(MetricLabeler.title(for: metric.logicalName))
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    HStack(spacing: 10) {
+                        metricValue(label: "今回", value: currentValueText, tint: KabuyomiTheme.ink)
+                        metricValue(label: "前年同期", value: comparisonValueText, tint: KabuyomiTheme.inkSoft)
+                    }
+                    Text(yoyText)
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(yoyTint)
+                }
+                .padding(10)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(MetricLabeler.title(for: metric.logicalName))
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                        .lineLimit(2)
+                        .frame(minWidth: 72, maxWidth: .infinity, alignment: .leading)
+
+                    Text(currentValueText)
+                        .font(.system(.caption, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .frame(minWidth: 82, maxWidth: .infinity, alignment: .trailing)
+
+                    Text(comparisonValueText)
+                        .font(.system(.caption, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.inkSoft)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .frame(minWidth: 78, maxWidth: .infinity, alignment: .trailing)
+
+                    Text(yoyText)
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(yoyTint)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(yoyTint.opacity(0.12)))
+                        .frame(minWidth: 58, maxWidth: .infinity, alignment: .trailing)
+                }
+                .padding(.horizontal, 11)
+                .padding(.vertical, 9)
+            }
+
+            if !isLast {
+                Divider()
+                    .overlay(KabuyomiTheme.accentDeep.opacity(0.14))
+            }
+        }
+    }
+
+    private func metricValue(label: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(.caption2, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+            Text(value)
+                .font(.system(.caption, design: .rounded, weight: .semibold))
+                .foregroundStyle(tint)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1162,31 +1295,33 @@ private struct InvestorDriverBoard: View {
     let openSource: (LocalMessageSourceRef) -> Void
 
     var body: some View {
-        SummaryBoardCard(
+        VStack(alignment: .leading, spacing: 14) {
+            AnalyticalSectionHeader(
             eyebrow: "整理",
-            title: "良かった点と気になる点",
-            subtitle: "まず強さ、その次に注意点を見る",
+            title: "改善項目と確認論点",
+            subtitle: "提出資料で確認できる改善と、追加確認が必要な論点",
             systemImage: "arrow.left.arrow.right"
-        ) {
+            )
+
             InvestorInsightLane(
                 company: company,
-                title: "良かった点",
-                subtitle: "数字や本文で確認できる追い風",
+                title: "改善項目",
+                subtitle: "数字や本文で確認できる改善",
                 tint: KabuyomiTheme.positive,
                 systemImage: "arrow.up.right.circle.fill",
                 insights: positiveInsights,
-                emptyMessage: "明確な良い材料はまだ切り出されていません。",
+                emptyMessage: "明確な改善項目はまだ切り出されていません。",
                 openSource: openSource
             )
 
             InvestorInsightLane(
                 company: company,
-                title: "気になる点",
-                subtitle: "弱さや注意点として見たい論点",
+                title: "確認論点",
+                subtitle: "弱さや注意点として追加確認したい論点",
                 tint: KabuyomiTheme.negative,
                 systemImage: "arrow.down.right.circle.fill",
                 insights: negativeInsights,
-                emptyMessage: "明確に気をつけたい材料はまだ切り出されていません。",
+                emptyMessage: "明確な確認論点はまだ切り出されていません。",
                 openSource: openSource
             )
         }
@@ -1207,10 +1342,10 @@ private struct InvestorInsightLane: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(tint)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(tint.opacity(0.14)))
+                    .frame(width: 24, height: 24)
+                    .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(tint.opacity(0.12)))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
@@ -1226,21 +1361,42 @@ private struct InvestorInsightLane: View {
                 Text(emptyMessage)
                     .font(.system(.footnote, design: .rounded))
                     .foregroundStyle(KabuyomiTheme.inkMuted)
-                    .padding(14)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .kabuyomiCard(.muted, radius: 18)
-            } else {
-                ForEach(Array(insights.enumerated()), id: \.element.id) { index, insight in
-                    InvestorInsightRow(
-                        company: company,
-                        index: index + 1,
-                        insight: insight,
-                        tint: tint,
-                        openSource: openSource
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(KabuyomiTheme.fill(for: .muted))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(tint.opacity(0.16), lineWidth: 1)
+                            )
                     )
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(insights.enumerated()), id: \.element.id) { index, insight in
+                        InvestorInsightRow(
+                            company: company,
+                            index: index + 1,
+                            insight: insight,
+                            tint: tint,
+                            isLast: index == insights.count - 1,
+                            openSource: openSource
+                        )
+                    }
                 }
+                .padding(.horizontal, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(KabuyomiTheme.fill(for: .input))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(tint.opacity(0.18), lineWidth: 1)
+                        )
+                )
             }
         }
+        .padding(.vertical, 2)
     }
 }
 
@@ -1249,33 +1405,61 @@ private struct InvestorInsightRow: View {
     let index: Int
     let insight: FilingInsight
     let tint: Color
+    let isLast: Bool
     let openSource: (LocalMessageSourceRef) -> Void
 
+    private var headline: String {
+        analyticalHeadline(from: insight.text)
+    }
+
+    private var detail: String {
+        analyticalDetail(from: insight.text, fallback: "提出資料で確認された項目です。")
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(index)")
-                .font(.system(.subheadline, design: .rounded, weight: .bold))
-                .foregroundStyle(tint)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(tint.opacity(0.14)))
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 11) {
+                VStack(spacing: 0) {
+                    Text("\(index)")
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(tint)
+                        .frame(width: 24, height: 24)
+                        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(tint.opacity(0.13)))
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text(insight.text)
-                    .font(.system(.body, design: .rounded))
-                    .foregroundStyle(KabuyomiTheme.inkSoft)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Rectangle()
+                        .fill(tint.opacity(0.18))
+                        .frame(width: 2)
+                        .frame(maxHeight: .infinity)
+                }
 
-                InsightSourceChips(
-                    company: company,
-                    sourceIds: insight.sourceIds,
-                    openSource: openSource
-                )
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(headline)
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(detail)
+                        .font(.system(.caption, design: .rounded, weight: .medium))
+                        .foregroundStyle(KabuyomiTheme.inkSoft)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    InsightSourceChips(
+                        company: company,
+                        sourceIds: insight.sourceIds,
+                        openSource: openSource
+                    )
+                }
+            }
+            .padding(.vertical, 10)
+
+            if !isLast {
+                Divider()
+                    .overlay(tint.opacity(0.16))
             }
         }
-        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .kabuyomiCard(.secondary, radius: 20)
     }
 }
 
@@ -1285,19 +1469,29 @@ private struct InvestorFocusBoard: View {
     let openSource: (LocalMessageSourceRef) -> Void
 
     var body: some View {
-        SummaryBoardCard(
+        VStack(alignment: .leading, spacing: 12) {
+            AnalyticalSectionHeader(
             eyebrow: "次",
-            title: "次に詰める論点",
-            subtitle: "会話で深掘りする順番まで見える形に",
+            title: "次に確認する論点",
+            subtitle: "本文根拠を起点に会話で深掘りする",
             systemImage: "bubble.left.and.bubble.right.fill"
-        ) {
+            )
+
             if focusInsights.isEmpty {
-                Text("質問で深掘りしやすい論点はまだ抽出されていません。")
+                Text("次に確認する論点はまだ抽出されていません。")
                     .font(.system(.footnote, design: .rounded))
                     .foregroundStyle(KabuyomiTheme.inkMuted)
-                    .padding(14)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .kabuyomiCard(.muted, radius: 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(KabuyomiTheme.fill(for: .muted))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(KabuyomiTheme.accentDeep.opacity(0.14), lineWidth: 1)
+                            )
+                    )
             } else {
                 ForEach(Array(focusInsights.enumerated()), id: \.element.id) { index, insight in
                     let primarySource = primarySourceReference(sourceIds: insight.sourceIds, in: company)
@@ -1326,8 +1520,16 @@ private struct InvestorFocusInsightCard: View {
         primarySource != nil
     }
 
+    private var question: String {
+        analyticalQuestion(from: insight.text)
+    }
+
+    private var supportingNote: String {
+        analyticalDetail(from: insight.text, fallback: insight.text)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             focusHeader
 
             InsightSourceChips(
@@ -1336,9 +1538,16 @@ private struct InvestorFocusInsightCard: View {
                 openSource: openSource
             )
         }
-        .padding(14)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .kabuyomiCard(.secondary, radius: 20)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(KabuyomiTheme.fill(for: .input))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(KabuyomiTheme.accentDeep.opacity(isInteractive ? 0.22 : 0.14), lineWidth: 1)
+                )
+        )
     }
 
     @ViewBuilder
@@ -1359,15 +1568,21 @@ private struct InvestorFocusInsightCard: View {
             Text("Q\(index)")
                 .font(.system(.caption, design: .rounded, weight: .bold))
                 .foregroundStyle(KabuyomiTheme.accentDeep)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+                .frame(width: 30, height: 24)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(KabuyomiTheme.accentSoft.opacity(0.48)))
 
-            Text(insight.text)
-                .font(.system(.body, design: .rounded))
-                .foregroundStyle(KabuyomiTheme.inkSoft)
-                .lineSpacing(4)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(question)
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(supportingNote)
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if isInteractive {
                 Spacer(minLength: 8)
@@ -1379,6 +1594,38 @@ private struct InvestorFocusInsightCard: View {
                     .background(Circle().fill(KabuyomiTheme.accentSoft.opacity(0.45)))
             }
         }
+    }
+}
+
+private struct AnalyticalSectionHeader: View {
+    let eyebrow: String
+    let title: String
+    let subtitle: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.accentDeep)
+                .frame(width: 26, height: 26)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(KabuyomiTheme.accentSoft.opacity(0.42)))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(eyebrow)
+                    .font(.system(.caption2, design: .rounded, weight: .heavy))
+                    .kerning(0.4)
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                Text(title)
+                    .font(.system(.headline, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                Text(subtitle)
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.bottom, 2)
     }
 }
 
@@ -1418,7 +1665,7 @@ private struct SummaryBoardCard<Content: View>: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(eyebrow)
                         .font(.system(.caption2, design: .rounded, weight: .heavy))
-                        .kerning(0.8)
+                        .kerning(0.4)
                         .foregroundStyle(KabuyomiTheme.accentDeep)
                     Text(title)
                         .font(.system(.headline, design: .rounded, weight: .bold))
@@ -1432,7 +1679,7 @@ private struct SummaryBoardCard<Content: View>: View {
             content
         }
         .padding(18)
-        .kabuyomiCard(.primary, radius: 24)
+        .kabuyomiCard(.primary, radius: 18)
     }
 }
 
@@ -1462,6 +1709,68 @@ func insightSourceChips(sourceIds: [String], in company: CompanyPayload) -> [Ins
             source: sourceReference(from: chunk, in: company)
         )
     }
+}
+
+private func analyticalHeadline(from text: String) -> String {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return "確認事項" }
+
+    let separators = ["で、", "ため、", "が、", "。", "です", "ます"]
+    for separator in separators {
+        if let range = trimmed.range(of: separator) {
+            let candidate = String(trimmed[..<range.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !candidate.isEmpty {
+                return String(candidate.prefix(32))
+            }
+        }
+    }
+
+    return String(trimmed.prefix(32))
+}
+
+private func analyticalDetail(from text: String, fallback: String) -> String {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return fallback }
+
+    let headline = analyticalHeadline(from: trimmed)
+    let withoutHeadline = trimmed
+        .replacingOccurrences(of: headline, with: "", options: [.anchored])
+        .trimmingCharacters(in: CharacterSet(charactersIn: "、。 　"))
+
+    if withoutHeadline.isEmpty {
+        return trimmed == headline ? fallback : trimmed
+    }
+
+    return withoutHeadline
+}
+
+private func analyticalQuestion(from text: String) -> String {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return "次に何を確認する？" }
+
+    if trimmed.hasSuffix("？") || trimmed.hasSuffix("?") {
+        return trimmed
+    }
+
+    if trimmed.contains("売上") || trimmed.localizedCaseInsensitiveContains("revenue") {
+        return "売上成長の主因は何か？"
+    }
+
+    if trimmed.contains("利益率") || trimmed.contains("マージン") {
+        return "利益率の改善は続きそうか？"
+    }
+
+    if trimmed.contains("営業キャッシュ") || trimmed.contains("営業CF") || trimmed.localizedCaseInsensitiveContains("cash flow") {
+        return "営業CFの増加は利益改善と連動しているか？"
+    }
+
+    if trimmed.contains("成長") || trimmed.contains("増加") || trimmed.contains("改善") {
+        return "この成長は一時的か、継続的か？"
+    }
+
+    let headline = analyticalHeadline(from: trimmed)
+    return "\(headline)をどう確認する？"
 }
 
 private struct InsightSourceChips: View {
@@ -1520,6 +1829,6 @@ private struct InsightSourceChips: View {
             .foregroundStyle(KabuyomiTheme.accentDeep)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(KabuyomiTheme.accentSoft.opacity(0.58)))
     }
 }

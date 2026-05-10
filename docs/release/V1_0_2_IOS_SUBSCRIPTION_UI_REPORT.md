@@ -92,7 +92,7 @@ The screen displays localized StoreKit prices when StoreKit returns product meta
 
 ## Known limitations
 
-- This phase does not add rewarded ad UI beyond the existing hidden/review-gated implementation.
+- This older subscription-UI phase did not add rewarded ad UI. Later v1.0.2 release truth makes the existing rewarded ad UI release-visible when required AdMob rewarded config is present.
 - This phase does not add account sync, App Attest, external purchase links, or SEC form router work.
 - Renewal/cancel status is displayed only from server-provided `periodEnd`/`expiresAt`; the UI does not independently interpret App Store renewal state beyond StoreKit entitlements.
 - The `kabuyomi.credits.100` consumable remains supported and visible, but `kabuyomi.credits.50` is the first/primary pack.

@@ -373,6 +373,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
         do {
             guard let purchase = try await subscriptionStore.purchaseSubscription(productId: productId) else {
+                activeAlert = AppAlertState(
+                    message: "購入はキャンセルされました。",
+                    kind: .dismissOnly
+                )
                 return
             }
             lastBillingSyncStatus = "syncing \(apiClient.subscriptionSyncEndpointDisplayString)"
@@ -508,7 +512,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         guard !billingActionInFlight else { return }
         guard isCreditBillingEnabled else {
             activeAlert = AppAlertState(
-                message: "追加credit購入は現在利用できません。時間をおいてからもう一度お試しください。",
+                message: "追加クレジット購入は現在利用できません。時間をおいてからもう一度お試しください。",
                 kind: .dismissOnly
             )
             return
@@ -520,6 +524,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         do {
             guard let purchase = try await subscriptionStore.purchaseCreditPack(productId: productId) else {
                 refreshStoreKitDiagnostics()
+                activeAlert = AppAlertState(
+                    message: "購入はキャンセルされました。",
+                    kind: .dismissOnly
+                )
                 return
             }
             subscriptionStore.recordBackendGrantStarted()
@@ -663,7 +671,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             let status = try await pollRewardStatus(rewardIntentId: intent.rewardIntentId)
             storeUsage(status.usage, source: .refresh)
             rewardedAdCreditState = status.dailyRemaining <= 0 ? .dailyCapReached : .idle
-            rewardedAdStatusMessage = "\(status.rewardCredits)クレジットを獲得しました。"
+            rewardedAdStatusMessage = "\(status.rewardCredits)無料/ad creditを獲得しました。"
             setRewardedAdDebugReason("granted")
             logRewardedAdDiagnostic(
                 "reward_status_granted",
@@ -1230,8 +1238,13 @@ credit残高に使う端末識別情報は維持されます。
     }
 
     func requestCreditOptions() {
+        let currentCredits = usage?.credits?.totalRemaining ?? 0
         activeAlert = AppAlertState(
-            message: "creditが不足しています。設定のクレジット画面で追加creditを確認してください。",
+            message: """
+クレジットが不足しています
+この質問には \(chatCreditCost) credits が必要です。
+現在の残高: \(currentCredits) credits
+""",
             kind: .dismissOnly
         )
     }
@@ -1715,30 +1728,43 @@ credit残高に使う端末識別情報は維持されます。
         }
 
         if rawMessage.contains("insufficient_credits") || rawMessage.contains("creditが不足") {
-            return "creditが不足しています。設定のクレジット画面で追加creditを確認してください。"
+            let currentCredits = usage?.credits?.totalRemaining ?? 0
+            return "クレジットが不足しています\nこの操作には \(chatCreditCost) credits が必要です。\n現在の残高: \(currentCredits) credits"
         }
 
         if rawMessage.contains("クレジット商品を読み込めません")
             || rawMessage.contains("購入を確認できません")
-            || rawMessage.contains("購入が保留中")
+            || rawMessage.contains("購入は保留中")
+            || rawMessage.contains("購入はキャンセルされました")
             || rawMessage.contains("購入は完了しましたが") {
             return rawMessage
         }
 
         if rawMessage.contains("route_missing") {
             #if DEBUG
-            return "課金APIのrouteが見つかりません。\(rawMessage)"
+            return "購入の同期先が見つかりません。しばらくしてからもう一度お試しください。\n\(rawMessage)"
             #else
-            return "課金APIを利用できません。アプリの更新またはサーバー反映を確認してください。"
+            return "購入の同期先が見つかりません。しばらくしてからもう一度お試しください。"
             #endif
         }
 
         if rawMessage.contains("Apple transaction verification") || rawMessage.contains("Apple transaction could not be verified") {
-            return "購入を確認できませんでした。少し時間をおいて再試行してください。"
+            return "購入を確認できませんでした。購入を復元してください。"
         }
 
         if rawMessage.contains("Purchase transaction") {
             return "購入は完了しましたが、クレジット付与確認がまだ完了していません。少し時間をおいて再試行してください。"
+        }
+
+        if rawMessage.contains("Invalid billing sync payload")
+            || rawMessage.contains("Invalid credit purchase payload")
+            || rawMessage.contains("Invalid transaction")
+            || (rawMessage.contains("product") && rawMessage.contains("mismatch")) {
+            return "購入を確認できませんでした。購入を復元してください。"
+        }
+
+        if nsError.domain == NSURLErrorDomain || error is URLError {
+            return "通信に失敗しました。接続を確認して、購入を復元してください。"
         }
 
         if rawMessage.contains("Watchlist limit exceeded") {

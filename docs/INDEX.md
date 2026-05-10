@@ -8,7 +8,7 @@ This index classifies docs and artifacts by release relevance. Current v1 truth 
 
 | Status | Item | Purpose |
 | --- | --- | --- |
-| active v1 | [release/RELEASE_TRUTH.md](./release/RELEASE_TRUTH.md) | Current v1 submission truth: 10-K/10-Q, credit-only, `kabuyomi.credits.100`, no subscriptions, no 8-K, no web search, no investment advice. |
+| active v1.0.2 | [release/RELEASE_TRUTH.md](./release/RELEASE_TRUTH.md) | Current v1.0.2 monetization truth for this branch: 10-K/10-Q, `kabuyomi.credits.50`, `kabuyomi.credits.100` compatibility, Lite/Pro/Max subscriptions, release-visible optional rewarded ads with server-side SSV, no 8-K, no web search, no investment advice. |
 | active v1 | [release/CURRENT_SHIPPING_TRUTH.md](./release/CURRENT_SHIPPING_TRUTH.md) | Current shipping snapshot and implementation semantics. |
 | active v1 | [release/APP_STORE_SUBMISSION_NOTES.md](./release/APP_STORE_SUBMISSION_NOTES.md) | App Review notes, privacy questionnaire guidance, legal URLs, manual checks. |
 | active v1 | [release/TESTFLIGHT_READINESS_CHECKLIST.md](./release/TESTFLIGHT_READINESS_CHECKLIST.md) | TestFlight/manual verification checklist aligned to the current credit-only v1 truth. |
@@ -19,7 +19,7 @@ This index classifies docs and artifacts by release relevance. Current v1 truth 
 | --- | --- | --- |
 | active v1 | [legal/LEGAL_SITE_DEPLOYMENT.md](./legal/LEGAL_SITE_DEPLOYMENT.md) | Cloudflare Pages legal-site setup and public metadata URLs. |
 | active v1 | [legal/APPLE_STORE_SERVER_CONFIG.md](./legal/APPLE_STORE_SERVER_CONFIG.md) | Worker Apple Store Server API secrets/config for paid-credit verification. |
-| active v1 | [legal/TESTFLIGHT_STOREKIT_DIAGNOSTICS.md](./legal/TESTFLIGHT_STOREKIT_DIAGNOSTICS.md) | Read-only TestFlight StoreKit diagnostics for `kabuyomi.credits.100`. |
+| active v1.0.2 | [legal/TESTFLIGHT_STOREKIT_DIAGNOSTICS.md](./legal/TESTFLIGHT_STOREKIT_DIAGNOSTICS.md) | Read-only TestFlight StoreKit diagnostics for v1.0.2 products: `kabuyomi.credits.50`, `kabuyomi.credits.100`, and Lite / Pro / Max subscriptions. |
 | active v1 | [../legal-site/README.md](../legal-site/README.md) | Static legal site source location and validation command. |
 
 ## Worker Quality Docs
@@ -38,8 +38,8 @@ This index classifies docs and artifacts by release relevance. Current v1 truth 
 
 | Status | Item | Purpose |
 | --- | --- | --- |
-| v1.1 planning / internal only | [admob/release-admob-checklist.md](./admob/release-admob-checklist.md) | Rewarded AdMob checklist. For v1 App Review, rewarded UI remains hidden. |
-| v1.1 planning / internal only | [admob/rewarded_admob_credits_runbook.md](./admob/rewarded_admob_credits_runbook.md) | Rewarded SSV runbook and evidence template. Real repository evidence is still not recorded. |
+| active v1.0.2 | [admob/release-admob-checklist.md](./admob/release-admob-checklist.md) | Rewarded AdMob checklist for the release-visible v1.0.2 App Review path. Rewards are optional and require server-side SSV before credits are reflected. |
+| active v1.0.2 | [admob/rewarded_admob_credits_runbook.md](./admob/rewarded_admob_credits_runbook.md) | Rewarded SSV runbook and evidence template. Real TestFlight/production SSV smoke evidence is still not recorded in the repo. |
 
 ## Historical Docs
 

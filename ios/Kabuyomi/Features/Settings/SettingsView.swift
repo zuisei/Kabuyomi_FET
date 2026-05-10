@@ -125,10 +125,10 @@ struct SettingsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("現在の device key")
+                    Text("device key suffix")
                         .font(.system(.footnote, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
-                    Text(appModel.currentDeviceKeyDisplay)
+                    Text("…\(appModel.currentDeviceKeySuffixDisplay)")
                         .font(.system(.footnote, design: .monospaced, weight: .medium))
                         .foregroundStyle(KabuyomiTheme.ink)
                         .textSelection(.enabled)
@@ -367,7 +367,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "広告と購入",
-                body: "v1 App Review ビルドでは rewarded-credit UI を表示しません。AdMob rewarded-credit infrastructure は残していますが、rewarded credits は v1.1 / post-approval に延期しています。追加 credit の購入、返金、請求、購入復元は Apple ID と App Store の仕組みに従います。"
+                body: "v1.0.2 App Review ビルドでは、任意の広告視聴で無料/ad creditを獲得できる画面を表示します。creditはGoogle AdMobのサーバー側確認が完了した場合のみ付与され、アプリ内の広告完了だけでは付与されません。追加 paid credit の購入、返金、請求、購入復元は Apple ID と App Store の仕組みに従います。"
             ),
             LegalSection(
                 title: "保存期間",
