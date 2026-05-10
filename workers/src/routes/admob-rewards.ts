@@ -1,8 +1,9 @@
 import type { Env, UsageState } from "../env";
 import { verifyAdMobSsvCallback } from "../lib/admob-ssv";
+import { enqueueCreditAuditRepair, type AdMobRewardTransactionRepairPayload } from "../lib/credit-audit-repair";
 import { AdMobRewardIntentRequestSchema } from "../lib/contracts";
 import { AppError } from "../lib/errors";
-import { logEvent, logWarnEvent } from "../lib/logging";
+import { hashForLog, logEvent, logWarnEvent, suffixForLog } from "../lib/logging";
 import {
   buildQuotaDateJST,
   grantRewardedAdCredits,
@@ -93,8 +94,8 @@ export const handleAdMobRewardRoutes: RouteHandler = async ({ request, url, env,
       .run();
 
     logEvent("rewarded_ad_intent_created", {
-      userId: identity.quotaSubject,
-      rewardIntentId,
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
+      rewardIntentIdSuffix: suffixForLog(rewardIntentId),
       dailyRemaining: DAILY_REWARD_CAP - grantedToday
     });
 
@@ -122,7 +123,10 @@ export const handleAdMobRewardRoutes: RouteHandler = async ({ request, url, env,
       status: effectiveIntentStatus(intent),
       rewardCredits: intent.reward_credits,
       creditsRemaining: intent.credits_remaining ?? usage.credits?.totalRemaining ?? 0,
-      dailyRemaining: Math.max(0, DAILY_REWARD_CAP - (await countGrantedRewards(env, identity.quotaSubject, intent.daily_date_key))),
+      dailyRemaining:
+        intent.status === "rejected"
+          ? 0
+          : Math.max(0, DAILY_REWARD_CAP - (await countGrantedRewards(env, identity.quotaSubject, intent.daily_date_key))),
       usage
     });
   }
@@ -130,7 +134,10 @@ export const handleAdMobRewardRoutes: RouteHandler = async ({ request, url, env,
   if (request.method === "GET" && url.pathname === "/v1/admob/ssv") {
     const verified = await safeVerifySsv(url, env);
     if (!verified) {
-      logWarnEvent("rewarded_ad_ssv_invalid_signature", { reason: "verify_failed" });
+      logWarnEvent("rewarded_ad_ssv_invalid_signature", {
+        reason: "verify_failed",
+        signaturePresent: url.searchParams.has("signature")
+      });
       return json({ error: "invalid_signature" }, { status: 401 });
     }
 
@@ -154,13 +161,14 @@ async function processSsvGrant(url: URL, env: Env, config: RemoteConfig) {
   const intent = await loadRewardIntentByCustomData(env, customData);
   if (!intent) {
     logWarnEvent("rewarded_ad_ssv_unknown_custom_data", {
-      customDataPresent: true
+      customDataPresent: true,
+      customDataSuffix: suffixForLog(customData)
     });
     throw new AppError(400, "Invalid rewarded ad custom data");
   }
   if (effectiveIntentStatus(intent) !== "pending" && intent.status !== "granted") {
     logWarnEvent("rewarded_ad_ssv_intent_not_grantable", {
-      rewardIntentId: intent.id,
+      rewardIntentIdSuffix: suffixForLog(intent.id),
       status: intent.status,
       effectiveStatus: effectiveIntentStatus(intent),
       expiresAt: intent.expires_at
@@ -173,9 +181,9 @@ async function processSsvGrant(url: URL, env: Env, config: RemoteConfig) {
   if (adUnit && !isAllowedRewardedAdUnit(adUnit, expectedAdUnit)) {
     if (isAdMobConsoleVerificationCallback(url)) {
       logEvent("rewarded_ad_ssv_console_verify_no_grant", {
-        rewardIntentId: intent.id,
-        transactionId,
-        adUnit,
+        rewardIntentIdSuffix: suffixForLog(intent.id),
+        transactionIdSuffix: suffixForLog(transactionId),
+        adUnitSuffix: suffixForLog(adUnit),
         queryKeys: collectQueryKeys(url.searchParams)
       });
       return {
@@ -185,19 +193,18 @@ async function processSsvGrant(url: URL, env: Env, config: RemoteConfig) {
       };
     }
     logWarnEvent("rewarded_ad_ssv_invalid_ad_unit", {
-      transactionId,
-      adUnit,
-      expectedAdUnit,
-      expectedAdUnitSuffix: expectedAdUnit.split("/").pop() ?? null
+      transactionIdSuffix: suffixForLog(transactionId),
+      adUnitSuffix: suffixForLog(adUnit),
+      expectedAdUnitSuffix: suffixForLog(expectedAdUnit)
     });
     throw new AppError(400, "Invalid rewarded ad unit");
   }
   if (!transactionId || !adUnit) {
     logEvent("rewarded_ad_ssv_verified_no_grant", {
-      rewardIntentId: intent.id,
+      rewardIntentIdSuffix: suffixForLog(intent.id),
       missingTransactionId: !transactionId,
       missingAdUnit: !adUnit,
-      adUnit: adUnit ?? null
+      adUnitSuffix: suffixForLog(adUnit)
     });
     return {
       status: "verified_no_grant",
@@ -211,20 +218,19 @@ async function processSsvGrant(url: URL, env: Env, config: RemoteConfig) {
   });
 
   logEvent("rewarded_ad_ssv_received", {
-    transactionId,
-    adUnit,
+    transactionIdSuffix: suffixForLog(transactionId),
+    adUnitSuffix: suffixForLog(adUnit),
     customDataPresent: true,
-    expectedAdUnit,
-    expectedAdUnitSuffix: expectedAdUnit.split("/").pop() ?? null
+    expectedAdUnitSuffix: suffixForLog(expectedAdUnit)
   });
 
   const existingTransaction = await loadRewardTransaction(env, transactionId);
   if (existingTransaction?.status === "granted") {
     const usage = await loadUsage(identityFromQuotaSubject(existingTransaction.user_id), env, config);
     logEvent("rewarded_ad_duplicate_ignored", {
-      userId: existingTransaction.user_id,
-      transactionId,
-      rewardIntentId: existingTransaction.reward_intent_id
+      quotaSubjectHash: hashForLog(existingTransaction.user_id),
+      transactionIdSuffix: suffixForLog(transactionId),
+      rewardIntentIdSuffix: suffixForLog(existingTransaction.reward_intent_id)
     });
     return {
       status: "duplicate_ignored",
@@ -247,8 +253,8 @@ async function processSsvGrant(url: URL, env: Env, config: RemoteConfig) {
   }
   if (effectiveIntentStatus(intent) !== "pending") {
     logWarnEvent("rewarded_ad_ssv_intent_not_grantable", {
-      transactionId,
-      rewardIntentId: intent.id,
+      transactionIdSuffix: suffixForLog(transactionId),
+      rewardIntentIdSuffix: suffixForLog(intent.id),
       status: intent.status,
       effectiveStatus: effectiveIntentStatus(intent),
       expiresAt: intent.expires_at
@@ -257,49 +263,140 @@ async function processSsvGrant(url: URL, env: Env, config: RemoteConfig) {
   }
 
   const identity = identityFromQuotaSubject(intent.user_id);
-  const grantedToday = await countGrantedRewards(env, intent.user_id, intent.daily_date_key);
-  if (grantedToday >= DAILY_REWARD_CAP) {
-    await markRewardIntentRejected(env, intent.id, transactionId);
-    logWarnEvent("rewarded_ad_ssv_daily_cap_reached", {
-      transactionId,
-      rewardIntentId: intent.id,
-      grantedToday,
-      dailyCap: DAILY_REWARD_CAP
-    });
-    throw new AppError(429, "Rewarded ad daily cap reached");
-  }
-
   const expiresAt = new Date(Date.now() + PROMO_CREDIT_TTL_MS).toISOString();
   const grant = await grantRewardedAdCredits(identity, env, config, {
     rewardIntentId: intent.id,
     transactionId,
     credits: REWARD_CREDITS,
-    expiresAt
-  });
-  await recordRewardTransaction(env, {
-    transactionId,
-    userId: intent.user_id,
-    rewardIntentId: intent.id,
-    adUnit,
-    operationId: grant.operationId,
-    creditsRemaining: grant.creditsRemaining
+    expiresAt,
+    dailyDateKey: intent.daily_date_key,
+    dailyCap: DAILY_REWARD_CAP
   });
 
+  if (grant.status === "cap_reached") {
+    await markRewardIntentRejected(env, intent.id, transactionId);
+    logWarnEvent("rewarded_ad_ssv_daily_cap_reached", {
+      quotaSubjectHash: hashForLog(intent.user_id),
+      transactionIdSuffix: suffixForLog(transactionId),
+      rewardIntentIdSuffix: suffixForLog(intent.id),
+      dailyRewardsUsed: grant.dailyRewardsUsed,
+      dailyRewardsRemaining: grant.dailyRewardsRemaining,
+      dailyCap: DAILY_REWARD_CAP
+    });
+    throw new AppError(429, "Rewarded ad daily cap reached");
+  }
+
+  if (grant.status === "duplicate_ignored") {
+    if (grant.rewardIntentId === intent.id) {
+      try {
+        await recordRewardTransaction(env, {
+          transactionId,
+          userId: intent.user_id,
+          rewardIntentId: intent.id,
+          adUnit,
+          operationId: grant.operationId,
+          creditsRemaining: grant.creditsRemaining
+        });
+      } catch (error) {
+        await enqueueAdMobRewardTransactionRepair(env, {
+          transactionId,
+          userId: intent.user_id,
+          rewardIntentId: intent.id,
+          adUnit,
+          operationId: grant.operationId,
+          rewardCredits: REWARD_CREDITS,
+          creditsRemaining: grant.creditsRemaining
+        });
+        logWarnEvent("rewarded_ad_transaction_audit_write_failed", {
+          quotaSubjectHash: hashForLog(intent.user_id),
+          transactionIdSuffix: suffixForLog(transactionId),
+          rewardIntentIdSuffix: suffixForLog(intent.id),
+          reason: error instanceof Error ? error.message : String(error)
+        });
+        throw error;
+      }
+    }
+    logEvent("rewarded_ad_duplicate_ignored", {
+      quotaSubjectHash: hashForLog(intent.user_id),
+      transactionIdSuffix: suffixForLog(transactionId),
+      rewardIntentIdSuffix: suffixForLog(grant.rewardIntentId),
+      dailyRewardsUsed: grant.dailyRewardsUsed,
+      dailyRewardsRemaining: grant.dailyRewardsRemaining
+    });
+    return {
+      status: "duplicate_ignored",
+      rewardIntentId: intent.id,
+      creditsGranted: 0,
+      creditsRemaining: grant.creditsRemaining,
+      dailyRewardsUsed: grant.dailyRewardsUsed,
+      dailyRewardsRemaining: grant.dailyRewardsRemaining,
+      usage: grant.usage
+    };
+  }
+
+  try {
+    await recordRewardTransaction(env, {
+      transactionId,
+      userId: intent.user_id,
+      rewardIntentId: intent.id,
+      adUnit,
+      operationId: grant.operationId,
+      creditsRemaining: grant.creditsRemaining
+    });
+  } catch (error) {
+    await enqueueAdMobRewardTransactionRepair(env, {
+      transactionId,
+      userId: intent.user_id,
+      rewardIntentId: intent.id,
+      adUnit,
+      operationId: grant.operationId,
+      rewardCredits: REWARD_CREDITS,
+      creditsRemaining: grant.creditsRemaining
+    });
+    logWarnEvent("rewarded_ad_transaction_audit_write_failed", {
+      quotaSubjectHash: hashForLog(intent.user_id),
+      transactionIdSuffix: suffixForLog(transactionId),
+      rewardIntentIdSuffix: suffixForLog(intent.id),
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
+
   logEvent("rewarded_ad_credit_granted", {
-    userId: intent.user_id,
-    rewardIntentId: intent.id,
-    transactionId,
-    creditsGranted: REWARD_CREDITS,
-    creditsRemaining: grant.creditsRemaining
+    quotaSubjectHash: hashForLog(intent.user_id),
+    rewardIntentIdSuffix: suffixForLog(intent.id),
+    transactionIdSuffix: suffixForLog(transactionId),
+    status: grant.status,
+    creditsGranted: grant.creditsGranted,
+    creditsRemaining: grant.creditsRemaining,
+    dailyRewardsUsed: grant.dailyRewardsUsed,
+    dailyRewardsRemaining: grant.dailyRewardsRemaining
   });
 
   return {
     status: "granted",
     rewardIntentId: intent.id,
-    creditsGranted: REWARD_CREDITS,
+    creditsGranted: grant.creditsGranted,
     creditsRemaining: grant.creditsRemaining,
+    dailyRewardsUsed: grant.dailyRewardsUsed,
+    dailyRewardsRemaining: grant.dailyRewardsRemaining,
     usage: grant.usage
   };
+}
+
+async function enqueueAdMobRewardTransactionRepair(
+  env: Env,
+  payload: AdMobRewardTransactionRepairPayload
+): Promise<void> {
+  await enqueueCreditAuditRepair(env, {
+    kind: "admob_reward_transaction",
+    operationId: payload.operationId,
+    quotaSubject: payload.userId,
+    transactionId: payload.transactionId,
+    rewardIntentId: payload.rewardIntentId,
+    source: "processSsvGrant.recordRewardTransaction",
+    payload
+  });
 }
 
 async function safeVerifySsv(url: URL, env: Env): Promise<boolean> {
@@ -380,8 +477,8 @@ function validateRewardPayload(
   const rewardAmount = optionalParam(url, "reward_amount");
   if (rewardAmount !== null && rewardAmount !== String(REWARD_CREDITS)) {
     logWarnEvent("rewarded_ad_ssv_invalid_reward_amount", {
-      transactionId: options.transactionId,
-      rewardIntentId: options.rewardIntentId,
+      transactionIdSuffix: suffixForLog(options.transactionId),
+      rewardIntentIdSuffix: suffixForLog(options.rewardIntentId),
       rewardAmount
     });
     throw new AppError(400, "Invalid rewarded ad amount");
@@ -390,8 +487,8 @@ function validateRewardPayload(
   const rewardItem = optionalParam(url, "reward_item");
   if (rewardItem !== null && rewardItem !== "credits") {
     logWarnEvent("rewarded_ad_ssv_invalid_reward_item", {
-      transactionId: options.transactionId,
-      rewardIntentId: options.rewardIntentId,
+      transactionIdSuffix: suffixForLog(options.transactionId),
+      rewardIntentIdSuffix: suffixForLog(options.rewardIntentId),
       rewardItem
     });
     throw new AppError(400, "Invalid rewarded ad item");

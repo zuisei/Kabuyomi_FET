@@ -6,7 +6,7 @@ import {
   type SubscriptionPlan
 } from "./billing-catalog";
 import { AppError } from "./errors";
-import { logEvent, logWarnEvent } from "./logging";
+import { logEvent, logWarnEvent, suffixForLog } from "./logging";
 
 interface CreditPurchaseVerificationRequest {
   productId: string;
@@ -186,7 +186,7 @@ async function fetchSignedTransactionInfo(env: Env, transactionId: string): Prom
         throw new AppError(502, "Apple transaction verification failed", "Missing signedTransactionInfo");
       }
       logEvent("apple_transaction_verified", {
-        transactionId,
+        transactionIdSuffix: suffixForLog(transactionId),
         environment,
         attempts
       });
@@ -205,7 +205,7 @@ async function fetchSignedTransactionInfo(env: Env, transactionId: string): Prom
     };
     attempts.push(attempt);
     logWarnEvent("apple_transaction_verification_attempt_failed", {
-      transactionId,
+      transactionIdSuffix: suffixForLog(transactionId),
       ...attempt,
       appleAuth: buildAppleAuthLog(debugInfo)
     });
@@ -216,7 +216,7 @@ async function fetchSignedTransactionInfo(env: Env, transactionId: string): Prom
   }
 
   logWarnEvent("apple_transaction_verification_failed", {
-    transactionId,
+    transactionIdSuffix: suffixForLog(transactionId),
     status: lastStatus,
     reason: lastError,
     environment: lastEnvironment,

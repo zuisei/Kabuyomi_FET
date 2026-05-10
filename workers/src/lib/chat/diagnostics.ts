@@ -497,6 +497,90 @@ export function buildChatQualityPipelinePayload({
   };
 }
 
+export function buildCompactChatQualityPipelinePayload({
+  filing,
+  answer,
+  latencyMs,
+  modelName,
+  contextMessageCount,
+  contextMessageCharCount,
+  contextApplied
+}: {
+  filing: FilingCacheRecord;
+  answer: ChatResponsePayload;
+  latencyMs: number;
+  modelName: string | null;
+  contextMessageCount: number;
+  contextMessageCharCount: number;
+  contextApplied: boolean;
+}): Record<string, unknown> {
+  const responsePath = resolveChatResponsePath(answer);
+  const selectedSourceChars = selectedResponseSourceCharCount(answer);
+  const answerQualityFlags = buildAnswerQualityFlags(answer, { contextApplied });
+
+  return {
+    diagnosticsLevel: "compact",
+    ticker: filing.ticker,
+    filingKey: filing.filingKey,
+    responsePath,
+    fallbackReason: answer.debug?.fallbackReason ?? null,
+    selectedSourceCount: answer.debug?.selectedSourceCount ?? answer.sources.length,
+    selectedSourceCharCount: answer.debug?.selectedSourceCharCount ?? selectedSourceChars,
+    estimatedContextTokens: answer.debug?.estimatedContextTokens ?? estimateTokenCountFromChars(selectedSourceChars),
+    conversationContextCount: contextMessageCount,
+    conversationContextCharCount: contextMessageCharCount,
+    modelName,
+    requestedModelName: answer.debug?.requestedModelName ?? null,
+    effectiveModelName: answer.debug?.effectiveModelName ?? answer.debug?.modelName ?? modelName,
+    modelProvider: answer.debug?.modelProvider ?? null,
+    latencyMs,
+    answerQualityFlags,
+    sourceIdsValid: answer.debug?.sourceIdsValid ?? null,
+    geminiCalled: answer.debug?.geminiCalled ?? false,
+    geminiSucceeded: answer.debug?.geminiSucceeded ?? false,
+    schemaValid: answer.debug?.schemaValid ?? null,
+    retryAttempt: answer.debug?.retryAttempt ?? 0,
+    retryReason: answer.debug?.retryReason ?? null,
+    retryAttempted: answer.debug?.retryAttempted ?? false,
+    retryOutcome: answer.debug?.retryOutcome ?? null,
+    retryWasted: answer.debug?.retryWasted ?? false,
+    sourceGateApplied: answer.debug?.sourceGateApplied ?? false,
+    sourceGateSufficient: answer.debug?.sourceGateSufficient ?? null,
+    sourceGateMissingSourceTypeCount: answer.debug?.sourceGateMissingSourceTypes?.length ?? 0,
+    sourceGateFailureLabelCount: answer.debug?.sourceGateFailureLabels?.length ?? 0,
+    retrievalRetryUsed: answer.debug?.retrievalRetryUsed ?? false,
+    retrievalRetryOutcome: answer.debug?.retrievalRetryOutcome ?? "not_used",
+    evidenceFallbackUsed: answer.debug?.evidenceFallbackUsed ?? false,
+    fallbackKind: answer.debug?.fallbackKind ?? "none",
+    driverSlotsCount: answer.debug?.driverSlotsCount ?? 0,
+    marginDriverSlotsCount: answer.debug?.marginDriverSlotsCount ?? 0,
+    hardRetrievalPlanUsed: answer.debug?.hardRetrievalPlanUsed ?? false,
+    hardRetrievalQueryCount: answer.debug?.hardRetrievalQueries?.length ?? 0,
+    hardRetrievalMissingSourceTypeCount: answer.debug?.hardRetrievalMissingSourceTypes?.length ?? 0,
+    hardRetrievalAddedSourceCount: answer.debug?.hardRetrievalAddedSourceCount ?? 0,
+    hardRetrievalOutcome: answer.debug?.hardRetrievalOutcome ?? "not_used",
+    hardRetrievalMode: answer.debug?.hardRetrievalMode ?? "diagnostic",
+    modelApiErrorKind: answer.debug?.modelApiErrorKind ?? answer.debug?.geminiApiErrorKind ?? null,
+    modelApiErrorStatus: answer.debug?.modelApiErrorStatus ?? answer.debug?.geminiApiErrorStatus ?? null,
+    modelApiErrorRetryable: answer.debug?.modelApiErrorRetryable ?? answer.debug?.geminiApiErrorRetryable ?? null,
+    promptTokenCount: answer.debug?.promptTokenCount ?? null,
+    completionTokenCount: answer.debug?.completionTokenCount ?? null,
+    totalTokenCount: answer.debug?.totalTokenCount ?? null,
+    modelCallLatencyMs: answer.debug?.modelCallLatencyMs ?? null,
+    totalPipelineMs: answer.debug?.totalPipelineMs ?? null,
+    historicalLookupMs: answer.debug?.historicalLookupMs ?? null,
+    deterministicBuildMs: answer.debug?.deterministicBuildMs ?? null,
+    contextBuildMs: answer.debug?.contextBuildMs ?? null,
+    geminiFirstCallMs: answer.debug?.geminiFirstCallMs ?? null,
+    geminiRetryMs: answer.debug?.geminiRetryMs ?? null,
+    fallbackBuildMs: answer.debug?.fallbackBuildMs ?? null,
+    webSupplementMs: answer.debug?.webSupplementMs ?? null,
+    groundingMs: answer.debug?.groundingMs ?? null,
+    contextApplied,
+    finalSourceCount: answer.sources.length
+  };
+}
+
 export function selectedResponseSourceCharCount(answer: ChatResponsePayload): number {
   return answer.sources.reduce((sum, source) => sum + source.excerpt.length, 0);
 }

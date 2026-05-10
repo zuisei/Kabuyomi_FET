@@ -39,6 +39,22 @@ function createState(initialEntries: Record<string, unknown> = {}) {
   };
 }
 
+function createSerialState(initialEntries: Record<string, unknown> = {}) {
+  const state = createState(initialEntries);
+  let tail = Promise.resolve();
+  return {
+    ...state,
+    async blockConcurrencyWhile<T>(callback: () => Promise<T>) {
+      const run = tail.then(callback, callback);
+      tail = run.then(
+        () => undefined,
+        () => undefined
+      );
+      return run;
+    }
+  };
+}
+
 async function postQuota(
   quota: UserQuotaDO,
   body: Record<string, unknown>
@@ -912,12 +928,146 @@ describe("UserQuotaDO", () => {
     });
     await expect(downgrade.json()).resolves.toMatchObject({
       didMutate: false,
+      creditOperation: {
+        operationId: expect.stringContaining("monthly-downgrade-no-clawback:lite:900->400"),
+        type: "monthly_grant",
+        status: "noop",
+        delta: 0,
+        referenceType: "subscription_downgrade_no_clawback",
+        monthlyBalanceAfter: 900,
+        purchasedBalanceAfter: 50
+      },
       usage: {
+        plan: "lite",
         credits: {
-          monthlyLimit: 400,
-          monthlyRemaining: 400,
+          monthlyLimit: 900,
+          monthlyRemaining: 900,
           purchasedRemaining: 50,
-          totalRemaining: 450
+          totalRemaining: 950
+        }
+      }
+    });
+  });
+
+  it("keeps same-period Max to Pro downgrades no-clawback and idempotent", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+    const base = {
+      action: "ensureMonthlyCreditGrant",
+      quotaSubject: "free:test-device",
+      dateJST: "2026-05-10",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditPeriodStart: "2026-05-01T00:00:00.000Z",
+      monthlyCreditPeriodEnd: "2026-06-01T00:00:00.000Z"
+    };
+
+    await postQuota(quota, {
+      ...base,
+      plan: "pro_max",
+      monthlyCreditLimit: 2000,
+      monthlyGrantOperationId: "sub-grant:max"
+    });
+    const firstDowngrade = await postQuota(quota, {
+      ...base,
+      plan: "pro",
+      monthlyCreditLimit: 900,
+      monthlyGrantOperationId: "sub-grant:pro-downgrade"
+    });
+    const duplicateDowngrade = await postQuota(quota, {
+      ...base,
+      plan: "pro",
+      monthlyCreditLimit: 900,
+      monthlyGrantOperationId: "sub-grant:pro-downgrade"
+    });
+
+    await expect(firstDowngrade.json()).resolves.toMatchObject({
+      creditOperation: {
+        operationId: expect.stringContaining("monthly-downgrade-no-clawback:pro:2000->900"),
+        status: "noop",
+        delta: 0,
+        referenceType: "subscription_downgrade_no_clawback",
+        monthlyBalanceAfter: 2000
+      },
+      usage: {
+        plan: "pro",
+        credits: {
+          monthlyLimit: 2000,
+          monthlyRemaining: 2000,
+          purchasedRemaining: 0,
+          totalRemaining: 2000
+        }
+      }
+    });
+    const duplicatePayload = (await duplicateDowngrade.json()) as Record<string, unknown>;
+    expect(duplicatePayload).not.toHaveProperty("creditOperation");
+    expect(duplicatePayload).toMatchObject({
+      usage: {
+        plan: "pro",
+        credits: {
+          monthlyLimit: 2000,
+          monthlyRemaining: 2000,
+          purchasedRemaining: 0,
+          totalRemaining: 2000
+        }
+      }
+    });
+  });
+
+  it("grants exactly the same-period Pro to Max upgrade delta once", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+    const base = {
+      action: "ensureMonthlyCreditGrant",
+      quotaSubject: "free:test-device",
+      dateJST: "2026-05-10",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditPeriodStart: "2026-05-01T00:00:00.000Z",
+      monthlyCreditPeriodEnd: "2026-06-01T00:00:00.000Z"
+    };
+
+    await postQuota(quota, {
+      ...base,
+      plan: "pro",
+      monthlyCreditLimit: 900,
+      monthlyGrantOperationId: "sub-grant:pro"
+    });
+    const max = await postQuota(quota, {
+      ...base,
+      plan: "pro_max",
+      monthlyCreditLimit: 2000,
+      monthlyGrantOperationId: "sub-grant:max"
+    });
+    const duplicateMax = await postQuota(quota, {
+      ...base,
+      plan: "pro_max",
+      monthlyCreditLimit: 2000,
+      monthlyGrantOperationId: "sub-grant:max"
+    });
+
+    await expect(max.json()).resolves.toMatchObject({
+      monthlyGrant: {
+        operationId: "sub-grant:max",
+        creditsGranted: 1100,
+        monthlyBalanceAfter: 2000
+      },
+      usage: {
+        plan: "pro_max",
+        credits: {
+          monthlyLimit: 2000,
+          monthlyRemaining: 2000,
+          totalRemaining: 2000
+        }
+      }
+    });
+    const duplicatePayload = (await duplicateMax.json()) as Record<string, unknown>;
+    expect(duplicatePayload).not.toHaveProperty("monthlyGrant");
+    expect(duplicatePayload).toMatchObject({
+      usage: {
+        plan: "pro_max",
+        credits: {
+          monthlyLimit: 2000,
+          monthlyRemaining: 2000,
+          totalRemaining: 2000
         }
       }
     });
@@ -1217,6 +1367,9 @@ describe("UserQuotaDO", () => {
       operationId: "admob-reward:tx-1",
       credits: 2,
       promoExpiresAt: "2026-05-16T00:00:00.000Z",
+      dailyRewardDateKey: "2026-04-16",
+      dailyRewardCap: 3,
+      transactionId: "tx-1",
       referenceType: "admob_rewarded",
       referenceId: "intent-1"
     });
@@ -1231,6 +1384,9 @@ describe("UserQuotaDO", () => {
       operationId: "admob-reward:tx-1",
       credits: 2,
       promoExpiresAt: "2026-05-16T00:00:00.000Z",
+      dailyRewardDateKey: "2026-04-16",
+      dailyRewardCap: 3,
+      transactionId: "tx-1",
       referenceType: "admob_rewarded",
       referenceId: "intent-1"
     });
@@ -1250,7 +1406,9 @@ describe("UserQuotaDO", () => {
           purchasedRemaining: 0,
           totalRemaining: 32
         }
-      }
+      },
+      dailyRewardsUsed: 1,
+      dailyRewardsRemaining: 2
     });
     await expect(duplicate.json()).resolves.toMatchObject({
       didMutate: false,
@@ -1258,6 +1416,131 @@ describe("UserQuotaDO", () => {
         credits: {
           rewardedAdRemaining: 2,
           totalRemaining: 32
+        }
+      },
+      dailyRewardsUsed: 1,
+      dailyRewardsRemaining: 2
+    });
+  });
+
+  it("serializes rewarded ad daily cap grants per user and day", async () => {
+    const quota = new UserQuotaDO(createSerialState() as never);
+    const grantBody = (index: number) => ({
+      action: "grantRewardedAdCredit",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30,
+      operationId: `admob-reward:tx-${index}`,
+      credits: 2,
+      promoExpiresAt: "2026-05-16T00:00:00.000Z",
+      dailyRewardDateKey: "2026-04-16",
+      dailyRewardCap: 3,
+      transactionId: `tx-${index}`,
+      referenceType: "admob_rewarded",
+      referenceId: `intent-${index}`
+    });
+
+    const responses = await Promise.all([1, 2, 3, 4, 5].map((index) => postQuota(quota, grantBody(index))));
+    const payloads = await Promise.all(
+      responses.map(async (response) => ({ status: response.status, body: (await response.json()) as Record<string, any> }))
+    );
+
+    expect(payloads.filter((payload) => payload.status === 200 && payload.body.didMutate === true)).toHaveLength(3);
+    expect(payloads.filter((payload) => payload.status === 429 && payload.body.error === "daily_cap_reached")).toHaveLength(2);
+    expect(payloads[payloads.length - 1]?.body).toMatchObject({
+      dailyRewardsUsed: 3,
+      dailyRewardsRemaining: 0,
+      usage: {
+        credits: {
+          rewardedAdRemaining: 6,
+          totalRemaining: 36
+        }
+      }
+    });
+  });
+
+  it("does not increment rewarded ad daily count for concurrent duplicate transactions", async () => {
+    const quota = new UserQuotaDO(createSerialState() as never);
+    const body = {
+      action: "grantRewardedAdCredit",
+      quotaSubject: "free:test-device",
+      plan: "free",
+      dateJST: "2026-04-16",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 30,
+      operationId: "admob-reward:tx-duplicate",
+      credits: 2,
+      promoExpiresAt: "2026-05-16T00:00:00.000Z",
+      dailyRewardDateKey: "2026-04-16",
+      dailyRewardCap: 3,
+      transactionId: "tx-duplicate",
+      referenceType: "admob_rewarded",
+      referenceId: "intent-duplicate"
+    };
+
+    const responses = await Promise.all([0, 1, 2, 3].map(() => postQuota(quota, body)));
+    const payloads = await Promise.all(
+      responses.map(async (response) => ({ status: response.status, body: (await response.json()) as Record<string, any> }))
+    );
+
+    expect(payloads.every((payload) => payload.status === 200)).toBe(true);
+    expect(payloads.filter((payload) => payload.body.didMutate === true)).toHaveLength(1);
+    expect(payloads.every((payload) => payload.body.dailyRewardsUsed === 1)).toBe(true);
+    expect(payloads.every((payload) => payload.body.dailyRewardsRemaining === 2)).toBe(true);
+    expect(payloads[payloads.length - 1]?.body).toMatchObject({
+      usage: {
+        credits: {
+          rewardedAdRemaining: 2,
+          totalRemaining: 32
+        }
+      }
+    });
+  });
+
+  it("resets rewarded ad daily cap on the next day", async () => {
+    const quota = new UserQuotaDO(createSerialState() as never);
+    const grant = (index: number, day: string) =>
+      postQuota(quota, {
+        action: "grantRewardedAdCredit",
+        quotaSubject: "free:test-device",
+        plan: "free",
+        dateJST: day,
+        chatLimit: 3,
+        stockLimit: 3,
+        monthlyCreditLimit: 30,
+        operationId: `admob-reward:${day}:tx-${index}`,
+        credits: 2,
+        promoExpiresAt: "2026-05-16T00:00:00.000Z",
+        dailyRewardDateKey: day,
+        dailyRewardCap: 3,
+        transactionId: `${day}:tx-${index}`,
+        referenceType: "admob_rewarded",
+        referenceId: `${day}:intent-${index}`
+      });
+
+    await Promise.all([1, 2, 3].map((index) => grant(index, "2026-04-16")));
+    const capped = await grant(4, "2026-04-16");
+    const nextDay = await grant(1, "2026-04-17");
+
+    expect(capped.status).toBe(429);
+    await expect(capped.json()).resolves.toMatchObject({
+      error: "daily_cap_reached",
+      dailyRewardsUsed: 3,
+      dailyRewardsRemaining: 0
+    });
+    expect(nextDay.status).toBe(200);
+    await expect(nextDay.json()).resolves.toMatchObject({
+      didMutate: true,
+      dailyRewardsUsed: 1,
+      dailyRewardsRemaining: 2,
+      usage: {
+        credits: {
+          rewardedAdRemaining: 8,
+          totalRemaining: 38
         }
       }
     });

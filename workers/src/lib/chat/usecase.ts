@@ -1,10 +1,10 @@
 import type { z } from "zod";
-import type { Env, FilingCacheRecord } from "../../env";
+import type { Env, FilingCacheRecord, UsageState } from "../../env";
 import { resolveLlmProvider } from "../../clients/llm/provider";
 import { resolveGeminiModel } from "../../clients/gemini/request";
 import { resolveOpenAIChatModel } from "../../clients/llm/providers/openai/request";
 import { ChatRequestSchema } from "../contracts";
-import { consumeBillableCredits, refundBillableCredits } from "../credit-operation";
+import { consumeBillableCredits } from "../credit-operation";
 import {
   backfillMarginSourceAssets,
   backfillRevenueDriverSourceAssets,
@@ -16,9 +16,10 @@ import {
 } from "../filings/content-upgrade";
 import {
   consumeChatQuota,
+  ensureChatQuotaAvailable,
+  InsufficientCreditsError,
+  loadUsage,
   readQuotaIdentity,
-  refundChatQuota,
-  type CreditMutationResult
 } from "../quota";
 import { logErrorEvent, logEvent } from "../logging";
 import { isCreditBillingEnabledForIdentity, type RemoteConfig } from "../remote-config";
@@ -27,6 +28,7 @@ import { formatChatAnswerForDisplay } from "./answer-format";
 import { type ChatContextMessage, resolveContextualQuestion } from "./context";
 import {
   buildAnswerQualityFlags,
+  buildCompactChatQualityPipelinePayload,
   buildChatQualityPipelinePayload,
   resolveChatResponsePath
 } from "./diagnostics";
@@ -58,29 +60,112 @@ export async function answerChatUsecase({
   const preparedFiling = await prepareFilingForChat(filing, env, ctx);
   const creditOperationId = payload.operationId ?? crypto.randomUUID();
   const creditBillingEnabled = isCreditBillingEnabledForIdentity(config, identity);
-  let chatCharge = await chargeChat({
+  const lifecycleLogFields = buildChatLifecycleLogFields({
     identity,
-    env,
-    config,
     creditBillingEnabled,
     creditOperationId,
-    filingKey: preparedFiling.filingKey
+    filing: preparedFiling
   });
+  let chatCharge: ChatChargeResult;
+  try {
+    chatCharge = await preflightChatCharge({
+      identity,
+      env,
+      config,
+      creditBillingEnabled,
+      filingKey: preparedFiling.filingKey
+    });
+    logEvent("chat_credit_preflight_passed", {
+      ...lifecycleLogFields,
+      chargeStage: "preflight",
+      creditsRemaining: chatCharge.creditsRemaining ?? chatCharge.usage.credits?.totalRemaining ?? null
+    });
+  } catch (error) {
+    if (error instanceof InsufficientCreditsError) {
+      logEvent("chat_credit_preflight_failed", {
+        ...lifecycleLogFields,
+        chargeStage: "preflight",
+        creditsRemaining: error.creditsRemaining,
+        creditsRequired: error.creditsRequired,
+        errorKind: "insufficient_credits"
+      });
+    }
+    throw error;
+  }
   const startedAt = Date.now();
   const resolvedQuestion = resolveContextualQuestion(payload.question, payload.conversationContext);
   const followupContext = summarizeFollowupContext(payload.conversationContext);
-  const answer = await buildChatResponseWithRefund({
-    filing: preparedFiling,
-    question: resolvedQuestion,
-    env,
-    config,
-    ctx,
-    identity,
-    creditBillingEnabled,
-    chatCharge,
-    creditOperationId,
-    followupContext
+  logEvent("chat_generation_started", {
+    ...lifecycleLogFields,
+    chargeStage: "generation",
+    conversationContextCount: payload.conversationContext?.length ?? 0,
+    conversationContextCharCount: countConversationContextChars(payload.conversationContext)
   });
+  let answer: Awaited<ReturnType<typeof buildChatResponse>>;
+  try {
+    answer = await buildChatResponseBeforeCharge({
+      filing: preparedFiling,
+      question: resolvedQuestion,
+      env,
+      config,
+      ctx,
+      followupContext
+    });
+    logEvent("chat_generation_succeeded", {
+      ...lifecycleLogFields,
+      chargeStage: "generation",
+      responsePath: answer.responsePath ?? answer.debug?.responsePath ?? "fallback",
+      chargeable: answer.chargeable !== false
+    });
+  } catch (error) {
+    logErrorEvent("chat_generation_failed_before_charge", {
+      ...lifecycleLogFields,
+      chargeStage: "generation",
+      errorKind: error instanceof Error ? error.name : "unknown",
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
+  if (answer.chargeable !== false) {
+    logEvent("chat_charge_commit_attempted", {
+      ...lifecycleLogFields,
+      chargeStage: "commit",
+      creditsRequired: creditBillingEnabled ? CHAT_CREDIT_COST : null
+    });
+    try {
+      chatCharge = await commitChatChargeAfterGeneration({
+        identity,
+        env,
+        config,
+        creditBillingEnabled,
+        creditOperationId,
+        filingKey: preparedFiling.filingKey
+      });
+      logEvent("chat_charge_commit_succeeded", {
+        ...lifecycleLogFields,
+        chargeStage: "commit",
+        charged: true,
+        creditDelta: chatCharge.creditsCharged ? -chatCharge.creditsCharged : null,
+        creditsRemaining: chatCharge.creditsRemaining ?? chatCharge.usage.credits?.totalRemaining ?? null
+      });
+    } catch (error) {
+      logErrorEvent("chat_charge_commit_failed", {
+        ...lifecycleLogFields,
+        chargeStage: "commit",
+        errorKind: error instanceof InsufficientCreditsError ? "insufficient_credits" : error instanceof Error ? error.name : "unknown",
+        creditsRemaining: error instanceof InsufficientCreditsError ? error.creditsRemaining : null,
+        creditsRequired: error instanceof InsufficientCreditsError ? error.creditsRequired : creditBillingEnabled ? CHAT_CREDIT_COST : null
+      });
+      throw error;
+    }
+  } else {
+    logEvent("chat_response_non_chargeable", {
+      ...lifecycleLogFields,
+      chargeStage: "commit",
+      charged: false,
+      responsePath: answer.responsePath ?? answer.debug?.responsePath ?? "fallback"
+    });
+  }
   const latencyMs = Date.now() - startedAt;
   const responsePath = resolveChatResponsePath(answer);
   const answerQualityFlags = buildAnswerQualityFlags(answer, {
@@ -88,54 +173,34 @@ export async function answerChatUsecase({
   });
   const modelNameForLog = answer.debug?.geminiCalled === true || isRemoteModelResponsePath(responsePath) ? resolveSelectedChatModelName(env, answer.debug?.modelName) : null;
 
-  if (answer.chargeable === false) {
-    try {
-      const refund = await refundChat({
-        identity,
-        env,
-        config,
-        creditBillingEnabled,
-        chatCharge,
-        creditOperationId,
-        filingKey: preparedFiling.filingKey
-      });
-      chatCharge = chatChargeAfterRefund(refund, creditBillingEnabled);
-      logEvent("chat_non_chargeable_refunded", {
-        filingKey: preparedFiling.filingKey,
-        quotaSubject: identity.quotaSubject,
-        responsePath: answer.responsePath ?? "fallback",
-        creditBillingEnabled
-      });
-    } catch (refundError) {
-      logErrorEvent("chat_non_chargeable_refund_failed", {
-        filingKey: preparedFiling.filingKey,
-        quotaSubject: identity.quotaSubject,
-        reason: refundError instanceof Error ? refundError.message : String(refundError)
-      });
-    }
-  }
-
   logEvent("chat_request", {
     ticker: preparedFiling.ticker,
     filingKey: preparedFiling.filingKey,
-    quotaSubject: identity.quotaSubject,
+    quotaSubjectSuffix: suffixForLog(identity.quotaSubject),
     identityKind: identity.identityKind,
     latencyMs,
     contextMessageCount: payload.conversationContext?.length ?? 0,
+    conversationContextCharCount: countConversationContextChars(payload.conversationContext),
     contextApplied: resolvedQuestion !== payload.question,
-    sourceCount: answer.sources.length
+    sourceCount: answer.sources.length,
+    chargeStage: answer.chargeable === false ? "not_chargeable" : "committed",
+    charged: answer.chargeable !== false,
+    creditsCharged: chatCharge.creditsCharged ?? null,
+    creditsRemaining: chatCharge.creditsRemaining ?? chatCharge.usage.credits?.totalRemaining ?? null
   });
 
   logEvent(
     "chat_quality_pipeline",
-    buildChatQualityPipelinePayload({
+    buildChatDiagnosticsPayload({
       filing: preparedFiling,
       originalQuestion: payload.question,
       rewrittenQuestion: resolvedQuestion,
       answer,
       latencyMs,
       modelName: modelNameForLog,
-      contextMessageCount: payload.conversationContext?.length ?? 0
+      contextMessageCount: payload.conversationContext?.length ?? 0,
+      contextMessageCharCount: countConversationContextChars(payload.conversationContext),
+      env
     })
   );
 
@@ -161,6 +226,15 @@ export async function answerChatUsecase({
       answerQualityFlags
     };
   }
+  logEvent("chat_response_returned", {
+    ...lifecycleLogFields,
+    chargeStage: answer.chargeable === false ? "not_chargeable" : "committed",
+    charged: answer.chargeable !== false,
+    status: 200,
+    responsePath: answer.responsePath,
+    latencyMs,
+    creditsRemaining: chatCharge.creditsRemaining ?? chatCharge.usage.credits?.totalRemaining ?? null
+  });
   return body;
 }
 
@@ -176,22 +250,18 @@ function resolveSelectedChatModelName(env: Env, debugModelName?: string | null):
 }
 
 interface ChatChargeResult {
-  usage: Awaited<ReturnType<typeof consumeChatQuota>>;
+  usage: UsageState;
   didMutate?: boolean;
   creditsCharged?: number;
   creditsRemaining?: number;
 }
 
-async function buildChatResponseWithRefund({
+async function buildChatResponseBeforeCharge({
   filing,
   question,
   env,
   config,
   ctx,
-  identity,
-  creditBillingEnabled,
-  chatCharge,
-  creditOperationId,
   followupContext
 }: {
   filing: FilingCacheRecord;
@@ -199,32 +269,15 @@ async function buildChatResponseWithRefund({
   env: Env;
   config: RemoteConfig;
   ctx: Pick<ExecutionContext, "waitUntil">;
-  identity: Awaited<ReturnType<typeof readQuotaIdentity>>;
-  creditBillingEnabled: boolean;
-  chatCharge: ChatChargeResult;
-  creditOperationId: string;
   followupContext: FollowupContextSummary;
 }): ReturnType<typeof buildChatResponse> {
-  try {
-    const options: Parameters<typeof buildChatResponse>[4] = { executionContext: ctx };
-    if (followupContext.previousQuestion || followupContext.previousAnswer) {
-      options.followupContext = followupContext;
-    }
-    return await buildChatResponse(filing, question, env, config, {
-      ...options
-    });
-  } catch (error) {
-    return refundAfterChatGenerationFailure({
-      error,
-      filing,
-      env,
-      config,
-      identity,
-      creditBillingEnabled,
-      chatCharge,
-      creditOperationId
-    });
+  const options: Parameters<typeof buildChatResponse>[4] = { executionContext: ctx };
+  if (followupContext.previousQuestion || followupContext.previousAnswer) {
+    options.followupContext = followupContext;
   }
+  return buildChatResponse(filing, question, env, config, {
+    ...options
+  });
 }
 
 interface FollowupContextSummary {
@@ -241,46 +294,40 @@ function summarizeFollowupContext(context: ChatContextMessage[] = []): FollowupC
   };
 }
 
-async function refundAfterChatGenerationFailure({
-  error,
-  filing,
+async function preflightChatCharge({
+  identity,
   env,
   config,
-  identity,
   creditBillingEnabled,
-  chatCharge,
-  creditOperationId
+  filingKey
 }: {
-  error: unknown;
-  filing: FilingCacheRecord;
+  identity: Awaited<ReturnType<typeof readQuotaIdentity>>;
   env: Env;
   config: RemoteConfig;
-  identity: Awaited<ReturnType<typeof readQuotaIdentity>>;
   creditBillingEnabled: boolean;
-  chatCharge: ChatChargeResult;
-  creditOperationId: string;
-}): ReturnType<typeof buildChatResponse> {
-  try {
-    await refundChat({
-      identity,
-      env,
-      config,
-      creditBillingEnabled,
-      chatCharge,
-      creditOperationId,
-      filingKey: filing.filingKey
-    });
-  } catch (refundError) {
-    logErrorEvent("chat_quota_refund_failed", {
-      filingKey: filing.filingKey,
-      quotaSubject: identity.quotaSubject,
-      reason: refundError instanceof Error ? refundError.message : String(refundError)
-    });
+  filingKey: string;
+}): Promise<ChatChargeResult> {
+  if (!creditBillingEnabled) {
+    return {
+      usage: await ensureChatQuotaAvailable(identity, env, config),
+      didMutate: false
+    };
   }
-  throw error;
+
+  const usage = await loadUsage(identity, env, config);
+  const creditsRemaining = usage.credits?.totalRemaining ?? 0;
+  if (creditsRemaining < CHAT_CREDIT_COST) {
+    throw new InsufficientCreditsError(CHAT_CREDIT_COST, creditsRemaining);
+  }
+  return {
+    usage,
+    didMutate: false,
+    creditsCharged: 0,
+    creditsRemaining
+  };
 }
 
-async function chargeChat({
+async function commitChatChargeAfterGeneration({
   identity,
   env,
   config,
@@ -321,63 +368,88 @@ async function chargeChat({
   };
 }
 
-async function refundChat({
-  identity,
-  env,
-  config,
-  creditBillingEnabled,
-  chatCharge,
-  creditOperationId,
-  filingKey
+function buildChatDiagnosticsPayload({
+  filing,
+  originalQuestion,
+  rewrittenQuestion,
+  answer,
+  latencyMs,
+  modelName,
+  contextMessageCount,
+  contextMessageCharCount,
+  env
 }: {
-  identity: Awaited<ReturnType<typeof readQuotaIdentity>>;
+  filing: FilingCacheRecord;
+  originalQuestion: string;
+  rewrittenQuestion: string;
+  answer: Awaited<ReturnType<typeof buildChatResponse>>;
+  latencyMs: number;
+  modelName: string | null;
+  contextMessageCount: number;
+  contextMessageCharCount: number;
   env: Env;
-  config: RemoteConfig;
-  creditBillingEnabled: boolean;
-  chatCharge: ChatChargeResult;
-  creditOperationId: string;
-  filingKey: string;
-}): Promise<CreditMutationResult | Awaited<ReturnType<typeof refundChatQuota>>> {
-  if (!creditBillingEnabled) {
-    return refundChatQuota(identity, env, config, { operationId: creditOperationId });
-  }
-
-  return refundBillableCredits({
-    identity,
-    env,
-    config,
-    charge: {
-      usage: chatCharge.usage,
-      didMutate: chatCharge.didMutate,
-      operationId: creditOperationId,
-      creditsCharged: chatCharge.creditsCharged ?? 0,
-      creditsRemaining: chatCharge.creditsRemaining
-    },
-    reference: {
-      type: "chat",
-      id: filingKey
-    }
-  });
-}
-
-function chatChargeAfterRefund(
-  refund: CreditMutationResult | Awaited<ReturnType<typeof refundChatQuota>>,
-  creditBillingEnabled: boolean
-): ChatChargeResult {
-  if (!creditBillingEnabled) {
+}): Record<string, unknown> {
+  if (shouldUseVerboseChatDiagnostics(env)) {
     return {
-      usage: refund as Awaited<ReturnType<typeof refundChatQuota>>,
-      didMutate: true
+      diagnosticsLevel: "verbose",
+      ...buildChatQualityPipelinePayload({
+        filing,
+        originalQuestion,
+        rewrittenQuestion,
+        answer,
+        latencyMs,
+        modelName,
+        contextMessageCount
+      })
     };
   }
 
-  const creditRefund = refund as CreditMutationResult;
+  return buildCompactChatQualityPipelinePayload({
+    filing,
+    answer,
+    latencyMs,
+    modelName,
+    contextMessageCount,
+    contextMessageCharCount,
+    contextApplied: rewrittenQuestion !== originalQuestion
+  });
+}
+
+function buildChatLifecycleLogFields({
+  identity,
+  creditBillingEnabled,
+  creditOperationId,
+  filing
+}: {
+  identity: Awaited<ReturnType<typeof readQuotaIdentity>>;
+  creditBillingEnabled: boolean;
+  creditOperationId: string;
+  filing: FilingCacheRecord;
+}): Record<string, unknown> {
   return {
-    usage: creditRefund.usage,
-    didMutate: creditRefund.didMutate,
-    creditsCharged: 0,
-    creditsRemaining: creditRefund.creditsRemaining
+    ticker: filing.ticker,
+    filingKey: filing.filingKey,
+    identityKind: identity.identityKind,
+    quotaSubjectSuffix: suffixForLog(identity.quotaSubject),
+    operationIdSuffix: suffixForLog(creditOperationId),
+    creditBillingEnabled
   };
+}
+
+function countConversationContextChars(context: ChatContextMessage[] = []): number {
+  return context.reduce((sum, message) => sum + message.content.length, 0);
+}
+
+function shouldUseVerboseChatDiagnostics(env: Env): boolean {
+  const explicitLevel = (env as unknown as Record<string, string | undefined>).CHAT_DIAGNOSTICS_LEVEL;
+  return shouldIncludeChatDebug(env) || explicitLevel === "verbose";
+}
+
+function suffixForLog(value: string | undefined, length = 8): string | null {
+  if (!value) {
+    return null;
+  }
+  return value.slice(-length);
 }
 
 async function prepareFilingForChat(

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AppRootView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.scenePhase) private var scenePhase
 
     private var alertIsPresented: Binding<Bool> {
         Binding(
@@ -34,6 +35,9 @@ struct AppRootView: View {
                 await appModel.bootstrap()
             }
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            appModel.handleRewardedAdScenePhaseChanged(scenePhaseName(newPhase))
+        }
         .alert(
             "Kabuyomi",
             isPresented: alertIsPresented,
@@ -55,6 +59,19 @@ struct AppRootView: View {
                 Text(alert.message)
             }
         )
+    }
+
+    private func scenePhaseName(_ phase: ScenePhase) -> String {
+        switch phase {
+        case .active:
+            return "active"
+        case .inactive:
+            return "inactive"
+        case .background:
+            return "background"
+        @unknown default:
+            return "unknown"
+        }
     }
 }
 

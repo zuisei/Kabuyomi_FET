@@ -16,6 +16,7 @@ import { handleCompanyRoute } from "./routes/company";
 import { handleCreditPurchaseGrantRoute } from "./routes/credit-purchase-grant";
 import { handleFilingPrepJobRoute } from "./routes/filing-prep-job";
 import { handleInternalBackfillHistoryRoute } from "./routes/internal-backfill-history";
+import { handleInternalCreditAuditRepairRoute } from "./routes/internal-credit-audit-repair";
 import { handleInternalCleanupFilingsRoute } from "./routes/internal-cleanup-filings";
 import { handleInternalCreditPurchaseGrantRoute } from "./routes/internal-credit-purchase-grant";
 import { handleInternalEvalCreditGrantRoute } from "./routes/internal-eval-credit-grant";
@@ -33,6 +34,7 @@ const preMaintenanceRoutes: RouteHandler[] = [
   handleLegalRoute,
   handleInternalBackfillHistoryRoute,
   handleInternalCleanupFilingsRoute,
+  handleInternalCreditAuditRepairRoute,
   handleInternalCreditPurchaseGrantRoute,
   handleInternalEvalCreditGrantRoute
 ];

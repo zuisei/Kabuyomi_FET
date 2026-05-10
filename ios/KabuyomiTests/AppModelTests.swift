@@ -349,15 +349,159 @@ final class AppModelTests: XCTestCase {
         let didSend = await model.sendChat(question: "売上高は？", ticker: "AAPL")
 
         XCTAssertFalse(didSend)
+        XCTAssertNil(model.activeAlert)
         XCTAssertEqual(
-            model.activeAlert?.message,
-            """
-クレジットが不足しています
-この質問には 2 credits が必要です。
-現在の残高: 0 credits
-"""
+            model.insufficientCreditRecovery,
+            InsufficientCreditRecoveryState(
+                requiredCredits: 2,
+                remainingCredits: 0,
+                source: .localChatPreflight
+            )
         )
+        XCTAssertNotNil(model.insufficientCreditRecoveryRequestID)
         XCTAssertEqual(model.usage?.credits?.totalRemaining, 0)
+    }
+
+    func testRequestCreditOptionsOpensRecoveryStateFromComposer() {
+        let model = makeAppModel()
+        model.usage = UsagePayload(
+            plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
+            chatsUsed: 0,
+            chatLimit: 10,
+            stocksUsed: 1,
+            stockLimit: 3,
+            dateJST: "2026-04-26",
+            savedTickers: ["AAPL"],
+            accessMode: nil,
+            credits: CreditUsagePayload(
+                monthlyRemaining: 1,
+                monthlyLimit: 30,
+                rewardedAdRemaining: nil,
+                rewardedAdExpiresAt: nil,
+                purchasedRemaining: 0,
+                totalRemaining: 1,
+                resetsAt: "2026-05-01T00:00:00+09:00"
+            ),
+            creditBillingEnabled: true
+        )
+
+        model.requestCreditOptions()
+
+        XCTAssertEqual(
+            model.insufficientCreditRecovery,
+            InsufficientCreditRecoveryState(
+                requiredCredits: 2,
+                remainingCredits: 1,
+                source: .chatComposer
+            )
+        )
+        XCTAssertNotNil(model.insufficientCreditRecoveryRequestID)
+    }
+
+    func testSendChatServerInsufficientCreditsOpensRecoveryState() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let company = TestFixtures.companyPayload()
+        try persistence.saveCompany(company, searchItem: nil)
+
+        let model = makeAppModel(persistence: persistence)
+        model.setAIConsent(true)
+        model.usage = UsagePayload(
+            plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
+            chatsUsed: 0,
+            chatLimit: 10,
+            stocksUsed: 1,
+            stockLimit: 3,
+            dateJST: "2026-04-26",
+            savedTickers: ["AAPL"],
+            accessMode: nil,
+            credits: CreditUsagePayload(
+                monthlyRemaining: 2,
+                monthlyLimit: 30,
+                rewardedAdRemaining: nil,
+                rewardedAdExpiresAt: nil,
+                purchasedRemaining: 0,
+                totalRemaining: 2,
+                resetsAt: "2026-05-01T00:00:00+09:00"
+            ),
+            creditBillingEnabled: true
+        )
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            if request.url?.path == "/v1/chat" {
+                let response = HTTPURLResponse(url: request.url!, statusCode: 402, httpVersion: nil, headerFields: nil)!
+                let data = try TestFixtures.jsonData([
+                    "error": "insufficient_credits",
+                    "creditsRequired": 2,
+                    "creditsRemaining": 0
+                ])
+                return (response, data)
+            }
+
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 0))
+        }
+
+        let didSend = await model.sendChat(question: "売上高は？", ticker: "AAPL")
+
+        XCTAssertFalse(didSend)
+        XCTAssertNil(model.activeAlert)
+        XCTAssertEqual(
+            model.insufficientCreditRecovery,
+            InsufficientCreditRecoveryState(
+                requiredCredits: 2,
+                remainingCredits: 0,
+                source: .serverChatResponse
+            )
+        )
+        XCTAssertNotNil(model.insufficientCreditRecoveryRequestID)
+        XCTAssertEqual(model.usage?.credits?.totalRemaining, 2)
+    }
+
+    func testInsufficientCreditRecoveryTracksWhenCreditsBecomeSufficient() {
+        let model = makeAppModel()
+        model.requestInsufficientCreditRecovery(requiredCredits: 2, remainingCredits: 0, source: .chatComposer)
+
+        XCTAssertFalse(model.hasRecoveredEnoughCreditsForPendingRecovery)
+
+        model.usage = UsagePayload(
+            plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
+            chatsUsed: 0,
+            chatLimit: 10,
+            stocksUsed: 1,
+            stockLimit: 3,
+            dateJST: "2026-04-26",
+            savedTickers: ["AAPL"],
+            accessMode: nil,
+            credits: CreditUsagePayload(
+                monthlyRemaining: 0,
+                monthlyLimit: 30,
+                rewardedAdRemaining: 2,
+                rewardedAdExpiresAt: "2026-05-26T00:00:00+09:00",
+                purchasedRemaining: 0,
+                totalRemaining: 2,
+                resetsAt: "2026-05-01T00:00:00+09:00"
+            ),
+            creditBillingEnabled: true
+        )
+
+        XCTAssertTrue(model.hasRecoveredEnoughCreditsForPendingRecovery)
+    }
+
+    func testClosingInsufficientCreditRecoveryClearsRecoveryState() {
+        let model = makeAppModel()
+        model.requestInsufficientCreditRecovery(requiredCredits: 2, remainingCredits: 0, source: .chatComposer)
+
+        model.dismissInsufficientCreditRecovery()
+
+        XCTAssertNil(model.insufficientCreditRecovery)
+        XCTAssertNil(model.insufficientCreditRecoveryRequestID)
+        XCTAssertFalse(model.hasRecoveredEnoughCreditsForPendingRecovery)
     }
 
     func testPurchaseCreditPackBlocksWhenCreditBillingIsDisabled() async {
@@ -925,6 +1069,38 @@ final class AppModelTests: XCTestCase {
                 let response = HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!
                 let data = try TestFixtures.jsonData(["error": "Chat response is temporarily unavailable"])
                 return (response, data)
+            }
+
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = try TestFixtures.jsonData([
+                "plan": "free",
+                "chatsUsed": 0,
+                "chatLimit": 10,
+                "stocksUsed": 0,
+                "stockLimit": 3,
+                "dateJST": "2026-04-18"
+            ])
+            return (response, data)
+        }
+
+        let sent = await model.sendChat(question: "今回の変化は？", ticker: "AAPL")
+
+        XCTAssertFalse(sent)
+        XCTAssertEqual(model.activeAlert?.message, "チャット応答を現在生成できません。少し待ってから、もう一度お試しください。")
+    }
+
+    func testSendChatPresentsLocalizedGenericHTTP503Failure() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let company = TestFixtures.companyPayload()
+        try persistence.saveCompany(company, searchItem: nil)
+
+        let model = makeAppModel(persistence: persistence)
+        model.setAIConsent(true)
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            if request.url?.path == "/v1/chat" {
+                let response = HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!
+                return (response, Data())
             }
 
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
@@ -1958,6 +2134,95 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.rewardedAdDeveloperDiagnosticLine.contains("AdUnit:"))
     }
 
+    func testRewardedAdCreditsRecordsReturnDestinationBeforeFlow() {
+        let model = makeAppModel()
+
+        model.prepareRewardedAdReturnDestination(.credits, visibleSurface: "credits")
+
+        XCTAssertEqual(model.rewardedAdReturnDestination, .credits)
+        XCTAssertTrue(model.shouldRestoreRewardedAdReturnDestination)
+    }
+
+    func testRewardedAdCreditSuccessRequestsCreditsReturnDestination() async throws {
+        let rewardedAdService = MockRewardedAdService(result: true)
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch request.url?.path {
+            case "/v1/usage":
+                return (response, try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30))
+            case "/v1/admob/reward-intents":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "customData": "intent-1.nonce",
+                        "rewardCredits": 2,
+                        "dailyRemaining": 3
+                    ])
+                )
+            case "/v1/admob/reward-status":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "status": "granted",
+                        "rewardCredits": 2,
+                        "creditsRemaining": 32,
+                        "dailyRemaining": 2,
+                        "usage": try Self.creditUsageObject(rewardedAdRemaining: 2, totalRemaining: 32)
+                    ])
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let model = makeAppModel(rewardedAdService: rewardedAdService)
+        await model.refreshCreditUsage()
+        model.prepareRewardedAdReturnDestination(.credits, visibleSurface: "credits")
+
+        await model.earnRewardedAdCredits()
+
+        XCTAssertEqual(model.rewardedAdReturnDestination, .credits)
+        XCTAssertNotNil(model.rewardedAdReturnRestorationRequestID)
+        XCTAssertTrue(model.shouldRestoreRewardedAdReturnDestination)
+        XCTAssertEqual(model.rewardedAdLastDebugReason, "granted")
+    }
+
+    func testRewardedAdPendingSSVKeepsCreditsReturnDestination() async {
+        let rewardedAdService = MockRewardedAdService(error: RewardedAdServiceError.ssvNotReceivedOrRewardStatusPending)
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch request.url?.path {
+            case "/v1/usage":
+                return (response, try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30))
+            case "/v1/admob/reward-intents":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "customData": "intent-1.nonce",
+                        "rewardCredits": 2,
+                        "dailyRemaining": 3
+                    ])
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let model = makeAppModel(rewardedAdService: rewardedAdService)
+        await model.refreshCreditUsage()
+        model.prepareRewardedAdReturnDestination(.credits, visibleSurface: "credits")
+
+        await model.earnRewardedAdCredits()
+
+        XCTAssertEqual(model.rewardedAdReturnDestination, .credits)
+        XCTAssertNotNil(model.rewardedAdReturnRestorationRequestID)
+        XCTAssertTrue(model.shouldRestoreRewardedAdReturnDestination)
+        XCTAssertEqual(model.rewardedAdCreditState, .idle)
+    }
+
     func testRewardedAdDismissedWithoutRewardDoesNotPollOrGrant() async {
         let rewardedAdService = MockRewardedAdService(result: false)
         let statusRequestCounter = ThreadSafeCounter()
@@ -1994,6 +2259,98 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.rewardedAdStatusMessage, RewardedAdServiceError.dismissedWithoutReward.localizedDescription)
         XCTAssertEqual(model.creditUsage?.totalRemaining, 50)
         XCTAssertEqual(model.rewardedAdLastDebugReason, "ad_dismissed_without_reward")
+    }
+
+    func testRewardedAdDismissedWithoutRewardRequestsCreditsReturnDestination() async {
+        let rewardedAdService = MockRewardedAdService(result: false)
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch request.url?.path {
+            case "/v1/usage":
+                return (response, try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30))
+            case "/v1/admob/reward-intents":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "customData": "intent-1.nonce",
+                        "rewardCredits": 2,
+                        "dailyRemaining": 3
+                    ])
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let model = makeAppModel(rewardedAdService: rewardedAdService)
+        await model.refreshCreditUsage()
+        model.prepareRewardedAdReturnDestination(.credits, visibleSurface: "credits")
+
+        await model.earnRewardedAdCredits()
+
+        XCTAssertEqual(model.rewardedAdReturnDestination, .credits)
+        XCTAssertNotNil(model.rewardedAdReturnRestorationRequestID)
+        XCTAssertTrue(model.shouldRestoreRewardedAdReturnDestination)
+        XCTAssertEqual(model.rewardedAdLastDebugReason, "ad_dismissed_without_reward")
+    }
+
+    func testRewardedAdUsageRefreshAfterGrantDoesNotClearCreditsReturnDestination() async {
+        let rewardedAdService = MockRewardedAdService(result: true)
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch request.url?.path {
+            case "/v1/usage":
+                return (response, try Self.creditUsageData(rewardedAdRemaining: 2, totalRemaining: 32))
+            case "/v1/admob/reward-intents":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "customData": "intent-1.nonce",
+                        "rewardCredits": 2,
+                        "dailyRemaining": 3
+                    ])
+                )
+            case "/v1/admob/reward-status":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "rewardIntentId": "intent-1",
+                        "status": "granted",
+                        "rewardCredits": 2,
+                        "creditsRemaining": 32,
+                        "dailyRemaining": 2,
+                        "usage": try Self.creditUsageObject(rewardedAdRemaining: 2, totalRemaining: 32)
+                    ])
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let model = makeAppModel(rewardedAdService: rewardedAdService)
+        await model.refreshCreditUsage()
+        model.prepareRewardedAdReturnDestination(.credits, visibleSurface: "credits")
+        await model.earnRewardedAdCredits()
+        let requestID = model.rewardedAdReturnRestorationRequestID
+
+        await model.refreshCreditUsage()
+
+        XCTAssertEqual(model.rewardedAdReturnDestination, .credits)
+        XCTAssertEqual(model.rewardedAdReturnRestorationRequestID, requestID)
+        XCTAssertTrue(model.shouldRestoreRewardedAdReturnDestination)
+    }
+
+    func testRewardedAdManualCreditsCloseSkipsReturnDestinationRestore() {
+        let model = makeAppModel()
+        model.prepareRewardedAdReturnDestination(.credits, visibleSurface: "credits")
+
+        model.markRewardedAdCreditsClosedByUser()
+
+        XCTAssertNil(model.rewardedAdReturnDestination)
+        XCTAssertNil(model.rewardedAdReturnRestorationRequestID)
+        XCTAssertFalse(model.shouldRestoreRewardedAdReturnDestination)
     }
 
     func testRewardedAdPresentFailureMapsAlreadyPresenting() async {

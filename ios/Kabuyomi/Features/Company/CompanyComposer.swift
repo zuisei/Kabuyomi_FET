@@ -98,15 +98,15 @@ struct ComposerBar: View {
     }
 
     private var sendButton: some View {
-        Button(action: sendAction) {
+        Button(action: sendButtonAction) {
             Image(systemName: "arrow.up")
                 .font(.system(size: 18, weight: .bold))
                 .frame(width: 40, height: 40)
-                .foregroundStyle(sendDisabled ? KabuyomiTheme.inkMuted : .white)
+                .foregroundStyle(sendButtonIsDisabled ? KabuyomiTheme.inkMuted : .white)
                 .background(sendButtonBackground)
         }
         .buttonStyle(.plain)
-        .disabled(sendDisabled)
+        .disabled(sendButtonIsDisabled)
         .accessibilityLabel("質問を送信")
     }
 
@@ -114,18 +114,26 @@ struct ComposerBar: View {
         question.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var sendDisabled: Bool {
-        trimmedQuestion.isEmpty || isSending || !isEnabled || !hasEnoughCredits
+    private var sendButtonIsDisabled: Bool {
+        trimmedQuestion.isEmpty || isSending || !isEnabled
+    }
+
+    private func sendButtonAction() {
+        if hasEnoughCredits {
+            sendAction()
+        } else {
+            openCreditOptions()
+        }
     }
 
     private var sendButtonBackground: some View {
         Circle()
-            .fill(sendDisabled ? Color(red: 0.88, green: 0.87, blue: 0.85) : KabuyomiTheme.accentDeep)
+            .fill(sendButtonIsDisabled ? Color(red: 0.88, green: 0.87, blue: 0.85) : KabuyomiTheme.accentDeep)
             .overlay(
                 Circle()
-                    .stroke(sendDisabled ? Color.white.opacity(0.9) : Color.white.opacity(0.2), lineWidth: 1)
+                    .stroke(sendButtonIsDisabled ? Color.white.opacity(0.9) : Color.white.opacity(0.2), lineWidth: 1)
             )
-            .shadow(color: sendDisabled ? Color.clear : KabuyomiTheme.accentDeep.opacity(0.24), radius: 10, x: 0, y: 6)
+            .shadow(color: sendButtonIsDisabled ? Color.clear : KabuyomiTheme.accentDeep.opacity(0.24), radius: 10, x: 0, y: 6)
     }
 
     private var consentStatusLine: some View {

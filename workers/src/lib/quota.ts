@@ -7,8 +7,9 @@ import {
 } from "./billing-catalog";
 import { loadDetachedAccessFromRequest } from "./detached-access";
 import { loadActiveEntitlementFromRequest } from "./entitlements";
+import { enqueueCreditAuditRepair } from "./credit-audit-repair";
 import { AppError } from "./errors";
-import { logEvent, logWarnEvent } from "./logging";
+import { hashForLog, logEvent, logWarnEvent, suffixForLog } from "./logging";
 import type { RemoteConfig } from "./remote-config";
 
 export interface QuotaIdentity {
@@ -41,6 +42,8 @@ interface UsageEnvelope {
   monthlyGrant?: MonthlyGrantResult;
   creditsRequired?: number;
   creditsRemaining?: number;
+  dailyRewardsUsed?: number;
+  dailyRewardsRemaining?: number;
 }
 
 interface PurchaseTransactionRow {
@@ -104,8 +107,11 @@ export interface RewardedAdCreditGrantResult {
   operationId: string;
   rewardIntentId: string;
   transactionId: string;
+  status: "granted" | "duplicate_ignored" | "cap_reached";
   creditsGranted: number;
   creditsRemaining: number;
+  dailyRewardsUsed: number;
+  dailyRewardsRemaining: number;
 }
 
 export class InsufficientCreditsError extends AppError {
@@ -365,7 +371,27 @@ export async function grantPurchasedCredits(
     purchasedAt: options.purchasedAt,
     purchaseCredits: creditsGranted
   });
-  await markPurchaseTransactionGranted(env, options.transactionId);
+  try {
+    await markPurchaseTransactionGranted(env, options.transactionId);
+  } catch (error) {
+    await enqueueCreditAuditRepair(env, {
+      kind: "purchase_transaction_mark",
+      operationId: buildPurchaseOperationId(options.transactionId),
+      quotaSubject: identity.quotaSubject,
+      transactionId: options.transactionId,
+      source: "grantPurchasedCredits.markPurchaseTransactionGranted",
+      payload: {
+        transactionId: options.transactionId
+      }
+    });
+    logWarnEvent("purchase_transaction_mark_granted_failed", {
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
+      operationIdSuffix: suffixForLog(buildPurchaseOperationId(options.transactionId)),
+      transactionIdSuffix: suffixForLog(options.transactionId),
+      errorClass: error instanceof Error ? error.name : typeof error
+    });
+    throw error;
+  }
 
   return {
     usage: result.usage,
@@ -414,6 +440,8 @@ export async function grantRewardedAdCredits(
     transactionId: string;
     credits: number;
     expiresAt: string;
+    dailyDateKey: string;
+    dailyCap: number;
   }
 ): Promise<RewardedAdCreditGrantResult> {
   const operationId = buildRewardedAdOperationId(options.transactionId);
@@ -422,17 +450,29 @@ export async function grantRewardedAdCredits(
     credits: options.credits,
     rewardIntentId: options.rewardIntentId,
     transactionId: options.transactionId,
-    expiresAt: options.expiresAt
+    expiresAt: options.expiresAt,
+    dailyDateKey: options.dailyDateKey,
+    dailyCap: options.dailyCap
   });
+
+  const status =
+    result.error === "daily_cap_reached"
+      ? "cap_reached"
+      : result.didMutate
+        ? "granted"
+        : "duplicate_ignored";
 
   return {
     usage: result.usage,
     didMutate: result.didMutate,
     operationId,
-    rewardIntentId: options.rewardIntentId,
+    rewardIntentId: result.creditOperation?.referenceId ?? options.rewardIntentId,
     transactionId: options.transactionId,
-    creditsGranted: options.credits,
-    creditsRemaining: result.creditsRemaining
+    status,
+    creditsGranted: status === "granted" ? options.credits : 0,
+    creditsRemaining: result.creditsRemaining,
+    dailyRewardsUsed: result.dailyRewardsUsed,
+    dailyRewardsRemaining: result.dailyRewardsRemaining
   };
 }
 
@@ -526,7 +566,7 @@ export async function ensureCompanyAccessAllowed(
   if (!response.ok || !payload.usage) {
     logEvent("quota_denial", {
       action: "checkCompanyAccess",
-      quotaSubject: identity.quotaSubject,
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
       plan: identity.plan,
       ticker: ticker.trim().toUpperCase(),
       reason: payload.error ?? "Quota request failed"
@@ -605,7 +645,7 @@ async function mutateUsage(
   if (!response.ok || !payload.usage) {
     logEvent("quota_denial", {
       action,
-      quotaSubject: identity.quotaSubject,
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
       plan: identity.plan,
       reason: payload.error ?? "Quota request failed"
     });
@@ -614,6 +654,20 @@ async function mutateUsage(
 
   if (payload.monthlyGrant) {
     await persistMonthlyGrant(env, identity, payload.monthlyGrant);
+  }
+  if (payload.creditOperation) {
+    await persistCreditLedgerEntry(env, identity, payload.creditOperation);
+    if (payload.creditOperation.referenceType === "subscription_downgrade_no_clawback") {
+      logEvent("subscription_downgrade_no_clawback", {
+        quotaSubjectHash: hashForLog(identity.quotaSubject),
+        operationIdSuffix: suffixForLog(payload.creditOperation.operationId),
+        plan: identity.plan,
+        creditDelta: payload.creditOperation.delta,
+        monthlyBalanceAfter: payload.creditOperation.monthlyBalanceAfter,
+        purchasedBalanceAfter: payload.creditOperation.purchasedBalanceAfter,
+        creditsRemaining: payload.creditOperation.balanceAfter
+      });
+    }
   }
 
   return {
@@ -688,7 +742,7 @@ async function mutateCreditUsage(
   if (!payload.usage) {
     logEvent("quota_denial", {
       action,
-      quotaSubject: identity.quotaSubject,
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
       plan: identity.plan,
       reason: payload.error ?? "Credit request failed"
     });
@@ -705,16 +759,16 @@ async function mutateCreditUsage(
   const creditsRemaining = payload.creditsRemaining ?? payload.usage.credits?.totalRemaining ?? 0;
   if (payload.error === "insufficient_credits") {
     logEvent("credit_consume", {
-      userId: identity.quotaSubject,
-      operationId: options.operationId,
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
+      operationIdSuffix: suffixForLog(options.operationId),
       status: "insufficient",
       creditsRequired: options.creditsRequired ?? null,
       creditsRemaining
     });
   } else {
     logEvent(action === "consumeCredit" ? "credit_consume" : "credit_refund", {
-      userId: identity.quotaSubject,
-      operationId: options.operationId,
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
+      operationIdSuffix: suffixForLog(options.operationId),
       status: payload.creditOperation?.status ?? "unknown",
       delta: payload.creditOperation?.delta ?? 0,
       creditsRemaining
@@ -779,7 +833,7 @@ async function mutatePurchaseCreditGrant(
   if (!response.ok || !payload.usage) {
     logEvent("quota_denial", {
       action: "grantPurchasedCredit",
-      quotaSubject: identity.quotaSubject,
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
       plan: identity.plan,
       reason: payload.error ?? "Purchase credit grant failed"
     });
@@ -795,9 +849,9 @@ async function mutatePurchaseCreditGrant(
 
   const creditsRemaining = payload.creditsRemaining ?? payload.usage.credits?.totalRemaining ?? 0;
   logEvent("credit_purchase_grant", {
-    userId: identity.quotaSubject,
-    operationId: options.operationId,
-    transactionId: options.transactionId,
+    quotaSubjectHash: hashForLog(identity.quotaSubject),
+    operationIdSuffix: suffixForLog(options.operationId),
+    transactionIdSuffix: suffixForLog(options.transactionId),
     productId: options.productId,
     status: payload.creditOperation?.status ?? "unknown",
     delta: payload.creditOperation?.delta ?? 0,
@@ -856,7 +910,7 @@ async function mutateEvalCreditGrant(
   if (!response.ok || !payload.usage) {
     logEvent("quota_denial", {
       action: "grantEvalCredit",
-      quotaSubject: identity.quotaSubject,
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
       plan: identity.plan,
       reason: payload.error ?? "Eval credit grant failed"
     });
@@ -872,8 +926,8 @@ async function mutateEvalCreditGrant(
 
   const creditsRemaining = payload.creditsRemaining ?? payload.usage.credits?.totalRemaining ?? 0;
   logEvent("credit_eval_grant", {
-    userId: identity.quotaSubject,
-    operationId: options.operationId,
+    quotaSubjectHash: hashForLog(identity.quotaSubject),
+    operationIdSuffix: suffixForLog(options.operationId),
     referenceId: options.referenceId,
     status: payload.creditOperation?.status ?? "unknown",
     delta: payload.creditOperation?.delta ?? 0,
@@ -898,11 +952,16 @@ async function mutateRewardedAdCreditGrant(
     rewardIntentId: string;
     transactionId: string;
     expiresAt: string;
+    dailyDateKey: string;
+    dailyCap: number;
   }
 ): Promise<
   QuotaMutationResult & {
     creditOperation?: CreditOperationResult;
     creditsRemaining: number;
+    dailyRewardsUsed: number;
+    dailyRewardsRemaining: number;
+    error?: string;
   }
 > {
   const stub = env.USER_QUOTA.getByName(identity.quotaSubject);
@@ -926,6 +985,8 @@ async function mutateRewardedAdCreditGrant(
       operationId: options.operationId,
       credits: options.credits,
       promoExpiresAt: options.expiresAt,
+      dailyRewardDateKey: options.dailyDateKey,
+      dailyRewardCap: options.dailyCap,
       referenceType: "admob_rewarded",
       referenceId: options.rewardIntentId,
       transactionId: options.transactionId
@@ -933,10 +994,10 @@ async function mutateRewardedAdCreditGrant(
   });
 
   const payload = (await response.json()) as UsageEnvelope & { error?: string };
-  if (!response.ok || !payload.usage) {
+  if ((!response.ok && payload.error !== "daily_cap_reached") || !payload.usage) {
     logEvent("quota_denial", {
       action: "grantRewardedAdCredit",
-      quotaSubject: identity.quotaSubject,
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
       plan: identity.plan,
       reason: payload.error ?? "Rewarded ad credit grant failed"
     });
@@ -952,20 +1013,25 @@ async function mutateRewardedAdCreditGrant(
 
   const creditsRemaining = payload.creditsRemaining ?? payload.usage.credits?.totalRemaining ?? 0;
   logEvent("rewarded_ad_credit_granted", {
-    userId: identity.quotaSubject,
-    operationId: options.operationId,
-    rewardIntentId: options.rewardIntentId,
-    transactionId: options.transactionId,
+    quotaSubjectHash: hashForLog(identity.quotaSubject),
+    operationIdSuffix: suffixForLog(options.operationId),
+    rewardIntentIdSuffix: suffixForLog(options.rewardIntentId),
+    transactionIdSuffix: suffixForLog(options.transactionId),
     status: payload.creditOperation?.status ?? "unknown",
     delta: payload.creditOperation?.delta ?? 0,
-    creditsRemaining
+    creditsRemaining,
+    dailyRewardsUsed: payload.dailyRewardsUsed ?? null,
+    dailyRewardsRemaining: payload.dailyRewardsRemaining ?? null
   });
 
   return {
     usage: payload.usage,
     didMutate: payload.didMutate === true,
     creditOperation: payload.creditOperation,
-    creditsRemaining
+    creditsRemaining,
+    dailyRewardsUsed: payload.dailyRewardsUsed ?? 0,
+    dailyRewardsRemaining: payload.dailyRewardsRemaining ?? 0,
+    error: payload.error
   };
 }
 
@@ -1072,9 +1138,26 @@ async function persistMonthlyGrant(env: Env, identity: QuotaIdentity, grant: Mon
       )
       .run();
   } catch (error) {
-    logWarnEvent("monthly_grant_write_failed", {
-      userId: identity.quotaSubject,
+    await enqueueCreditAuditRepair(env, {
+      kind: "monthly_grant",
       operationId: grant.operationId,
+      quotaSubject: identity.quotaSubject,
+      source: "persistMonthlyGrant.monthly_grants",
+      payload: {
+        userId: identity.quotaSubject,
+        grant: {
+          operationId: grant.operationId,
+          plan: grant.plan,
+          periodStart: grant.periodStart,
+          periodEnd: grant.periodEnd,
+          creditsGranted: grant.creditsGranted,
+          createdAt: grant.createdAt
+        }
+      }
+    });
+    logWarnEvent("monthly_grant_write_failed", {
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
+      operationIdSuffix: suffixForLog(grant.operationId),
       reason: error instanceof Error ? error.message : String(error)
     });
   }
@@ -1093,8 +1176,8 @@ async function persistMonthlyGrant(env: Env, identity: QuotaIdentity, grant: Mon
   });
 
   logEvent("credit_monthly_grant", {
-    userId: identity.quotaSubject,
-    operationId: grant.operationId,
+    quotaSubjectHash: hashForLog(identity.quotaSubject),
+    operationIdSuffix: suffixForLog(grant.operationId),
     plan: grant.plan,
     creditsGranted: grant.creditsGranted,
     creditsRemaining: grant.balanceAfter
@@ -1145,9 +1228,19 @@ async function persistCreditLedgerEntry(
       )
       .run();
   } catch (error) {
-    logWarnEvent("credit_ledger_write_failed", {
-      userId: identity.quotaSubject,
+    await enqueueCreditAuditRepair(env, {
+      kind: "credit_ledger",
       operationId: operation.operationId,
+      quotaSubject: identity.quotaSubject,
+      source: "persistCreditLedgerEntry.credit_ledger",
+      payload: {
+        userId: identity.quotaSubject,
+        operation
+      }
+    });
+    logWarnEvent("credit_ledger_write_failed", {
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
+      operationIdSuffix: suffixForLog(operation.operationId),
       reason: error instanceof Error ? error.message : String(error)
     });
   }

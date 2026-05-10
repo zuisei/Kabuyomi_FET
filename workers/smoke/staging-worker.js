@@ -339,7 +339,7 @@ async function checkBillingSync() {
     },
     body: JSON.stringify({
       originalTransactionId: "smoke-tx",
-      productId: "app.kabuyomi.pro.monthly",
+      productId: "kabuyomi.sub.pro.monthly",
       active: true
     })
   });
@@ -361,7 +361,7 @@ async function checkBillingSync() {
     },
     body: JSON.stringify({
       originalTransactionId: "smoke-tx-inactive",
-      productId: "app.kabuyomi.pro.monthly",
+      productId: "kabuyomi.sub.pro.monthly",
       active: false
     })
   });

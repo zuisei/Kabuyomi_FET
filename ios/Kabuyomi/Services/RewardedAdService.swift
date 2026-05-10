@@ -80,7 +80,7 @@ final class GoogleRewardedAdService: NSObject, RewardedAdServing {
             "present_rewarded_ad_entered",
             fields: [
                 "adUnitKind": AdMobConfig.rewardedCreditAdUnitKind,
-                "adUnit": AdMobConfig.rewardedCreditAdUnitID,
+                "adUnit": RewardedAdDiagnostics.redact(AdMobConfig.rewardedCreditAdUnitID),
                 "customDataPresent": String(!customData.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
                 "mobileAdsInitialized": String(AdMobRuntimeState.mobileAdsInitialized)
             ]
@@ -138,7 +138,7 @@ final class GoogleRewardedAdService: NSObject, RewardedAdServing {
             "rewarded_ad_load_started",
             fields: [
                 "adUnitKind": AdMobConfig.rewardedCreditAdUnitKind,
-                "adUnit": AdMobConfig.rewardedCreditAdUnitID
+                "adUnit": RewardedAdDiagnostics.redact(AdMobConfig.rewardedCreditAdUnitID)
             ]
         )
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
