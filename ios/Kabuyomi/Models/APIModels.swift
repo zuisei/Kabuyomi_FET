@@ -388,6 +388,8 @@ struct ChatSourcePayload: Decodable, Identifiable, Hashable {
 
 struct UsagePayload: Decodable, Hashable {
     let plan: String
+    let activePlan: String?
+    let activeSubscription: ActiveSubscriptionPayload?
     let chatsUsed: Int
     let chatLimit: Int
     let stocksUsed: Int
@@ -427,6 +429,17 @@ struct UsagePayload: Decodable, Hashable {
     private func displayLimit(_ value: Int) -> String {
         String(value)
     }
+}
+
+struct ActiveSubscriptionPayload: Decodable, Hashable {
+    let plan: String
+    let productId: String?
+    let originalTransactionId: String?
+    let transactionId: String?
+    let periodStart: String?
+    let periodEnd: String?
+    let expiresAt: String?
+    let monthlyCredits: Int?
 }
 
 struct CreditUsagePayload: Decodable, Hashable {
@@ -503,6 +516,10 @@ struct BillingSyncResponse: Decodable {
     let quotaSubject: String
     let productId: String?
     let syncedAt: String
+    let activePlan: String?
+    let activeSubscription: ActiveSubscriptionPayload?
+    let creditBillingEnabled: Bool?
+    let usage: UsagePayload?
 }
 
 struct WatchlistCard: Identifiable, Hashable {

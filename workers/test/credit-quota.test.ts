@@ -150,6 +150,75 @@ describe("credit quota bridge", () => {
     );
   });
 
+  it("grants the new primary 50-credit consumable as paid credits", async () => {
+    const db = createPurchaseDb({
+      user_id: identity.quotaSubject,
+      product_id: "kabuyomi.credits.50",
+      transaction_id: "tx-50",
+      original_transaction_id: "orig-tx-50",
+      credits_granted: 50,
+      status: "pending",
+      purchased_at: "2026-05-09T00:00:00.000Z",
+      created_at: "2026-05-09T00:00:00.000Z",
+      updated_at: "2026-05-09T00:00:00.000Z"
+    });
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          usage: usagePayload(50),
+          didMutate: true,
+          creditsRemaining: 80,
+          creditOperation: {
+            operationId: "purchase:tx-50",
+            type: "purchase_grant",
+            status: "applied",
+            delta: 50,
+            balanceAfter: 80,
+            monthlyBalanceAfter: 30,
+            purchasedBalanceAfter: 50,
+            referenceType: "purchase",
+            referenceId: "tx-50",
+            createdAt: "2026-05-09T00:00:01.000Z"
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    const result = await grantPurchasedCredits(
+      identity,
+      {
+        DB: db.db,
+        USER_QUOTA: {
+          getByName: vi.fn().mockReturnValue({ fetch })
+        }
+      } as never,
+      DEFAULT_REMOTE_CONFIG,
+      {
+        productId: "kabuyomi.credits.50",
+        transactionId: "tx-50",
+        originalTransactionId: "orig-tx-50",
+        purchasedAt: "2026-05-09T00:00:00.000Z"
+      }
+    );
+
+    expect(result.didMutate).toBe(true);
+    expect(result.creditsGranted).toBe(50);
+    expect(result.creditsRemaining).toBe(80);
+    expect(db.bind).toHaveBeenCalledWith(
+      expect.any(String),
+      identity.quotaSubject,
+      "kabuyomi.credits.50",
+      "tx-50",
+      "orig-tx-50",
+      50,
+      "pending",
+      "2026-05-09T00:00:00.000Z",
+      expect.any(String),
+      expect.any(String)
+    );
+  });
+
   it("records eval credit grants in the ledger without purchase transactions", async () => {
     const db = createDb();
     const fetch = vi.fn().mockResolvedValue(

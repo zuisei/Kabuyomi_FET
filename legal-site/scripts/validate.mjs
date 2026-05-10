@@ -10,7 +10,6 @@ const pages = [
 ];
 
 const forbiddenClaims = [
-  "Lite",
   "Pro Max",
   "¥500",
   "500円",

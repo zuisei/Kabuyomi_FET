@@ -42,26 +42,26 @@ enum BillingCatalog {
         title: "Lite",
         stockLimit: 3,
         chatLimit: 10,
-        monthlyCredits: 150,
-        productID: "app.kabuyomi.lite.monthly"
+        monthlyCredits: 400,
+        productID: "kabuyomi.sub.lite.monthly"
     )
     static let pro = BillingTier(
         plan: "pro",
         title: "Pro",
         stockLimit: 20,
         chatLimit: 50,
-        monthlyCredits: 500,
-        productID: "app.kabuyomi.pro.monthly"
+        monthlyCredits: 900,
+        productID: "kabuyomi.sub.pro.monthly"
     )
     static let proMax = BillingTier(
         plan: "pro_max",
-        title: "Pro Max",
+        title: "Max",
         stockLimit: 20,
         chatLimit: 50,
-        monthlyCredits: 1200,
-        productID: "app.kabuyomi.pro_max.monthly"
+        monthlyCredits: 2000,
+        productID: "kabuyomi.sub.max.monthly"
     )
-    // v1.1 recurring credit grant candidates. Keep isolated from v1 public UI.
+    // v1.0.2 monthly subscription products shown in the credit screen.
     static let subscriptionTiers = [lite, pro, proMax]
     static let recognizedSubscriptionTiers = subscriptionTiers
 

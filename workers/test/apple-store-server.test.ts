@@ -438,7 +438,7 @@ describe("apple store server verification", () => {
     const signedTransactionInfo = fakeJws({
       transactionId: "sub-tx-100",
       originalTransactionId: "orig-sub-tx-100",
-      productId: "app.kabuyomi.pro_max.monthly",
+      productId: "kabuyomi.sub.max.monthly",
       bundleId: "app.kabuyomi.ios",
       expiresDate: Date.now() + 30 * 24 * 60 * 60 * 1000
     });
@@ -459,7 +459,7 @@ describe("apple store server verification", () => {
         APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
       } as never,
       {
-        productId: "app.kabuyomi.pro_max.monthly",
+        productId: "kabuyomi.sub.max.monthly",
         transactionId: "sub-tx-100",
         originalTransactionId: "orig-sub-tx-100",
         active: true,
@@ -469,11 +469,120 @@ describe("apple store server verification", () => {
 
     expect(result).toEqual({
       originalTransactionId: "orig-sub-tx-100",
-      productId: "app.kabuyomi.pro_max.monthly",
-      active: true
+      transactionId: "sub-tx-100",
+      productId: "kabuyomi.sub.max.monthly",
+      plan: "max",
+      active: true,
+      periodStart: null,
+      periodEnd: expect.any(String),
+      expiresAt: expect.any(String)
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(fetch.mock.calls[0][0])).toContain("api.storekit-sandbox.itunes.apple.com/inApps/v1/transactions/sub-tx-100");
+  });
+
+  it("rejects expired subscription transactions without granting", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "sub-tx-expired",
+      originalTransactionId: "orig-sub-expired",
+      productId: "kabuyomi.sub.lite.monthly",
+      bundleId: "app.kabuyomi.ios",
+      expiresDate: Date.now() - 1000
+    });
+    const fetch = vi.fn().mockResolvedValueOnce(successResponse(signedTransactionInfo));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      verifySubscriptionWithApple(
+        {
+          APPLE_APP_STORE_ISSUER_ID: "issuer-id",
+          APPLE_APP_STORE_KEY_ID: "key-id",
+          APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+          APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+          APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
+        } as never,
+        {
+          productId: "kabuyomi.sub.lite.monthly",
+          transactionId: "sub-tx-expired",
+          originalTransactionId: "orig-sub-expired",
+          active: true,
+          signedTransactionInfo
+        }
+      )
+    ).rejects.toMatchObject({
+      status: 409,
+      publicMessage: "Subscription transaction has expired"
+    });
+  });
+
+  it("rejects revoked subscription transactions without granting", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "sub-tx-revoked",
+      originalTransactionId: "orig-sub-revoked",
+      productId: "kabuyomi.sub.pro.monthly",
+      bundleId: "app.kabuyomi.ios",
+      revocationDate: Date.now(),
+      expiresDate: Date.now() + 30 * 24 * 60 * 60 * 1000
+    });
+    const fetch = vi.fn().mockResolvedValueOnce(successResponse(signedTransactionInfo));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      verifySubscriptionWithApple(
+        {
+          APPLE_APP_STORE_ISSUER_ID: "issuer-id",
+          APPLE_APP_STORE_KEY_ID: "key-id",
+          APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+          APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+          APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
+        } as never,
+        {
+          productId: "kabuyomi.sub.pro.monthly",
+          transactionId: "sub-tx-revoked",
+          originalTransactionId: "orig-sub-revoked",
+          active: true,
+          signedTransactionInfo
+        }
+      )
+    ).rejects.toMatchObject({
+      status: 409,
+      publicMessage: "Subscription transaction has been revoked"
+    });
+  });
+
+  it("rejects subscription bundle id mismatches", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "sub-tx-bundle",
+      originalTransactionId: "orig-sub-bundle",
+      productId: "kabuyomi.sub.max.monthly",
+      bundleId: "wrong.bundle",
+      expiresDate: Date.now() + 30 * 24 * 60 * 60 * 1000
+    });
+
+    await expect(
+      verifySubscriptionWithApple(
+        {
+          APPLE_APP_STORE_ISSUER_ID: "issuer-id",
+          APPLE_APP_STORE_KEY_ID: "key-id",
+          APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+          APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+          APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
+        } as never,
+        {
+          productId: "kabuyomi.sub.max.monthly",
+          transactionId: "sub-tx-bundle",
+          originalTransactionId: "orig-sub-bundle",
+          active: true,
+          signedTransactionInfo
+        }
+      )
+    ).rejects.toMatchObject({
+      status: 400,
+      publicMessage: "Purchase transaction bundle mismatch"
+    });
   });
 });
 

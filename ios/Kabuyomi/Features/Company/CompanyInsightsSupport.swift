@@ -17,11 +17,11 @@ enum InvestorOverviewTone {
     var title: String {
         switch self {
         case .positive:
-            return "良い材料が優勢"
+            return "前年同期比では改善が目立つ"
         case .mixed:
-            return "強弱が混在"
+            return "改善と確認論点が混在"
         case .negative:
-            return "慎重に見たい決算"
+            return "確認論点を優先"
         }
     }
 
@@ -39,11 +39,11 @@ enum InvestorOverviewTone {
     var supportingCopy: String {
         switch self {
         case .positive:
-            return "数字と本文を並べると、今回は良い材料がやや優勢です。まずは伸びた要因の持続性を確認したい局面です。"
+            return "確認できる範囲では、前年同期比で改善している指標が目立ちます。持続性と一時要因を分けて確認します。"
         case .mixed:
-            return "良化と悪化が混在しています。強い数字と弱い数字を分けて見ると、決算の解像度が上がります。"
+            return "良化した数字と未確認の論点が混在しています。強い数字、弱い数字、本文根拠を分けて確認します。"
         case .negative:
-            return "慎重に見たい材料がやや多めです。一時要因か構造要因かを優先して切り分けたい局面です。"
+            return "注意して読むべき論点が多めです。一時要因か構造要因かを、提出資料の根拠から切り分けます。"
         }
     }
 }

@@ -266,7 +266,7 @@ final class APIClientTests: XCTestCase {
 
     func testSyncBillingSendsDeviceBindingHeaders() async throws {
         let client = makeClient(context: proContext) { request in
-            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/billing/sync")
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/ios/subscriptions/sync")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-original-transaction-id"), "tx-123")
@@ -275,7 +275,7 @@ final class APIClientTests: XCTestCase {
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             XCTAssertEqual(json["originalTransactionId"] as? String, "orig-tx-123")
             XCTAssertEqual(json["transactionId"] as? String, "tx-123")
-            XCTAssertEqual(json["productId"] as? String, "app.kabuyomi.pro.monthly")
+            XCTAssertEqual(json["productId"] as? String, "kabuyomi.sub.pro.monthly")
             XCTAssertEqual(json["active"] as? Bool, true)
             XCTAssertEqual(json["signedTransactionInfo"] as? String, "signed-jws")
 
@@ -284,7 +284,18 @@ final class APIClientTests: XCTestCase {
                 try TestFixtures.jsonData([
                     "plan": "pro",
                     "quotaSubject": "pro:abcdef",
-                    "productId": "app.kabuyomi.pro.monthly",
+                    "productId": "kabuyomi.sub.pro.monthly",
+                    "activePlan": "pro",
+                    "activeSubscription": [
+                        "plan": "pro",
+                        "productId": "kabuyomi.sub.pro.monthly",
+                        "originalTransactionId": "orig-tx-123",
+                        "transactionId": "tx-123",
+                        "periodStart": "2026-05-01T00:00:00.000Z",
+                        "periodEnd": "2026-06-01T00:00:00.000Z",
+                        "expiresAt": "2026-06-01T00:00:00.000Z",
+                        "monthlyCredits": 900
+                    ],
                     "syncedAt": "2026-04-26T00:00:00.000Z"
                 ])
             )
@@ -294,7 +305,7 @@ final class APIClientTests: XCTestCase {
             BillingSyncRequest(
                 originalTransactionId: "orig-tx-123",
                 transactionId: "tx-123",
-                productId: "app.kabuyomi.pro.monthly",
+                productId: "kabuyomi.sub.pro.monthly",
                 active: true,
                 signedTransactionInfo: "signed-jws"
             )
@@ -302,6 +313,40 @@ final class APIClientTests: XCTestCase {
 
         XCTAssertEqual(response.plan, "pro")
         XCTAssertEqual(response.quotaSubject, "pro:abcdef")
+        XCTAssertEqual(response.activeSubscription?.monthlyCredits, 900)
+    }
+
+    func testSyncBilling404MapsToRouteMissingWithEndpointDetails() async throws {
+        let client = makeClient(context: proContext) { request in
+            XCTAssertEqual(request.url?.path, "/v1/ios/subscriptions/sync")
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData(["error": "Not found"])
+            )
+        }
+
+        do {
+            _ = try await client.syncBilling(
+                BillingSyncRequest(
+                    originalTransactionId: "orig-tx-123",
+                    transactionId: "tx-123",
+                    productId: "kabuyomi.sub.pro.monthly",
+                    active: true,
+                    signedTransactionInfo: "signed-jws"
+                )
+            )
+            XCTFail("Expected routeMissing")
+        } catch let error as APIError {
+            XCTAssertEqual(
+                error,
+                .routeMissing(
+                    statusCode: 404,
+                    path: "/v1/ios/subscriptions/sync",
+                    url: "https://example.com/v1/ios/subscriptions/sync",
+                    message: "Not found"
+                )
+            )
+        }
     }
 
     func testFetchUsageIncludesDetachedAccessHeaderWhenPresent() async throws {
@@ -538,18 +583,18 @@ final class APIClientTests: XCTestCase {
 
             let body = try XCTUnwrap(Self.requestBodyData(from: request))
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
-            XCTAssertEqual(json["productId"], "kabuyomi.credits.100")
-            XCTAssertEqual(json["transactionId"], "tx-100")
-            XCTAssertEqual(json["originalTransactionId"], "orig-tx-100")
+            XCTAssertEqual(json["productId"], "kabuyomi.credits.50")
+            XCTAssertEqual(json["transactionId"], "tx-50")
+            XCTAssertEqual(json["originalTransactionId"], "orig-tx-50")
             XCTAssertEqual(json["signedTransactionInfo"], "signed-jws")
 
             return (
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                 try TestFixtures.jsonData([
-                    "transactionId": "tx-100",
-                    "productId": "kabuyomi.credits.100",
-                    "creditsGranted": 100,
-                    "creditsRemaining": 130,
+                    "transactionId": "tx-50",
+                    "productId": "kabuyomi.credits.50",
+                    "creditsGranted": 50,
+                    "creditsRemaining": 80,
                     "transactionStatus": "granted",
                     "didMutate": true,
                     "usage": [
@@ -562,7 +607,7 @@ final class APIClientTests: XCTestCase {
                         "credits": [
                             "monthlyRemaining": 30,
                             "monthlyLimit": 30,
-                            "purchasedRemaining": 100,
+                            "purchasedRemaining": 50,
                             "totalRemaining": 130,
                             "resetsAt": "2026-05-01T00:00:00+09:00"
                         ],
@@ -574,17 +619,88 @@ final class APIClientTests: XCTestCase {
 
         let response = try await client.grantCreditPurchase(
             CreditPurchaseGrantRequest(
-                productId: "kabuyomi.credits.100",
-                transactionId: "tx-100",
-                originalTransactionId: "orig-tx-100",
+                productId: "kabuyomi.credits.50",
+                transactionId: "tx-50",
+                originalTransactionId: "orig-tx-50",
                 purchasedAt: "2026-04-26T00:00:00.000Z",
                 signedTransactionInfo: "signed-jws"
             )
         )
 
-        XCTAssertEqual(response.creditsGranted, 100)
-        XCTAssertEqual(response.creditsRemaining, 130)
-        XCTAssertEqual(response.usage.credits?.purchasedRemaining, 100)
+        XCTAssertEqual(response.creditsGranted, 50)
+        XCTAssertEqual(response.creditsRemaining, 80)
+        XCTAssertEqual(response.usage.credits?.purchasedRemaining, 50)
+    }
+
+    func testGrantCreditPurchase404MapsToRouteMissingWithEndpointDetails() async throws {
+        let client = makeClient(context: standardContext) { request in
+            XCTAssertEqual(request.url?.path, "/v1/ios/purchases/credits/complete")
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData(["error": "Not found"])
+            )
+        }
+
+        do {
+            _ = try await client.grantCreditPurchase(
+                CreditPurchaseGrantRequest(
+                    productId: "kabuyomi.credits.50",
+                    transactionId: "tx-50",
+                    originalTransactionId: "orig-tx-50",
+                    purchasedAt: "2026-04-26T00:00:00.000Z",
+                    signedTransactionInfo: "signed-jws"
+                )
+            )
+            XCTFail("Expected routeMissing")
+        } catch let error as APIError {
+            XCTAssertEqual(
+                error,
+                .routeMissing(
+                    statusCode: 404,
+                    path: "/v1/ios/purchases/credits/complete",
+                    url: "https://example.com/v1/ios/purchases/credits/complete",
+                    message: "Not found"
+                )
+            )
+        }
+    }
+
+    func testBillingAPIHealthCheckReportsRouteMissingSeparatelyFromValidationErrors() async throws {
+        let client = makeClient(context: standardContext) { request in
+            let path = try XCTUnwrap(request.url?.path)
+            let statusCode: Int
+            let error: String
+            switch path {
+            case "/v1/usage":
+                statusCode = 200
+                error = "ok"
+            case "/v1/ios/subscriptions/sync":
+                statusCode = 404
+                error = "Not found"
+            case "/v1/ios/purchases/credits/complete":
+                statusCode = 400
+                error = "Invalid credit purchase payload"
+            default:
+                statusCode = 500
+                error = "unexpected"
+            }
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: statusCode, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData(["error": error])
+            )
+        }
+
+        let report = await client.checkBillingAPIHealth()
+
+        XCTAssertEqual(report.entries.map(\.path), [
+            "/v1/usage",
+            "/v1/ios/subscriptions/sync",
+            "/v1/ios/purchases/credits/complete"
+        ])
+        XCTAssertTrue(report.hasRouteMissing)
+        XCTAssertEqual(report.entries.first { $0.path == "/v1/ios/subscriptions/sync" }?.statusCode, 404)
+        XCTAssertEqual(report.entries.first { $0.path == "/v1/ios/purchases/credits/complete" }?.statusCode, 400)
     }
 
     func testCreateAdMobRewardIntentSendsDeviceHeaderAndDecodesResponse() async throws {

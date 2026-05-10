@@ -12,6 +12,8 @@ func displayableMessageSources(_ sources: [LocalMessageSourceRef], in company: C
 }
 
 struct ConversationMessageRow: View {
+    @State private var showsAllSources = false
+
     let company: CompanyPayload
     let message: LocalChatMessage
     let precedingUserPrompt: String?
@@ -25,19 +27,20 @@ struct ConversationMessageRow: View {
     }
 
     var body: some View {
-        VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 8) {
-            HStack(alignment: .bottom, spacing: 10) {
+        VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 7) {
+            HStack(alignment: .bottom, spacing: 8) {
                 if message.role != "user" {
                     avatarBubble(label: company.ticker.prefix(1), accent: false)
                 } else {
-                    Spacer(minLength: 42)
+                    Spacer(minLength: 54)
                 }
 
-                VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 8) {
+                VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 7) {
                     messageMetaLine
 
                     messageBubbleContent
-                        .padding(message.role == "user" ? 16 : 15)
+                        .padding(.horizontal, message.role == "user" ? 12 : 13)
+                        .padding(.vertical, message.role == "user" ? 9 : 12)
                         .background(message.role == "user" ? AnyView(userBubble) : AnyView(assistantBubble))
 
                     if showsSuggestionStrip {
@@ -48,11 +51,10 @@ struct ConversationMessageRow: View {
                         )
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
-
-                if message.role == "user" {
-                    avatarBubble(label: "私", accent: true)
-                }
+                .frame(
+                    maxWidth: message.role == "user" ? 292 : .infinity,
+                    alignment: message.role == "user" ? .trailing : .leading
+                )
             }
 
             if !displaySources.isEmpty {
@@ -63,56 +65,61 @@ struct ConversationMessageRow: View {
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(Array(displaySources.prefix(3))) { source in
-                                Button(action: { openSource(source) }) {
-                                    sourceChip(for: source)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("根拠を開く: \(displaySourceLabel(for: source))")
+                    FlowLayout(spacing: 6, lineSpacing: 6) {
+                        ForEach(visibleSources) { source in
+                            Button(action: { openSource(source) }) {
+                                sourceChip(for: source)
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("根拠を開く: \(displaySourceLabel(for: source))")
+                        }
 
-                            if displaySources.count > 3 {
-                                Text("+\(displaySources.count - 3)")
+                        if displaySources.count > 3 && !showsAllSources {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    showsAllSources = true
+                                }
+                            } label: {
+                                Text("すべての根拠を見る")
                                     .font(.system(.caption2, design: .rounded, weight: .bold))
                                     .foregroundStyle(KabuyomiTheme.inkMuted)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 7)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 6)
                                     .background(
-                                        RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                            .fill(Color.white.opacity(0.58))
+                                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                            .fill(KabuyomiTheme.fill(for: .muted))
                                     )
                             }
+                            .buttonStyle(.plain)
                         }
-                        .padding(.trailing, 20)
                     }
                 }
+                .padding(.leading, message.role == "user" ? 0 : 42)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
+    private var visibleSources: [LocalMessageSourceRef] {
+        showsAllSources ? displaySources : Array(displaySources.prefix(3))
+    }
+
     private var assistantBubble: some View {
-        RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .fill((showsRecoverySuggestions || comparisonLimitationNotice != nil) ? KabuyomiTheme.fill(for: .secondary) : KabuyomiTheme.fill(for: .primary))
+        RoundedRectangle(cornerRadius: 17, style: .continuous)
+            .fill(KabuyomiTheme.fill(for: .primary).opacity(0.92))
             .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.white.opacity(0.7), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .stroke(KabuyomiTheme.stroke(for: .primary).opacity(0.86), lineWidth: 1)
             )
-            .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 6)
     }
 
     private var userBubble: some View {
-        RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [KabuyomiTheme.accentDeep, KabuyomiTheme.accent],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(KabuyomiTheme.accentDeep.opacity(0.08))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(KabuyomiTheme.accentDeep.opacity(0.14), lineWidth: 1)
             )
-            .shadow(color: KabuyomiTheme.accentDeep.opacity(0.22), radius: 12, x: 0, y: 8)
     }
 
     private var groundingCaption: String? {
@@ -175,8 +182,8 @@ struct ConversationMessageRow: View {
     private var messageBubbleContent: some View {
         if message.role == "user" {
             Text(message.content)
-                .font(.system(.body, design: .rounded))
-                .foregroundStyle(Color.white)
+                .font(.system(.callout, design: .rounded, weight: .medium))
+                .foregroundStyle(KabuyomiTheme.inkSoft)
         } else if isUnavailableMessage(message.content) {
             AssistantFallbackBubble(
                 message: fallbackCopy,
@@ -232,25 +239,26 @@ struct ConversationMessageRow: View {
     private func sourceChip(for source: LocalMessageSourceRef) -> some View {
         HStack(spacing: 7) {
             Image(systemName: source.sourceKind.systemImage)
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(sourceBadgeForeground(for: source))
 
             Text(displaySourceLabel(for: source))
                 .font(.system(.caption2, design: .rounded, weight: .bold))
                 .foregroundStyle(KabuyomiTheme.accentDeep)
                 .lineLimit(1)
+                .truncationMode(.tail)
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(KabuyomiTheme.accentDeep.opacity(0.55))
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(Color.white.opacity(0.58))
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Color.white.opacity(0.70))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
                         .stroke(sourceBadgeBackground(for: source), lineWidth: 1)
                 )
         )
@@ -335,25 +343,41 @@ struct ConversationRecoverySuggestions: View {
     let applySuggestion: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 7) {
             Text(title)
                 .font(.system(.caption, design: .rounded, weight: .bold))
                 .foregroundStyle(KabuyomiTheme.accentDeep)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(suggestions, id: \.self) { suggestion in
-                        ConversationPromptChip(
-                            text: suggestion,
-                            systemImage: "arrow.turn.down.right",
-                            action: { applySuggestion(suggestion) }
-                        )
-                    }
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(shortSuggestions, id: \.self) { suggestion in
+                    ConversationPromptChip(
+                        text: suggestion,
+                        systemImage: "arrow.turn.down.right",
+                        action: { applySuggestion(suggestion) }
+                    )
                 }
-                .padding(.trailing, 20)
             }
         }
     }
+
+    private var shortSuggestions: [String] {
+        suggestions.map(shortFollowUpSuggestion)
+    }
+}
+
+private func shortFollowUpSuggestion(_ suggestion: String) -> String {
+    let replacements: [(String, String)] = [
+        ("売上高を伸ばした要因は？", "売上成長の要因は？"),
+        ("この3年の利益率推移は？", "利益率は改善した？"),
+        ("前回決算との違いは？", "前回との差は？")
+    ]
+
+    if let replacement = replacements.first(where: { suggestion == $0.0 })?.1 {
+        return replacement
+    }
+
+    guard suggestion.count > 18 else { return suggestion }
+    return String(suggestion.prefix(17)) + "？"
 }
 
 private struct AssistantComparisonNotice {
@@ -412,8 +436,12 @@ private struct AssistantNaturalText: View {
 
     var body: some View {
         let structure = structureAssistantMessage(text)
+        let metricRows = assistantMetricRows(from: text)
+        let evidence = metricRows.count >= 2
+            ? structure.evidence.filter { !assistantSentenceContainsMetric($0) }
+            : structure.evidence
 
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(structure.conclusion)
                 .font(.system(.callout, design: .rounded, weight: .semibold))
                 .foregroundStyle(KabuyomiTheme.ink)
@@ -421,9 +449,13 @@ private struct AssistantNaturalText: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
 
-            if !structure.evidence.isEmpty {
-                VStack(alignment: .leading, spacing: 9) {
-                    ForEach(Array(structure.evidence.prefix(5).enumerated()), id: \.offset) { _, sentence in
+            if metricRows.count >= 2 {
+                AssistantMetricTable(rows: metricRows)
+            }
+
+            if !evidence.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(Array(evidence.prefix(4).enumerated()), id: \.offset) { _, sentence in
                         AssistantSentenceRow(text: sentence)
                     }
                 }
@@ -444,7 +476,13 @@ private struct AssistantInlineNotice: View {
     let message: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.accentDeep)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 3) {
             Text(title)
                 .font(.system(.caption, design: .rounded, weight: .bold))
                 .foregroundStyle(KabuyomiTheme.accentDeep)
@@ -454,10 +492,76 @@ private struct AssistantInlineNotice: View {
                 .foregroundStyle(KabuyomiTheme.inkSoft)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .padding(12)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .kabuyomiGlass(radius: 18, tint: Color.white.opacity(0.18), stroke: Color.white.opacity(0.52))
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(KabuyomiTheme.accentSoft.opacity(0.24))
+        )
+    }
+}
+
+struct AssistantMetricDisplayRow: Equatable, Identifiable {
+    let metric: String
+    let value: String
+    let context: String
+
+    var id: String { metric }
+}
+
+private struct AssistantMetricTable: View {
+    let rows: [AssistantMetricDisplayRow]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                metricHeader("指標", width: 74)
+                metricHeader("値", width: 96)
+                metricHeader("変化 / 文脈", width: nil)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+
+            Divider().overlay(Color.white.opacity(0.55))
+
+            ForEach(rows) { row in
+                HStack(alignment: .top, spacing: 8) {
+                    Text(row.metric)
+                        .frame(width: 74, alignment: .leading)
+                    Text(row.value)
+                        .frame(width: 96, alignment: .leading)
+                    Text(row.context.isEmpty ? "本文参照" : row.context)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .font(.system(.caption, design: .rounded, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.ink)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+
+                if row.id != rows.last?.id {
+                    Divider().overlay(Color.white.opacity(0.42))
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(KabuyomiTheme.fill(for: .input))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(KabuyomiTheme.stroke(for: .input), lineWidth: 1)
+                )
+        )
+    }
+
+    private func metricHeader(_ text: String, width: CGFloat?) -> some View {
+        Text(text)
+            .font(.system(.caption2, design: .rounded, weight: .bold))
+            .foregroundStyle(KabuyomiTheme.inkMuted)
+            .frame(width: width, alignment: .leading)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
     }
 }
 
@@ -503,6 +607,98 @@ private struct AssistantSentenceRow: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
+}
+
+func assistantMetricRows(from text: String) -> [AssistantMetricDisplayRow] {
+    let sentences = splitAssistantSentences(text).map(localizedAssistantDisplayText)
+    var rows: [AssistantMetricDisplayRow] = []
+    var seen = Set<String>()
+
+    for sentence in sentences {
+        for metric in assistantMetricLabels where sentence.contains(metric) && !seen.contains(metric) {
+            guard let value = firstMetricValue(in: sentence, after: metric) else { continue }
+            rows.append(
+                AssistantMetricDisplayRow(
+                    metric: metric,
+                    value: value,
+                    context: metricContext(in: sentence, excluding: value)
+                )
+            )
+            seen.insert(metric)
+        }
+    }
+
+    return rows
+}
+
+private var assistantMetricLabels: [String] {
+    [
+        "売上高",
+        "営業利益",
+        "純利益",
+        "粗利益",
+        "営業キャッシュフロー",
+        "フリーキャッシュフロー",
+        "利益率",
+        "営業利益率"
+    ]
+}
+
+private func assistantSentenceContainsMetric(_ sentence: String) -> Bool {
+    assistantMetricLabels.contains { sentence.contains($0) }
+}
+
+private func firstMetricValue(in sentence: String, after metric: String) -> String? {
+    guard let metricRange = sentence.range(of: metric) else { return nil }
+    let tail = String(sentence[metricRange.upperBound...])
+    let patterns = [
+        #"([0-9０-９][0-9０-９,，.．]*\s*(?:億ドル|百万ドル|万ドル|ドル|億円|百万円|万円|円))"#,
+        #"([0-9０-９][0-9０-９,，.．]*\s*(?:%|％))"#
+    ]
+
+    for pattern in patterns {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+        let range = NSRange(tail.startIndex..<tail.endIndex, in: tail)
+        guard let match = regex.firstMatch(in: tail, range: range),
+              let valueRange = Range(match.range(at: 1), in: tail) else {
+            continue
+        }
+
+        return String(tail[valueRange])
+            .replacingOccurrences(of: "，", with: ",")
+            .replacingOccurrences(of: "．", with: ".")
+            .replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
+    }
+
+    return nil
+}
+
+private func metricContext(in sentence: String, excluding value: String) -> String {
+    let contextPatterns = [
+        #"(前年同期比\s*[+-]?[0-9０-９][0-9０-９,.．，]*\s*(?:%|％)\s*(?:増|減)?)"#,
+        #"([+-][0-9０-９][0-9０-９,.．，]*\s*(?:%|％))"#,
+        #"((?:増加|減少|改善|悪化)[^。！？!?]{0,18})"#
+    ]
+
+    for pattern in contextPatterns {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+        let range = NSRange(sentence.startIndex..<sentence.endIndex, in: sentence)
+        guard let match = regex.firstMatch(in: sentence, range: range),
+              let contextRange = Range(match.range(at: 1), in: sentence) else {
+            continue
+        }
+
+        let context = String(sentence[contextRange])
+            .replacingOccurrences(of: "，", with: ",")
+            .replacingOccurrences(of: "．", with: ".")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !context.contains(value) {
+            return context
+        }
+    }
+
+    return ""
 }
 
 func isComparisonQuestionText(_ text: String) -> Bool {
@@ -870,4 +1066,83 @@ private func looksLikePureBoilerplate(_ text: String) -> Bool {
         || normalized.contains("forward-looking statements")
         || normalized.contains("investors are cautioned")
         || normalized.contains("available information")
+}
+
+private struct FlowLayout: Layout {
+    let spacing: CGFloat
+    let lineSpacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let width = proposal.width ?? 320
+        let rows = buildRows(subviews: subviews, maxWidth: width)
+        let height = rows.reduce(CGFloat.zero) { partial, row in
+            partial + row.height
+        } + CGFloat(max(0, rows.count - 1)) * lineSpacing
+
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        let rows = buildRows(subviews: subviews, maxWidth: bounds.width)
+        var y = bounds.minY
+
+        for row in rows {
+            var x = bounds.minX
+            for item in row.items {
+                subviews[item.index].place(
+                    at: CGPoint(x: x, y: y),
+                    proposal: ProposedViewSize(item.size)
+                )
+                x += item.size.width + spacing
+            }
+            y += row.height + lineSpacing
+        }
+    }
+
+    private func buildRows(subviews: Subviews, maxWidth: CGFloat) -> [FlowLayoutRow] {
+        var rows: [FlowLayoutRow] = []
+        var current = FlowLayoutRow(items: [], height: 0, width: 0)
+
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let itemWidth = min(size.width, maxWidth)
+            let item = FlowLayoutItem(index: index, size: CGSize(width: itemWidth, height: size.height))
+            let proposedWidth = current.items.isEmpty ? itemWidth : current.width + spacing + itemWidth
+
+            if proposedWidth > maxWidth, !current.items.isEmpty {
+                rows.append(current)
+                current = FlowLayoutRow(items: [item], height: item.size.height, width: itemWidth)
+            } else {
+                current.items.append(item)
+                current.width = proposedWidth
+                current.height = max(current.height, item.size.height)
+            }
+        }
+
+        if !current.items.isEmpty {
+            rows.append(current)
+        }
+
+        return rows
+    }
+}
+
+private struct FlowLayoutRow {
+    var items: [FlowLayoutItem]
+    var height: CGFloat
+    var width: CGFloat
+}
+
+private struct FlowLayoutItem {
+    let index: Int
+    let size: CGSize
 }

@@ -18,6 +18,16 @@ export interface QuotaIdentity {
   accessMode?: string;
   chatLimitOverride?: number;
   stockLimitOverride?: number;
+  activeSubscription?: {
+    originalTransactionId?: string;
+    transactionId?: string | null;
+    productId: string | null;
+    periodStart?: string | null;
+    periodEnd?: string | null;
+    expiresAt?: string | null;
+    monthlyCredits?: number | null;
+    monthlyGrantOperationId?: string | null;
+  };
 }
 
 interface QuotaIdentityOptions {
@@ -162,7 +172,17 @@ export async function readQuotaIdentity(
     return {
       quotaSubject: syncedEntitlement.quotaSubject,
       plan: syncedEntitlement.plan,
-      identityKind: "entitlement"
+      identityKind: "entitlement",
+      activeSubscription: {
+        originalTransactionId: syncedEntitlement.originalTransactionId,
+        transactionId: syncedEntitlement.transactionId,
+        productId: syncedEntitlement.productId,
+        periodStart: syncedEntitlement.subscriptionPeriodStart,
+        periodEnd: syncedEntitlement.subscriptionPeriodEnd,
+        expiresAt: syncedEntitlement.subscriptionExpiresAt,
+        monthlyCredits: syncedEntitlement.subscriptionMonthlyCredits,
+        monthlyGrantOperationId: syncedEntitlement.monthlyGrantOperationId
+      }
     };
   }
 
@@ -494,6 +514,9 @@ export async function ensureCompanyAccessAllowed(
       chatLimit: limits.chatLimit,
       stockLimit: limits.stockLimit,
       monthlyCreditLimit: limits.monthlyCreditLimit,
+      monthlyCreditPeriodStart: limits.monthlyCreditPeriodStart,
+      monthlyCreditPeriodEnd: limits.monthlyCreditPeriodEnd,
+      monthlyGrantOperationId: limits.monthlyGrantOperationId,
       previewTickers: normalizePreviewTickers(previewTickers),
       relatedTickers: normalizePreviewTickers(options.relatedTickers ?? [])
     })
@@ -571,6 +594,9 @@ async function mutateUsage(
       chatLimit: limits.chatLimit,
       stockLimit: limits.stockLimit,
       monthlyCreditLimit: limits.monthlyCreditLimit,
+      monthlyCreditPeriodStart: limits.monthlyCreditPeriodStart,
+      monthlyCreditPeriodEnd: limits.monthlyCreditPeriodEnd,
+      monthlyGrantOperationId: limits.monthlyGrantOperationId,
       operationId: options.operationId
     })
   });
@@ -598,10 +624,17 @@ async function mutateUsage(
 
 function resolveIdentityLimits(identity: QuotaIdentity, config: RemoteConfig) {
   const planLimits = resolvePlanLimits(identity.plan, config);
+  const subscriptionCredits = identity.activeSubscription?.monthlyCredits;
   return {
     chatLimit: identity.chatLimitOverride ?? planLimits.chatLimit,
     stockLimit: identity.stockLimitOverride ?? planLimits.stockLimit,
-    monthlyCreditLimit: resolveMonthlyCreditLimit(identity.plan, config)
+    monthlyCreditLimit:
+      typeof subscriptionCredits === "number" && subscriptionCredits >= 0
+        ? subscriptionCredits
+        : resolveMonthlyCreditLimit(identity.plan, config),
+    monthlyCreditPeriodStart: identity.activeSubscription?.periodStart ?? undefined,
+    monthlyCreditPeriodEnd: identity.activeSubscription?.periodEnd ?? undefined,
+    monthlyGrantOperationId: identity.activeSubscription?.monthlyGrantOperationId ?? undefined
   };
 }
 
@@ -639,6 +672,9 @@ async function mutateCreditUsage(
       chatLimit: limits.chatLimit,
       stockLimit: limits.stockLimit,
       monthlyCreditLimit: limits.monthlyCreditLimit,
+      monthlyCreditPeriodStart: limits.monthlyCreditPeriodStart,
+      monthlyCreditPeriodEnd: limits.monthlyCreditPeriodEnd,
+      monthlyGrantOperationId: limits.monthlyGrantOperationId,
       operationId: options.operationId,
       originalOperationId: options.originalOperationId,
       creditsRequired: options.creditsRequired,
@@ -727,6 +763,9 @@ async function mutatePurchaseCreditGrant(
       chatLimit: limits.chatLimit,
       stockLimit: limits.stockLimit,
       monthlyCreditLimit: limits.monthlyCreditLimit,
+      monthlyCreditPeriodStart: limits.monthlyCreditPeriodStart,
+      monthlyCreditPeriodEnd: limits.monthlyCreditPeriodEnd,
+      monthlyGrantOperationId: limits.monthlyGrantOperationId,
       operationId: options.operationId,
       transactionId: options.transactionId,
       productId: options.productId,
@@ -803,6 +842,9 @@ async function mutateEvalCreditGrant(
       chatLimit: limits.chatLimit,
       stockLimit: limits.stockLimit,
       monthlyCreditLimit: limits.monthlyCreditLimit,
+      monthlyCreditPeriodStart: limits.monthlyCreditPeriodStart,
+      monthlyCreditPeriodEnd: limits.monthlyCreditPeriodEnd,
+      monthlyGrantOperationId: limits.monthlyGrantOperationId,
       operationId: options.operationId,
       credits: options.credits,
       referenceType: "eval_grant",
@@ -878,6 +920,9 @@ async function mutateRewardedAdCreditGrant(
       chatLimit: limits.chatLimit,
       stockLimit: limits.stockLimit,
       monthlyCreditLimit: limits.monthlyCreditLimit,
+      monthlyCreditPeriodStart: limits.monthlyCreditPeriodStart,
+      monthlyCreditPeriodEnd: limits.monthlyCreditPeriodEnd,
+      monthlyGrantOperationId: limits.monthlyGrantOperationId,
       operationId: options.operationId,
       credits: options.credits,
       promoExpiresAt: options.expiresAt,

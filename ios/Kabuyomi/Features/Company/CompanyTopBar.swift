@@ -30,7 +30,7 @@ struct ChatTopBar: View {
     }
 
     private var compactToolbar: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             libraryButton
 
             Spacer(minLength: 0)
@@ -41,9 +41,9 @@ struct ChatTopBar: View {
 
             actionCluster
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
     }
 
     private var stackedToolbar: some View {
@@ -67,10 +67,10 @@ struct ChatTopBar: View {
     private var libraryButton: some View {
         Button(action: openLibrary) {
             Image(systemName: "line.3.horizontal")
-                .font(.system(size: 20, weight: .semibold))
-                .frame(width: 48, height: 48)
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 44, height: 44)
                 .foregroundStyle(KabuyomiTheme.accentDeep)
-                .kabuyomiGlass(radius: 24, interactive: true)
+                .kabuyomiCard(.secondary, radius: 14)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("一覧を開く")
@@ -79,25 +79,19 @@ struct ChatTopBar: View {
     }
 
     private var actionCluster: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 6) {
             iconButton(
                 systemName: "sidebar.right",
                 accessibilityLabel: "要点を開く",
                 isEnabled: canOpenSummary,
                 action: openSummary
             )
-            Divider()
-                .frame(height: 22)
-                .overlay(KabuyomiTheme.stroke(for: .secondary))
             iconButton(
                 systemName: isSaved ? "bookmark.fill" : "bookmark",
                 accessibilityLabel: isSaved ? "保存済み銘柄から外す" : "保存銘柄に追加",
                 isEnabled: true,
                 action: toggleSaved
             )
-            Divider()
-                .frame(height: 22)
-                .overlay(KabuyomiTheme.stroke(for: .secondary))
             Button(action: refresh) {
                 Group {
                     if isLoading {
@@ -106,17 +100,23 @@ struct ChatTopBar: View {
                             .tint(KabuyomiTheme.accentDeep)
                     } else {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(.system(size: 17, weight: .semibold))
                     }
                 }
-                .frame(width: 44, height: 48)
+                .frame(width: 44, height: 44)
                 .foregroundStyle(KabuyomiTheme.accentDeep)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("企業データを更新")
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(KabuyomiTheme.fill(for: .secondary))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(KabuyomiTheme.stroke(for: .secondary), lineWidth: 1)
+                    )
+            )
         }
-        .padding(.horizontal, 4)
-        .kabuyomiGlass(radius: 24, interactive: true)
     }
 
     private var topBarTitle: some View {
@@ -138,7 +138,7 @@ struct ChatTopBar: View {
         VStack(spacing: 2) {
             HStack(spacing: 6) {
                 Text(ticker)
-                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .font(.system(.headline, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.ink)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
@@ -173,8 +173,8 @@ struct ChatTopBar: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 220)
+        .padding(.vertical, 4)
+        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 190)
         .contentShape(Rectangle())
     }
 
@@ -186,10 +186,18 @@ struct ChatTopBar: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 18, weight: .semibold))
-                .frame(width: 44, height: 48)
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 44, height: 44)
                 .foregroundStyle(isEnabled ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted.opacity(0.6))
         }
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(KabuyomiTheme.fill(for: .secondary))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(KabuyomiTheme.stroke(for: .secondary), lineWidth: 1)
+                )
+        )
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .accessibilityLabel(accessibilityLabel)

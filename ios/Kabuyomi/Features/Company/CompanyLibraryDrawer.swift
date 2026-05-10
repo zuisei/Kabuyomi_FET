@@ -60,21 +60,18 @@ struct ConversationLibraryDrawer: View {
     private var drawerShell: some View {
         drawerShellBackground
             .compositingGroup()
-            .mask(CompanyDrawerShellFadeMask(topFade: 28, bottomFade: 34))
     }
 
     private var drawerShellBackground: some View {
         ZStack {
             Rectangle()
-                .fill(.ultraThinMaterial)
+                .fill(KabuyomiTheme.paper)
+                .ignoresSafeArea()
 
             Rectangle()
-                .fill(Color.white.opacity(0.28))
-
-            Rectangle()
-                .stroke(Color.white.opacity(0.55), lineWidth: 1)
+                .stroke(KabuyomiTheme.stroke(for: .secondary), lineWidth: 1)
         }
-        .shadow(color: Color.black.opacity(0.12), radius: 18, x: 8, y: 0)
+        .shadow(color: KabuyomiTheme.shadow(for: .primary), radius: 16, x: 8, y: 0)
     }
 
     @ViewBuilder
@@ -174,10 +171,10 @@ struct ConversationLibraryDrawer: View {
 
             Button(action: close) {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 15, weight: .bold))
-                    .frame(width: 36, height: 36)
+                    .font(.system(size: 17, weight: .bold))
+                    .frame(width: 44, height: 44)
                     .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .kabuyomiGlass(radius: 18, interactive: true)
+                    .kabuyomiCard(.secondary, radius: 14)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("一覧を閉じる")
@@ -188,7 +185,7 @@ struct ConversationLibraryDrawer: View {
         VStack(spacing: 12) {
             HStack(spacing: 10) {
                 DrawerDockButton(
-                    title: "Credits",
+                    title: "クレジット",
                     subtitle: creditSubtitle,
                     systemImage: "creditcard",
                     action: openCredits
@@ -214,7 +211,7 @@ struct ConversationLibraryDrawer: View {
 
     private var creditSubtitle: String {
         if let credits = appModel.creditUsage {
-            return "\(credits.totalRemaining) credits"
+            return "\(credits.totalRemaining)クレジット"
         }
         return "確認中"
     }

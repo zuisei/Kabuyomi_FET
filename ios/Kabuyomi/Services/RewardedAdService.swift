@@ -57,7 +57,7 @@ enum RewardedAdServiceError: LocalizedError, Equatable {
         case .ssvNotReceivedOrRewardStatusPending:
             "広告視聴は完了しましたが、サーバー確認がまだ完了していません。少し時間をおいて残高を更新してください。"
         case .dismissedWithoutReward:
-            "広告の視聴が完了していないため、creditは付与されませんでした。"
+            "広告の視聴が完了していないため、無料/ad creditは付与されませんでした。"
         }
     }
 }

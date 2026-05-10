@@ -834,6 +834,95 @@ describe("UserQuotaDO", () => {
     });
   });
 
+  it("grants only the same-period subscription upgrade delta and keeps paid credits separate", async () => {
+    const quota = new UserQuotaDO(createState() as never);
+
+    const lite = await postQuota(quota, {
+      action: "ensureMonthlyCreditGrant",
+      quotaSubject: "free:test-device",
+      plan: "lite",
+      dateJST: "2026-05-10",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 400,
+      monthlyCreditPeriodStart: "2026-05-01T00:00:00.000Z",
+      monthlyCreditPeriodEnd: "2026-06-01T00:00:00.000Z",
+      monthlyGrantOperationId: "sub-grant:lite"
+    });
+    await postQuota(quota, {
+      action: "grantPurchasedCredit",
+      quotaSubject: "free:test-device",
+      plan: "lite",
+      dateJST: "2026-05-10",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 400,
+      monthlyCreditPeriodStart: "2026-05-01T00:00:00.000Z",
+      monthlyCreditPeriodEnd: "2026-06-01T00:00:00.000Z",
+      monthlyGrantOperationId: "sub-grant:lite",
+      operationId: "purchase:tx-50",
+      productId: "kabuyomi.credits.50",
+      transactionId: "tx-50",
+      purchaseCredits: 50
+    });
+    const pro = await postQuota(quota, {
+      action: "ensureMonthlyCreditGrant",
+      quotaSubject: "free:test-device",
+      plan: "pro",
+      dateJST: "2026-05-10",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 900,
+      monthlyCreditPeriodStart: "2026-05-01T00:00:00.000Z",
+      monthlyCreditPeriodEnd: "2026-06-01T00:00:00.000Z",
+      monthlyGrantOperationId: "sub-grant:pro"
+    });
+    const downgrade = await postQuota(quota, {
+      action: "ensureMonthlyCreditGrant",
+      quotaSubject: "free:test-device",
+      plan: "lite",
+      dateJST: "2026-05-10",
+      chatLimit: 3,
+      stockLimit: 3,
+      monthlyCreditLimit: 400,
+      monthlyCreditPeriodStart: "2026-05-01T00:00:00.000Z",
+      monthlyCreditPeriodEnd: "2026-06-01T00:00:00.000Z",
+      monthlyGrantOperationId: "sub-grant:lite-downgrade"
+    });
+
+    await expect(lite.json()).resolves.toMatchObject({
+      monthlyGrant: {
+        operationId: "sub-grant:lite",
+        creditsGranted: 400
+      }
+    });
+    await expect(pro.json()).resolves.toMatchObject({
+      monthlyGrant: {
+        operationId: "sub-grant:pro",
+        creditsGranted: 500
+      },
+      usage: {
+        credits: {
+          monthlyLimit: 900,
+          monthlyRemaining: 900,
+          purchasedRemaining: 50,
+          totalRemaining: 950
+        }
+      }
+    });
+    await expect(downgrade.json()).resolves.toMatchObject({
+      didMutate: false,
+      usage: {
+        credits: {
+          monthlyLimit: 400,
+          monthlyRemaining: 400,
+          purchasedRemaining: 50,
+          totalRemaining: 450
+        }
+      }
+    });
+  });
+
   it("consumes credit once for the same operation id", async () => {
     const quota = new UserQuotaDO(createState() as never);
     const body = {

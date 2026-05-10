@@ -135,6 +135,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var creditPackProductLoadErrorMessage: String?
     var creditPackProductLoadInFlight = false
     var storeKitDiagnostics = StoreKitDiagnosticsSnapshot.initial(requestedProductIds: SubscriptionStore.creditPackProductIDs)
+    var lastUsageRefreshAt: Date?
+    var lastBillingSyncStatus: String = "not_started"
+    var lastBillingSyncAt: Date?
+    var billingAPIHealthReport: BillingAPIHealthReport?
+    var billingAPIHealthCheckInFlight = false
     var activeAlert: AppAlertState?
     var aiConsentGranted = UserDefaults.standard.bool(forKey: "kabuyomi.aiConsentGranted")
     var showStarterCompanies = UserDefaults.standard.object(forKey: "kabuyomi.showStarterCompanies") as? Bool ?? true
@@ -183,7 +188,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                await self.syncBillingState(showErrors: false)
+                _ = await self.syncBillingState(showErrors: false)
                 await self.recoverUnfinishedCreditPurchases(showErrors: false)
                 await self.refreshUsage()
             }
@@ -308,6 +313,20 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         deviceIdentity.deviceKey()
     }
 
+    var currentDeviceKeySuffixDisplay: String {
+        let key = deviceIdentity.deviceKey().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return "unknown" }
+        return String(key.suffix(6))
+    }
+
+    var currentAppVersionDisplay: String {
+        appVersionDisplay
+    }
+
+    var billingEndpointDiagnosticLine: String {
+        "subscription=\(apiClient.subscriptionSyncEndpointDisplayString) / credit=\(apiClient.creditPurchaseEndpointDisplayString)"
+    }
+
     func logRewardedAdSettingsViewed() {
         logRewardedAdDiagnostic("settings_view_appeared")
     }
@@ -336,7 +355,8 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             guard let self else { return }
             if !Self.isRunningTests {
                 await self.subscriptionStore.refreshEntitlements(reason: "bootstrap")
-                await self.syncBillingState(showErrors: false)
+                _ = await self.syncBillingState(showErrors: false)
+                await self.loadSubscriptionProducts(showErrors: false)
                 await self.loadCreditPackProducts(showErrors: false)
                 await self.recoverUnfinishedCreditPurchases(showErrors: false)
             }
@@ -347,14 +367,39 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     func purchaseSubscription(productId: String) async {
         guard !billingActionInFlight else { return }
         billingActionInFlight = true
+        let stateGeneration = self.stateGeneration
+        let usageGeneration = usageMutationGeneration
         defer { billingActionInFlight = false }
 
         do {
-            let isActive = try await subscriptionStore.purchaseSubscription(productId: productId)
-            guard isActive else { return }
-            await syncBillingState(showErrors: true)
-            await refreshUsage()
+            guard let purchase = try await subscriptionStore.purchaseSubscription(productId: productId) else {
+                activeAlert = AppAlertState(
+                    message: "購入はキャンセルされました。",
+                    kind: .dismissOnly
+                )
+                return
+            }
+            lastBillingSyncStatus = "syncing \(apiClient.subscriptionSyncEndpointDisplayString)"
+            let response = try await apiClient.syncBilling(purchase.syncRequest)
+            let isCurrentGeneration = stateGeneration == self.stateGeneration && usageGeneration == usageMutationGeneration
+            if isCurrentGeneration {
+                subscriptionStore.apply(response)
+                lastBillingSyncStatus = "succeeded \(apiClient.subscriptionSyncEndpointDisplayString)"
+                lastBillingSyncAt = Date()
+            }
+            if isCurrentGeneration, let usage = response.usage {
+                storeUsage(usage, source: .refresh)
+            }
+            await purchase.finish()
+            if isCurrentGeneration {
+                await refreshUsage()
+                activeAlert = AppAlertState(
+                    message: "\(currentBillingTier.title)プランを同期しました。",
+                    kind: .dismissOnly
+                )
+            }
         } catch {
+            recordBillingFailure(error, endpoint: apiClient.subscriptionSyncEndpointDisplayString)
             handle(error)
         }
     }
@@ -371,12 +416,17 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
         do {
             try await subscriptionStore.restorePurchases()
-            await syncBillingState(showErrors: true)
+            let response = await syncBillingState(showErrors: true)
             await refreshUsage()
 
             if !subscriptionStore.isSubscriptionActive {
                 activeAlert = AppAlertState(
                     message: "復元できる購読は見つかりませんでした。",
+                    kind: .dismissOnly
+                )
+            } else if response != nil {
+                activeAlert = AppAlertState(
+                    message: "\(currentBillingTier.title)プランを同期しました。",
                     kind: .dismissOnly
                 )
             }
@@ -462,7 +512,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         guard !billingActionInFlight else { return }
         guard isCreditBillingEnabled else {
             activeAlert = AppAlertState(
-                message: "追加credit購入は現在利用できません。時間をおいてからもう一度お試しください。",
+                message: "追加クレジット購入は現在利用できません。時間をおいてからもう一度お試しください。",
                 kind: .dismissOnly
             )
             return
@@ -474,12 +524,19 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         do {
             guard let purchase = try await subscriptionStore.purchaseCreditPack(productId: productId) else {
                 refreshStoreKitDiagnostics()
+                activeAlert = AppAlertState(
+                    message: "購入はキャンセルされました。",
+                    kind: .dismissOnly
+                )
                 return
             }
             subscriptionStore.recordBackendGrantStarted()
             refreshStoreKitDiagnostics()
+            lastBillingSyncStatus = "granting \(apiClient.creditPurchaseEndpointDisplayString)"
             let response = try await apiClient.grantCreditPurchase(purchase.grantRequest)
             subscriptionStore.recordBackendGrantSucceeded(didMutate: response.didMutate)
+            lastBillingSyncStatus = "succeeded \(apiClient.creditPurchaseEndpointDisplayString)"
+            lastBillingSyncAt = Date()
             storeUsage(response.usage, source: .refresh)
             await purchase.finish()
             subscriptionStore.recordTransactionFinished()
@@ -494,6 +551,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             if subscriptionStore.storeKitDiagnostics.backendGrantStatus == "started" {
                 subscriptionStore.recordBackendGrantFailed(error)
             }
+            recordBillingFailure(error, endpoint: apiClient.creditPurchaseEndpointDisplayString)
             refreshStoreKitDiagnostics()
             handle(error)
         }
@@ -513,6 +571,8 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 refreshStoreKitDiagnostics()
                 let response = try await apiClient.grantCreditPurchase(purchase.grantRequest)
                 subscriptionStore.recordBackendGrantSucceeded(didMutate: response.didMutate)
+                lastBillingSyncStatus = "recovered \(apiClient.creditPurchaseEndpointDisplayString)"
+                lastBillingSyncAt = Date()
                 storeUsage(response.usage, source: .refresh)
                 await purchase.finish()
                 subscriptionStore.recordTransactionFinished()
@@ -521,6 +581,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 if subscriptionStore.storeKitDiagnostics.backendGrantStatus == "started" {
                     subscriptionStore.recordBackendGrantFailed(error)
                 }
+                recordBillingFailure(error, endpoint: apiClient.creditPurchaseEndpointDisplayString)
                 refreshStoreKitDiagnostics()
                 if showErrors {
                     handle(error)
@@ -610,7 +671,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             let status = try await pollRewardStatus(rewardIntentId: intent.rewardIntentId)
             storeUsage(status.usage, source: .refresh)
             rewardedAdCreditState = status.dailyRemaining <= 0 ? .dailyCapReached : .idle
-            rewardedAdStatusMessage = "\(status.rewardCredits)クレジットを獲得しました。"
+            rewardedAdStatusMessage = "\(status.rewardCredits)無料/ad creditを獲得しました。"
             setRewardedAdDebugReason("granted")
             logRewardedAdDiagnostic(
                 "reward_status_granted",
@@ -817,6 +878,13 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     func refreshCreditUsage() async {
         await refreshUsage()
+    }
+
+    func checkBillingAPIHealth() async {
+        guard !billingAPIHealthCheckInFlight else { return }
+        billingAPIHealthCheckInFlight = true
+        defer { billingAPIHealthCheckInFlight = false }
+        billingAPIHealthReport = await apiClient.checkBillingAPIHealth()
     }
 
     #if DEBUG
@@ -1170,8 +1238,13 @@ credit残高に使う端末識別情報は維持されます。
     }
 
     func requestCreditOptions() {
+        let currentCredits = usage?.credits?.totalRemaining ?? 0
         activeAlert = AppAlertState(
-            message: "creditが不足しています。設定のクレジット画面で追加creditを確認してください。",
+            message: """
+クレジットが不足しています
+この質問には \(chatCreditCost) credits が必要です。
+現在の残高: \(currentCredits) credits
+""",
             kind: .dismissOnly
         )
     }
@@ -1397,6 +1470,7 @@ credit残高に使う端末識別情報は維持されます。
             guard stateGeneration == self.stateGeneration else { return }
             guard usageGeneration == usageMutationGeneration else { return }
             storeUsage(usage, source: .refresh)
+            lastUsageRefreshAt = Date()
             usageLoadState = .loaded
         } catch {
             guard stateGeneration == self.stateGeneration else { return }
@@ -1654,22 +1728,43 @@ credit残高に使う端末識別情報は維持されます。
         }
 
         if rawMessage.contains("insufficient_credits") || rawMessage.contains("creditが不足") {
-            return "creditが不足しています。設定のクレジット画面で追加creditを確認してください。"
+            let currentCredits = usage?.credits?.totalRemaining ?? 0
+            return "クレジットが不足しています\nこの操作には \(chatCreditCost) credits が必要です。\n現在の残高: \(currentCredits) credits"
         }
 
         if rawMessage.contains("クレジット商品を読み込めません")
             || rawMessage.contains("購入を確認できません")
-            || rawMessage.contains("購入が保留中")
+            || rawMessage.contains("購入は保留中")
+            || rawMessage.contains("購入はキャンセルされました")
             || rawMessage.contains("購入は完了しましたが") {
             return rawMessage
         }
 
+        if rawMessage.contains("route_missing") {
+            #if DEBUG
+            return "購入の同期先が見つかりません。しばらくしてからもう一度お試しください。\n\(rawMessage)"
+            #else
+            return "購入の同期先が見つかりません。しばらくしてからもう一度お試しください。"
+            #endif
+        }
+
         if rawMessage.contains("Apple transaction verification") || rawMessage.contains("Apple transaction could not be verified") {
-            return "購入を確認できませんでした。少し時間をおいて再試行してください。"
+            return "購入を確認できませんでした。購入を復元してください。"
         }
 
         if rawMessage.contains("Purchase transaction") {
             return "購入は完了しましたが、クレジット付与確認がまだ完了していません。少し時間をおいて再試行してください。"
+        }
+
+        if rawMessage.contains("Invalid billing sync payload")
+            || rawMessage.contains("Invalid credit purchase payload")
+            || rawMessage.contains("Invalid transaction")
+            || (rawMessage.contains("product") && rawMessage.contains("mismatch")) {
+            return "購入を確認できませんでした。購入を復元してください。"
+        }
+
+        if nsError.domain == NSURLErrorDomain || error is URLError {
+            return "通信に失敗しました。接続を確認して、購入を復元してください。"
         }
 
         if rawMessage.contains("Watchlist limit exceeded") {
@@ -1732,6 +1827,8 @@ credit残高に使う端末識別情報は維持されます。
                 return message
             case .serverStatus(let statusCode, let message):
                 return "HTTP \(statusCode): \(message)"
+            case .routeMissing(let statusCode, let path, let url, let message):
+                return "HTTP \(statusCode): route_missing path=\(path) url=\(url) message=\(message)"
             case .insufficientCredits(let required, let remaining):
                 return "insufficient_credits required=\(required) remaining=\(remaining)"
             }
@@ -1760,6 +1857,8 @@ credit残高に使う端末識別情報は維持されます。
             guard normalizedChatLimit != usage.chatLimit else { return usage }
             return UsagePayload(
                 plan: usage.plan,
+                activePlan: usage.activePlan,
+                activeSubscription: usage.activeSubscription,
                 chatsUsed: usage.chatsUsed,
                 chatLimit: normalizedChatLimit,
                 stocksUsed: usage.stocksUsed,
@@ -1791,6 +1890,8 @@ credit残高に使う端末識別情報は維持されます。
 
         return UsagePayload(
             plan: usage.plan,
+            activePlan: usage.activePlan,
+            activeSubscription: usage.activeSubscription,
             chatsUsed: usage.chatsUsed,
             chatLimit: normalizedChatLimit,
             stocksUsed: usage.stocksUsed,
@@ -1819,6 +1920,8 @@ credit残高に使う端末識別情報は維持されます。
 
         return UsagePayload(
             plan: usage.plan,
+            activePlan: usage.activePlan,
+            activeSubscription: usage.activeSubscription,
             chatsUsed: usage.chatsUsed,
             chatLimit: usage.chatLimit,
             stocksUsed: mergedTickers.count,
@@ -2312,18 +2415,50 @@ credit残高に使う端末識別情報は維持されます。
         }
     }
 
-    private func syncBillingState(showErrors: Bool) async {
+    private func syncBillingState(showErrors: Bool) async -> BillingSyncResponse? {
+        let stateGeneration = self.stateGeneration
+        let usageGeneration = usageMutationGeneration
+
         do {
             guard let request = try await subscriptionStore.syncRequestIfAvailable() else {
-                return
+                return nil
             }
+            lastBillingSyncStatus = "syncing \(apiClient.subscriptionSyncEndpointDisplayString)"
             let response = try await apiClient.syncBilling(request)
+            guard stateGeneration == self.stateGeneration else {
+                return nil
+            }
             subscriptionStore.apply(response)
+            lastBillingSyncStatus = "succeeded \(apiClient.subscriptionSyncEndpointDisplayString)"
+            lastBillingSyncAt = Date()
+            if usageGeneration == usageMutationGeneration, let usage = response.usage {
+                storeUsage(usage, source: .refresh)
+                lastUsageRefreshAt = Date()
+            }
+            return response
         } catch {
+            recordBillingFailure(error, endpoint: apiClient.subscriptionSyncEndpointDisplayString)
             if showErrors {
                 handle(error)
             }
+            return nil
         }
+    }
+
+    private func recordBillingFailure(_ error: Error, endpoint: String) {
+        if let apiError = error as? APIError {
+            switch apiError {
+            case .routeMissing(let statusCode, let path, _, _):
+                lastBillingSyncStatus = "route_missing HTTP \(statusCode) \(path)"
+            case .serverStatus(let statusCode, let message):
+                lastBillingSyncStatus = "failed HTTP \(statusCode) \(endpoint): \(message)"
+            default:
+                lastBillingSyncStatus = "failed \(endpoint): \(rawMessage(for: error))"
+            }
+        } else {
+            lastBillingSyncStatus = "failed \(endpoint): \(rawMessage(for: error))"
+        }
+        lastBillingSyncAt = Date()
     }
 
     var isUsageSynchronizing: Bool {

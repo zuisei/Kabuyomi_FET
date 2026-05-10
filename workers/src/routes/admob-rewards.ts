@@ -205,6 +205,10 @@ async function processSsvGrant(url: URL, env: Env, config: RemoteConfig) {
       creditsGranted: 0
     };
   }
+  validateRewardPayload(url, {
+    transactionId,
+    rewardIntentId: intent.id
+  });
 
   logEvent("rewarded_ad_ssv_received", {
     transactionId,
@@ -364,6 +368,34 @@ function isAdMobConsoleVerificationCallback(url: URL): boolean {
     url.searchParams.get("reward_amount") === String(REWARD_CREDITS) &&
     url.searchParams.get("reward_item") === "credits"
   );
+}
+
+function validateRewardPayload(
+  url: URL,
+  options: {
+    transactionId: string;
+    rewardIntentId: string;
+  }
+): void {
+  const rewardAmount = optionalParam(url, "reward_amount");
+  if (rewardAmount !== null && rewardAmount !== String(REWARD_CREDITS)) {
+    logWarnEvent("rewarded_ad_ssv_invalid_reward_amount", {
+      transactionId: options.transactionId,
+      rewardIntentId: options.rewardIntentId,
+      rewardAmount
+    });
+    throw new AppError(400, "Invalid rewarded ad amount");
+  }
+
+  const rewardItem = optionalParam(url, "reward_item");
+  if (rewardItem !== null && rewardItem !== "credits") {
+    logWarnEvent("rewarded_ad_ssv_invalid_reward_item", {
+      transactionId: options.transactionId,
+      rewardIntentId: options.rewardIntentId,
+      rewardItem
+    });
+    throw new AppError(400, "Invalid rewarded ad item");
+  }
 }
 
 function effectiveIntentStatus(intent: RewardIntentRow): RewardIntentRow["status"] {

@@ -28,14 +28,14 @@ describe("remote config", () => {
     expect(config.freeDailyChatLimit).toBe(25);
     expect(config.planCredits).toEqual({
       free: 50,
-      lite: 150,
-      pro: 500,
-      pro_max: 1200
+      lite: 400,
+      pro: 900,
+      pro_max: 2000
     });
     expect(config.freeMonthlyCreditLimit).toBe(50);
-    expect(config.liteMonthlyCreditLimit).toBe(150);
-    expect(config.proMonthlyCreditLimit).toBe(500);
-    expect(config.proMaxMonthlyCreditLimit).toBe(1200);
+    expect(config.liteMonthlyCreditLimit).toBe(400);
+    expect(config.proMonthlyCreditLimit).toBe(900);
+    expect(config.proMaxMonthlyCreditLimit).toBe(2000);
   });
 
   it("logs and falls back to defaults when remote config KV read fails", async () => {

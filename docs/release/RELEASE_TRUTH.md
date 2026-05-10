@@ -1,15 +1,15 @@
 # Kabuyomi v1 Release Truth
 
-Last updated: 2026-05-06 JST
+Last updated: 2026-05-10 JST
 
-This document is the v1 submission source of truth. If older specs or handoff docs disagree with this file, use this file and the current code.
+This document is the v1.0.2 monetization source of truth for the `v1.0.2-subscription-rewarded-credits` branch. If older specs or handoff docs disagree with this file, use this file and the current code for this branch.
 
 ## Product Scope
 
 - Kabuyomi v1 is a Japanese SEC filing reader for U.S. stocks.
 - v1 supports SEC `10-K` and `10-Q` filings only.
 - v1 provides source-grounded filing Q&A and Japanese reading support.
-- v1 is a consumable-credit product only.
+- v1.0.2 is a credit-based monetization release with consumable paid credits and monthly subscription credit plans.
 - v1 is not investment advice.
 - v1 does not provide buy/sell recommendations.
 - v1 does not provide stock price forecasts or target prices.
@@ -17,22 +17,22 @@ This document is the v1 submission source of truth. If older specs or handoff do
 
 ## v1 Monetization
 
-- The only visible paid IAP product in v1 is `kabuyomi.credits.100`.
-- `kabuyomi.credits.100` grants 100 paid credits.
-- Price truth for `kabuyomi.credits.100` is ¥200.
+- Visible paid consumable products in v1.0.2:
+  - `kabuyomi.credits.50`: ¥100, grants 50 paid credits.
+  - `kabuyomi.credits.100`: existing compatibility product, remains supported when present and grants 100 paid credits.
+- Subscription group: `Kabuyomi_sus`.
+- Visible monthly subscription products in v1.0.2:
+  - `kabuyomi.sub.lite.monthly`: ¥640/month, grants 400 subscription credits/month.
+  - `kabuyomi.sub.pro.monthly`: ¥1,280/month, grants 900 subscription credits/month.
+  - `kabuyomi.sub.max.monthly`: ¥2,560/month, grants 2,000 subscription credits/month.
 - Paid credits do not expire.
-- Free/promotional credit and ad credit are separate from paid credit.
-- Credit consumption order is free/promotional credit, then ad credit, then paid credit.
-- v1 has no subscription UI.
-- v1 has no Lite / Pro / Pro Max user-facing or review-facing copy.
-- v1 public and review-facing copy must not use monthly credit wording.
-- v1 App Review builds hide the normal rewarded-credit UI.
+- Free/promotional credit, subscription credit, ad credit, and paid credit are separate server-side buckets.
+- Credit consumption order is subscription/free/promotional credit, then ad credit, then paid credit.
+- Normal chat cost is 2 credits.
+- Rewarded-credit UI is release-visible in v1.0.2 when the required AdMob rewarded config is present. Rewarded ads are optional and grant only free/ad credits after server-side Google AdMob SSV verification.
 
 ## Explicitly Not In v1
 
-- Subscriptions
-- Lite / Pro / Pro Max public plans
-- Monthly credit grants in public or review-facing copy
 - ¥500 / 280-credit pack
 - 8-K support
 - Web search route
@@ -41,21 +41,20 @@ This document is the v1 submission source of truth. If older specs or handoff do
 - Account system
 - Model-tier upsell
 
-These are v1.1+ or later items unless a new release truth document explicitly changes scope.
+These are later items unless a new release truth document explicitly changes scope.
 
 ## AdMob Rewarded Credit Status
 
-- AdMob rewarded-credit infrastructure exists in code and Worker routes.
-- The normal rewarded-credit UI is hidden for v1 App Review.
-- Rewarded credits are deferred to v1.1 / post-approval.
-- When enabled after approval, rewarded ads must be optional and must never be required to use paid credits.
-- When enabled after approval, rewarded ads grant +2 ad credits only after server-verified Google SSV.
-- When enabled after approval, rewarded grants are capped at 3 valid grants per user per JST day.
+- AdMob rewarded-credit UI is release-visible for Release/TestFlight/App Review when the required rewarded ad config is present.
+- Rewarded ads must be optional and must never be required to use paid credits.
+- Rewarded ads grant +2 ad credits only after server-verified Google SSV.
+- Rewarded grants are capped at 3 valid grants per user per JST day.
+- Rewarded grants are capped at +6 ad credits per JST day.
 - Invalid SSV, invalid ad unit, malformed callbacks, expired intents, and duplicate transaction callbacks must not grant credits.
 - Duplicate SSV transaction callbacks are success/no-op and must not double grant.
 - Ad credit expires 30 days after grant and must be disclosed in user-facing copy when the UI is enabled.
 - Paid credits remain separate and do not expire.
-- Real production/TestFlight Google SSV evidence must be recorded in `docs/admob/rewarded_admob_credits_runbook.md` before rewarded credits can be enabled in a submitted build.
+- Real production/TestFlight Google SSV smoke evidence must be recorded in `docs/admob/rewarded_admob_credits_runbook.md` before main merge or App Store submission can be marked ready.
 
 ## Legal / Review Requirements
 
@@ -77,6 +76,6 @@ These are v1.1+ or later items unless a new release truth document explicitly ch
 
 ## Submit Gate
 
-Default release decision is `HOLD`.
+Default release decision is `TESTFLIGHT_SMOKE_REQUIRED`.
 
-Kabuyomi can move to `SUBMIT CANDIDATE` only after all v1 gates are actually verified, including static legal URL deployment, StoreKit sandbox purchase, duplicate grant no-op, Apple server verification, confirmed hidden rewarded-credit UI for the v1 App Review build, Minimal Core 60 critical = 0, and production smoke 20 critical = 0.
+Kabuyomi can move to `SUBMIT CANDIDATE` only after all v1.0.2 gates are actually verified, including static legal URL deployment, StoreKit sandbox/TestFlight product load, subscription purchase, consumable purchase, restore, duplicate grant no-op, Apple server verification, confirmed rewarded-credit UI visibility state, Minimal Core 60 critical = 0, and production smoke 20 critical = 0.

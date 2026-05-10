@@ -12,11 +12,17 @@ Treat the current code as the source of truth over older specs. The ship target 
 - Conversation-first flow: entry -> company conversation -> drawers/settings
 - Supported filings: `10-K` and `10-Q` only
 - Starter preview tickers: `AAPL`, `MSFT`, `NVDA`, `AMZN`, `TSLA`
-- Billing is credit-only for v1.
-- The only visible paid IAP is `kabuyomi.credits.100`: 100 paid credits for JPY 200.
+- Billing is credit-based for v1.0.2.
+- Visible paid consumables:
+  - `kabuyomi.credits.50`: 50 paid credits for JPY 100.
+  - `kabuyomi.credits.100`: existing compatibility product, supported when present.
+- Visible subscriptions use subscription group `Kabuyomi_sus`:
+  - `kabuyomi.sub.lite.monthly`: JPY 640/month, 400 credits/month.
+  - `kabuyomi.sub.pro.monthly`: JPY 1,280/month, 900 credits/month.
+  - `kabuyomi.sub.max.monthly`: JPY 2,560/month, 2,000 credits/month.
 - Paid credits do not expire.
-- No subscription UI, Lite / Pro / Pro Max plan copy, recurring monthly-credit copy, or JPY 500 pack should be visible.
-- The normal rewarded-credit UI is hidden for v1 App Review and deferred to v1.1 / post-approval.
+- No JPY 500 / 280-credit pack should be visible.
+- Rewarded-credit UI is visible in v1.0.2 when the required AdMob rewarded config is present. Rewarded ads are optional and grant free/ad credits only after server-side Google AdMob SSV.
 - Filing answers stay grounded in SEC filing material. External web search is not part of v1.
 - Chat metadata should follow `responsePath`; remote model naming should appear only for real remote execution.
 - Historical chat is narrow on purpose: explicit `3年` / `比較` / `推移` style prompts only
@@ -25,10 +31,9 @@ Treat the current code as the source of truth over older specs. The ship target 
 ## Not In Scope For This TestFlight
 
 - `20-F`, `6-K`, `8-K`, or broader filing coverage
-- subscriptions, Lite / Pro / Pro Max plans, or recurring monthly credits
 - JPY 500 / 280-credit pack
 - web search
-- visible rewarded-credit UI in the v1 App Review build
+- rewarded-credit grants from client-only ad completion without server-side Google SSV
 - full cross-company comparison product
 - broad notification system
 
@@ -36,16 +41,19 @@ Treat the current code as the source of truth over older specs. The ship target 
 
 - A Release archive builds successfully.
 - Workers and `sec-fetcher` are deployed with the expected secrets and storage bindings.
-- The app copy consistently states credit-only billing, `kabuyomi.credits.100`, unsupported cases, and no investment advice.
+- The app copy consistently states v1.0.2 credit/subscription billing, `kabuyomi.credits.50`, `kabuyomi.credits.100` compatibility support, unsupported cases, and no investment advice.
 - Manual QA covers the main happy paths plus saved/remove/reset/limit/error paths.
 - TestFlight metadata and tester notes explain that this is a filing reader, not investment advice.
 
 ## 1. Freeze The Beta Scope
 
-- [ ] Do not add new product surface area until the first TestFlight build is out.
+- [ ] Do not add product surface area beyond the v1.0.2 monetization scope.
 - [ ] Keep the filing scope explicit everywhere: `10-K / 10-Q` only.
-- [ ] Keep credit purchase copy aligned with `kabuyomi.credits.100`, 100 paid credits, and JPY 200.
-- [ ] Confirm no subscription, Lite / Pro / Pro Max, recurring monthly-credit, or JPY 500 pack copy appears in the review-facing build.
+- [ ] Keep credit purchase copy aligned with `kabuyomi.credits.50`, 50 paid credits, and JPY 100.
+- [ ] Confirm `kabuyomi.credits.100` remains supported/visible as compatibility when StoreKit returns it.
+- [ ] Keep subscription copy aligned with Lite / Pro / Max product IDs, prices, monthly credit amounts, and App Store auto-renewal behavior.
+- [ ] Keep rewarded-credit copy aligned with +2 free/ad credits, 3 successful rewards/day, +6 ad credits/day, 30-day expiry, and server-side SSV.
+- [ ] Confirm no JPY 500 / 280-credit pack copy appears in the review-facing build.
 - [ ] Decide whether the initial drop is `internal testers only` or `small external beta`.
 - [ ] Use the current conversation-first UI as the ship target. Do not block on reviving the older home/search/tab concept.
 
@@ -131,8 +139,11 @@ Explicitly recheck these current product rules:
 - [ ] Starter tickers open without consuming saved ticker quota.
 - [ ] Search shows unsupported tickers as unsupported instead of allowing save.
 - [ ] Filing-grounded beta mode stays on by default, and no external supplement copy leaks into the main happy path unless intentionally enabled.
-- [ ] Credit UI shows only the visible v1 paid IAP product `kabuyomi.credits.100` and purchase / restore actions work end-to-end.
-- [ ] Rewarded-credit UI is hidden in the v1 App Review build.
+- [ ] Credit UI shows `kabuyomi.credits.50` primary, keeps `kabuyomi.credits.100` compatibility support, and purchase / restore actions work end-to-end.
+- [ ] Credit UI shows Lite / Pro / Max subscription products only when StoreKit returns them and disabled/retry states otherwise.
+- [ ] Rewarded-credit UI is visible from Credits / Account Status when required AdMob rewarded config is present.
+- [ ] Rewarded-credit UI says ads are optional and credits are free/ad credits, not paid credits.
+- [ ] Rewarded-credit UI handles ad unavailable, load failure, dismiss, pending verification, verified grant, daily cap, and network/backend error states.
 
 ## 5. Manual QA Matrix
 
@@ -173,8 +184,8 @@ Suggested tester note baseline:
 - This is a limited beta for reading SEC `10-K / 10-Q` filings in Japanese.
 - `20-F / 6-K` companies are not yet supported.
 - Saved tickers are capped separately from the daily chat quota.
-- The only visible paid IAP product is `kabuyomi.credits.100`, which grants 100 paid credits for JPY 200.
-- Rewarded-credit UI is hidden for v1 App Review.
+- Visible paid products include `kabuyomi.credits.50` and Lite / Pro / Max subscription plans; `kabuyomi.credits.100` remains supported as an existing compatibility product.
+- Rewarded-credit UI is visible from Credits / Account Status when an ad is available. Rewarded ads are optional, grant +2 free/ad credits after server-side verification, and are capped at 3 successful rewards per day.
 - The app is not investment advice and may contain summary or chat errors.
 - Use TestFlight feedback with the ticker, question, screenshot, and repro steps.
 

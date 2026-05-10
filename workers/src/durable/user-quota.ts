@@ -37,7 +37,7 @@ interface CreditStateRecord {
 
 interface CreditOperationRecord {
   operationId: string;
-  type: "consume" | "refund" | "purchase_grant" | "eval_grant" | "admob_rewarded_grant";
+  type: "consume" | "refund" | "monthly_grant" | "purchase_grant" | "eval_grant" | "admob_rewarded_grant";
   status: "applied" | "insufficient" | "noop";
   delta: number;
   balanceAfter: number;
@@ -120,7 +120,16 @@ export class UserQuotaDO {
         this.loadDailyRecord(body.dateJST, body.plan, body.chatLimit),
         this.loadSavedTickerRecord(body.plan, body.stockLimit)
       ]);
-      const creditStateResult = await this.loadCreditState(body.dateJST, body.plan, body.monthlyCreditLimit ?? 0);
+      const creditStateResult = await this.loadCreditState(
+        body.dateJST,
+        body.plan,
+        body.monthlyCreditLimit ?? 0,
+        {
+          periodStart: body.monthlyCreditPeriodStart,
+          periodEnd: body.monthlyCreditPeriodEnd,
+          monthlyGrantOperationId: body.monthlyGrantOperationId
+        }
+      );
       const creditState = creditStateResult.creditState;
       const monthlyGrant = creditStateResult.monthlyGrant;
       const currentUsage = () => usagePayload(dailyRecord, savedTickerRecord, creditState, body.accessMode);
@@ -491,9 +500,14 @@ export class UserQuotaDO {
   private async loadCreditState(
     dateJST: string,
     plan: AccessPlan,
-    monthlyCreditLimit: number
+    monthlyCreditLimit: number,
+    options: {
+      periodStart?: string;
+      periodEnd?: string;
+      monthlyGrantOperationId?: string;
+    } = {}
   ): Promise<{ creditState: CreditStateRecord; monthlyGrant?: MonthlyGrantRecord }> {
-    const period = buildCreditPeriod(dateJST);
+    const period = buildCreditPeriod(dateJST, options);
     const now = new Date().toISOString();
     const existing = (await this.state.storage.get<CreditStateRecord>(CREDIT_STATE_KEY)) as
       | CreditStateRecord
@@ -513,7 +527,12 @@ export class UserQuotaDO {
       };
       return {
         creditState,
-        monthlyGrant: await this.buildMonthlyGrantIfNeeded(creditState, monthlyCreditLimit, now)
+        monthlyGrant: await this.buildMonthlyGrantIfNeeded(
+          creditState,
+          monthlyCreditLimit,
+          now,
+          options.monthlyGrantOperationId
+        )
       };
     }
 
@@ -525,7 +544,10 @@ export class UserQuotaDO {
     existing.updatedAt = now;
     return {
       creditState: existing,
-      monthlyGrant: limitDelta > 0 ? await this.buildMonthlyGrantIfNeeded(existing, limitDelta, now) : undefined
+      monthlyGrant:
+        limitDelta > 0
+          ? await this.buildMonthlyGrantIfNeeded(existing, limitDelta, now, options.monthlyGrantOperationId)
+          : undefined
     };
   }
 
@@ -827,13 +849,15 @@ export class UserQuotaDO {
   private async buildMonthlyGrantIfNeeded(
     creditState: CreditStateRecord,
     creditsGranted: number,
-    createdAt: string
+    createdAt: string,
+    operationIdOverride?: string
   ): Promise<MonthlyGrantRecord | undefined> {
     if (creditsGranted <= 0) {
       return undefined;
     }
 
-    const operationId = buildMonthlyGrantOperationId(creditState.plan, creditState.periodStart, creditState.periodEnd);
+    const operationId =
+      operationIdOverride ?? buildMonthlyGrantOperationId(creditState.plan, creditState.periodStart, creditState.periodEnd);
     const existing = (await this.state.storage.get<MonthlyGrantRecord>(buildMonthlyGrantKey(operationId))) as
       | MonthlyGrantRecord
       | undefined;
@@ -1040,7 +1064,17 @@ function maxIsoTimestamp(left: string, right: string): string {
   return left >= right ? left : right;
 }
 
-function buildCreditPeriod(dateJST: string): { periodStart: string; periodEnd: string } {
+function buildCreditPeriod(
+  dateJST: string,
+  options: { periodStart?: string; periodEnd?: string } = {}
+): { periodStart: string; periodEnd: string } {
+  if (options.periodStart && options.periodEnd) {
+    return {
+      periodStart: options.periodStart,
+      periodEnd: options.periodEnd
+    };
+  }
+
   const [yearPart, monthPart] = dateJST.split("-");
   const year = Number.parseInt(yearPart ?? "", 10);
   const month = Number.parseInt(monthPart ?? "", 10);
@@ -1070,7 +1104,7 @@ function buildCreditOperation({
   createdAt
 }: {
   operationId: string;
-  type: "consume" | "refund" | "purchase_grant" | "eval_grant" | "admob_rewarded_grant";
+  type: "consume" | "refund" | "monthly_grant" | "purchase_grant" | "eval_grant" | "admob_rewarded_grant";
   status: "applied" | "insufficient" | "noop";
   delta: number;
   creditState: CreditStateRecord;

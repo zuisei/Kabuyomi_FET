@@ -1,21 +1,29 @@
 # App Store Submission Notes
 
-Last checked: 2026-05-06
+Last checked: 2026-05-10
 
 ## Build
 - Bundle ID: `app.kabuyomi.ios`
-- Version: `0.1.1`
-- Build: `6`
-- Archive path checked locally: `build/Kabuyomi-0.1.1-6.xcarchive`
+- Version: `1.0.2` in `ios/project.yml`
+- Build: `4` in `ios/project.yml`
+- Archive path: not rechecked in this cleanup pass
 
 ## Review Notes
 Kabuyomi is a Japanese reading app for U.S. company SEC filings. It summarizes and explains SEC 10-K and 10-Q filings, shows source references, and lets users ask questions about filing content.
 
 Kabuyomi is not an investment advisory service. It does not execute trades, connect to brokerage accounts, manage portfolios, recommend buying or selling securities, predict stock prices, or provide target prices. Answers are based on SEC filings available to the app and should be used as reading support only. Users make their own investment decisions.
 
-Kabuyomi v1 uses consumable credits only. The only visible paid IAP product is `kabuyomi.credits.100`, which grants 100 paid credits for ¥200. Paid credits do not expire. Free/promotional credits and ad credits are separate from paid credits.
+Kabuyomi v1.0.2 uses credit-based monetization. Visible StoreKit products for this branch are:
 
-For the v1 App Review build, the rewarded-credit UI is hidden. AdMob rewarded-credit infrastructure exists in the app and Worker, but rewarded credits are deferred to v1.1 / post-approval. App Review notes for v1 should not claim that users can earn credits by watching rewarded ads. Paid IAP remains available as `kabuyomi.credits.100`.
+- `kabuyomi.credits.50`: consumable, ¥100, grants 50 paid credits.
+- `kabuyomi.credits.100`: existing compatibility consumable, remains supported when present and grants 100 paid credits.
+- `kabuyomi.sub.lite.monthly`: auto-renewable subscription in group `Kabuyomi_sus`, ¥640/month, grants 400 subscription credits/month.
+- `kabuyomi.sub.pro.monthly`: auto-renewable subscription in group `Kabuyomi_sus`, ¥1,280/month, grants 900 subscription credits/month.
+- `kabuyomi.sub.max.monthly`: auto-renewable subscription in group `Kabuyomi_sus`, ¥2,560/month, grants 2,000 subscription credits/month.
+
+Paid credits do not expire. Subscription credits, free/promotional credits, ad credits, and paid credits are separate server-side buckets. Normal chat cost is 2 credits.
+
+Rewarded ads are visible in the v1.0.2 Credits / Account Status flow when the required AdMob rewarded config is present. They are optional and grant free/ad credits, not paid credits. Rewards require server-side Google AdMob SSV before credits are reflected. Each verified reward grants +2 ad credits, with a server-side cap of 3 successful rewards / +6 ad credits per JST day. Ad serving is not guaranteed and can be unavailable depending on device, network, or ad fill.
 
 Support contact: `kabuyomi.support@gmail.com`
 
@@ -68,25 +76,40 @@ Current support text points users to:
 - `@0xt4dano`
 
 ## Current Ad Policy
-- For the v1 App Review build, rewarded-credit UI is hidden.
-- AdMob rewarded-credit infrastructure exists and remains available for v1.1 / post-approval work.
-- Do not claim rewarded-credit earning in v1 App Review notes.
-- When re-enabled after approval, rewarded credits must grant only after server-side Google AdMob SSV verification.
+- Rewarded-credit UI is release-visible in v1.0.2 when required AdMob rewarded config is present.
+- Rewarded ads are optional.
+- Rewarded credits are free/ad credits and are separate from paid credits.
+- Rewarded credits must grant only after server-side Google AdMob SSV verification.
+- Client-only ad completion must never grant credits.
+- Daily cap is 3 successful rewarded grants / +6 ad credits per JST day.
 - Ads are not required to use paid credits.
 - Ads do not unlock investment advice, buy/sell recommendations, premium recommendations, stock price forecasts, or target prices.
 - No interstitial ads.
 - No native ads.
+
+## App Review Rewarded Ad Test Steps
+1. Open Credits / Account Status.
+2. Tap the rewarded ad option.
+3. Watch an available rewarded ad.
+4. Return to the app.
+5. Wait for verification / refresh usage.
+6. Confirm +2 free/ad credits if Google AdMob SSV succeeds.
+7. Confirm the daily cap is 3 successful rewards per day.
+
+If AdMob does not serve an ad during review, the app should show the ad unavailable/load failure state and should not grant credits.
 
 ## Final Manual Checks
 - Confirm the deployed static legal site has the latest source contents before using public legal URLs in App Store Connect
 - Confirm `LegalSiteConfig.baseURL` points to `https://kabuyomi-legal-site.pages.dev`
 - Open Settings and confirm Privacy Policy / Terms / Support / 特商法 screens open
 - Confirm the 特商法 page uses disclosure-by-request wording and contains no `TODO_FINAL_LEGAL_*` placeholders
-- Confirm Settings has no subscription UI and no Lite / Pro / Pro Max card
-- Confirm the credit screen shows only `kabuyomi.credits.100` as the visible paid IAP
+- Confirm Settings/Credits shows the intended Lite / Pro / Max subscription UI for v1.0.2.
+- Confirm the credit screen shows `kabuyomi.credits.50` as the primary paid credit pack.
+- Confirm `kabuyomi.credits.100` remains supported/visible as a compatibility pack if StoreKit returns it.
 - Confirm no ¥500 pack is visible
-- Confirm no public/review-facing recurring-credit wording appears
-- Confirm rewarded-credit UI is hidden in the v1 Release/TestFlight App Review build
-- Do not submit App Review notes that claim rewarded-credit earning for v1
+- Confirm subscription price/credit copy matches App Store Connect and the v1.0.2 release truth.
+- Confirm rewarded-credit UI is visible from Credits / Account Status when the required AdMob rewarded config is present.
+- Confirm the UI describes rewarded ads as optional free/ad credits and does not show raw AdMob IDs, callback URLs, Worker routes, device keys, transaction IDs, or internal diagnostics.
+- Confirm a completed rewarded ad grants credits only after server-side SSV and usage refresh.
 - Send one chat and confirm the displayed credit balance decreases
 - Translate one source preview and confirm it shows `訳 1 credit`

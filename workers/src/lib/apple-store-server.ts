@@ -1,5 +1,10 @@
 import type { Env } from "../env";
-import { isSubscriptionProductId, resolveCreditPackCredits } from "./billing-catalog";
+import {
+  isSubscriptionProductId,
+  resolveCreditPackCredits,
+  resolveSubscriptionPlan,
+  type SubscriptionPlan
+} from "./billing-catalog";
 import { AppError } from "./errors";
 import { logEvent, logWarnEvent } from "./logging";
 
@@ -28,6 +33,7 @@ interface ParsedTransactionPayload {
   productId?: string;
   bundleId?: string;
   revocationDate?: number;
+  purchaseDate?: number | string;
   expiresDate?: number | string;
 }
 
@@ -94,12 +100,26 @@ export async function verifyCreditPurchaseWithApple(
 export async function verifySubscriptionWithApple(
   env: Env,
   request: SubscriptionVerificationRequest
-): Promise<{ originalTransactionId: string; productId: string | null; active: boolean }> {
+): Promise<{
+  originalTransactionId: string;
+  transactionId: string | null;
+  productId: string | null;
+  plan: SubscriptionPlan | null;
+  active: boolean;
+  periodStart: string | null;
+  periodEnd: string | null;
+  expiresAt: string | null;
+}> {
   if (!request.active) {
     return {
       originalTransactionId: request.originalTransactionId,
+      transactionId: request.transactionId ?? null,
       productId: request.productId ?? null,
-      active: false
+      plan: resolveSubscriptionPlan(request.productId),
+      active: false,
+      periodStart: null,
+      periodEnd: null,
+      expiresAt: null
     };
   }
 
@@ -131,8 +151,13 @@ export async function verifySubscriptionWithApple(
 
   return {
     originalTransactionId: applePayload.originalTransactionId ?? request.originalTransactionId,
+    transactionId: applePayload.transactionId ?? transactionId,
     productId: applePayload.productId ?? request.productId ?? null,
-    active: true
+    plan: resolveSubscriptionPlan(applePayload.productId ?? request.productId),
+    active: true,
+    periodStart: normalizeAppleDateToIso(applePayload.purchaseDate),
+    periodEnd: normalizeAppleDateToIso(applePayload.expiresDate),
+    expiresAt: normalizeAppleDateToIso(applePayload.expiresDate)
   };
 }
 
@@ -317,6 +342,20 @@ function ensureSubscriptionIsActive(payload: ParsedTransactionPayload): void {
   if (expiresAt !== undefined && Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
     throw new AppError(409, "Subscription transaction has expired");
   }
+}
+
+function normalizeAppleDateToIso(value: number | string | undefined): string | null {
+  if (value === undefined) {
+    return null;
+  }
+
+  const millis = typeof value === "string" ? Number.parseInt(value, 10) : value;
+  if (!Number.isFinite(millis)) {
+    return null;
+  }
+
+  const date = new Date(millis);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
 // This parser intentionally does not verify the JWS signature. Client-provided

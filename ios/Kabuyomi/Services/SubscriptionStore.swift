@@ -12,8 +12,10 @@ final class SubscriptionStore {
 
     static let subscriptionProductIDs = BillingCatalog.subscriptionTiers.compactMap(\.productID)
     static let recognizedSubscriptionProductIDs = BillingCatalog.recognizedSubscriptionTiers.compactMap(\.productID)
-    static let miniCreditProductID = "kabuyomi.credits.100"
-    static let creditPackProductIDs = [miniCreditProductID]
+    static let primaryCreditProductID = "kabuyomi.credits.50"
+    static let legacyCreditProductID = "kabuyomi.credits.100"
+    static let miniCreditProductID = primaryCreditProductID
+    static let creditPackProductIDs = [primaryCreditProductID, legacyCreditProductID]
     private static let creditPackProductLoadTimeoutNanoseconds: UInt64 = 10_000_000_000
 
     private let quotaSubjectKey = "kabuyomi.quotaSubject"
@@ -108,7 +110,7 @@ final class SubscriptionStore {
         }
     }
 
-    func purchaseSubscription(productId: String) async throws -> Bool {
+    func purchaseSubscription(productId: String) async throws -> PendingSubscriptionPurchase? {
         startObservingTransactionsIfNeeded()
         let product = try await subscriptionProduct(id: productId)
         let result = try await product.purchase()
@@ -117,31 +119,36 @@ final class SubscriptionStore {
         case .success(let verification):
             guard case .verified(let transaction) = verification else {
                 logger.error("purchase_result=unverified")
-                return false
+                throw SubscriptionStoreError.purchaseUnverified
             }
 
             logger.notice(
                 "purchase_result=success product_id=\(transaction.productID, privacy: .public) transaction_id=\(String(transaction.id), privacy: .public)"
             )
-            await refreshEntitlements(reason: "purchase")
-            await transaction.finish()
-            return isSubscriptionActive
+            storeSubscriptionState(
+                productId: transaction.productID,
+                transactionId: String(transaction.id),
+                originalTransactionId: String(transaction.originalID),
+                signedTransactionInfo: verification.jwsRepresentation,
+                active: isActive(transaction)
+            )
+            return PendingSubscriptionPurchase(transaction: transaction, signedTransactionInfo: verification.jwsRepresentation)
 
         case .userCancelled:
             logger.notice("purchase_result=cancelled")
-            return false
+            return nil
 
         case .pending:
             logger.notice("purchase_result=pending")
-            return false
+            throw SubscriptionStoreError.purchasePending
 
         @unknown default:
             logger.error("purchase_result=unknown")
-            return false
+            throw SubscriptionStoreError.purchaseUnknown
         }
     }
 
-    func purchasePro() async throws -> Bool {
+    func purchasePro() async throws -> PendingSubscriptionPurchase? {
         try await purchaseSubscription(productId: BillingCatalog.pro.productID ?? "")
     }
 
@@ -554,7 +561,9 @@ final class SubscriptionStore {
 
     private static func credits(for productId: String) -> Int {
         switch productId {
-        case miniCreditProductID:
+        case primaryCreditProductID:
+            return 50
+        case legacyCreditProductID:
             return 100
         default:
             return 0
@@ -639,6 +648,25 @@ struct PendingCreditPurchase {
     }
 }
 
+struct PendingSubscriptionPurchase {
+    let transaction: Transaction
+    let signedTransactionInfo: String
+
+    var syncRequest: BillingSyncRequest {
+        BillingSyncRequest(
+            originalTransactionId: String(transaction.originalID),
+            transactionId: String(transaction.id),
+            productId: transaction.productID,
+            active: true,
+            signedTransactionInfo: signedTransactionInfo
+        )
+    }
+
+    func finish() async {
+        await transaction.finish()
+    }
+}
+
 private struct BillingSyncSnapshot: Equatable {
     let productId: String?
     let transactionId: String?
@@ -666,9 +694,9 @@ enum SubscriptionStoreError: LocalizedError {
         case .productNotFound, .productLoadTimedOut:
             "クレジット商品を読み込めませんでした。少し時間をおいて再試行してください。"
         case .purchaseUnverified:
-            "購入を確認できませんでした。少し時間をおいて再試行してください。"
+            "購入を確認できませんでした。購入を復元してください。"
         case .purchasePending:
-            "購入が保留中です。承認後にクレジットが反映されます。"
+            "購入は保留中です。App Store側の処理が完了すると反映されます。"
         case .purchaseUnknown:
             "購入を完了できませんでした。少し時間をおいて再試行してください。"
         }

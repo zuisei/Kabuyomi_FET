@@ -24,15 +24,15 @@ struct ComposerBar: View {
             inputControls
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
         .kabuyomiGlass(
-            radius: 28,
-            tint: Color.white.opacity(0.28),
-            stroke: Color.white.opacity(0.66)
+            radius: 22,
+            tint: Color.white.opacity(0.22),
+            stroke: Color.white.opacity(0.56)
         )
         .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
     }
 
     @ViewBuilder
@@ -68,7 +68,7 @@ struct ComposerBar: View {
         .disabled(!isEnabled)
         .font(.system(.body, design: .rounded))
         .foregroundStyle(KabuyomiTheme.ink)
-        .frame(minHeight: 24)
+        .frame(minHeight: 22)
         .submitLabel(.send)
         .onSubmit(sendAction)
         .accessibilityLabel("質問入力")
@@ -82,7 +82,7 @@ struct ComposerBar: View {
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.9))
-                .frame(width: 32, height: 32)
+                .frame(width: 30, height: 30)
                 .background(
                     Circle()
                         .fill(Color.white.opacity(0.72))
@@ -101,7 +101,7 @@ struct ComposerBar: View {
         Button(action: sendAction) {
             Image(systemName: "arrow.up")
                 .font(.system(size: 18, weight: .bold))
-                .frame(width: 44, height: 44)
+                .frame(width: 40, height: 40)
                 .foregroundStyle(sendDisabled ? KabuyomiTheme.inkMuted : .white)
                 .background(sendButtonBackground)
         }
@@ -148,14 +148,14 @@ struct ComposerBar: View {
             Image(systemName: hasEnoughCredits ? "bolt.circle.fill" : "exclamationmark.circle.fill")
                 .font(.system(size: 12, weight: .bold))
 
-            Text(hasEnoughCredits ? creditStatusText : "\(creditStatusText) / credit不足")
+            Text(hasEnoughCredits ? creditStatusText : "\(creditStatusText) / この質問には2 creditsが必要です")
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                 .fixedSize(horizontal: false, vertical: true)
 
             Spacer(minLength: 0)
 
             if !hasEnoughCredits {
-                Button("追加") {
+                Button("対応を見る") {
                     openCreditOptions()
                 }
                 .font(.system(.caption2, design: .rounded, weight: .bold))

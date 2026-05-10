@@ -111,6 +111,20 @@ final class ConversationPromptTests: XCTestCase {
         XCTAssertTrue(structure.limitations.isEmpty)
     }
 
+    func testAssistantMetricRowsExtractOnlyDisplayedAnswerValues() {
+        let rows = assistantMetricRows(
+            from: """
+            売上高は 1,111.8億ドル で、前年同期比 +16.6% です。\
+            営業利益は 358.9億ドル で、前年同期比 +21.3% です。\
+            純利益は 295.8億ドル で、前年同期比 +19.4% です。
+            """
+        )
+
+        XCTAssertEqual(rows.map(\.metric), ["売上高", "営業利益", "純利益"])
+        XCTAssertEqual(rows.map(\.value), ["1,111.8億ドル", "358.9億ドル", "295.8億ドル"])
+        XCTAssertEqual(rows.map(\.context), ["前年同期比 +16.6%", "前年同期比 +21.3%", "前年同期比 +19.4%"])
+    }
+
     func testUnavailableMessageRequiresMoreThanPartialCaveat() {
         XCTAssertTrue(isUnavailableMessage("この決算資料の範囲では確認できません。"))
         XCTAssertFalse(

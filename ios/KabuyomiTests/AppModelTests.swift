@@ -279,6 +279,8 @@ final class AppModelTests: XCTestCase {
         let model = makeAppModel(persistence: persistence)
         model.usage = UsagePayload(
             plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
             chatsUsed: 0,
             chatLimit: 10,
             stocksUsed: 0,
@@ -318,6 +320,8 @@ final class AppModelTests: XCTestCase {
         model.setAIConsent(true)
         model.usage = UsagePayload(
             plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
             chatsUsed: 0,
             chatLimit: 10,
             stocksUsed: 1,
@@ -345,13 +349,23 @@ final class AppModelTests: XCTestCase {
         let didSend = await model.sendChat(question: "売上高は？", ticker: "AAPL")
 
         XCTAssertFalse(didSend)
-        XCTAssertEqual(model.activeAlert?.message, "creditが不足しています。設定のクレジット画面で追加creditを確認してください。")
+        XCTAssertEqual(
+            model.activeAlert?.message,
+            """
+クレジットが不足しています
+この質問には 2 credits が必要です。
+現在の残高: 0 credits
+"""
+        )
+        XCTAssertEqual(model.usage?.credits?.totalRemaining, 0)
     }
 
     func testPurchaseCreditPackBlocksWhenCreditBillingIsDisabled() async {
         let model = makeAppModel()
         model.usage = UsagePayload(
             plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
             chatsUsed: 0,
             chatLimit: 10,
             stocksUsed: 0,
@@ -376,15 +390,133 @@ final class AppModelTests: XCTestCase {
             throw URLError(.badServerResponse)
         }
 
-        await model.purchaseCreditPack(productId: "kabuyomi.credits.100")
+        await model.purchaseCreditPack(productId: "kabuyomi.credits.50")
 
-        XCTAssertEqual(model.activeAlert?.message, "追加credit購入は現在利用できません。時間をおいてからもう一度お試しください。")
+        XCTAssertEqual(model.activeAlert?.message, "追加クレジット購入は現在利用できません。時間をおいてからもう一度お試しください。")
         XCTAssertFalse(model.billingActionInFlight)
     }
 
     func testMiniConsumableUsesProductionStoreKitProductId() {
-        XCTAssertEqual(SubscriptionStore.miniCreditProductID, "kabuyomi.credits.100")
-        XCTAssertEqual(SubscriptionStore.creditPackProductIDs, ["kabuyomi.credits.100"])
+        XCTAssertEqual(SubscriptionStore.miniCreditProductID, "kabuyomi.credits.50")
+        XCTAssertEqual(SubscriptionStore.creditPackProductIDs, ["kabuyomi.credits.50", "kabuyomi.credits.100"])
+    }
+
+    func testSubscriptionCatalogUsesV102StoreKitProducts() {
+        XCTAssertEqual(SubscriptionStore.subscriptionProductIDs, [
+            "kabuyomi.sub.lite.monthly",
+            "kabuyomi.sub.pro.monthly",
+            "kabuyomi.sub.max.monthly"
+        ])
+        XCTAssertEqual(BillingCatalog.lite.monthlyCredits, 400)
+        XCTAssertEqual(BillingCatalog.pro.monthlyCredits, 900)
+        XCTAssertEqual(BillingCatalog.proMax.monthlyCredits, 2000)
+        XCTAssertEqual(BillingCatalog.proMax.title, "Max")
+    }
+
+    func testCreditPackPresentationKeepsPrimaryAndCompatibilityRowsSeparate() {
+        let products = CreditPackPresentation.visibleProducts(from: [
+            CreditPackProduct(id: "kabuyomi.credits.100", credits: 100, displayPrice: "¥200", isAvailable: true),
+            CreditPackProduct(id: "kabuyomi.credits.50", credits: 50, displayPrice: "¥100", isAvailable: true)
+        ])
+
+        XCTAssertEqual(products.map(\.id), ["kabuyomi.credits.50", "kabuyomi.credits.100"])
+        XCTAssertEqual(CreditPackPresentation.primaryProduct(from: products)?.id, "kabuyomi.credits.50")
+        XCTAssertEqual(CreditPackPresentation.secondaryProducts(from: products).map(\.id), ["kabuyomi.credits.100"])
+    }
+
+    func testAccountStatusDisplayModelUsesServerUsageAndHandlesMissingActiveSubscription() {
+        let usage = UsagePayload(
+            plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
+            chatsUsed: 0,
+            chatLimit: 25,
+            stocksUsed: 0,
+            stockLimit: 3,
+            dateJST: "2026-05-09",
+            savedTickers: [],
+            accessMode: nil,
+            credits: CreditUsagePayload(
+                monthlyRemaining: 50,
+                monthlyLimit: 50,
+                rewardedAdRemaining: nil,
+                rewardedAdExpiresAt: nil,
+                purchasedRemaining: 100,
+                totalRemaining: 150,
+                resetsAt: "2026-06-01T00:00:00+09:00"
+            ),
+            creditBillingEnabled: true
+        )
+
+        let viewModel = AccountStatusDisplayModel(
+            apiEnvironment: "prod",
+            apiBaseURL: "https://example.com",
+            appVersion: "1.0.2(4)",
+            deviceKeySuffix: "abc123",
+            usage: usage,
+            lastUsageRefreshAt: nil,
+            lastBillingSyncStatus: "not_started",
+            lastBillingSyncAt: nil,
+            healthReport: nil
+        )
+
+        let rows = Dictionary(uniqueKeysWithValues: viewModel.rows.map { ($0.title, $0.value) })
+        let normalRows = Dictionary(uniqueKeysWithValues: viewModel.normalRows.map { ($0.title, $0.value) })
+        let debugRows = Dictionary(uniqueKeysWithValues: viewModel.debugRows.map { ($0.title, $0.value) })
+        XCTAssertEqual(rows["接続状態"], "未確認")
+        XCTAssertEqual(rows["環境"], "本番")
+        XCTAssertEqual(rows["現在のプラン"], "無料")
+        XCTAssertEqual(rows["合計クレジット"], "150")
+        XCTAssertEqual(rows["月額/初回分"], "50 / 50")
+        XCTAssertEqual(rows["購入分"], "100")
+        XCTAssertNil(normalRows["Device"])
+        XCTAssertNil(normalRows["API"])
+        XCTAssertNil(normalRows["Route detail"])
+        XCTAssertFalse(viewModel.rows.contains { $0.value.contains("https://example.com") })
+        XCTAssertEqual(debugRows["端末ID末尾"], "…abc123")
+        XCTAssertNil(debugRows["API"])
+    }
+
+    func testAccountStatusDisplayModelHidesRouteMissingDetailsFromDisplayRows() {
+        let viewModel = AccountStatusDisplayModel(
+            apiEnvironment: "prod",
+            apiBaseURL: "https://example.com",
+            appVersion: "1.0.2(4)",
+            deviceKeySuffix: "abc123",
+            usage: nil,
+            lastUsageRefreshAt: nil,
+            lastBillingSyncStatus: "route_missing HTTP 404 /v1/ios/subscriptions/sync",
+            lastBillingSyncAt: nil,
+            healthReport: nil
+        )
+
+        let normalRows = Dictionary(uniqueKeysWithValues: viewModel.normalRows.map { ($0.title, $0.value) })
+        let debugRows = Dictionary(uniqueKeysWithValues: viewModel.debugRows.map { ($0.title, $0.value) })
+        XCTAssertEqual(normalRows["接続状態"], "エラー")
+        XCTAssertNil(normalRows["Route detail"])
+        XCTAssertNil(debugRows["Route detail"])
+        XCTAssertFalse(viewModel.rows.contains { $0.value.contains("/v1/ios/subscriptions/sync") })
+        XCTAssertFalse(viewModel.rows.contains { $0.value.contains("https://example.com") })
+    }
+
+    func testSubscriptionStoreErrorMessagesUseReleaseSafePurchaseCopy() {
+        XCTAssertEqual(SubscriptionStoreError.purchasePending.errorDescription, "購入は保留中です。App Store側の処理が完了すると反映されます。")
+        XCTAssertEqual(SubscriptionStoreError.purchaseUnverified.errorDescription, "購入を確認できませんでした。購入を復元してください。")
+    }
+
+    func testProjectVersionMetadataIsV102Build4() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let projectYML = try String(contentsOf: repoRoot.appendingPathComponent("ios/project.yml"), encoding: .utf8)
+        let pbxproj = try String(contentsOf: repoRoot.appendingPathComponent("ios/Kabuyomi.xcodeproj/project.pbxproj"), encoding: .utf8)
+
+        XCTAssertTrue(projectYML.contains("MARKETING_VERSION: 1.0.2"))
+        XCTAssertTrue(projectYML.contains("CURRENT_PROJECT_VERSION: 4"))
+        XCTAssertTrue(pbxproj.contains("MARKETING_VERSION = 1.0.2;"))
+        XCTAssertTrue(pbxproj.contains("CURRENT_PROJECT_VERSION = 4;"))
     }
 
     func testResetLocalDataClearsRecentStateAndKeepsDeviceIdentity() async throws {
@@ -1818,7 +1950,7 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(rewardedAdService.presentedCustomData, "intent-1.nonce")
         XCTAssertEqual(model.rewardedAdCreditState, .idle)
-        XCTAssertEqual(model.rewardedAdStatusMessage, "2クレジットを獲得しました。")
+        XCTAssertEqual(model.rewardedAdStatusMessage, "2無料/ad creditを獲得しました。")
         XCTAssertEqual(model.creditUsage?.rewardedAdRemaining, 2)
         XCTAssertEqual(model.creditUsage?.totalRemaining, 52)
         XCTAssertEqual(model.rewardedAdLastDebugReason, "granted")
