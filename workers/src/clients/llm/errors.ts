@@ -21,6 +21,9 @@ export function classifyProviderHttpError(status: number, bodyPreview: string): 
     return { kind: "timeout", code };
   }
   if (status === 400) {
+    if (/unknown prompt variables?|prompt variables?/.test(body)) {
+      return { kind: "bad_request", code };
+    }
     if (/context|maximum context|context length|tokens.*exceed|input.*too.*long|prompt.*too.*long/.test(body)) {
       return { kind: "context_too_large", code };
     }

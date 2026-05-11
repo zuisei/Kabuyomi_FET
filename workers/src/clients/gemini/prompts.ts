@@ -132,8 +132,6 @@ export function buildChatPromptTemplateVariables(input: ChatPromptInput): Record
     : input.question;
   return {
     question: questionForPrompt,
-    original_question: input.question,
-    conversation_context: conversationContext || "なし",
     question_intent: contextPack.questionIntent,
     content_mode: contextPack.contentMode,
     answer_format_instruction: answerFormatInstruction(contextPack.questionIntent),
