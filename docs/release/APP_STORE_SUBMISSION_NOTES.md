@@ -23,7 +23,7 @@ Kabuyomi v1.0.2 uses credit-based monetization. Visible StoreKit products for th
 
 Paid credits do not expire. Subscription credits, free/promotional credits, and paid credits are separate server-side buckets in the visible RC. Normal chat cost is 2 credits.
 
-Rewarded-ad credit UI is hidden in this RC/App Review build. The backend SSV route remains implemented but is not presented to users until real production/TestFlight Google SSV grant evidence is recorded in this repository.
+Rewarded-ad credit UI is visible in this RC/App Review build. Rewarded ads are optional, and credits are granted only after the Worker verifies Google AdMob server-side verification (SSV).
 
 Support contact: `kabuyomi.support@gmail.com`
 
@@ -76,7 +76,8 @@ Current support text points users to:
 - `@0xt4dano`
 
 ## Current Ad Policy
-- Rewarded-credit UI is hidden in this RC/App Review build.
+- Rewarded-credit UI is visible in this RC/App Review build.
+- Rewarded credits are optional and require Worker-side Google AdMob SSV verification before grant.
 - Banner/display ads may appear where implemented, but ads are not required to use paid credits.
 - Ads do not unlock investment advice, buy/sell recommendations, premium recommendations, stock price forecasts, or target prices.
 - No interstitial ads.
@@ -92,6 +93,7 @@ Current support text points users to:
 - Confirm `kabuyomi.credits.100` remains supported/visible as a compatibility pack if StoreKit returns it.
 - Confirm no ¥500 pack is visible
 - Confirm subscription price/credit copy matches App Store Connect and the v1.0.2 release truth.
-- Confirm rewarded-credit UI is not visible from Credits / Account Status in the RC build.
+- Confirm rewarded-credit UI is visible from Credits / Account Status in the RC build.
+- Confirm rewarded-credit copy says ads are optional and credits require server-side Google AdMob SSV before grant.
 - Send one chat and confirm the displayed credit balance decreases
 - Translate one source preview and confirm it shows `訳 1 credit`

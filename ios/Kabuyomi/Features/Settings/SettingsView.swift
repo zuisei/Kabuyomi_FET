@@ -367,7 +367,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "広告と購入",
-                body: "v1.0.2 App Review ビルドでは、広告視聴によるcredit獲得画面は表示しません。追加 paid credit の購入、返金、請求、購入復元は Apple ID と App Store の仕組みに従います。"
+                body: "広告視聴によるcredit獲得は任意です。広告完了だけでは付与せず、Google AdMob SSV をWorkerが確認した後に無料/ad creditとして反映します。追加 paid credit の購入、返金、請求、購入復元は Apple ID と App Store の仕組みに従います。"
             ),
             LegalSection(
                 title: "保存期間",

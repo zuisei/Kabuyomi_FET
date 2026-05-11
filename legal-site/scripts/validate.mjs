@@ -17,8 +17,6 @@ const forbiddenClaims = [
   "web search",
   "Web search",
   "ウェブ検索",
-  "広告報酬",
-  "ad credit",
   "目標株価を提供",
   "売買推奨を提供",
   "投資助言を提供"

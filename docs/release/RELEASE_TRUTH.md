@@ -29,7 +29,7 @@ This document is the RC monetization source of truth for the current branch. If 
 - Free/promotional credit, subscription credit, and paid credit are separate server-side buckets in the visible RC.
 - Credit consumption order is subscription/free/promotional credit, then paid credit for the visible RC.
 - Normal chat cost is 2 credits.
-- Rewarded-credit backend routes remain implemented and server-side Google SSV-gated, but the rewarded-credit UI is hidden in Release/App Review until real production/TestFlight Google SSV grant evidence is recorded in this repository.
+- Rewarded-credit backend routes are implemented and server-side Google SSV-gated. The rewarded-credit UI is visible in Release/App Review as an optional way to earn free/ad credits.
 
 ## Explicitly Not In v1
 
@@ -45,16 +45,16 @@ These are later items unless a new release truth document explicitly changes sco
 
 ## AdMob Rewarded Credit Status
 
-- AdMob rewarded-credit UI is hidden for the RC Release/TestFlight/App Review build.
-- Rewarded ads must remain optional and must never be required to use paid credits if re-enabled after SSV evidence is recorded.
-- If the UI is re-enabled later, rewarded ads grant +2 ad credits only after server-verified Google SSV.
-- If the UI is re-enabled later, rewarded grants are capped at 3 valid grants per user per JST day.
-- If the UI is re-enabled later, rewarded grants are capped at +6 ad credits per JST day.
+- AdMob rewarded-credit UI is visible for the RC Release/TestFlight/App Review build.
+- Rewarded ads must remain optional and must never be required to use paid credits.
+- Rewarded ads grant +2 ad credits only after server-verified Google SSV.
+- Rewarded grants are capped at 3 valid grants per user per JST day.
+- Rewarded grants are capped at +6 ad credits per JST day.
 - Invalid SSV, invalid ad unit, malformed callbacks, expired intents, and duplicate transaction callbacks must not grant credits.
 - Duplicate SSV transaction callbacks are success/no-op and must not double grant.
-- Ad credit expiration must be disclosed in user-facing copy if the rewarded-credit UI is re-enabled.
+- Ad credit expiration must be disclosed in user-facing copy.
 - Paid credits remain separate and do not expire.
-- Real production/TestFlight Google SSV smoke evidence must be recorded in `docs/admob/rewarded_admob_credits_runbook.md` before the rewarded-credit UI can be re-enabled or described in App Store submission material.
+- Real production/TestFlight Google SSV smoke evidence must be recorded in `docs/admob/rewarded_admob_credits_runbook.md` before App Store submission.
 
 ## Legal / Review Requirements
 
@@ -78,4 +78,4 @@ These are later items unless a new release truth document explicitly changes sco
 
 Default release decision is `TESTFLIGHT_SMOKE_REQUIRED`.
 
-Kabuyomi can move to `SUBMIT CANDIDATE` only after all RC gates are actually verified, including static legal URL deployment, StoreKit sandbox/TestFlight product load, subscription purchase, consumable purchase, restore, duplicate grant no-op, Apple server verification, confirmed rewarded-credit UI hidden state, Minimal Core 60 critical = 0, and production smoke 20 critical = 0.
+Kabuyomi can move to `SUBMIT CANDIDATE` only after all RC gates are actually verified, including static legal URL deployment, StoreKit sandbox/TestFlight product load, subscription purchase, consumable purchase, restore, duplicate grant no-op, Apple server verification, confirmed rewarded-credit UI visible state and SSV smoke, Minimal Core 60 critical = 0, and production smoke 20 critical = 0.

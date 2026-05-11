@@ -1,9 +1,7 @@
 import SwiftUI
 
 private enum RewardedCreditReviewUI {
-    // Keep the rewarded-credit path hidden from Release/App Review until real
-    // production/TestFlight Google SSV grant evidence is recorded in-repo.
-    static let rewardedAdsVisibleInV102Review = false
+    static let rewardedAdsVisibleInV102Review = true
 
     static var isVisible: Bool {
         #if DEBUG
@@ -1219,7 +1217,7 @@ struct AccountStatusDisplayModel: Equatable {
             Row(title: "合計クレジット", value: credits.map { "\($0.totalRemaining)" } ?? "不明"),
             Row(title: "月額/初回分", value: credits.map { "\($0.monthlyRemaining) / \($0.monthlyLimit)" } ?? "不明"),
             Row(title: "購入分", value: credits.map { "\($0.purchasedRemaining)" } ?? "不明"),
-            Row(title: "プロモーション分", value: credits?.rewardedAdRemaining.map(String.init) ?? "未提供"),
+            Row(title: "広告/無料分", value: credits?.rewardedAdRemaining.map(String.init) ?? "未提供"),
             Row(title: "次回更新", value: renewal ?? "未提供"),
             Row(title: "最終利用同期", value: Self.format(date: lastUsageRefreshAt)),
             Row(title: "最終購入同期", value: Self.billingStatus(status: lastBillingSyncStatus, at: lastBillingSyncAt)),

@@ -35,7 +35,7 @@ const legalPages: LegalPage[] = [
       {
         title: "4. 広告",
         body:
-          "無料プランでは Google AdMob による広告を表示する場合があります。広告配信のため、Google AdMob SDK が広告識別子、デバイス情報、利用状況、診断情報などを扱うことがあります。Kabuyomi はアプリ内で株式売買を促す広告や、会話本文を妨げるインタースティシャル広告を前提にしていません。"
+          "無料プランでは Google AdMob による広告を表示する場合があります。任意の rewarded ad を最後まで見ると、Kabuyomi Worker が Google AdMob SSV を確認した後に無料/ad credit が反映されます。広告配信のため、Google AdMob SDK が広告識別子、デバイス情報、利用状況、診断情報などを扱うことがあります。Kabuyomi はアプリ内で株式売買を促す広告や、会話本文を妨げるインタースティシャル広告を前提にしていません。"
       },
       {
         title: "5. 利用目的",
