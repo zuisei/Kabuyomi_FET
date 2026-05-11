@@ -95,6 +95,7 @@ export async function answerChatUsecase({
   const startedAt = Date.now();
   const resolvedQuestion = resolveContextualQuestion(payload.question, payload.conversationContext);
   const followupContext = summarizeFollowupContext(payload.conversationContext);
+  const conversationContextSummary = summarizeConversationContext(payload.conversationContext);
   logEvent("chat_generation_started", {
     ...lifecycleLogFields,
     chargeStage: "generation",
@@ -109,7 +110,8 @@ export async function answerChatUsecase({
       env,
       config,
       ctx,
-      followupContext
+      followupContext,
+      conversationContextSummary
     });
     logEvent("chat_generation_succeeded", {
       ...lifecycleLogFields,
@@ -262,7 +264,8 @@ async function buildChatResponseBeforeCharge({
   env,
   config,
   ctx,
-  followupContext
+  followupContext,
+  conversationContextSummary
 }: {
   filing: FilingCacheRecord;
   question: string;
@@ -270,10 +273,14 @@ async function buildChatResponseBeforeCharge({
   config: RemoteConfig;
   ctx: Pick<ExecutionContext, "waitUntil">;
   followupContext: FollowupContextSummary;
+  conversationContextSummary?: string;
 }): ReturnType<typeof buildChatResponse> {
   const options: Parameters<typeof buildChatResponse>[4] = { executionContext: ctx };
   if (followupContext.previousQuestion || followupContext.previousAnswer) {
     options.followupContext = followupContext;
+  }
+  if (conversationContextSummary) {
+    options.conversationContextSummary = conversationContextSummary;
   }
   return buildChatResponse(filing, question, env, config, {
     ...options
@@ -292,6 +299,21 @@ function summarizeFollowupContext(context: ChatContextMessage[] = []): FollowupC
     previousQuestion: previousQuestion ? previousQuestion.slice(0, 500) : undefined,
     previousAnswer: previousAnswer ? previousAnswer.slice(0, 1_500) : undefined
   };
+}
+
+function summarizeConversationContext(context: ChatContextMessage[] = []): string | undefined {
+  const turns = context
+    .slice(-8)
+    .map((message) => {
+      const roleLabel = message.role === "user" ? "ユーザー" : "アシスタント";
+      const content = message.content.replace(/\s+/g, " ").trim();
+      return content ? `${roleLabel}: ${content.slice(0, 520)}` : "";
+    })
+    .filter(Boolean);
+  if (turns.length === 0) {
+    return undefined;
+  }
+  return turns.join("\n").slice(0, 3_000);
 }
 
 async function preflightChatCharge({

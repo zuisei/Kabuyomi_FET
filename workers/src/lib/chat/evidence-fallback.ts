@@ -69,8 +69,10 @@ export function hasBannedPhrase(answer: string): boolean {
 function buildRevenueDriverFallback(sourceGateResult: SourceGateResult, evidenceSlots: EvidenceSlots): string {
   const metric = evidenceSlots.confirmedMetricMovement;
   const safeDrivers = safeDriverTexts(evidenceSlots.companyExplainedDrivers);
-  const missingSourceText = joinMissingSourceLabels(sourceGateResult.missingSourceTypes);
-  const nextIndicatorText = joinMissingSourceLabels(evidenceSlots.sectorSpecificNextIndicators.slice(0, 5));
+  const nextEvidenceText = joinMissingSourceLabels([
+    ...sourceGateResult.missingSourceTypes,
+    ...evidenceSlots.sectorSpecificNextIndicators.slice(0, 5)
+  ]);
   const parts: string[] = [];
   if (metric) {
     parts.push(`${metric.metricName}は${metric.currentValue ?? "確認できます"}${metric.changePct ? `で、${metric.comparisonBasis ?? "比較"}${metric.changePct}です` : "です"}。`);
@@ -81,8 +83,8 @@ function buildRevenueDriverFallback(sourceGateResult: SourceGateResult, evidence
   if (safeDrivers.length > 0) {
     parts.push(`会社が説明する主な売上要因は、${safeDrivers.join(" / ")}です。`);
   } else {
-    parts.push(`ただし、取得できた資料では、会社固有の売上要因は十分に特定できていません。不足しているのは ${missingSourceText} です。`);
-    parts.push(`主因を見るには、${nextIndicatorText} を追加確認する必要があります。`);
+    parts.push(`ただし、この資料だけだと会社固有の売上要因までは追いきれません。`);
+    parts.push(`次に見るなら、${nextEvidenceText} あたりです。`);
   }
   return parts.join("");
 }
@@ -190,7 +192,7 @@ function cleanBannedPhrases(answer: string): string {
 function joinItems(items: string[]): string {
   const unique = [...new Set(items.filter(Boolean))];
   if (unique.length === 0) {
-    return "MD&Aやsegment results";
+    return "経営陣による業績説明やセグメント実績";
   }
   return unique.join("、");
 }
@@ -211,13 +213,19 @@ export function normalizeMissingSourceLabels(items: string[]): string[] {
     "sector-specific KPIs"
   ];
   const aliases: Array<[RegExp, string]> = [
-    [/^md&a(?:\s+(driver|revenue|business)\s+discussion)?$|^management'?s discussion$/i, "MD&A"],
-    [/segment/i, "segment results"],
-    [/^revenue discussion$|^sales discussion$/i, "revenue discussion"],
-    [/^profitability discussion$|^margin discussion$/i, "profitability discussion"],
-    [/cash|liquidity|debt|balance sheet|maturit/i, "cash flow / liquidity"],
-    [/risk/i, "risk factors"],
-    [/^sector-specific (kpis?|indicators?)$/i, "sector-specific KPIs"]
+    [/^md&a(?:\s+(driver|revenue|business)\s+discussion)?$|^management'?s discussion$/i, "経営陣による業績説明"],
+    [/segment/i, "セグメント実績"],
+    [/^revenue discussion$|^sales discussion$/i, "売上要因の説明"],
+    [/^profitability discussion$|^margin discussion$/i, "利益率・採算性"],
+    [/cash|liquidity|debt|balance sheet|maturit/i, "キャッシュフロー・流動性"],
+    [/risk/i, "リスク要因"],
+    [/^sector-specific (kpis?|indicators?)$/i, "業種固有KPI"],
+    [/^product revenue(?:\s+discussion)?$/i, "製品別売上"],
+    [/^services revenue(?:\s+discussion)?$/i, "サービス売上"],
+    [/^geographic revenue(?:\s+discussion)?$/i, "地域別売上"],
+    [/^product launches?$/i, "新製品投入"],
+    [/^channel inventory$/i, "販売チャネル在庫"],
+    [/^product launch or channel inventory discussion$/i, "新製品投入や販売チャネル在庫"]
   ];
   const seen = new Set<string>();
   for (const item of items) {

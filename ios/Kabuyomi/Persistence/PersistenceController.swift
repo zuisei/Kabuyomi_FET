@@ -99,62 +99,42 @@ final class PersistenceController {
         }
     }
 
-    func loadCompany(ticker: String) -> LocalCompanyRecord? {
+    func loadCompany(ticker: String, filingKey: String? = nil) -> LocalCompanyRecord? {
         let request = StockEntity.fetchRequest()
         request.fetchLimit = 1
         request.predicate = NSPredicate(format: "ticker == %@", ticker)
 
         do {
             guard let stock = try viewContext.fetch(request).first,
-                  let filing = stock.filingArray.first,
+                  let filing = filingKey.flatMap({ key in stock.filingArray.first { $0.filingKey == key } }) ?? stock.filingArray.first,
                   let summary = filing.summary else {
                 return nil
             }
 
-            let company = CompanyPayload(
-                filingKey: filing.filingKey,
-                ticker: stock.ticker,
-                companyName: stock.companyName,
-                cik: stock.cik,
-                formType: filing.formType,
-                filedAt: Self.dayString(from: filing.filedAt),
-                periodOfReport: Self.dayString(from: filing.periodOfReport),
-                primaryDocumentUrl: filing.primaryDocumentUrl,
-                companyWebsiteUrl: filing.companyWebsiteUrl.map(Self.detachedString),
-                summary: SummaryPayload(
-                    verdict: summary.verdictText,
-                    highlights: summary.itemArray.filter { $0.kind == "highlight" }.map(summaryItemPayload(from:)),
-                    changes: summary.itemArray.filter { $0.kind == "change" }.map(summaryItemPayload(from:))
-                ),
-                metrics: filing.metricArray.map(metricPayload(from:)),
-                historicalOverview: decodeHistoricalOverview(from: filing.historicalOverviewJSON),
-                sourceChunks: filing.sourceChunkArray.map(sourceChunkPayload(from:)),
-                lastUpdatedAt: Self.isoString(from: stock.lastUpdatedAt)
-            )
-
-            let messages = filing.chatMessageArray.map { message in
-                LocalChatMessage(
-                    id: message.id,
-                    role: Self.detachedString(message.role),
-                    content: Self.detachedString(message.content),
-                    createdAt: message.createdAt,
-                    modelName: Self.detachedString(message.modelName),
-                    sources: message.sourceRefArray.map {
-                        LocalMessageSourceRef(
-                            id: $0.id,
-                            sourceIdSnapshot: $0.sourceIdSnapshot.map(Self.detachedString),
-                            sourceKind: MessageSourceKind(rawValue: $0.sourceKindSnapshot ?? "") ?? .secFiling,
-                            sourceLabelSnapshot: Self.detachedString($0.sourceLabelSnapshot),
-                            excerpt: Self.detachedString($0.excerpt),
-                            sourceUrl: $0.sourceUrlSnapshot.map(Self.detachedString)
-                        )
-                    }
-                )
-            }
-
-            return LocalCompanyRecord(company: company, chatHistory: messages)
+            return localCompanyRecord(stock: stock, filing: filing, summary: summary)
         } catch {
             return nil
+        }
+    }
+
+    func loadConversationRecords(ticker: String) -> [LocalCompanyRecord] {
+        let request = StockEntity.fetchRequest()
+        request.fetchLimit = 1
+        request.predicate = NSPredicate(format: "ticker == %@", ticker)
+
+        do {
+            guard let stock = try viewContext.fetch(request).first else {
+                return []
+            }
+
+            return stock.filingArray.compactMap { filing in
+                guard !filing.chatMessageArray.isEmpty, let summary = filing.summary else {
+                    return nil
+                }
+                return localCompanyRecord(stock: stock, filing: filing, summary: summary)
+            }
+        } catch {
+            return []
         }
     }
 
@@ -326,6 +306,51 @@ final class PersistenceController {
         request.fetchLimit = 1
         request.predicate = NSPredicate(format: "filingKey == %@", key)
         return try viewContext.fetch(request).first
+    }
+
+    private func localCompanyRecord(stock: StockEntity, filing: FilingEntity, summary: SummaryEntity) -> LocalCompanyRecord {
+        let company = CompanyPayload(
+            filingKey: filing.filingKey,
+            ticker: stock.ticker,
+            companyName: stock.companyName,
+            cik: stock.cik,
+            formType: filing.formType,
+            filedAt: Self.dayString(from: filing.filedAt),
+            periodOfReport: Self.dayString(from: filing.periodOfReport),
+            primaryDocumentUrl: filing.primaryDocumentUrl,
+            companyWebsiteUrl: filing.companyWebsiteUrl.map(Self.detachedString),
+            summary: SummaryPayload(
+                verdict: summary.verdictText,
+                highlights: summary.itemArray.filter { $0.kind == "highlight" }.map(summaryItemPayload(from:)),
+                changes: summary.itemArray.filter { $0.kind == "change" }.map(summaryItemPayload(from:))
+            ),
+            metrics: filing.metricArray.map(metricPayload(from:)),
+            historicalOverview: decodeHistoricalOverview(from: filing.historicalOverviewJSON),
+            sourceChunks: filing.sourceChunkArray.map(sourceChunkPayload(from:)),
+            lastUpdatedAt: Self.isoString(from: stock.lastUpdatedAt)
+        )
+
+        let messages = filing.chatMessageArray.map { message in
+            LocalChatMessage(
+                id: message.id,
+                role: Self.detachedString(message.role),
+                content: Self.detachedString(message.content),
+                createdAt: message.createdAt,
+                modelName: Self.detachedString(message.modelName),
+                sources: message.sourceRefArray.map {
+                    LocalMessageSourceRef(
+                        id: $0.id,
+                        sourceIdSnapshot: $0.sourceIdSnapshot.map(Self.detachedString),
+                        sourceKind: MessageSourceKind(rawValue: $0.sourceKindSnapshot ?? "") ?? .secFiling,
+                        sourceLabelSnapshot: Self.detachedString($0.sourceLabelSnapshot),
+                        excerpt: Self.detachedString($0.excerpt),
+                        sourceUrl: $0.sourceUrlSnapshot.map(Self.detachedString)
+                    )
+                }
+            )
+        }
+
+        return LocalCompanyRecord(company: company, chatHistory: messages)
     }
 
     private func replaceSummary(on filing: FilingEntity, summary: SummaryPayload) {

@@ -7,7 +7,7 @@ import { logErrorEvent } from "../lib/logging";
 import { json, notFound, unavailable } from "../lib/response";
 import type { RouteHandler } from "./types";
 
-const CHAT_PAYLOAD_MAX_BYTES = 4_096;
+const CHAT_PAYLOAD_MAX_BYTES = 12_288;
 
 export const handleChatRoute: RouteHandler = async ({ request, url, env, config, ctx }) => {
   if (!(request.method === "POST" && url.pathname === "/v1/chat")) {

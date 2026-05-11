@@ -18,6 +18,7 @@ export interface ChatPromptInput {
   question: string;
   questionIntent?: QuestionIntent;
   contextPack?: ChatContextPack;
+  conversationContextSummary?: string;
   retryInstruction?: ChatRetryInstruction;
 }
 

@@ -2,14 +2,19 @@ import Foundation
 @testable import Kabuyomi
 
 enum TestFixtures {
-    static func companyPayload(ticker: String = "AAPL", cik: String = "0000320193") -> CompanyPayload {
+    static func companyPayload(
+        ticker: String = "AAPL",
+        cik: String = "0000320193",
+        filingKey: String? = nil,
+        filedAt: String = "2024-11-01"
+    ) -> CompanyPayload {
         CompanyPayload(
-            filingKey: "v1:\(ticker):\(cik)-24-000001",
+            filingKey: filingKey ?? "v1:\(ticker):\(cik)-24-000001",
             ticker: ticker,
             companyName: "\(ticker) Holdings",
             cik: cik,
             formType: "10-K",
-            filedAt: "2024-11-01",
+            filedAt: filedAt,
             periodOfReport: "2024-09-30",
             primaryDocumentUrl: "https://www.sec.gov/Archives/\(ticker).htm",
             companyWebsiteUrl: "https://www.\(ticker.lowercased()).com",
@@ -279,8 +284,13 @@ enum TestFixtures {
         ])
     }
 
-    static func companyPayloadData(ticker: String = "AAPL", cik: String = "0000320193") throws -> Data {
-        let company = companyPayload(ticker: ticker, cik: cik)
+    static func companyPayloadData(
+        ticker: String = "AAPL",
+        cik: String = "0000320193",
+        filingKey: String? = nil,
+        filedAt: String = "2024-11-01"
+    ) throws -> Data {
+        let company = companyPayload(ticker: ticker, cik: cik, filingKey: filingKey, filedAt: filedAt)
         return try jsonData([
             "filingKey": company.filingKey,
             "ticker": company.ticker,

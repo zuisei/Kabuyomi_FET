@@ -30,12 +30,12 @@ const legalPages: LegalPage[] = [
       {
         title: "3. 第三者サービス",
         body:
-          "Kabuyomi は、API 配信、キャッシュ、利用制限管理に Cloudflare、米国企業の 10-K / 10-Q 取得に SEC EDGAR、AI 応答や翻訳に OpenAI API などの外部 AI サービス、広告表示や広告報酬の検証に Google AdMob、アプリ内課金と購入復元に Apple App Store / StoreKit を利用します。これらのサービスは、それぞれの規約およびプライバシーポリシーに基づいて情報を処理する場合があります。"
+          "Kabuyomi は、API 配信、キャッシュ、利用制限管理に Cloudflare、米国企業の 10-K / 10-Q 取得に SEC EDGAR、AI 応答や翻訳に OpenAI API などの外部 AI サービス、広告表示に Google AdMob、アプリ内課金と購入復元に Apple App Store / StoreKit を利用します。これらのサービスは、それぞれの規約およびプライバシーポリシーに基づいて情報を処理する場合があります。"
       },
       {
         title: "4. 広告",
         body:
-          "無料プランでは Google AdMob による広告を表示する場合があります。任意の広告視聴による ad credit は、サーバー側で Google AdMob の完了確認ができた場合のみ反映されます。広告配信のため、Google AdMob SDK が広告識別子、デバイス情報、利用状況、診断情報などを扱うことがあります。Kabuyomi はアプリ内で株式売買を促す広告や、会話本文を妨げるインタースティシャル広告を前提にしていません。"
+          "無料プランでは Google AdMob による広告を表示する場合があります。広告配信のため、Google AdMob SDK が広告識別子、デバイス情報、利用状況、診断情報などを扱うことがあります。Kabuyomi はアプリ内で株式売買を促す広告や、会話本文を妨げるインタースティシャル広告を前提にしていません。"
       },
       {
         title: "5. 利用目的",
@@ -97,7 +97,7 @@ const legalPages: LegalPage[] = [
       {
         title: "6. credit購入について",
         body:
-          "v1.0.2 では、買い切りの追加 paid credit と月額 subscription credit を App Store のアプリ内課金として提供します。kabuyomi.credits.50 は 50 paid credits を ¥100 で付与します。kabuyomi.credits.100 は既存の互換商品として、App Store で利用可能な場合に引き続き対応します。subscription group は Kabuyomi_sus です。Lite は ¥640/月で 400 credits/月、Pro は ¥1,280/月で 900 credits/月、Max は ¥2,560/月で 2,000 credits/月を付与します。paid credit は失効しません。subscription credit、free/promotional credit、ad credit、paid credit は分けて管理されます。購入、返金、請求、購入履歴、購入復元は Apple ID と App Store の仕組みおよび適用法に従います。"
+          "v1.0.2 では、買い切りの追加 paid credit と月額 subscription credit を App Store のアプリ内課金として提供します。kabuyomi.credits.50 は 50 paid credits を ¥100 で付与します。kabuyomi.credits.100 は既存の互換商品として、App Store で利用可能な場合に引き続き対応します。subscription group は Kabuyomi_sus です。Lite は ¥640/月で 400 credits/月、Pro は ¥1,280/月で 900 credits/月、Max は ¥2,560/月で 2,000 credits/月を付与します。paid credit は失効しません。subscription credit、free/promotional credit、paid credit は分けて管理されます。購入、返金、請求、購入履歴、購入復元は Apple ID と App Store の仕組みおよび適用法に従います。"
       },
       {
         title: "7. 外部サービス",
@@ -161,7 +161,7 @@ const legalPages: LegalPage[] = [
       },
       {
         title: "credit の有効期限",
-        body: "paid credit は失効しません。subscription credit、free/promotional credit、ad credit、paid credit は分けて管理されます。ad credit は任意の広告視聴後、サーバー側の広告報酬確認が完了した場合のみ付与されます。v1.0.2 の広告報酬は1回あたり +2 ad credits、1日3回まで、最大 +6 ad credits/日で、期限がある場合はアプリ内表示または関連説明に従います。"
+        body: "paid credit は失効しません。subscription credit、free/promotional credit、paid credit は分けて管理されます。free/promotional credit に期限がある場合はアプリ内表示または関連説明に従います。"
       },
       {
         title: "投資助言ではありません",

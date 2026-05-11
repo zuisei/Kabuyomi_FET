@@ -38,7 +38,7 @@ struct ConversationMessageRow: View {
                 VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 7) {
                     messageMetaLine
 
-                    messageBubbleContent
+                    messageBubble
                         .padding(.horizontal, message.role == "user" ? 12 : 13)
                         .padding(.vertical, message.role == "user" ? 9 : 12)
                         .background(message.role == "user" ? AnyView(userBubble) : AnyView(assistantBubble))
@@ -56,60 +56,19 @@ struct ConversationMessageRow: View {
                     alignment: message.role == "user" ? .trailing : .leading
                 )
             }
-
-            if !displaySources.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    if let groundingCaption {
-                        Label(groundingCaption, systemImage: groundingIcon)
-                            .font(.system(.caption2, design: .rounded, weight: .bold))
-                            .foregroundStyle(KabuyomiTheme.inkMuted)
-                    }
-
-                    FlowLayout(spacing: 6, lineSpacing: 6) {
-                        ForEach(visibleSources) { source in
-                            Button(action: { openSource(source) }) {
-                                sourceChip(for: source)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("根拠を開く: \(displaySourceLabel(for: source))")
-                        }
-
-                        if displaySources.count > 3 && !showsAllSources {
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.18)) {
-                                    showsAllSources = true
-                                }
-                            } label: {
-                                Text("すべての根拠を見る")
-                                    .font(.system(.caption2, design: .rounded, weight: .bold))
-                                    .foregroundStyle(KabuyomiTheme.inkMuted)
-                                    .padding(.horizontal, 9)
-                                    .padding(.vertical, 6)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                            .fill(KabuyomiTheme.fill(for: .muted))
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-                .padding(.leading, message.role == "user" ? 0 : 42)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
     }
 
     private var visibleSources: [LocalMessageSourceRef] {
-        showsAllSources ? displaySources : Array(displaySources.prefix(3))
+        showsAllSources ? displaySources : Array(displaySources.prefix(2))
     }
 
     private var assistantBubble: some View {
         RoundedRectangle(cornerRadius: 17, style: .continuous)
-            .fill(KabuyomiTheme.fill(for: .primary).opacity(0.92))
+            .fill(Color.white.opacity(0.56))
             .overlay(
                 RoundedRectangle(cornerRadius: 17, style: .continuous)
-                    .stroke(KabuyomiTheme.stroke(for: .primary).opacity(0.86), lineWidth: 1)
+                    .stroke(KabuyomiTheme.accentDeep.opacity(0.12), lineWidth: 1)
             )
     }
 
@@ -118,7 +77,7 @@ struct ConversationMessageRow: View {
             .fill(KabuyomiTheme.accentDeep.opacity(0.08))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(KabuyomiTheme.accentDeep.opacity(0.14), lineWidth: 1)
+                    .stroke(KabuyomiTheme.accentDeep.opacity(0.18), lineWidth: 1)
             )
     }
 
@@ -179,6 +138,21 @@ struct ConversationMessageRow: View {
     }
 
     @ViewBuilder
+    private var messageBubble: some View {
+        if message.role == "user" {
+            messageBubbleContent
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                messageBubbleContent
+
+                if !displaySources.isEmpty {
+                    sourceFooter
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var messageBubbleContent: some View {
         if message.role == "user" {
             Text(message.content)
@@ -197,6 +171,44 @@ struct ConversationMessageRow: View {
         }
     }
 
+    private var sourceFooter: some View {
+        HStack(spacing: 5) {
+            Spacer(minLength: 18)
+
+            if let primarySource = visibleSources.first {
+                Button(action: { openSource(primarySource) }) {
+                    sourceChip(for: primarySource)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("参照元を開く: \(displaySourceLabel(for: primarySource))")
+            }
+
+            if displaySources.count > 1 {
+                Button {
+                    let nextSource = displaySources.dropFirst().first ?? displaySources[0]
+                    openSource(nextSource)
+                } label: {
+                    Text("+\(displaySources.count - 1)")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.86))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color.white.opacity(0.34))
+                                .overlay(
+                                    Capsule(style: .continuous)
+                                        .stroke(KabuyomiTheme.inkMuted.opacity(0.10), lineWidth: 0.8)
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("他の参照元を開く")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
     private var groundingIcon: String {
         let kinds = Set(displaySources.map(\.sourceKind))
         if kinds.contains(.historicalFiling) {
@@ -212,11 +224,11 @@ struct ConversationMessageRow: View {
     private func sourceBadgeBackground(for source: LocalMessageSourceRef) -> Color {
         switch source.sourceKind {
         case .secFiling:
-            return KabuyomiTheme.accentDeep.opacity(0.12)
+            return KabuyomiTheme.accentDeep.opacity(0.085)
         case .historicalFiling:
-            return KabuyomiTheme.accent.opacity(0.16)
+            return KabuyomiTheme.accent.opacity(0.10)
         case .webSupplement:
-            return Color.white.opacity(0.72)
+            return Color.white.opacity(0.38)
         }
     }
 
@@ -237,29 +249,25 @@ struct ConversationMessageRow: View {
 
     @ViewBuilder
     private func sourceChip(for source: LocalMessageSourceRef) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: source.sourceKind.systemImage)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(sourceBadgeForeground(for: source))
+        HStack(spacing: 4) {
+            Text("参照元")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.86))
 
             Text(displaySourceLabel(for: source))
-                .font(.system(.caption2, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.accentDeep)
+                .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(KabuyomiTheme.inkSoft)
                 .lineLimit(1)
                 .truncationMode(.tail)
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.accentDeep.opacity(0.55))
         }
         .padding(.horizontal, 9)
-        .padding(.vertical, 6)
+        .padding(.vertical, 5)
         .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(Color.white.opacity(0.70))
+            Capsule(style: .continuous)
+                .fill(sourceBadgeBackground(for: source))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .stroke(sourceBadgeBackground(for: source), lineWidth: 1)
+                    Capsule(style: .continuous)
+                        .stroke(sourceBadgeForeground(for: source).opacity(0.17), lineWidth: 0.8)
                 )
         )
     }
@@ -345,10 +353,10 @@ struct ConversationRecoverySuggestions: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title)
-                .font(.system(.caption, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.accentDeep)
+                .font(.system(.caption2, design: .rounded, weight: .bold))
+                .foregroundStyle(KabuyomiTheme.inkMuted)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 5) {
                 ForEach(shortSuggestions, id: \.self) { suggestion in
                     ConversationPromptChip(
                         text: suggestion,
@@ -443,9 +451,9 @@ private struct AssistantNaturalText: View {
 
         VStack(alignment: .leading, spacing: 10) {
             Text(structure.conclusion)
-                .font(.system(.callout, design: .rounded, weight: .semibold))
+                .font(.system(.body, design: .rounded, weight: .regular))
                 .foregroundStyle(KabuyomiTheme.ink)
-                .lineSpacing(3)
+                .lineSpacing(5)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
 
@@ -515,6 +523,14 @@ struct AssistantMetricDisplayRow: Equatable, Identifiable {
 private struct AssistantMetricTable: View {
     let rows: [AssistantMetricDisplayRow]
 
+    private var separatorColor: Color {
+        KabuyomiTheme.inkMuted.opacity(0.13)
+    }
+
+    private var outerStrokeColor: Color {
+        KabuyomiTheme.accentDeep.opacity(0.16)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
@@ -525,7 +541,7 @@ private struct AssistantMetricTable: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
 
-            Divider().overlay(Color.white.opacity(0.55))
+            metricSeparator
 
             ForEach(rows) { row in
                 HStack(alignment: .top, spacing: 8) {
@@ -542,7 +558,7 @@ private struct AssistantMetricTable: View {
                 .padding(.vertical, 8)
 
                 if row.id != rows.last?.id {
-                    Divider().overlay(Color.white.opacity(0.42))
+                    metricSeparator
                 }
             }
         }
@@ -551,9 +567,15 @@ private struct AssistantMetricTable: View {
                 .fill(KabuyomiTheme.fill(for: .input))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(KabuyomiTheme.stroke(for: .input), lineWidth: 1)
+                        .stroke(outerStrokeColor, lineWidth: 1)
                 )
         )
+    }
+
+    private var metricSeparator: some View {
+        Rectangle()
+            .fill(separatorColor)
+            .frame(height: 1 / UIScreen.main.scale)
     }
 
     private func metricHeader(_ text: String, width: CGFloat?) -> some View {
@@ -596,14 +618,14 @@ private struct AssistantSentenceRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Circle()
-                .fill(KabuyomiTheme.accentDeep.opacity(0.72))
-                .frame(width: 5, height: 5)
-                .padding(.top, 7)
+                .fill(KabuyomiTheme.inkMuted.opacity(0.46))
+                .frame(width: 4, height: 4)
+                .padding(.top, 8)
 
             Text(localizedAssistantDisplayText(text))
-                .font(.system(.footnote, design: .rounded, weight: .semibold))
+                .font(.system(.callout, design: .rounded, weight: .regular))
                 .foregroundStyle(KabuyomiTheme.inkSoft)
-                .lineSpacing(3)
+                .lineSpacing(5)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

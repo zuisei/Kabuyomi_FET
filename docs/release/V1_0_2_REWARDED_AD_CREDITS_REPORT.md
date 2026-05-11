@@ -1,6 +1,6 @@
 # Kabuyomi v1.0.2-C Rewarded Ad SSV Credits Report
 
-Superseded note: later on 2026-05-10 JST, the product decision changed. Rewarded-credit UI is now release-visible for v1.0.2 when required AdMob rewarded config is present. Older UI-hidden statements below are pre-decision history; use `docs/release/RELEASE_TRUTH.md` and `docs/release/V1_0_2_REWARDED_AD_RELEASE_VISIBLE_REPORT.md` for current truth.
+Superseded note: the current RC decision changed again after this report. Rewarded-credit UI is hidden for Release/App Review until real Google AdMob SSV grant evidence is recorded in-repo. Older UI-visible or UI-hidden statements below are pre-decision history; use `docs/release/RELEASE_TRUTH.md` for current truth.
 
 ## 1. Conclusion
 
@@ -14,7 +14,7 @@ The iOS rewarded-credit UI already exists. This report originally observed the o
 RewardedCreditReviewUI.rewardedAdsVisibleInV1Review = false
 ```
 
-That old conclusion is superseded. Current v1.0.2 truth is release-visible optional rewarded ads with server-side SSV before grant.
+That old conclusion is superseded. Current RC truth is hidden rewarded-credit UI for Release/App Review; the SSV backend remains implemented for future re-enable work.
 
 ## 2. Backend Endpoints Implemented / Verified
 
@@ -103,13 +103,13 @@ Existing iOS flow is present:
 
 Release/TestFlight visibility:
 
-- Rewarded-credit UI is now release-visible when required AdMob rewarded config is present.
+- Rewarded-credit UI is hidden for the current RC until real Google AdMob SSV grant evidence is recorded in-repo.
 - DEBUG builds can show the UI for development and SSV smoke work.
 - DEBUG demo ad unit is blocked from creating production reward intents.
 
 ## 9. Screenshots Captured
 
-No rewarded-ad UI screenshots were captured in this older pass. Current release-visible behavior needs fresh TestFlight/App Review screenshots or human smoke notes before main merge/App Store submission readiness.
+No rewarded-ad UI screenshots were captured in this older pass. Current RC behavior should instead be checked as hidden in Release/App Review; fresh rewarded-ad screenshots and human smoke notes are only needed before a later re-enable.
 
 ## 10. Tests / Commands Run
 
@@ -226,10 +226,10 @@ For the current v1.0.2 Release/TestFlight build:
 - iOS full tests could not execute because the iOS 26.4.1 simulator launch service returned `Busy` twice. This needs a clean simulator/test-runner retry outside the current busy simulator state.
 - No live AdMob SSV callback was executed in this pass.
 - No production deploy was performed.
-- Rewarded UI is release-visible; fresh screenshots and TestFlight smoke are required.
+- Rewarded UI is hidden for current Release/App Review; fresh screenshots and TestFlight smoke are required only before a later re-enable.
 
 ## 15. releaseDecision
 
-`backend-ready-ui-release-visible-smoke-required`
+`backend-ready-ui-hidden-real-ssv-evidence-required-before-reenable`
 
-The Worker rewarded-credit path is ready for test deployment/smoke. The Release/TestFlight rewarded-credit UI is now intentionally visible when config is present, but live AdMob SSV smoke must still be recorded before main merge/App Store submission readiness.
+The Worker rewarded-credit path is ready for test deployment/smoke. The Release/TestFlight rewarded-credit UI is hidden for the current RC; live AdMob SSV smoke must be recorded before any future App Review-visible re-enable.

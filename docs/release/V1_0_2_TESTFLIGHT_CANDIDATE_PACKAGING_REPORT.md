@@ -187,7 +187,7 @@ P0:
 
 P0:
 
-- Rewarded-credit UI is now release-visible when required AdMob rewarded config is present; real AdMob SSV evidence is still required before main merge/App Store submission readiness.
+- Rewarded-credit UI is hidden for the current RC; real AdMob SSV evidence is still required before any future UI re-enable or App Store submission material can describe rewarded ads.
 
 P1:
 

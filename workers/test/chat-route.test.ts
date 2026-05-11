@@ -278,6 +278,7 @@ describe("handleChatRoute", () => {
       expect.anything(),
       {
         executionContext: ctx,
+        conversationContextSummary: "ユーザー: 営業CF\nアシスタント: 営業キャッシュフローはマイナスで、前年比で減少しました。",
         followupContext: {
           previousQuestion: "営業CF",
           previousAnswer: "営業キャッシュフローはマイナスで、前年比で減少しました。"

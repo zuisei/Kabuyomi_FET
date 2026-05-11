@@ -964,7 +964,7 @@ describe("evidence-slot fallback", () => {
       "profitability discussion"
     ]);
 
-    expect(rendered).toBe("MD&A、segment results、revenue discussion、profitability discussion");
+    expect(rendered).toBe("経営陣による業績説明、セグメント実績、売上要因の説明、利益率・採算性");
     expect(rendered).not.toContain("MD&AとMD&A");
   });
 
@@ -992,8 +992,10 @@ describe("evidence-slot fallback", () => {
     expect(fallback.answer.answer).toContain("net interest income");
     expect(fallback.answer.answer).toContain("noninterest income");
     expect(fallback.answer.answer).toContain("provision");
-    expect(fallback.answer.answer).toContain("segment results");
-    expect(fallback.answer.answer).toContain("会社固有の売上要因は十分に特定できていません");
+    expect(fallback.answer.answer).toContain("セグメント実績");
+    expect(fallback.answer.answer).toContain("会社固有の売上要因までは追いきれません");
+    expect(fallback.answer.answer).toContain("次に見るなら");
+    expect(fallback.answer.answer).not.toContain("不足しているのは");
     expect(fallback.answer.answer).not.toContain("MD&AとMD&A");
     expect(fallback.answer.answer).not.toContain("主因はnet interest income");
     expect(hasBannedPhrase(fallback.answer.answer)).toBe(false);
@@ -1031,7 +1033,7 @@ describe("evidence-slot fallback", () => {
     expect(result.modelResponse.qualityControl?.fallbackKind).not.toBe("legacy_template");
     expect(result.modelResponse.qualityControl?.evidenceFallbackUsed).toBe(true);
     expect(result.modelResponse.retryDiagnostics?.retryAttempted).toBe(false);
-    expect(result.modelResponse.answer).toContain("会社固有の売上要因は十分に特定できていません");
+    expect(result.modelResponse.answer).toContain("会社固有の売上要因までは追いきれません");
   });
 
   it("replaces local revenue-driver legacy fallback with evidence_slot for RKLB-like hard intents", async () => {

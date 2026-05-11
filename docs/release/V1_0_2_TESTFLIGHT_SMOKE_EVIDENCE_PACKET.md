@@ -4,7 +4,7 @@ Generated: 2026-05-10 JST
 
 ## 1. Purpose
 
-This packet is the single human-executable smoke checklist for the final Kabuyomi v1.0.2 TestFlight candidate.
+This packet is superseded by `docs/release/RELEASE_TRUTH.md`, `docs/release/CURRENT_SHIPPING_TRUTH.md`, and the final RC audit report. It remains a historical TestFlight smoke template, but the current RC hides the rewarded-credit UI until real Google AdMob SSV grant evidence is recorded in-repo.
 
 Do not mark any item as passed unless the evidence was captured from the installed TestFlight candidate or the explicitly named App Store Connect / backend surface.
 
@@ -40,7 +40,7 @@ Sensitive evidence rules:
 - Subscriptions are visible when StoreKit returns them.
 - `kabuyomi.credits.50` is visible.
 - `kabuyomi.credits.100` remains supported as compatibility when StoreKit returns it.
-- Rewarded ad credits are visible when required AdMob rewarded config exists.
+- Rewarded-credit UI is hidden in the current RC until real Google AdMob SSV grant evidence is recorded in-repo.
 - StoreKit / Apple server verification is authoritative for paid credit and subscription grants.
 - AdMob SSV is authoritative for rewarded ad grants.
 - Credit ledger and idempotency behavior prevent double grants.
@@ -100,13 +100,13 @@ Use the installed TestFlight candidate. Capture StoreKit diagnostics after produ
 | Cancel purchase path | Cancel does not grant credits and UI returns cleanly | UNTESTED |  |
 | Failed backend grant path, if observed | Transaction is not treated as granted unless Worker confirms grant/already-granted | UNTESTED |  |
 
-## 7. Rewarded Ad / AdMob SSV Smoke Checklist
+## 7. Rewarded Ad / AdMob SSV Re-Enable Checklist
 
-Rewarded ads are optional. Do not fail the build only because Google does not serve an ad, but capture the fallback state and keep SSV-specific items unpassed until a real callback is observed.
+Rewarded-credit UI is not part of the current RC/App Review build. Use this section only for a future re-enable smoke build or branch where the UI is intentionally visible. Do not describe rewarded ads or ad credits in App Review material for the current RC.
 
 | Check | Expected pass condition | Result | Evidence / notes |
 | --- | --- | --- | --- |
-| Rewarded ad UI visibility | Credits / Account Status shows rewarded-ad entry point when required AdMob rewarded config exists | UNTESTED |  |
+| Rewarded-credit UI hidden in RC | Credits / Account Status does not show rewarded-ad entry point in the RC/App Review build | UNTESTED |  |
 | Optional/free-ad-credit copy | UI says ad is optional and reward is free/ad credit, not paid credit | UNTESTED |  |
 | Ad unavailable fallback | If no ad is served, app shows non-granting unavailable/load-failure state | UNTESTED |  |
 | Reward intent created before ad | Backend creates pending intent before ad presentation | UNTESTED |  |
@@ -130,7 +130,7 @@ Rewarded ads are optional. Do not fail the build only because Google does not se
 | No investment advice copy | App Review-facing copy does not imply buy/sell recommendations, price targets, guaranteed performance, or investment advice | UNTESTED |  |
 | App Review metadata consistency | Metadata matches 10-K / 10-Q filing reader scope, paid products, subscriptions, rewarded ads, and no-investment-advice positioning | UNTESTED |  |
 | Company UI polish visible smoke | Company overview, answer presentation, source display, summary drawer, timeline, and top bar render without layout breakage or misleading investment-advice copy | UNTESTED |  |
-| Rewarded ad review note | Review note explains optional ads, +2 free/ad credits, SSV requirement, 3/day cap, and non-guaranteed ad availability | UNTESTED |  |
+| Rewarded ad review note | Review note does not claim visible rewarded ads or ad credits in the current RC | UNTESTED |  |
 | Legal links | Privacy, Terms, Tokushoho, and Support URLs open from App Store metadata / app UI | UNTESTED |  |
 
 ## 9. Evidence Table
@@ -146,7 +146,7 @@ Add one row per concrete observation. Use suffixes and sanitized summaries only.
 |  |  |  | `kabuyomi.sub.lite.monthly` purchase |  |  |  |  |  | UNTESTED |  |
 |  |  |  | Restore purchases |  |  |  |  |  | UNTESTED |  |
 |  |  |  | Duplicate restore |  |  |  |  |  | UNTESTED |  |
-|  |  |  | Rewarded ad UI visible | N/A |  |  |  |  | UNTESTED |  |
+|  |  |  | Rewarded-credit UI hidden in RC | N/A |  |  |  |  | UNTESTED |  |
 |  |  |  | AdMob SSV callback |  |  |  |  |  | UNTESTED |  |
 |  |  |  | Reward status granted |  |  |  |  |  | UNTESTED |  |
 |  |  |  | Rewarded ad +2 ad credits |  |  |  |  |  | UNTESTED |  |
@@ -181,7 +181,7 @@ Do not paste raw SSV signatures, full callback URLs, full custom data, raw trans
 | --- | --- | --- | --- |
 | Local validation | `git diff --check`, iOS build/test, Worker tests, legal/docs validation as applicable | Local validation previously passed; this packet only ran lightweight checks | See current release reports and validation section below |
 | StoreKit smoke | Real TestFlight product load, purchase, restore, duplicate no-op, Apple verification, `/v1/usage` refresh | UNTESTED | Must be executed by human |
-| AdMob SSV smoke | Real rewarded ad SSV callback, `reward-status=granted`, +2 ad credits, paid balance separate, cap behavior | UNTESTED | Must be executed by human |
+| AdMob SSV smoke | N/A for current RC because rewarded-credit UI is hidden. Required before any future UI re-enable: real rewarded ad SSV callback, `reward-status=granted`, +2 ad credits, paid balance separate, cap behavior | UNTESTED | Must be executed by human before re-enable |
 | App Review metadata | Metadata matches v1.0.2 scope and no-investment-advice requirements | UNTESTED | Human App Store Connect review required |
 | Legal/public URLs | Privacy / Terms / Tokushoho / Support URLs reachable and consistent | UNTESTED | Human/public URL smoke required |
 | Final git state | Candidate diff reviewed, Company UI polish included, no v1.2, no main changes | PARTIAL | Branch is correct; final staging/commit not done in this packet |
@@ -189,7 +189,7 @@ Do not paste raw SSV signatures, full callback URLs, full custom data, raw trans
 Go criteria:
 
 - All P0 StoreKit smoke rows are `PASS` or intentionally documented `N/A` where product absence is expected.
-- Real AdMob SSV callback path has at least one `PASS` for granted reward and exactly +2 ad credits.
+- Real AdMob SSV callback path has at least one `PASS` for granted reward and exactly +2 ad credits before any future rewarded-credit UI re-enable.
 - Duplicate restore / duplicate SSV no-double-grant behavior is either directly proven or has a documented accepted residual risk by the human release owner.
 - App Review metadata and public legal URLs are consistent with v1.0.2.
 - Final git diff contains the intended Company UI polish and contains no v1.2 / SEC Form Router, filing retrieval, or Worker answer-quality changes.

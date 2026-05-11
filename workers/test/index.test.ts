@@ -842,7 +842,7 @@ describe("worker routing", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           filingKey: "filing-1",
-          question: "a".repeat(5_000)
+          question: "a".repeat(13_000)
         })
       }),
       {

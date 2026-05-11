@@ -80,6 +80,12 @@ struct InsufficientCreditRecoveryState: Equatable {
     let source: InsufficientCreditRecoverySource
 }
 
+enum CompanyRefreshResult: Equatable {
+    case unchanged
+    case needsConfirmation(CompanyPayload)
+    case retryable
+}
+
 private enum UsageUpdateSource {
     case refresh
     case chat
@@ -180,6 +186,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     private var accessRevokedTickers: Set<String> = []
     private var refreshedTickersThisSession: Set<String> = []
     private var companyRetryTasks: [String: Task<Void, Never>] = [:]
+    private var activeConversationFilingKeys: [String: String] = [:]
     private var watchlistMutationInFlight = false
     private var watchlistMutationWaiters: [CheckedContinuation<Void, Never>] = []
     private var usageMutationGeneration = 0
@@ -1185,7 +1192,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             return
         }
 
-        if let local = persistence.loadCompany(ticker: normalized) {
+        if let local = persistence.loadCompany(ticker: normalized, filingKey: activeConversationFilingKeys[normalized]) {
             companyCache[normalized] = local.company
             chatHistoryCache[normalized] = local.chatHistory
 
@@ -1247,7 +1254,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             }
             try persistence.saveChat(question: trimmed, response: response, for: company)
             storeUsage(response.usage, source: .chat)
-            chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized)?.chatHistory ?? []
+            chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized, filingKey: company.filingKey)?.chatHistory ?? []
             await ensureMinimumPendingChatDuration(since: pendingStartedAt)
             return true
         } catch {
@@ -1272,12 +1279,12 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     private func recentChatContext(for ticker: String) -> [ChatContextMessage] {
         chatHistory(for: ticker)
-            .suffix(6)
+            .suffix(10)
             .compactMap { message in
                 guard ["user", "assistant"].contains(message.role) else { return nil }
                 let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !content.isEmpty else { return nil }
-                return ChatContextMessage(role: message.role, content: String(content.prefix(420)))
+                return ChatContextMessage(role: message.role, content: String(content.prefix(700)))
             }
     }
 
@@ -1299,7 +1306,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     func companyPayload(for ticker: String) -> CompanyPayload? {
         let normalized = normalizedTicker(ticker)
         guard !isLocalAccessRevoked(for: normalized) else { return nil }
-        return companyCache[normalized] ?? persistence.loadCompany(ticker: normalized)?.company
+        return companyCache[normalized] ?? persistence.loadCompany(ticker: normalized, filingKey: activeConversationFilingKeys[normalized])?.company
     }
 
     func companyLoadState(for ticker: String) -> CompanyLoadStatePayload? {
@@ -1310,10 +1317,19 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         loadingTickers.contains(normalizedTicker(ticker))
     }
 
-    func openConversation(for ticker: String, draftQuestion: String? = nil) {
+    func openConversation(for ticker: String, draftQuestion: String? = nil, filingKey: String? = nil) {
         let normalized = normalizedTicker(ticker)
         let trimmedDraft = draftQuestion?.trimmingCharacters(in: .whitespacesAndNewlines)
         completeInitialEntry()
+        if let filingKey {
+            activeConversationFilingKeys[normalized] = filingKey
+        } else {
+            activeConversationFilingKeys.removeValue(forKey: normalized)
+        }
+        if let local = persistence.loadCompany(ticker: normalized, filingKey: filingKey) {
+            companyCache[normalized] = local.company
+            chatHistoryCache[normalized] = local.chatHistory
+        }
         activeConversationTicker = normalized
         pendingConversationTicker = trimmedDraft == nil ? nil : normalized
         pendingConversationQuestion = trimmedDraft
@@ -1353,7 +1369,26 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         if let cached = chatHistoryCache[normalized] {
             return cached
         }
-        return persistence.loadCompany(ticker: normalized)?.chatHistory ?? []
+        return persistence.loadCompany(ticker: normalized, filingKey: activeConversationFilingKeys[normalized])?.chatHistory ?? []
+    }
+
+    func conversationHistory(for ticker: String) -> [LocalCompanyRecord] {
+        let normalized = normalizedTicker(ticker)
+        guard !isLocalAccessRevoked(for: normalized) else { return [] }
+        return persistence.loadConversationRecords(ticker: normalized)
+    }
+
+    func isViewingOlderFilingConversation(ticker: String) -> Bool {
+        let normalized = normalizedTicker(ticker)
+        guard let active = companyPayload(for: normalized),
+              let latest = persistence.loadCompany(ticker: normalized)?.company else {
+            return false
+        }
+        return active.filingKey != latest.filingKey
+    }
+
+    func openLatestConversation(for ticker: String) {
+        openConversation(for: ticker)
     }
 
     func pendingChat(for ticker: String) -> PendingChatState? {
@@ -1369,7 +1404,9 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         UserDefaults.standard.set(normalized, forKey: Self.lastViewedTickerKey)
         activeConversationTicker = normalized
         UserDefaults.standard.set(normalized, forKey: Self.activeConversationTickerKey)
-        setLastSeenFilingKey(company.filingKey, for: normalized)
+        if activeConversationFilingKeys[normalized] == nil {
+            setLastSeenFilingKey(company.filingKey, for: normalized)
+        }
 
         recentTickers.removeAll(where: { $0 == normalized })
         recentTickers.insert(normalized, at: 0)
@@ -1642,6 +1679,76 @@ credit残高に使う端末識別情報は維持されます。
         }
     }
 
+    func refreshConversationCompany(ticker: String) async -> CompanyRefreshResult {
+        let normalized = normalizedTicker(ticker)
+        guard !loadingTickers.contains(normalized), !isLocalAccessRevoked(for: normalized) else {
+            return .retryable
+        }
+
+        let stateGeneration = self.stateGeneration
+        let activeCompany = companyPayload(for: normalized)
+
+        loadingTickers.insert(normalized)
+        companyIsLoading = true
+        defer {
+            finishCompanyLoad(ticker: normalized, stateGeneration: stateGeneration)
+        }
+
+        do {
+            let response = try await apiClient.refreshCompany(ticker: normalized)
+            guard stateGeneration == self.stateGeneration else { return .retryable }
+            guard !isLocalAccessRevoked(for: normalized) else { return .retryable }
+
+            switch response {
+            case .company(let company):
+                let refreshedTicker = normalizedTicker(company.ticker)
+                if let activeCompany,
+                   activeCompany.filingKey != company.filingKey {
+                    return .needsConfirmation(company)
+                }
+
+                try handleLoadedCompany(company, requestedTicker: normalized)
+                if refreshedTicker != normalized {
+                    try handleLoadedCompany(company, requestedTicker: refreshedTicker)
+                }
+                return .unchanged
+
+            case .retryable(let state):
+                companyLoadStates[normalized] = state
+                scheduleCompanyLoadRetry(ticker: normalized, state: state)
+                return .retryable
+            }
+        } catch {
+            guard stateGeneration == self.stateGeneration else { return .retryable }
+            guard !shouldIgnore(error) else { return .retryable }
+            let recoveredSelection = clearUnavailableEphemeralSelectionIfNeeded(for: normalized)
+            if companyCache[normalized] == nil, !recoveredSelection {
+                presentAlert(for: error)
+            }
+            return .retryable
+        }
+    }
+
+    func startNewConversation(with company: CompanyPayload) {
+        let normalized = normalizedTicker(company.ticker)
+        do {
+            try persistence.saveCompany(company, searchItem: nil)
+            activeConversationFilingKeys.removeValue(forKey: normalized)
+            companyCache[normalized] = company
+            chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized, filingKey: company.filingKey)?.chatHistory ?? []
+            companyLoadStates.removeValue(forKey: normalized)
+            cancelCompanyLoadRetry(for: normalized)
+            refreshedTickersThisSession.insert(normalized)
+            accessRevokedTickers.remove(normalized)
+            activeConversationTicker = normalized
+            UserDefaults.standard.set(normalized, forKey: Self.activeConversationTickerKey)
+            setLastSeenFilingKey(company.filingKey, for: normalized)
+            loadHomeFromPersistence()
+        } catch {
+            activeAlert = AppAlertState(message: error.localizedDescription, kind: .dismissOnly)
+        }
+    }
+
     private func refreshUsage() async {
         let stateGeneration = self.stateGeneration
         let usageGeneration = usageMutationGeneration
@@ -1733,10 +1840,17 @@ credit残高に使う端末識別情報は維持されます。
             )
         }
 
-        companyCache[requestedTicker] = company
-        companyCache[normalizedCompanyTicker] = company
-        chatHistoryCache[requestedTicker] = persistence.loadCompany(ticker: requestedTicker)?.chatHistory ?? []
-        chatHistoryCache[normalizedCompanyTicker] = persistence.loadCompany(ticker: normalizedCompanyTicker)?.chatHistory ?? []
+        let requestedActiveFilingKey = activeConversationFilingKeys[requestedTicker]
+        if requestedActiveFilingKey == nil || requestedActiveFilingKey == company.filingKey {
+            companyCache[requestedTicker] = company
+            chatHistoryCache[requestedTicker] = persistence.loadCompany(ticker: requestedTicker, filingKey: company.filingKey)?.chatHistory ?? []
+        }
+
+        let normalizedActiveFilingKey = activeConversationFilingKeys[normalizedCompanyTicker]
+        if normalizedActiveFilingKey == nil || normalizedActiveFilingKey == company.filingKey {
+            companyCache[normalizedCompanyTicker] = company
+            chatHistoryCache[normalizedCompanyTicker] = persistence.loadCompany(ticker: normalizedCompanyTicker, filingKey: company.filingKey)?.chatHistory ?? []
+        }
         accessRevokedTickers.remove(requestedTicker)
         accessRevokedTickers.remove(normalizedCompanyTicker)
         if shouldPersist {

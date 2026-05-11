@@ -33,6 +33,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     factualPack: undefined,
     sourceChunks: input.filing.sourceChunks
   };
+  const conversationContext = input.conversationContextSummary?.trim();
   return [
     "You are a source-bound but helpful assistant for a Japanese SEC filing reader.",
     "Answer must be based only on the provided filing, historical, or web sources.",
@@ -76,6 +77,8 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "If the user asks about a driver, cause, or contributor but the provided support is only a metric, explain the observed change first, then say what extra filing detail would help narrow the driver.",
     "If the user asks whether a driver, cause, factor, or its impact is temporary, recurring, sustainable, or likely to continue, answer that durability question first. Use filing-backed outlook, risk, demand, cost, or management discussion language when present. If the provided context does not identify the prior driver clearly, say that the prior factor is not explicit in this request and answer from the closest filing-backed driver. Never answer this kind of question with only a revenue or profit metric.",
     "For very short cause or durability follow-ups such as なぜ？, その要因は一時的？, or 続きそう？, do not treat the wording as standalone general advice. Anchor the answer to the closest provided filing driver, risk, demand, cost, margin, cash-flow, or outlook source.",
+    "Use the recent conversation context to resolve pronouns, omitted subjects, and follow-up intent. Do not reset the conversation unless the user clearly changes topic.",
+    "If the current question refers to 前回, それ, その要因, どれ, or この話, connect it to the most relevant recent user question and assistant answer before answering.",
     "If the user asks why the company is in the red, why losses widened, or why net income is negative, anchor the answer on net income or operating income evidence and any filing text about losses, valuation changes, costs, taxes, or impairments. Do not switch to a revenue-only answer unless no profit-related evidence exists at all.",
     "If the user asks why the stock moved or what investors want to know, distinguish backward-looking results from forward-looking expectations.",
     "If the answer is only partially supported, say what is supported and what is still not confirmable from this filing context.",
@@ -85,6 +88,9 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "Do not cite sourceIds that do not exist.",
     "",
     `Question: ${input.question}`,
+    "",
+    "Recent conversation context:",
+    conversationContext || "なし",
     `Question intent: ${contextPack.questionIntent}`,
     `Content mode: ${contextPack.contentMode}`,
     "Answer format:",
@@ -120,8 +126,14 @@ export function buildChatPromptTemplateVariables(input: ChatPromptInput): Record
     factualPack: undefined,
     sourceChunks: input.filing.sourceChunks
   };
+  const conversationContext = input.conversationContextSummary?.trim() ?? "";
+  const questionForPrompt = conversationContext
+    ? `${input.question}\n\n直近の会話文脈:\n${conversationContext}`
+    : input.question;
   return {
-    question: input.question,
+    question: questionForPrompt,
+    original_question: input.question,
+    conversation_context: conversationContext || "なし",
     question_intent: contextPack.questionIntent,
     content_mode: contextPack.contentMode,
     answer_format_instruction: answerFormatInstruction(contextPack.questionIntent),

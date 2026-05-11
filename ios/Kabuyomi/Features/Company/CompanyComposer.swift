@@ -23,16 +23,16 @@ struct ComposerBar: View {
             creditStatusLine
             inputControls
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 8)
         .kabuyomiGlass(
-            radius: 22,
-            tint: Color.white.opacity(0.22),
-            stroke: Color.white.opacity(0.56)
+            radius: 20,
+            tint: Color.white.opacity(0.10),
+            stroke: KabuyomiTheme.accentDeep.opacity(0.13)
         )
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 18)
         .padding(.top, 6)
-        .padding(.bottom, 10)
+        .padding(.bottom, 11)
     }
 
     @ViewBuilder
@@ -48,11 +48,22 @@ struct ComposerBar: View {
                 }
             }
         } else {
-            HStack(alignment: .center, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
                 questionField
                 clearButton
                 sendButton
             }
+            .padding(.leading, 12)
+            .padding(.trailing, 6)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color.white.opacity(0.44))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(KabuyomiTheme.inkMuted.opacity(0.13), lineWidth: 0.7)
+            )
         }
     }
 
@@ -101,7 +112,7 @@ struct ComposerBar: View {
         Button(action: sendButtonAction) {
             Image(systemName: "arrow.up")
                 .font(.system(size: 18, weight: .bold))
-                .frame(width: 40, height: 40)
+                .frame(width: 42, height: 42)
                 .foregroundStyle(sendButtonIsDisabled ? KabuyomiTheme.inkMuted : .white)
                 .background(sendButtonBackground)
         }
@@ -133,7 +144,7 @@ struct ComposerBar: View {
                 Circle()
                     .stroke(sendButtonIsDisabled ? Color.white.opacity(0.9) : Color.white.opacity(0.2), lineWidth: 1)
             )
-            .shadow(color: sendButtonIsDisabled ? Color.clear : KabuyomiTheme.accentDeep.opacity(0.24), radius: 10, x: 0, y: 6)
+            .shadow(color: sendButtonIsDisabled ? Color.clear : KabuyomiTheme.accentDeep.opacity(0.10), radius: 4, x: 0, y: 2)
     }
 
     private var consentStatusLine: some View {
@@ -175,5 +186,55 @@ struct ComposerBar: View {
         .foregroundStyle(hasEnoughCredits ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative)
         .padding(.horizontal, 4)
         .dynamicTypeSize(.xSmall ... .accessibility2)
+    }
+}
+
+#Preview("Chat Composer") {
+    @Previewable @State var question = "営業CFの変化を日本語で要約して"
+
+    ZStack {
+        KabuyomiTheme.background
+
+        VStack {
+            Spacer()
+
+            ComposerBar(
+                question: $question,
+                isSending: false,
+                isEnabled: true,
+                placeholder: "AAPL の 10-Q について質問",
+                aiConsentGranted: true,
+                creditStatusText: "48 credits",
+                hasEnoughCredits: true,
+                applyPrompt: { question = $0 },
+                openCreditOptions: {},
+                sendAction: {}
+            )
+        }
+    }
+}
+
+#Preview("Chat Composer Needs Credits") {
+    @Previewable @State var question = "売上高と利益率の変化を教えて"
+
+    ZStack {
+        KabuyomiTheme.background
+
+        VStack {
+            Spacer()
+
+            ComposerBar(
+                question: $question,
+                isSending: false,
+                isEnabled: true,
+                placeholder: "NVDA の 10-K について質問",
+                aiConsentGranted: true,
+                creditStatusText: "0 credits",
+                hasEnoughCredits: false,
+                applyPrompt: { question = $0 },
+                openCreditOptions: {},
+                sendAction: {}
+            )
+        }
     }
 }

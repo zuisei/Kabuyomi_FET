@@ -9,13 +9,13 @@ export const WatchlistRemoveRequestSchema = WatchlistTickerRequestSchema;
 
 export const ChatContextMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string().trim().min(1).max(420)
+  content: z.string().trim().min(1).max(700)
 });
 
 export const ChatRequestSchema = z.object({
   filingKey: z.string().min(1),
   question: z.string().trim().min(1).max(1_000),
-  conversationContext: z.array(ChatContextMessageSchema).max(6).optional(),
+  conversationContext: z.array(ChatContextMessageSchema).max(10).optional(),
   operationId: z.string().trim().min(1).max(128).optional()
 });
 

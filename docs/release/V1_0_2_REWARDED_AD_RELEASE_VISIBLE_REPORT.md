@@ -2,9 +2,11 @@
 
 Date: 2026-05-10 JST
 
+> Superseded for the current RC: rewarded-credit UI is hidden in Release/App Review until real production/TestFlight Google AdMob SSV grant evidence is recorded in-repo. Use `docs/release/RELEASE_TRUTH.md`, `docs/release/CURRENT_SHIPPING_TRUTH.md`, and the final RC audit report for current shipping truth.
+
 ## 1. Conclusion
 
-Rewarded ad credits are now intended to be release-visible for v1.0.2 when the required AdMob rewarded configuration is present.
+Historical conclusion: this pass previously intended rewarded ad credits to be shown for v1.0.2 when the required AdMob rewarded configuration was present. Current RC truth supersedes that decision and hides the rewarded-credit UI.
 
 The implementation remains server-authoritative:
 
@@ -15,7 +17,7 @@ The implementation remains server-authoritative:
 - Ad credits expire after 30 days through the rewarded-ad credit bucket.
 - Paid credits remain separate.
 - Client-only ad completion does not grant credits.
-- Real Google AdMob SSV smoke is still required before main merge / App Store submission readiness.
+- Real Google AdMob SSV smoke is still required before any future rewarded-credit UI re-enable or App Store submission material can describe rewarded ads.
 - TestFlight StoreKit smoke is still required before main merge.
 
 No production deploy, push, merge to `main`, v1.2 branch creation, SEC Form Router work, filing retrieval change, or answer-quality logic change was performed.
@@ -91,9 +93,9 @@ No production deploy, push, merge to `main`, v1.2 branch creation, SEC Form Rout
 
 ## 5. Release Truth Decisions Reflected
 
-- Rewarded ad credits are release-visible in v1.0.2 when AdMob rewarded config exists.
-- Rewarded ad credits are App Review-visible.
-- Rewarded ad credits are part of TestFlight smoke.
+- Rewarded ad credits are not visible in the current RC/App Review build.
+- Rewarded ad credits are not App Review-visible in the current RC.
+- Rewarded ad credits are not part of current RC TestFlight smoke except as a hidden-state check.
 - Rewarded ads are optional.
 - Rewarded ads grant free/ad credits, not paid credits.
 - Credits grant only after server-side Google AdMob SSV.
@@ -165,7 +167,7 @@ Automated/local validation is not a substitute for this checklist.
 
 1. Install the v1.0.2 TestFlight candidate.
 2. Confirm Credits / Account Status shows the rewarded ad option when AdMob config is present.
-3. Confirm the UI says the ad is optional and grants free/ad credits.
+3. Confirm the UI remains hidden in the current RC. For a future re-enable branch, confirm the UI says the ad is optional and grants free/ad credits.
 4. Tap the rewarded ad option.
 5. If no ad is served, confirm the app shows a non-granting unavailable/load-failure state.
 6. If an ad is served, watch it to completion.
@@ -183,7 +185,7 @@ Automated/local validation is not a substitute for this checklist.
 
 P0:
 
-- Real Google AdMob SSV smoke from TestFlight/production-like installed build is still required.
+- Real Google AdMob SSV smoke from TestFlight/production-like installed build is still required before any future rewarded-credit UI re-enable.
 - TestFlight StoreKit smoke is still required:
   - `kabuyomi.credits.50` product load/purchase
   - `kabuyomi.credits.100` compatibility behavior if returned
@@ -202,7 +204,7 @@ P1:
 
 The branch can be prepared for human TestFlight candidate packaging after automated validation passes.
 
-It is not main-merge-ready and not App-Store-submission-ready until real AdMob SSV smoke and real TestFlight StoreKit smoke are recorded.
+It is not rewarded-credit-reenable-ready until real AdMob SSV smoke is recorded. Current RC App Store submission material must keep rewarded-credit UI hidden; real TestFlight StoreKit smoke is still required for paid products and subscriptions.
 
 ## 12. No v1.2 Confirmation
 

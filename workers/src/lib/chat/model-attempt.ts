@@ -33,7 +33,8 @@ export async function buildValidatedModelAnswer({
   questionIntent,
   timings,
   previousQuestion,
-  previousAnswer
+  previousAnswer,
+  conversationContextSummary
 }: {
   filing: FilingCacheRecord;
   question: string;
@@ -42,6 +43,7 @@ export async function buildValidatedModelAnswer({
   timings: ChatTimingTracker;
   previousQuestion?: string;
   previousAnswer?: string;
+  conversationContextSummary?: string;
 }): Promise<{
   contextPack: ChatContextPack;
   modelResponse: GeminiChatAnswer;
@@ -257,7 +259,7 @@ export async function buildValidatedModelAnswer({
   }
 
   let modelResponse = await timings.timeAsync("geminiFirstCallMs", () =>
-    generateModelChatAnswer(env, { filing, question, questionIntent, contextPack })
+    generateModelChatAnswer(env, { filing, question, questionIntent, contextPack, conversationContextSummary })
   );
   let sourceValidation = validateModelSources(modelResponse, contextPack, filing);
   if (
@@ -346,7 +348,8 @@ export async function buildValidatedModelAnswer({
       env,
       questionIntent,
       retryReason: retryReason!,
-      previousModelResponse: modelResponse
+      previousModelResponse: modelResponse,
+      conversationContextSummary
     }));
     contextPack = retryResult.contextPack;
     modelResponse = retryResult.modelResponse;

@@ -13,7 +13,8 @@ export async function retryModelAnswer({
   env,
   questionIntent,
   retryReason,
-  previousModelResponse
+  previousModelResponse,
+  conversationContextSummary
 }: {
   filing: FilingCacheRecord;
   question: string;
@@ -21,6 +22,7 @@ export async function retryModelAnswer({
   questionIntent: QuestionIntent;
   retryReason: ChatFallbackReason;
   previousModelResponse: GeminiChatAnswer;
+  conversationContextSummary?: string;
 }): Promise<{ contextPack: ChatContextPack; modelResponse: GeminiChatAnswer }> {
   const contextPack = buildChatContextPack(filing, questionIntent, {
     mode: retryContextMode(retryReason),
@@ -49,6 +51,7 @@ export async function retryModelAnswer({
     question,
     questionIntent,
     contextPack,
+    conversationContextSummary,
     retryInstruction: {
       attempt: 1,
       reason: retryReason

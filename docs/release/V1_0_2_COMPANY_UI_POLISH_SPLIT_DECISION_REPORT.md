@@ -20,7 +20,7 @@ The v1.0.2 candidate should remain focused on:
 - visible subscriptions
 - `kabuyomi.credits.50`
 - compatibility with `kabuyomi.credits.100`
-- visible rewarded ad credits
+- hidden rewarded-credit UI for Release/App Review until real Google AdMob SSV grant evidence is recorded in-repo
 - StoreKit / Apple verification
 - AdMob SSV rewarded credit grants
 - credit ledger / idempotency safety
@@ -88,8 +88,8 @@ The final candidate scope after splitting Company UI polish is:
 - subscriptions visible in v1.0.2
 - `kabuyomi.credits.50` visible
 - `kabuyomi.credits.100` remains supported as compatibility if present
-- rewarded ad credits visible and App Review-visible
-- rewarded ads grant free/ad credits only after server-side verification
+- rewarded-credit UI hidden and not App Review-visible for the current RC
+- rewarded-credit backend remains server-side SSV gated for future re-enable
 - duplicate AdMob SSV callbacks do not double grant
 - invalid SSV/custom data does not grant
 - daily cap remains server-enforced at 3 successful rewards/day

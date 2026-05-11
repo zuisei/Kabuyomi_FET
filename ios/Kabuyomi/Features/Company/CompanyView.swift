@@ -88,6 +88,11 @@ private struct OptimisticSavedState: Equatable {
     let isSaved: Bool
 }
 
+private struct PendingNewFilingConfirmation: Identifiable {
+    let id = UUID()
+    let company: CompanyPayload
+}
+
 struct CompanyView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.openURL) private var openURL
@@ -113,6 +118,7 @@ struct CompanyView: View {
     @State private var pendingDrawerOpenTask: Task<Void, Never>?
     @State private var pendingConsentSubmission: String?
     @State private var optimisticSavedState: OptimisticSavedState?
+    @State private var pendingNewFilingConfirmation: PendingNewFilingConfirmation?
 
     init(ticker: String) {
         _currentTicker = State(initialValue: ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
@@ -132,6 +138,10 @@ struct CompanyView: View {
 
     private var companyLoadState: CompanyLoadStatePayload? {
         appModel.companyLoadState(for: currentTicker)
+    }
+
+    private var conversationHistory: [LocalCompanyRecord] {
+        appModel.conversationHistory(for: currentTicker)
     }
 
     private var isCurrentCompanyLoading: Bool {
@@ -249,7 +259,9 @@ struct CompanyView: View {
                             pendingTicker: pendingDrawerTickerOpen?.ticker,
                             pendingCompanyName: pendingDrawerTickerOpen?.companyName,
                             pendingDetail: pendingDrawerTickerOpen?.detail,
+                            conversationHistory: conversationHistory,
                             selectTicker: openDrawerTicker,
+                            selectFiling: openDrawerFiling,
                             saveSearchResult: saveSearchResult,
                             openSearchResult: openSearchResult,
                             openSearch: openSearchScreen,
@@ -409,6 +421,30 @@ struct CompanyView: View {
                     .presentationDragIndicator(.visible)
             }
         }
+        .alert(
+            "新しい決算資料が見つかりました",
+            isPresented: Binding(
+                get: { pendingNewFilingConfirmation != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingNewFilingConfirmation = nil
+                    }
+                }
+            ),
+            presenting: pendingNewFilingConfirmation,
+            actions: { pending in
+                Button("新しい会話を開始") {
+                    appModel.startNewConversation(with: pending.company)
+                    pendingNewFilingConfirmation = nil
+                }
+                Button("今の会話を続ける", role: .cancel) {
+                    pendingNewFilingConfirmation = nil
+                }
+            },
+            message: { _ in
+                Text("現在の会話は前の資料に紐づいています。新しい資料で別の会話を開始しますか？")
+            }
+        )
     }
 
     private var mainContent: some View {
@@ -432,7 +468,17 @@ struct CompanyView: View {
                 refresh: refreshCurrentCompany
             )
 
+            headerContentDivider
+
             if let company {
+                if appModel.isViewingOlderFilingConversation(ticker: currentTicker) {
+                    OlderFilingConversationBanner {
+                        appModel.openLatestConversation(for: currentTicker)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                }
+
                 if let companyStatusNotice {
                     CompanyStatusNoticeBanner(notice: companyStatusNotice)
                         .padding(.horizontal, 16)
@@ -473,6 +519,15 @@ struct CompanyView: View {
                 sendAction: sendCurrentQuestion
             )
         }
+    }
+
+    private var headerContentDivider: some View {
+        Rectangle()
+            .fill(KabuyomiTheme.accentDeep.opacity(0.16))
+            .frame(height: 1 / UIScreen.main.scale)
+            .padding(.horizontal, 24)
+            .padding(.top, 2)
+            .padding(.bottom, 3)
     }
 
     private var composerPlaceholder: String {
@@ -948,8 +1003,15 @@ struct CompanyView: View {
 
     private func refreshCurrentCompany() {
         Task {
-            await appModel.loadCompany(ticker: currentTicker, forceRefresh: true)
-            appModel.recordCompanyVisit(ticker: currentTicker)
+            let result = await appModel.refreshConversationCompany(ticker: currentTicker)
+            switch result {
+            case .unchanged:
+                appModel.recordCompanyVisit(ticker: currentTicker)
+            case .needsConfirmation(let company):
+                pendingNewFilingConfirmation = PendingNewFilingConfirmation(company: company)
+            case .retryable:
+                break
+            }
         }
     }
 
@@ -981,6 +1043,7 @@ struct CompanyView: View {
         let normalized = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         pendingDrawerTickerOpen = nil
         guard normalized != currentTicker else {
+            appModel.openLatestConversation(for: normalized)
             closePanels()
             return
         }
@@ -1020,6 +1083,14 @@ struct CompanyView: View {
             }
             pendingDrawerOpenTask = nil
         }
+    }
+
+    private func openDrawerFiling(_ ticker: String, _ filingKey: String) {
+        let normalized = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        pendingDrawerTickerOpen = nil
+        appModel.openConversation(for: normalized, filingKey: filingKey)
+        currentTicker = normalized
+        closePanels()
     }
 
     private func openSearchResult(_ item: SearchItem) {
@@ -1102,6 +1173,44 @@ private struct CompanyStatusNoticeBanner: View {
         }
         .padding(14)
         .kabuyomiCard(.secondary, radius: 18)
+    }
+}
+
+private struct OlderFilingConversationBanner: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep.opacity(0.82))
+
+                Text("前の資料に基づく会話です")
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.62))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(KabuyomiTheme.accentSoft.opacity(0.18))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(KabuyomiTheme.accentDeep.opacity(0.10), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("前の資料に基づく会話です。最新の資料で質問する")
     }
 }
 

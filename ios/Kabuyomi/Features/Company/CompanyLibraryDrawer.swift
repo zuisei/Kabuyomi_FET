@@ -14,7 +14,9 @@ struct ConversationLibraryDrawer: View {
     let pendingTicker: String?
     let pendingCompanyName: String?
     let pendingDetail: String?
+    let conversationHistory: [LocalCompanyRecord]
     let selectTicker: (String, String) -> Void
+    let selectFiling: (String, String) -> Void
     let saveSearchResult: (SearchItem) -> Void
     let openSearchResult: (SearchItem) -> Void
     let openSearch: () -> Void
@@ -69,9 +71,9 @@ struct ConversationLibraryDrawer: View {
                 .ignoresSafeArea()
 
             Rectangle()
-                .stroke(KabuyomiTheme.stroke(for: .secondary), lineWidth: 1)
+                .stroke(KabuyomiTheme.accentDeep.opacity(0.10), lineWidth: 1)
         }
-        .shadow(color: KabuyomiTheme.shadow(for: .primary), radius: 16, x: 8, y: 0)
+        .shadow(color: KabuyomiTheme.accentDeep.opacity(0.05), radius: 10, x: 5, y: 0)
     }
 
     @ViewBuilder
@@ -100,7 +102,27 @@ struct ConversationLibraryDrawer: View {
             )
         }
         .padding(.vertical, 8)
-        .kabuyomiCard(.primary, radius: 18)
+        .background(DrawerCellBackground(radius: 16, isCurrent: false, opacity: 0.30))
+    }
+
+    private var activeFilingKey: String? {
+        appModel.companyPayload(for: currentTicker)?.filingKey
+    }
+
+    private var visibleConversationHistory: [LocalCompanyRecord] {
+        let savedFilingKey = savedCompanies.first(where: { $0.ticker == currentTicker })?.filingKey
+
+        return conversationHistory.filter { record in
+            guard record.company.ticker == currentTicker else { return false }
+            guard record.company.filingKey != savedFilingKey else { return false }
+            return true
+        }
+    }
+
+    private func visibleConversationHistory(for ticker: String, excluding filingKey: String) -> [LocalCompanyRecord] {
+        conversationHistory.filter { record in
+            record.company.ticker == ticker && record.company.filingKey != filingKey
+        }
     }
 
     @ViewBuilder
@@ -112,18 +134,58 @@ struct ConversationLibraryDrawer: View {
                 priority: .standard
             ) {
                 ForEach(savedCompanies) { company in
-                    DrawerCompanyRow(
-                        ticker: company.ticker,
-                        companyName: company.companyName,
-                        subtitle: drawerSubtitle(for: company),
-                        isCurrent: company.ticker == currentTicker,
-                        prominence: .standard,
-                        action: { selectTicker(company.ticker, company.companyName) }
-                    )
+                    VStack(alignment: .leading, spacing: 7) {
+                        DrawerCompanyRow(
+                            ticker: company.ticker,
+                            companyName: company.companyName,
+                            subtitle: drawerSubtitle(for: company),
+                            isCurrent: false,
+                            prominence: .standard,
+                            action: { selectTicker(company.ticker, company.companyName) }
+                        )
+
+                        if company.ticker == currentTicker {
+                            filingRows(for: company)
+                                .padding(.leading, 18)
+                        }
+                    }
                 }
             }
         } else {
             DrawerEmptyWatchlistHint(openSearch: openSearch)
+        }
+    }
+
+    @ViewBuilder
+    private func filingRows(for company: WatchlistCard) -> some View {
+        let records = visibleConversationHistory(for: company.ticker, excluding: company.filingKey)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("資料")
+                .font(.system(.caption2, design: .rounded, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.86))
+                .padding(.leading, 2)
+
+            DrawerFilingConversationRow(
+                formType: company.formType,
+                filedAt: company.filedAt.formatted(date: .abbreviated, time: .omitted),
+                messageCount: nil,
+                isCurrent: company.filingKey == activeFilingKey,
+                currentLabel: "最新を閲覧中",
+                leadingLabel: "最新",
+                action: { selectTicker(company.ticker, company.companyName) }
+            )
+
+            ForEach(records, id: \.company.filingKey) { record in
+                DrawerFilingConversationRow(
+                    formType: record.company.formType,
+                    filedAt: record.company.filedAt,
+                    messageCount: record.chatHistory.count,
+                    isCurrent: record.company.filingKey == activeFilingKey,
+                    currentLabel: "前の資料を閲覧中",
+                    leadingLabel: "過去",
+                    action: { selectFiling(record.company.ticker, record.company.filingKey) }
+                )
+            }
         }
     }
 
@@ -174,7 +236,7 @@ struct ConversationLibraryDrawer: View {
                     .font(.system(size: 17, weight: .bold))
                     .frame(width: 44, height: 44)
                     .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .kabuyomiCard(.secondary, radius: 14)
+                    .background(DrawerCellBackground(radius: 14, isCurrent: false, opacity: 0.32))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("一覧を閉じる")
@@ -269,6 +331,26 @@ private struct DrawerSearchErrorState: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .kabuyomiCard(.muted, radius: 18)
+    }
+}
+
+private struct DrawerCellBackground: View {
+    let radius: CGFloat
+    let isCurrent: Bool
+    let opacity: Double
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(Color.white.opacity(opacity))
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .stroke(
+                        isCurrent
+                            ? KabuyomiTheme.accentDeep.opacity(0.20)
+                            : KabuyomiTheme.accentDeep.opacity(0.09),
+                        lineWidth: isCurrent ? 1 : 0.8
+                    )
+            )
     }
 }
 
@@ -493,6 +575,57 @@ private enum DrawerRowProminence {
     }
 }
 
+private struct DrawerFilingConversationRow: View {
+    let formType: String
+    let filedAt: String
+    let messageCount: Int?
+    let isCurrent: Bool
+    let currentLabel: String
+    let leadingLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(leadingLabel)
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(isCurrent ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted.opacity(0.76))
+                    .frame(width: 28, alignment: .leading)
+
+                Text("\(formType) ・ \(filedAt) 提出")
+                    .font(.system(.caption, design: .rounded, weight: isCurrent ? .semibold : .medium))
+                    .foregroundStyle(isCurrent ? KabuyomiTheme.ink : KabuyomiTheme.inkSoft)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.86)
+
+                Spacer(minLength: 8)
+
+                if isCurrent {
+                    Text(currentLabel)
+                        .font(.system(.caption2, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.66)))
+                } else if let messageCount {
+                    Text("\(messageCount)件")
+                        .font(.system(.caption2, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.88))
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.48))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+            .background(DrawerCellBackground(radius: 11, isCurrent: isCurrent, opacity: isCurrent ? 0.30 : 0.18))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct DrawerCompanyRow: View {
     let ticker: String
     let companyName: String
@@ -546,14 +679,12 @@ private struct DrawerCompanyRow: View {
             .padding(.horizontal, isCompact ? 12 : 14)
             .padding(.vertical, isCompact ? 9 : 14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .kabuyomiCard(isCurrent ? .primary : prominence.surface, radius: isCompact ? 15 : 18)
             .background(
-                RoundedRectangle(cornerRadius: isCompact ? 15 : 18, style: .continuous)
-                    .fill(isCurrent ? KabuyomiTheme.accentSoft.opacity(0.14) : Color.clear)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: isCompact ? 15 : 18, style: .continuous)
-                    .stroke(isCurrent ? KabuyomiTheme.accentDeep.opacity(0.26) : Color.clear, lineWidth: 1.2)
+                DrawerCellBackground(
+                    radius: isCompact ? 14 : 16,
+                    isCurrent: isCurrent,
+                    opacity: isCurrent ? 0.46 : prominence == .subdued ? 0.22 : 0.30
+                )
             )
             .opacity(prominence == .subdued && !isCurrent ? 0.9 : 1)
         }
@@ -635,7 +766,7 @@ private struct DrawerSearchRow: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .kabuyomiCard(.muted, radius: 18)
+        .background(DrawerCellBackground(radius: 16, isCurrent: false, opacity: 0.26))
     }
 
     private var saveTitle: String {

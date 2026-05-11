@@ -2,7 +2,7 @@
 
 Date: 2026-05-10 JST
 
-Superseded note: later on 2026-05-10 JST, the product decision changed. Rewarded-credit UI is now release-visible for v1.0.2 when required AdMob rewarded config is present. The older hidden-unless-SSV statements in this report are retained only as pre-decision history and are superseded by `docs/release/RELEASE_TRUTH.md`.
+Superseded note: the current RC decision changed again after this report. Rewarded-credit UI is hidden for Release/App Review until real Google AdMob SSV grant evidence is recorded in-repo. Older release-visible statements in this report are retained only as history and are superseded by `docs/release/RELEASE_TRUTH.md`.
 
 ## Executive Summary
 
@@ -100,7 +100,7 @@ Initial untracked release reports:
 - Paid, subscription, free/promotional, and ad credits are documented as separate buckets.
 - Paid credits do not expire.
 - Ad credits may expire after 30 days if the ledger supports expiry.
-- Rewarded-credit UI is release-visible for v1.0.2 when required AdMob rewarded config is present; real TestFlight/production SSV smoke remains required before main merge/App Store submission readiness.
+- Rewarded-credit UI is hidden for the current RC; real TestFlight/production SSV smoke remains required before any future UI re-enable or App Store submission material can describe rewarded ads.
 - Older "no subscriptions" and "only kabuyomi.credits.100" release-truth statements were replaced or superseded.
 - No legal identity, address, phone number, or seller details were invented.
 
@@ -133,7 +133,7 @@ Confirmed in docs/legal copy after cleanup:
 
 ## Rewarded Ad Visibility Status
 
-Current release truth superseding the earlier cleanup pass: rewarded-ad credit UI is release-visible for v1.0.2 when required AdMob rewarded config is present.
+Current RC truth superseding the earlier cleanup pass: rewarded-ad credit UI is hidden for Release/App Review until real Google AdMob SSV grant evidence is recorded in-repo.
 
 The Worker route tests cover +2 credits, reward amount / item validation, duplicate handling, and daily cap behavior. This is not a substitute for real TestFlight / production SSV smoke.
 
@@ -186,7 +186,7 @@ P0:
 
 P0:
 
-- Rewarded-credit UI is release-visible, but real AdMob SSV evidence must be recorded before main merge/App Store submission readiness.
+- Rewarded-credit UI is hidden in the current RC, and real AdMob SSV evidence must be recorded before any future UI re-enable.
 
 P1:
 
@@ -208,7 +208,7 @@ It is locally cleaner and passes available local validation, but merge to `main`
 2. Confirm App Store Connect product configuration for `kabuyomi.credits.50`, `kabuyomi.credits.100`, `Kabuyomi_sus`, Lite, Pro, and Max.
 3. Build and install a real TestFlight candidate.
 4. Run StoreKit/TestFlight smoke for consumable purchase, subscription purchase, restore, and duplicate grant no-op.
-5. Run and record real AdMob SSV smoke for the now release-visible rewarded-credit UI before marking the branch main-merge/App-Store-submission-ready.
+5. Run and record real AdMob SSV smoke before any future rewarded-credit UI re-enable or App Store submission material describes rewarded ads.
 
 ## Confirmation: No v1.2 / SEC Form Router Work Added
 

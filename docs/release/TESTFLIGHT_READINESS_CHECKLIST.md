@@ -22,7 +22,7 @@ Treat the current code as the source of truth over older specs. The ship target 
   - `kabuyomi.sub.max.monthly`: JPY 2,560/month, 2,000 credits/month.
 - Paid credits do not expire.
 - No JPY 500 / 280-credit pack should be visible.
-- Rewarded-credit UI is visible in v1.0.2 when the required AdMob rewarded config is present. Rewarded ads are optional and grant free/ad credits only after server-side Google AdMob SSV.
+- Rewarded-credit UI is hidden in the current RC/App Review build until real production/TestFlight Google AdMob SSV grant evidence is recorded in-repo.
 - Filing answers stay grounded in SEC filing material. External web search is not part of v1.
 - Chat metadata should follow `responsePath`; remote model naming should appear only for real remote execution.
 - Historical chat is narrow on purpose: explicit `3年` / `比較` / `推移` style prompts only
@@ -52,7 +52,7 @@ Treat the current code as the source of truth over older specs. The ship target 
 - [ ] Keep credit purchase copy aligned with `kabuyomi.credits.50`, 50 paid credits, and JPY 100.
 - [ ] Confirm `kabuyomi.credits.100` remains supported/visible as compatibility when StoreKit returns it.
 - [ ] Keep subscription copy aligned with Lite / Pro / Max product IDs, prices, monthly credit amounts, and App Store auto-renewal behavior.
-- [ ] Keep rewarded-credit copy aligned with +2 free/ad credits, 3 successful rewards/day, +6 ad credits/day, 30-day expiry, and server-side SSV.
+- [ ] Confirm rewarded-credit UI and public copy remain hidden for the RC. Before any future re-enable, align copy with +2 free/ad credits, 3 successful rewards/day, +6 ad credits/day, 30-day expiry, and server-side SSV.
 - [ ] Confirm no JPY 500 / 280-credit pack copy appears in the review-facing build.
 - [ ] Decide whether the initial drop is `internal testers only` or `small external beta`.
 - [ ] Use the current conversation-first UI as the ship target. Do not block on reviving the older home/search/tab concept.
@@ -141,9 +141,9 @@ Explicitly recheck these current product rules:
 - [ ] Filing-grounded beta mode stays on by default, and no external supplement copy leaks into the main happy path unless intentionally enabled.
 - [ ] Credit UI shows `kabuyomi.credits.50` primary, keeps `kabuyomi.credits.100` compatibility support, and purchase / restore actions work end-to-end.
 - [ ] Credit UI shows Lite / Pro / Max subscription products only when StoreKit returns them and disabled/retry states otherwise.
-- [ ] Rewarded-credit UI is visible from Credits / Account Status when required AdMob rewarded config is present.
-- [ ] Rewarded-credit UI says ads are optional and credits are free/ad credits, not paid credits.
-- [ ] Rewarded-credit UI handles ad unavailable, load failure, dismiss, pending verification, verified grant, daily cap, and network/backend error states.
+- [ ] Rewarded-credit UI is not visible from Credits / Account Status in the RC/App Review build.
+- [ ] App Review-facing copy does not claim visible rewarded ads or ad credits.
+- [ ] Future rewarded-credit re-enable remains blocked until the AdMob SSV runbook contains real grant evidence.
 
 ## 5. Manual QA Matrix
 
@@ -185,7 +185,7 @@ Suggested tester note baseline:
 - `20-F / 6-K` companies are not yet supported.
 - Saved tickers are capped separately from the daily chat quota.
 - Visible paid products include `kabuyomi.credits.50` and Lite / Pro / Max subscription plans; `kabuyomi.credits.100` remains supported as an existing compatibility product.
-- Rewarded-credit UI is visible from Credits / Account Status when an ad is available. Rewarded ads are optional, grant +2 free/ad credits after server-side verification, and are capped at 3 successful rewards per day.
+- Rewarded-credit UI is not visible in this RC/App Review build. The backend SSV path remains disabled from the user surface until real grant evidence is recorded.
 - The app is not investment advice and may contain summary or chat errors.
 - Use TestFlight feedback with the ticker, question, screenshot, and repro steps.
 

@@ -1702,7 +1702,8 @@ func insightSourceChips(sourceIds: [String], in company: CompanyPayload) -> [Ins
             return InsightSourceChip(label: fallback, source: nil)
         }
 
-        let label = investorFacingSourceLabel(for: chunk, in: company)
+        let baseLabel = investorFacingSourceLabel(for: chunk, in: company)
+        let label = chunk.sectionType == "xbrl_metric" ? "\(baseLabel)（XBRL）" : baseLabel
         guard seen.insert(label).inserted else { return nil }
         return InsightSourceChip(
             label: label,

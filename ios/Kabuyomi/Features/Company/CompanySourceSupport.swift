@@ -33,9 +33,9 @@ func investorFacingSourceLabel(for chunk: SourceChunkPayload, in company: Compan
     if chunk.sectionType == "xbrl_metric" {
         if let tagName = chunk.tagName,
            let metric = company.metrics.first(where: { $0.tagUsed == tagName }) {
-            return "\(MetricLabeler.title(for: metric.logicalName))（XBRL）"
+            return MetricLabeler.title(for: metric.logicalName)
         }
-        return "主要指標（XBRL）"
+        return "主要指標"
     }
 
     let raw = chunk.sectionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? chunk.sourceLabel : chunk.sectionTitle
@@ -83,7 +83,7 @@ func investorFacingSourceLabel(rawLabel: String, in company: CompanyPayload) -> 
     }
 
     if lowered.contains("xbrl") {
-        return "主要指標（XBRL）"
+        return "主要指標"
     }
 
     if let historicalMatch = raw.range(

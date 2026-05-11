@@ -70,7 +70,7 @@ struct ChatTopBar: View {
                 .font(.system(size: 18, weight: .semibold))
                 .frame(width: 44, height: 44)
                 .foregroundStyle(KabuyomiTheme.accentDeep)
-                .kabuyomiCard(.secondary, radius: 14)
+                .background(topBarControlBackground)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("一覧を開く")
@@ -108,14 +108,7 @@ struct ChatTopBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("企業データを更新")
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(KabuyomiTheme.fill(for: .secondary))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(KabuyomiTheme.stroke(for: .secondary), lineWidth: 1)
-                    )
-            )
+            .background(topBarControlBackground)
         }
     }
 
@@ -174,8 +167,30 @@ struct ChatTopBar: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
-        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 190)
-        .contentShape(Rectangle())
+        .frame(
+            maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 190,
+            minHeight: 38
+        )
+        .background(topBarTitleBackground)
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var topBarTitleBackground: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color.white.opacity(0.36))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(KabuyomiTheme.accentDeep.opacity(0.12), lineWidth: 0.8)
+            )
+    }
+
+    private var topBarControlBackground: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color.white.opacity(0.38))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(KabuyomiTheme.accentDeep.opacity(0.12), lineWidth: 0.8)
+            )
     }
 
     private func iconButton(
@@ -190,16 +205,53 @@ struct ChatTopBar: View {
                 .frame(width: 44, height: 44)
                 .foregroundStyle(isEnabled ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted.opacity(0.6))
         }
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(KabuyomiTheme.fill(for: .secondary))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(KabuyomiTheme.stroke(for: .secondary), lineWidth: 1)
-                )
-        )
+        .background(topBarControlBackground)
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .accessibilityLabel(accessibilityLabel)
     }
+}
+
+#Preview("Chat Header") {
+    VStack(spacing: 0) {
+        ChatTopBar(
+            ticker: "AAPL",
+            companyName: "Apple Inc.",
+            formType: "10-Q",
+            companyWebsiteURL: URL(string: "https://www.apple.com/investor-relations/"),
+            isSaved: true,
+            isLoading: false,
+            canOpenSummary: true,
+            openLibrary: {},
+            openCompanyWebsite: {},
+            openSummary: {},
+            toggleSaved: {},
+            refresh: {}
+        )
+
+        Divider()
+    }
+    .background(KabuyomiTheme.background)
+}
+
+#Preview("Chat Header Loading") {
+    VStack(spacing: 0) {
+        ChatTopBar(
+            ticker: "NVDA",
+            companyName: "NVIDIA Corporation",
+            formType: "10-K",
+            companyWebsiteURL: nil,
+            isSaved: false,
+            isLoading: true,
+            canOpenSummary: true,
+            openLibrary: {},
+            openCompanyWebsite: {},
+            openSummary: {},
+            toggleSaved: {},
+            refresh: {}
+        )
+
+        Divider()
+    }
+    .background(KabuyomiTheme.background)
 }

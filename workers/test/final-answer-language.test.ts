@@ -5,6 +5,7 @@ import {
   buildJapaneseLanguageGuardRepair,
   checkFinalAnswerJapaneseOnly
 } from "../src/lib/chat/final-answer-language";
+import { joinMissingSourceLabels } from "../src/lib/chat/evidence-fallback";
 import { finalizeChatResponse } from "../src/lib/chat/response-finalizer";
 import { DEFAULT_REMOTE_CONFIG } from "../src/lib/remote-config";
 import { createChatTimingTracker } from "../src/lib/chat/timing";
@@ -27,6 +28,29 @@ describe("Japanese-only final answer guard", () => {
   it("allows Japanese CAT durability wording with bounded English financial terms", () => {
     const answer = "CATのConstruction Industriesでは、backlog、dealer inventory、price realization の推移を見る必要があります。継続性は提出資料だけでは断定しません。";
     expect(checkFinalAnswerJapaneseOnly(answer).ok).toBe(true);
+  });
+
+  it("humanizes internal revenue coverage labels before fallback answers reach users", () => {
+    expect(joinMissingSourceLabels([
+      "segment results",
+      "product revenue discussion",
+      "services revenue discussion",
+      "geographic revenue discussion",
+      "product launch or channel inventory discussion"
+    ])).toBe("セグメント実績、製品別売上、サービス売上、地域別売上、新製品投入や販売チャネル在庫");
+
+    const fallback = buildJapaneseLanguageGuardFallback({
+      questionIntent: "revenue_driver",
+      missingSourceTypes: ["product revenue", "services revenue", "geographic revenue"]
+    });
+    expect(fallback).toContain("売上要因");
+    expect(fallback).toContain("追いきれません");
+    expect(fallback).toContain("次に見るなら");
+    expect(fallback).not.toContain("driver");
+    expect(fallback).not.toContain("追加確認");
+    expect(fallback).not.toContain("product revenue");
+    expect(fallback).not.toContain("services revenue");
+    expect(fallback).not.toContain("geographic revenue");
   });
 
   it("repairs supported CAT durability answers without allowing raw English excerpts", () => {

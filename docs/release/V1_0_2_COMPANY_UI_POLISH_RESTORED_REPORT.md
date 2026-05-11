@@ -88,7 +88,7 @@ Included:
 - subscriptions visible
 - `kabuyomi.credits.50` visible
 - `kabuyomi.credits.100` compatibility
-- rewarded ad credits visible
+- rewarded-credit UI hidden for Release/App Review until real Google AdMob SSV grant evidence is recorded in-repo
 - StoreKit / Apple verification
 - AdMob SSV rewarded credits
 - Account Status privacy
@@ -152,8 +152,8 @@ P0:
 
 P0:
 
-- Real AdMob SSV smoke remains required:
-  - rewarded ad UI visibility
+- Real AdMob SSV smoke remains required before any future rewarded-credit UI re-enable:
+  - rewarded ad UI visibility in the candidate build
   - optional/free-ad-credit copy
   - real Google SSV callback receipt
   - `/v1/admob/reward-status` becomes `granted`

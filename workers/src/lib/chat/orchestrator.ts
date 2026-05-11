@@ -40,6 +40,7 @@ export async function buildChatResponse(
       previousQuestion?: string;
       previousAnswer?: string;
     };
+    conversationContextSummary?: string;
   } = {}
 ): Promise<ChatResponsePayload> {
   const resolvedConfig: RemoteConfig = {
@@ -173,7 +174,8 @@ export async function buildChatResponse(
     questionIntent,
     timings,
     previousQuestion: options.followupContext?.previousQuestion,
-    previousAnswer: options.followupContext?.previousAnswer
+    previousAnswer: options.followupContext?.previousAnswer,
+    conversationContextSummary: options.conversationContextSummary
   });
   const { contextPack, modelResponse, sourceValidation } = modelAttempt;
   const fallbackValidSourceIds = buildFallbackValidSourceIds(filing, contextPack);

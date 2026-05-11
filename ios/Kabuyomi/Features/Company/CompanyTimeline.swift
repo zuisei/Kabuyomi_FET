@@ -58,13 +58,7 @@ struct ConversationTimeline: View {
                 VStack(alignment: .leading, spacing: 18) {
                     if hasStartedConversation {
                         ConversationSessionHeader(
-                            company: company,
-                            followUpQuestion: buildFollowUpQuestions(
-                                for: company,
-                                precedingUserPrompt: latestVisibleUserPrompt
-                            ).first,
-                            historicalQuestion: historicalSuggestions.first,
-                            selectQuestion: { draftQuestion = $0 }
+                            company: company
                         )
 
                         ForEach(Array(chatHistory.enumerated()), id: \.element.id) { index, message in
@@ -230,68 +224,23 @@ private func pendingHistoryDetail(formType: String) -> String {
 
 private struct ConversationSessionHeader: View {
     let company: CompanyPayload
-    let followUpQuestion: String?
-    let historicalQuestion: String?
-    let selectQuestion: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("根拠資料")
-                        .font(.system(.footnote, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
+        HStack(alignment: .center, spacing: 7) {
+            Image(systemName: "doc.text")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.70))
 
-                    Text("\(company.formType) ・ \(company.filedAt) 提出")
-                        .font(.system(.caption, design: .rounded, weight: .medium))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
+            Text("\(company.formType) ・ \(company.filedAt) 提出")
+                .font(.system(.caption2, design: .rounded, weight: .medium))
+                .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.86))
+                .lineLimit(1)
 
-                Spacer()
-
-                Text("選択中")
-                    .font(.system(.caption2, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(Color.white.opacity(0.66)))
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                if let followUpQuestion {
-                    ConversationMiniPromptChip(
-                        text: shortTimelineSuggestion(followUpQuestion),
-                        systemImage: "arrow.turn.down.right",
-                        action: { selectQuestion(followUpQuestion) }
-                    )
-                }
-
-                if let historicalQuestion {
-                    ConversationMiniPromptChip(
-                        text: shortTimelineSuggestion(historicalQuestion),
-                        systemImage: "clock.arrow.circlepath",
-                        action: { selectQuestion(historicalQuestion) }
-                    )
-                }
-            }
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .kabuyomiGlass(radius: 16, tint: Color.white.opacity(0.16), stroke: Color.white.opacity(0.42))
+        .padding(.horizontal, 2)
+        .accessibilityLabel("参照資料: \(company.formType)、\(company.filedAt) 提出")
     }
-}
-
-private func shortTimelineSuggestion(_ question: String) -> String {
-    if question.contains("売上") {
-        return "売上成長の要因は？"
-    }
-    if question.contains("利益率") {
-        return "利益率は改善した？"
-    }
-    if question.contains("前回") || question.contains("違い") {
-        return "前回との差は？"
-    }
-    return question
 }
 
 struct ConversationContextCard: View {
@@ -447,19 +396,15 @@ struct ConversationPromptChip: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .center, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(KabuyomiTheme.accentSoft.opacity(0.5))
-                    )
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.64))
+                    .frame(width: 18, height: 24)
 
                 Text(text)
-                    .font(.system(.footnote, design: .rounded, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.ink)
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(KabuyomiTheme.inkSoft)
                     .multilineTextAlignment(.leading)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                     .minimumScaleFactor(0.9)
@@ -467,50 +412,18 @@ struct ConversationPromptChip: View {
                 Spacer(minLength: 0)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep.opacity(0.48))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.38))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(0.62))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.white.opacity(0.72), lineWidth: 1)
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("質問を入力: \(text)")
-    }
-}
-
-private struct ConversationMiniPromptChip: View {
-    let text: String
-    let systemImage: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 11, weight: .bold))
-                Text(text)
-                    .font(.system(.caption, design: .rounded, weight: .semibold))
-                    .lineLimit(1)
-                    .multilineTextAlignment(.leading)
-            }
-            .foregroundStyle(KabuyomiTheme.accentDeep)
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(Color.white.opacity(0.68))
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.white.opacity(0.30))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .stroke(Color.white.opacity(0.78), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(KabuyomiTheme.accentDeep.opacity(0.12), lineWidth: 0.8)
                     )
             )
         }

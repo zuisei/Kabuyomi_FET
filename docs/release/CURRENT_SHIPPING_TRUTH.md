@@ -21,7 +21,7 @@ The center of the experience is:
 - get a source-grounded answer
 - inspect summary and supporting evidence
 
-Current `v1.0.2-subscription-rewarded-credits` branch scope includes consumable credits and monthly subscription credit plans. Older v1 docs that say subscription plans are absent are superseded for this branch.
+Current RC scope includes consumable credits and monthly subscription credit plans. Older v1 docs that say subscription plans are absent are superseded for this branch.
 
 ---
 
@@ -79,7 +79,7 @@ In scope:
 - `kabuyomi.credits.50` primary paid credit pack
 - `kabuyomi.credits.100` compatibility paid credit pack when present
 - Lite / Pro / Max monthly subscription credit plans
-- optional rewarded-credit UI when the required AdMob rewarded config is present
+- rewarded-credit backend routes, implemented but hidden in Release/App Review until real production/TestFlight Google SSV grant evidence is recorded in this repository
 
 Out of scope:
 - 20-F
@@ -107,7 +107,7 @@ Current truth:
 - Workers verify Apple transactions through App Store Server API before granting paid credits
 - duplicate consumable transactions must be no-op / already-granted
 - paid credits do not expire
-- rewarded-ad credits grant +2 per verified reward, are capped at 3 rewards / +6 ad credits per JST day, expire after 30 days, and are granted only after server-side Google AdMob SSV
+- rewarded-ad credits are not visible in the RC UI; backend grant routes remain SSV-only, capped, idempotent, and test-covered
 - normal chat cost is 2 credits
 - DEBUG-only detached dev access is a removable non-shipping path and is not part of the public product contract
 

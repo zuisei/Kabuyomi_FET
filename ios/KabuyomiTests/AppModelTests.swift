@@ -311,6 +311,78 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.usage?.chatsUsed, 0)
     }
 
+    func testConversationRefreshWithSameFilingKeepsChatHistory() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let company = TestFixtures.companyPayload()
+        try persistence.saveCompany(company, searchItem: nil)
+        try persistence.saveChat(question: "売上高は？", response: TestFixtures.chatResponse(), for: company)
+
+        let model = makeAppModel(persistence: persistence)
+        model.openConversation(for: "AAPL")
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/company/AAPL/refresh")
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, try TestFixtures.companyPayloadData())
+        }
+
+        let result = await model.refreshConversationCompany(ticker: "AAPL")
+
+        XCTAssertEqual(result, .unchanged)
+        XCTAssertEqual(model.companyPayload(for: "AAPL")?.filingKey, company.filingKey)
+        XCTAssertEqual(model.chatHistory(for: "AAPL").count, 2)
+    }
+
+    func testConversationRefreshWithNewerFilingRequiresConfirmationBeforeSwitching() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let oldCompany = TestFixtures.companyPayload(
+            filingKey: "v1:AAPL:0000320193-24-000001",
+            filedAt: "2024-11-01"
+        )
+        let newCompany = TestFixtures.companyPayload(
+            filingKey: "v1:AAPL:0000320193-25-000001",
+            filedAt: "2025-11-01"
+        )
+        try persistence.saveCompany(oldCompany, searchItem: nil)
+        try persistence.saveChat(question: "営業利益率は？", response: TestFixtures.chatResponse(), for: oldCompany)
+
+        let model = makeAppModel(persistence: persistence)
+        model.openConversation(for: "AAPL")
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/company/AAPL/refresh")
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (
+                response,
+                try TestFixtures.companyPayloadData(
+                    ticker: newCompany.ticker,
+                    cik: newCompany.cik,
+                    filingKey: newCompany.filingKey,
+                    filedAt: newCompany.filedAt
+                )
+            )
+        }
+
+        let result = await model.refreshConversationCompany(ticker: "AAPL")
+
+        XCTAssertEqual(result, .needsConfirmation(newCompany))
+        XCTAssertEqual(model.companyPayload(for: "AAPL")?.filingKey, oldCompany.filingKey)
+        XCTAssertEqual(model.chatHistory(for: "AAPL").count, 2)
+        XCTAssertEqual(persistence.loadCompany(ticker: "AAPL")?.company.filingKey, oldCompany.filingKey)
+
+        model.startNewConversation(with: newCompany)
+
+        XCTAssertEqual(model.companyPayload(for: "AAPL")?.filingKey, newCompany.filingKey)
+        XCTAssertTrue(model.chatHistory(for: "AAPL").isEmpty)
+        XCTAssertEqual(model.conversationHistory(for: "AAPL").map(\.company.filingKey), [oldCompany.filingKey])
+
+        model.openConversation(for: "AAPL", filingKey: oldCompany.filingKey)
+
+        XCTAssertTrue(model.isViewingOlderFilingConversation(ticker: "AAPL"))
+        XCTAssertEqual(model.companyPayload(for: "AAPL")?.filingKey, oldCompany.filingKey)
+        XCTAssertEqual(model.chatHistory(for: "AAPL").count, 2)
+    }
+
     func testSendChatBlocksLocallyWhenCreditBalanceIsZero() async throws {
         let persistence = PersistenceController(inMemory: true)
         let company = TestFixtures.companyPayload()

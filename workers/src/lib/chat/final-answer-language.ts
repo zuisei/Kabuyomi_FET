@@ -121,15 +121,15 @@ export function buildJapaneseLanguageGuardFallback({
   const missing = joinItems(missingSourceTypes.length > 0 ? missingSourceTypes : sourceTypesForIntent(questionIntent));
 
   if (effectiveIntent === "revenue_driver") {
-    return `売上の増減は確認できますが、選択された資料では会社固有の売上driverを十分に特定できません。主因を見るには、${missing} の説明を追加確認する必要があります。`;
+    return `売上の増減は確認できますが、選択された資料だけだと会社固有の売上要因までは追いきれません。次に見るなら、${missing} あたりです。`;
   }
 
   if (effectiveIntent === "driver_durability_followup") {
-    return `前問の具体的なdriverを十分に特定できていないため、この資料だけで一時要因か継続要因かは分類しません。判断には、${missing} の継続確認が必要です。`;
+    return `前問の具体的な要因を十分に特定できていないため、この資料だけで一時要因か継続要因かは分類しません。判断には、${missing} の継続確認が必要です。`;
   }
 
   if (effectiveIntent === "margin_durability_followup") {
-    return "利益率の方向は確認できますが、具体的なmargin driverは十分に特定できません。そのため、この資料だけで一時要因か構造的変化かは分類しません。判断には、コスト、製品構成、価格、営業費用、引当金、セグメント利益率などの説明が必要です。";
+    return "利益率の方向は確認できますが、具体的な利益率要因は十分に特定できません。そのため、この資料だけで一時要因か構造的変化かは分類しません。判断には、コスト、製品構成、価格、営業費用、引当金、セグメント利益率などの説明が必要です。";
   }
 
   if (fallbackKind === "context_unavailable") {
@@ -404,17 +404,17 @@ function sourceTypesForIntent(questionIntent?: string | null): string[] {
       return ["リスク要因", "MD&Aのリスク説明", "業種固有リスクの説明"];
     case "watch_points":
     case "mda_summary":
-      return ["MD&A", "セグメント実績", "売上driverの説明", "流動性またはリスクの説明"];
+      return ["MD&A", "セグメント実績", "売上要因の説明", "流動性またはリスクの説明"];
     case "segment_driver":
     case "segment_analysis":
     case "revenue_breakdown":
-      return ["Segment results", "Geographic revenue", "Product/category revenue"];
+      return ["セグメント実績", "地域別売上", "製品・カテゴリ別売上"];
     case "business_model":
     case "business_overview":
       return ["事業内容", "セグメント情報", "売上内訳", "MD&Aの事業説明"];
     case "margin_driver":
     case "margin_profitability":
-      return ["cost discussion", "mix", "pricing", "operating expenses", "provision", "segment margin"];
+      return ["コストの説明", "製品構成", "価格", "営業費用", "引当金", "セグメント利益率"];
     case "prior_filing_delta":
     case "historical_comparison":
       return ["前回の提出資料", "前回のMD&A", "前期のXBRL数値"];
@@ -424,7 +424,26 @@ function sourceTypesForIntent(questionIntent?: string | null): string[] {
 }
 
 function joinItems(items: string[]): string {
-  return [...new Set(items.filter(Boolean))].join("、");
+  return [...new Set(items.filter(Boolean).map(humanizeSourceLabel))].join("、");
+}
+
+function humanizeSourceLabel(item: string): string {
+  const text = item.trim();
+  const aliases: Array<[RegExp, string]> = [
+    [/^md&a$/i, "MD&A"],
+    [/^segment results?$/i, "セグメント実績"],
+    [/^geographic revenue$/i, "地域別売上"],
+    [/^product(?:\/category)? revenue$/i, "製品・カテゴリ別売上"],
+    [/^services revenue$/i, "サービス売上"],
+    [/^product launches?$/i, "新製品投入"],
+    [/^channel inventory$/i, "販売チャネル在庫"],
+    [/^cost discussion$/i, "コストの説明"],
+    [/^operating expenses$/i, "営業費用"],
+    [/^segment margin$/i, "セグメント利益率"],
+    [/^driver$/i, "要因"],
+    [/^margin driver$/i, "利益率要因"]
+  ];
+  return aliases.find(([pattern]) => pattern.test(text))?.[1] ?? text;
 }
 
 function escapeRegExp(value: string): string {

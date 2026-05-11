@@ -1,10 +1,10 @@
 # Rewarded AdMob Credits Runbook
 
-AdMob rewarded-credit UI is release-visible in Kabuyomi v1.0.2 when the required AdMob rewarded config is present. Keep this runbook as the operational checklist for server-side Google AdMob SSV, ledger evidence, and TestFlight/App Review smoke.
+AdMob rewarded-credit backend routes are implemented and server-side verification gated, but the rewarded-credit UI is hidden for the current RC. Keep this runbook as the operational checklist for re-enabling the visible rewarded-credit flow after real Google AdMob SSV grant evidence is recorded.
 
 ## Scope
 
-- v1.0.2 App Review builds show the normal rewarded-credit card/button when required AdMob rewarded config is present.
+- Current RC App Review builds do not show the rewarded-credit card/button.
 - Rewarded ads are optional.
 - A completed rewarded ad view grants exactly 2 free/ad credits after server-side Google AdMob SSV verification.
 - The daily cap is 3 rewarded grants per user per JST calendar day.
@@ -51,7 +51,7 @@ The Worker expects Google AdMob SSV query parameters including `ad_unit`, `custo
 6. Confirm the ledger row has `creditSource = admob_rewarded`.
 7. Confirm usage reflects `rewardedAdRemaining` and the expected total balance.
 
-Do not mark main merge or App Store submission ready until step 5 succeeds and the evidence is recorded below.
+Do not re-enable rewarded-credit UI or describe it in App Store submission notes until step 5 succeeds and the evidence is recorded below.
 
 Latest production-path route check:
 
@@ -63,7 +63,7 @@ Latest production-path route check:
 - `GET /v1/admob/ssv` with numeric production suffix `7202804414` and no signature: reached route and returned `invalid_signature`, not generic 404 or 500.
 - `GET /v1/admob/ssv` with full production ad unit `ca-app-pub-1248492954379402/7202804414` and no signature: reached route and returned `invalid_signature`, not generic 404 or 500.
 - External product-owner statement: real SSV was verified outside the previous Codex pass.
-- Repository evidence status: not recorded. Production/main-merge readiness remains HOLD until a real callback reaches the Worker, verifies successfully, grants exactly 2 credits once, and the sanitized evidence record below is completed.
+- Repository evidence status: not recorded. Rewarded-credit UI remains hidden until a real callback reaches the Worker, verifies successfully, grants exactly 2 credits once, and the sanitized evidence record below is completed.
 
 ## Real SSV Evidence Record
 
@@ -132,7 +132,7 @@ If the production rewarded ad unit is temporarily pointed at the test SSV URL fo
 
 1. Install the TestFlight or Release build.
 2. Open the credit/settings screen.
-3. Confirm rewarded-credit UI is visible when required AdMob rewarded config is present.
+3. Use a dedicated smoke build or future re-enable branch where rewarded-credit UI is intentionally visible.
 4. Confirm the UI says rewarded ads are optional and grant free/ad credits, not paid credits.
 5. Tap the rewarded-ad button.
 6. Confirm the ad loads and completes.

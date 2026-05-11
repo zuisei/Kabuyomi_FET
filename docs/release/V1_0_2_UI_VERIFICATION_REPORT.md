@@ -113,7 +113,7 @@ Remaining human visual checks:
 
 Pass for release/TestFlight path by static inspection.
 
-Superseded by the later 2026-05-10 product decision: rewarded-credit UI is now release-visible in v1.0.2 when required AdMob rewarded config is present. The earlier DEBUG-only/static hidden result is retained as historical context only.
+Superseded by the current RC decision: rewarded-credit UI is hidden for Release/App Review until real Google AdMob SSV grant evidence is recorded in-repo. Earlier UI-visible or DEBUG-only/static hidden results are retained as historical context only.
 
 No SEC Form Router, filing retrieval, or answer-quality functionality was added.
 

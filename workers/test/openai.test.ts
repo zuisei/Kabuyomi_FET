@@ -299,7 +299,10 @@ describe("OpenAI chat provider", () => {
       expect(body.prompt.id).toBe("pmpt_test");
       expect(body.model).toBe("gpt-5.4-nano");
       expect(body.prompt.version).toBe("1");
-      expect(body.prompt.variables.question).toBe("売上成長の要因は？");
+      expect(body.prompt.variables.question).toContain("売上成長の要因は？");
+      expect(body.prompt.variables.question).toContain("直近の会話文脈");
+      expect(body.prompt.variables.original_question).toBe("売上成長の要因は？");
+      expect(body.prompt.variables.conversation_context).toContain("前回は営業CFについて話した");
       expect(body.prompt.variables.question_intent).toBe("mda_summary");
       expect(body.prompt.variables.filing_metadata_json).toContain("Test Corp");
       expect(body.prompt.variables.sources_json).toContain("S1");
@@ -345,7 +348,8 @@ describe("OpenAI chat provider", () => {
       {
         filing: makeFiling(),
         question: "売上成長の要因は？",
-        questionIntent: "mda_summary"
+        questionIntent: "mda_summary",
+        conversationContextSummary: "ユーザー: 営業CFは？\nアシスタント: 前回は営業CFについて話した。"
       }
     );
 

@@ -1,7 +1,9 @@
 import SwiftUI
 
 private enum RewardedCreditReviewUI {
-    static let rewardedAdsVisibleInV102Review = true
+    // Keep the rewarded-credit path hidden from Release/App Review until real
+    // production/TestFlight Google SSV grant evidence is recorded in-repo.
+    static let rewardedAdsVisibleInV102Review = false
 
     static var isVisible: Bool {
         #if DEBUG
@@ -761,7 +763,7 @@ struct CreditView: View {
         if appModel.hasRecoveredEnoughCreditsForPendingRecovery {
             return "現在の残高は \(currentCredits) credits です。この質問には \(requiredCredits) credits が必要です。"
         }
-        return "この質問には\(requiredCredits) creditsが必要です。広告視聴、クレジット購入、またはサブスクで続けられます。"
+        return "この質問には\(requiredCredits) creditsが必要です。クレジット購入またはサブスクで続けられます。"
     }
 
     private func recoveryActionButton(
@@ -1217,7 +1219,7 @@ struct AccountStatusDisplayModel: Equatable {
             Row(title: "合計クレジット", value: credits.map { "\($0.totalRemaining)" } ?? "不明"),
             Row(title: "月額/初回分", value: credits.map { "\($0.monthlyRemaining) / \($0.monthlyLimit)" } ?? "不明"),
             Row(title: "購入分", value: credits.map { "\($0.purchasedRemaining)" } ?? "不明"),
-            Row(title: "広告/無料分", value: credits?.rewardedAdRemaining.map(String.init) ?? "未提供"),
+            Row(title: "プロモーション分", value: credits?.rewardedAdRemaining.map(String.init) ?? "未提供"),
             Row(title: "次回更新", value: renewal ?? "未提供"),
             Row(title: "最終利用同期", value: Self.format(date: lastUsageRefreshAt)),
             Row(title: "最終購入同期", value: Self.billingStatus(status: lastBillingSyncStatus, at: lastBillingSyncAt)),
