@@ -20,6 +20,7 @@ import { handleInternalCreditAuditRepairRoute } from "./routes/internal-credit-a
 import { handleInternalCleanupFilingsRoute } from "./routes/internal-cleanup-filings";
 import { handleInternalCreditPurchaseGrantRoute } from "./routes/internal-credit-purchase-grant";
 import { handleInternalEvalCreditGrantRoute } from "./routes/internal-eval-credit-grant";
+import { handleInternalSecFetcherRoute } from "./routes/internal-sec-fetcher";
 import { handleLegalRoute } from "./routes/legal";
 import { handleSearchRoute } from "./routes/search";
 import { handleTranslateQuoteRoute } from "./routes/translate-quote";
@@ -36,7 +37,8 @@ const preMaintenanceRoutes: RouteHandler[] = [
   handleInternalCleanupFilingsRoute,
   handleInternalCreditAuditRepairRoute,
   handleInternalCreditPurchaseGrantRoute,
-  handleInternalEvalCreditGrantRoute
+  handleInternalEvalCreditGrantRoute,
+  handleInternalSecFetcherRoute
 ];
 const apiRoutes: RouteHandler[] = [
   handleSearchRoute,

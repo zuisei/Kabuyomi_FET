@@ -1,0 +1,594 @@
+import type { Env } from "../env";
+import { extractMDASectionWithDiagnostics } from "../extractors/mda";
+import type { CompanyFactsResponse, ConceptResponse } from "../clients/sec";
+
+const MAX_RESPONSE_CACHE_ENTRIES = 512;
+const CACHE_TTL = {
+  tickerSnapshot: 24 * 60 * 60 * 1000,
+  submissions: 30 * 60 * 1000,
+  filing: 24 * 60 * 60 * 1000,
+  concept: 6 * 60 * 60 * 1000,
+  companyFacts: 6 * 60 * 60 * 1000
+};
+const SUBMISSIONS_LOOKBACK_YEARS = 4;
+const MIN_RECENT_10K_FILINGS = 3;
+const MIN_RECENT_10Q_FILINGS = 4;
+const DEFAULT_RETRY_COUNT = 2;
+const DEFAULT_INITIAL_BACKOFF_MS = 400;
+const DEFAULT_REQUEST_TIMEOUT_MS = 12_000;
+
+interface SecFetcherConfig {
+  userAgent: string;
+  retryCount: number;
+  initialBackoffMs: number;
+  requestTimeoutMs: number;
+}
+
+interface SubmissionRecent {
+  form: string[];
+  accessionNumber: string[];
+  primaryDocument: string[];
+  filingDate: string[];
+  reportDate: string[];
+}
+
+interface SubmissionEntry {
+  form: string;
+  accessionNumber: string;
+  primaryDocument: string;
+  filingDate: string;
+  reportDate: string;
+}
+
+interface CacheEntry {
+  value?: unknown;
+  expiresAt: number;
+  pending?: Promise<unknown>;
+}
+
+const responseCache = new Map<string, CacheEntry>();
+
+export function createCloudflareSecFetcherService(env: Env) {
+  const config = readSecFetcherConfig(env);
+
+  async function secJson(url: string, options: { allowNotFound?: boolean; cacheTtlMs?: number } = {}) {
+    return withCache(responseCache, url, options.cacheTtlMs ?? 0, async () => {
+      const response = await fetchWithRetry(
+        url,
+        {
+          method: "GET",
+          headers: {
+            "user-agent": config.userAgent,
+            accept: "application/json,text/html;q=0.9,*/*;q=0.8"
+          }
+        },
+        config
+      );
+
+      if (options.allowNotFound === true && response.status === 404) {
+        return null;
+      }
+
+      if (!response.ok) {
+        throw new Error(`SEC request failed (${response.status}) for ${url}`);
+      }
+
+      return response.json();
+    });
+  }
+
+  async function secText(url: string, options: { cacheTtlMs?: number } = {}): Promise<string> {
+    return withCache(responseCache, url, options.cacheTtlMs ?? 0, async () => {
+      const response = await fetchWithRetry(
+        url,
+        {
+          method: "GET",
+          headers: {
+            "user-agent": config.userAgent,
+            accept: "application/json,text/html;q=0.9,*/*;q=0.8"
+          }
+        },
+        config
+      );
+
+      if (!response.ok) {
+        throw new Error(`SEC request failed (${response.status}) for ${url}`);
+      }
+
+      return response.text();
+    }) as Promise<string>;
+  }
+
+  return {
+    async fetchTickerSnapshot(): Promise<unknown> {
+      return secJson("https://www.sec.gov/files/company_tickers_exchange.json", {
+        cacheTtlMs: CACHE_TTL.tickerSnapshot
+      });
+    },
+
+    async fetchSubmissions(cik: string, options: { includeHistory?: boolean } = {}): Promise<unknown> {
+      const root = await secJson(`https://data.sec.gov/submissions/CIK${String(cik).padStart(10, "0")}.json`, {
+        cacheTtlMs: CACHE_TTL.submissions
+      });
+
+      return options.includeHistory === true ? expandSubmissionHistory(root, secJson) : root;
+    },
+
+    async fetchFiling({
+      cik,
+      accessionNumber,
+      primaryDocument
+    }: {
+      cik: string;
+      accessionNumber: string;
+      primaryDocument: string;
+    }): Promise<{ html: string; primaryDocumentUrl: string }> {
+      const accessionNoDash = String(accessionNumber).replaceAll("-", "");
+      const url = `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${accessionNoDash}/${primaryDocument}`;
+      const html = await secText(url, { cacheTtlMs: CACHE_TTL.filing });
+      return { html, primaryDocumentUrl: url };
+    },
+
+    async fetchFilingAssets(args: {
+      cik: string;
+      accessionNumber: string;
+      primaryDocument: string;
+      tags: string[];
+    }): Promise<{ html: string; primaryDocumentUrl: string; concepts: Record<string, ConceptResponse | null>; companyFacts: CompanyFactsResponse | null }> {
+      const [filing, metrics] = await Promise.all([
+        this.fetchFiling(args),
+        this.fetchMetrics({ cik: args.cik, tags: args.tags })
+      ]);
+
+      return {
+        html: filing.html,
+        primaryDocumentUrl: filing.primaryDocumentUrl,
+        concepts: metrics.concepts,
+        companyFacts: metrics.companyFacts
+      };
+    },
+
+    async fetchPreparedFiling(args: {
+      cik: string;
+      accessionNumber: string;
+      primaryDocument: string;
+      formType: "10-K" | "10-Q";
+      tags: string[];
+    }): Promise<{
+      primaryDocumentUrl: string;
+      mdaText: string;
+      mdaTokenCount: number;
+      usedStartPattern: string;
+      usedEndPattern: string;
+      diagnostics: unknown;
+      concepts: Record<string, ConceptResponse | null>;
+      companyFacts: CompanyFactsResponse | null;
+    }> {
+      const [filing, metrics] = await Promise.all([
+        this.fetchFiling(args),
+        this.fetchMetrics({ cik: args.cik, tags: args.tags })
+      ]);
+      const prepared = extractMDASectionWithDiagnostics(filing.html, args.formType);
+      if (!prepared.result) {
+        throw new Error("Failed to extract MD&A section");
+      }
+
+      return {
+        primaryDocumentUrl: filing.primaryDocumentUrl,
+        mdaText: prepared.result.text,
+        mdaTokenCount: prepared.result.tokenCount,
+        usedStartPattern: prepared.result.usedStartPattern,
+        usedEndPattern: prepared.result.usedEndPattern,
+        diagnostics: prepared.diagnostics,
+        concepts: metrics.concepts,
+        companyFacts: metrics.companyFacts
+      };
+    },
+
+    async fetchMetrics({
+      cik,
+      tags
+    }: {
+      cik: string;
+      tags: string[];
+    }): Promise<{ concepts: Record<string, ConceptResponse | null>; companyFacts: CompanyFactsResponse | null }> {
+      const normalizedCik = String(cik).padStart(10, "0");
+      const requestedTags = [...new Set(tags.map((tag) => String(tag).trim()).filter(Boolean))];
+      if (requestedTags.length === 0) {
+        return { concepts: {}, companyFacts: null };
+      }
+
+      let companyFacts: CompanyFactsResponse | null = null;
+      let companyFactsError: unknown = null;
+      try {
+        companyFacts = await secJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${normalizedCik}.json`, {
+          cacheTtlMs: CACHE_TTL.companyFacts
+        }) as CompanyFactsResponse;
+      } catch (error) {
+        companyFactsError = error;
+      }
+
+      const { concepts: companyFactsConcepts, missingTags } = extractRequestedConceptsFromCompanyFacts(
+        companyFacts,
+        requestedTags
+      );
+      const fallback = await fetchConceptFallbacks(normalizedCik, missingTags, secJson);
+      if (!companyFacts && missingTags.length > 0 && fallback.fulfilledCount === 0 && fallback.failedCount > 0) {
+        throw companyFactsError ?? new Error(`SEC concept fallback failed for CIK${normalizedCik}`);
+      }
+
+      const concepts = Object.fromEntries(
+        requestedTags.map((tag) => [tag, companyFactsConcepts[tag] ?? fallback.concepts[tag] ?? null])
+      );
+
+      return { concepts, companyFacts };
+    }
+  };
+}
+
+function readSecFetcherConfig(env: Env): SecFetcherConfig {
+  return {
+    userAgent: env.SEC_USER_AGENT ?? "Kabuyomi admin@kabuyomi.app",
+    retryCount: parsePositiveInt(env.SEC_FETCHER_RETRY_COUNT, DEFAULT_RETRY_COUNT),
+    initialBackoffMs: parsePositiveInt(env.SEC_FETCHER_INITIAL_BACKOFF_MS, DEFAULT_INITIAL_BACKOFF_MS),
+    requestTimeoutMs: parsePositiveInt(env.SEC_FETCHER_HTTP_TIMEOUT_MS ?? env.SEC_FETCHER_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS)
+  };
+}
+
+function extractRequestedConceptsFromCompanyFacts(companyFacts: CompanyFactsResponse | null, tags: string[]) {
+  const usGaap = companyFacts?.facts?.["us-gaap"];
+  const concepts: Record<string, ConceptResponse> = {};
+  const missingTags: string[] = [];
+
+  for (const tag of tags) {
+    if (usGaap && Object.prototype.hasOwnProperty.call(usGaap, tag)) {
+      concepts[tag] = usGaap[tag]!;
+      continue;
+    }
+
+    missingTags.push(tag);
+  }
+
+  return { concepts, missingTags };
+}
+
+async function fetchConceptFallbacks(
+  normalizedCik: string,
+  tags: string[],
+  secJson: (url: string, options?: { allowNotFound?: boolean; cacheTtlMs?: number }) => Promise<unknown>
+): Promise<{ concepts: Record<string, ConceptResponse | null>; fulfilledCount: number; failedCount: number }> {
+  if (tags.length === 0) {
+    return { concepts: {}, fulfilledCount: 0, failedCount: 0 };
+  }
+
+  const settled = await Promise.allSettled(
+    tags.map(async (tag): Promise<[string, ConceptResponse | null]> => [
+      tag,
+      await secJson(`https://data.sec.gov/api/xbrl/companyconcept/CIK${normalizedCik}/us-gaap/${tag}.json`, {
+        allowNotFound: true,
+        cacheTtlMs: CACHE_TTL.concept
+      }) as ConceptResponse | null
+    ])
+  );
+  const concepts: Record<string, ConceptResponse | null> = {};
+  let fulfilledCount = 0;
+  let failedCount = 0;
+
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      fulfilledCount += 1;
+      const [tag, concept] = result.value;
+      concepts[tag] = concept;
+      continue;
+    }
+
+    failedCount += 1;
+  }
+
+  return { concepts, fulfilledCount, failedCount };
+}
+
+async function expandSubmissionHistory(
+  root: unknown,
+  secJson: (url: string, options?: { allowNotFound?: boolean; cacheTtlMs?: number }) => Promise<unknown>
+): Promise<unknown> {
+  const recent = normalizeSubmissionRecent(root);
+  if (!recent) {
+    return root;
+  }
+
+  const files = Array.isArray((root as { filings?: { files?: unknown[] } })?.filings?.files)
+    ? (root as { filings: { files: unknown[] } }).filings.files
+    : [];
+  if (files.length === 0 || hasEnoughSupportedHistory(recent)) {
+    return root;
+  }
+
+  const entries = toSubmissionEntries(recent);
+  const cutoff = isoDateYearsAgo(SUBMISSIONS_LOOKBACK_YEARS);
+
+  for (const file of files) {
+    const fileName = typeof (file as { name?: unknown })?.name === "string"
+      ? ((file as { name: string }).name).trim()
+      : "";
+    if (!fileName) {
+      continue;
+    }
+
+    const fileTo = typeof (file as { filingTo?: unknown })?.filingTo === "string"
+      ? (file as { filingTo: string }).filingTo
+      : "";
+    const fileFrom = typeof (file as { filingFrom?: unknown })?.filingFrom === "string"
+      ? (file as { filingFrom: string }).filingFrom
+      : "";
+    if (fileTo && fileTo < cutoff) {
+      break;
+    }
+
+    const payload = await secJson(`https://data.sec.gov/submissions/${fileName}`, {
+      cacheTtlMs: CACHE_TTL.submissions
+    });
+    const historicalRecent = normalizeSubmissionRecent(payload);
+    if (!historicalRecent) {
+      if (fileFrom && fileFrom < cutoff && hasEnoughSupportedHistoryEntries(entries)) {
+        break;
+      }
+      continue;
+    }
+
+    entries.push(...toSubmissionEntries(historicalRecent));
+    if (hasEnoughSupportedHistoryEntries(entries)) {
+      break;
+    }
+
+    if (fileFrom && fileFrom < cutoff) {
+      break;
+    }
+  }
+
+  return {
+    ...(root as Record<string, unknown>),
+    filings: {
+      ...((root as { filings?: Record<string, unknown> })?.filings ?? {}),
+      recent: toSubmissionRecent(entries)
+    }
+  };
+}
+
+async function fetchWithRetry(url: string, init: RequestInit, config: SecFetcherConfig): Promise<Response> {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt <= config.retryCount; attempt += 1) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
+      try {
+        const response = await fetch(url, {
+          ...init,
+          signal: controller.signal
+        });
+        if (shouldRetryResponse(response) && attempt < config.retryCount) {
+          await discardResponseBody(response);
+          await sleep(config.initialBackoffMs * (attempt + 1));
+          continue;
+        }
+        return response;
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (error) {
+      lastError = error;
+      if (attempt >= config.retryCount) {
+        throw error;
+      }
+      await sleep(config.initialBackoffMs * (attempt + 1));
+    }
+  }
+
+  throw lastError ?? new Error(`Request failed for ${url}`);
+}
+
+async function withCache<T>(cache: Map<string, CacheEntry>, key: string, ttlMs: number, loader: () => Promise<T>): Promise<T> {
+  const cached = cache.get(key);
+  if (cached) {
+    if (cached.value !== undefined && cached.expiresAt > Date.now()) {
+      return cached.value as T;
+    }
+
+    if (cached.pending) {
+      return cached.pending as Promise<T>;
+    }
+  }
+
+  const pending = (async () => {
+    try {
+      const value = await loader();
+      if (ttlMs > 0) {
+        setCacheEntry(cache, key, {
+          value,
+          expiresAt: Date.now() + ttlMs
+        });
+      } else {
+        cache.delete(key);
+      }
+      return value;
+    } catch (error) {
+      if (cached?.value !== undefined) {
+        setCacheEntry(cache, key, cached);
+        return cached.value as T;
+      }
+      cache.delete(key);
+      throw error;
+    }
+  })();
+
+  setCacheEntry(cache, key, {
+    value: cached?.value,
+    expiresAt: cached?.expiresAt ?? 0,
+    pending
+  });
+
+  try {
+    return await pending;
+  } finally {
+    const latest = cache.get(key);
+    if (latest?.pending === pending && latest.value === undefined) {
+      cache.delete(key);
+    }
+  }
+}
+
+async function discardResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Best-effort cleanup before retrying a failed SEC response.
+  }
+}
+
+function shouldRetryResponse(response: Response): boolean {
+  return response.status === 429 || response.status >= 500;
+}
+
+function setCacheEntry(cache: Map<string, CacheEntry>, key: string, entry: CacheEntry): void {
+  if (cache.has(key)) {
+    cache.delete(key);
+  }
+  cache.set(key, entry);
+  pruneCache(cache);
+}
+
+function pruneCache(cache: Map<string, CacheEntry>): void {
+  if (cache.size <= MAX_RESPONSE_CACHE_ENTRIES) {
+    return;
+  }
+
+  for (const [key, entry] of cache) {
+    if (cache.size <= MAX_RESPONSE_CACHE_ENTRIES) {
+      return;
+    }
+    if (entry.pending) {
+      continue;
+    }
+    cache.delete(key);
+  }
+}
+
+function normalizeSubmissionRecent(payload: unknown): SubmissionRecent | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const candidate = payload as { filings?: { recent?: unknown } };
+  const recent =
+    candidate.filings?.recent && typeof candidate.filings.recent === "object"
+      ? candidate.filings.recent as SubmissionRecent
+      : payload as SubmissionRecent;
+
+  return Array.isArray(recent.form) &&
+    Array.isArray(recent.accessionNumber) &&
+    Array.isArray(recent.primaryDocument) &&
+    Array.isArray(recent.filingDate) &&
+    Array.isArray(recent.reportDate)
+    ? recent
+    : null;
+}
+
+function toSubmissionEntries(recent: SubmissionRecent): SubmissionEntry[] {
+  const entries: SubmissionEntry[] = [];
+  const seen = new Set<string>();
+
+  for (let index = 0; index < recent.form.length; index += 1) {
+    const accessionNumber = String(recent.accessionNumber[index] ?? "").trim();
+    if (!accessionNumber || seen.has(accessionNumber)) {
+      continue;
+    }
+
+    seen.add(accessionNumber);
+    entries.push({
+      form: String(recent.form[index] ?? ""),
+      accessionNumber,
+      primaryDocument: String(recent.primaryDocument[index] ?? ""),
+      filingDate: String(recent.filingDate[index] ?? ""),
+      reportDate: String(recent.reportDate[index] ?? "") || String(recent.filingDate[index] ?? "")
+    });
+  }
+
+  return entries;
+}
+
+function toSubmissionRecent(entries: SubmissionEntry[]): SubmissionRecent {
+  const deduped: SubmissionEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of entries) {
+    if (!entry.accessionNumber || seen.has(entry.accessionNumber)) {
+      continue;
+    }
+    seen.add(entry.accessionNumber);
+    deduped.push(entry);
+  }
+
+  deduped.sort((left, right) => {
+    const filedDelta = right.filingDate.localeCompare(left.filingDate);
+    if (filedDelta !== 0) {
+      return filedDelta;
+    }
+
+    const reportDelta = right.reportDate.localeCompare(left.reportDate);
+    if (reportDelta !== 0) {
+      return reportDelta;
+    }
+
+    return right.accessionNumber.localeCompare(left.accessionNumber);
+  });
+
+  return {
+    form: deduped.map((entry) => entry.form),
+    accessionNumber: deduped.map((entry) => entry.accessionNumber),
+    primaryDocument: deduped.map((entry) => entry.primaryDocument),
+    filingDate: deduped.map((entry) => entry.filingDate),
+    reportDate: deduped.map((entry) => entry.reportDate)
+  };
+}
+
+function hasEnoughSupportedHistory(recent: SubmissionRecent): boolean {
+  return hasEnoughSupportedHistoryEntries(toSubmissionEntries(recent));
+}
+
+function hasEnoughSupportedHistoryEntries(entries: SubmissionEntry[]): boolean {
+  let tenKCount = 0;
+  let tenQCount = 0;
+
+  for (const entry of entries) {
+    if (!entry.filingDate || entry.filingDate < isoDateYearsAgo(SUBMISSIONS_LOOKBACK_YEARS)) {
+      continue;
+    }
+
+    if (entry.form.startsWith("10-K")) {
+      tenKCount += 1;
+      continue;
+    }
+
+    if (entry.form.startsWith("10-Q")) {
+      tenQCount += 1;
+    }
+  }
+
+  return tenKCount >= MIN_RECENT_10K_FILINGS && tenQCount >= MIN_RECENT_10Q_FILINGS;
+}
+
+function isoDateYearsAgo(years: number): string {
+  const date = new Date();
+  date.setUTCFullYear(date.getUTCFullYear() - years);
+  return date.toISOString().slice(0, 10);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parsePositiveInt(rawValue: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(rawValue ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}

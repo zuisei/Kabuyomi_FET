@@ -36,6 +36,8 @@ npm install
 SEC_FETCHER_SHARED_SECRET=replace-me npm run dev
 ```
 
+Railway is not required for this service. The fetcher can run inside the Cloudflare Worker with `SEC_FETCHER_BASE_URL=cloudflare-internal`, or as a plain Dockerized Node service; see `docs/deploy/SEC_FETCHER_RAILWAY_EXIT_RUNBOOK.md` for the migration paths.
+
 ### 2. Workers
 
 ```bash

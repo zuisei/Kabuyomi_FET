@@ -10,6 +10,11 @@ export function isAuthorizedEvalRequest(request: Request, env: Env): boolean {
   return isAuthorizedSharedSecretRequest(request, configured, "x-eval-token");
 }
 
+export function isAuthorizedSecFetcherRequest(request: Request, env: Env): boolean {
+  const configured = env.SEC_FETCHER_SHARED_SECRET?.trim();
+  return isAuthorizedSharedSecretRequest(request, configured, "x-internal-token");
+}
+
 function isAuthorizedSharedSecretRequest(request: Request, configured: string | undefined, headerName: string): boolean {
   if (!configured) {
     return false;

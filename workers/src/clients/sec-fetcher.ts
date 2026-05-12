@@ -1,6 +1,7 @@
 import type { Env, FilingReference } from "../env";
 import { AppError } from "../lib/errors";
 import { logErrorEvent } from "../lib/logging";
+import { createCloudflareSecFetcherService } from "../lib/sec-fetcher-service";
 import type {
   CompanyFactsResponse,
   ConceptResponse,
@@ -48,6 +49,7 @@ export interface FetchSubmissionsOptions {
 const DEFAULT_FETCHER_TIMEOUT_MS = 25_000;
 const DEFAULT_FETCHER_RETRY_COUNT = 1;
 const SEC_RATE_LIMITER_NAME = "global";
+const CLOUDFLARE_INTERNAL_FETCHER = "cloudflare-internal";
 
 export async function fetchTickerSnapshotFromFetcher(env: Env): Promise<TickerSnapshotEnvelope> {
   return fetcherRequest(env, "/internal/sec/tickers-snapshot", {});
@@ -153,6 +155,10 @@ async function fetcherRequest<ResponseType>(
     throw new AppError(503, "SEC data is temporarily unavailable", "SEC fetcher base URL is not configured");
   }
 
+  if (env.SEC_FETCHER_BASE_URL.trim() === CLOUDFLARE_INTERNAL_FETCHER) {
+    return fetchFromCloudflareInternalSecFetcher(env, path, payload) as Promise<ResponseType>;
+  }
+
   const timeoutMs = parsePositiveInt(env.SEC_FETCHER_TIMEOUT_MS, DEFAULT_FETCHER_TIMEOUT_MS);
   let lastError: unknown;
 
@@ -243,6 +249,84 @@ async function fetcherRequest<ResponseType>(
   }
 
   throw new AppError(503, "SEC data is temporarily unavailable", `SEC fetcher request failed for ${path}`);
+}
+
+async function fetchFromCloudflareInternalSecFetcher(
+  env: Env,
+  path: string,
+  payload: Record<string, unknown>
+): Promise<unknown> {
+  try {
+    await waitForSecRateLimit(env, path);
+    const service = createCloudflareSecFetcherService(env);
+
+    if (path === "/internal/sec/tickers-snapshot") {
+      return service.fetchTickerSnapshot();
+    }
+
+    if (path === "/internal/sec/submissions") {
+      return service.fetchSubmissions(String(payload.cik ?? ""), {
+        includeHistory: payload.includeHistory === true
+      });
+    }
+
+    if (path === "/internal/sec/filing") {
+      return service.fetchFiling({
+        cik: String(payload.cik ?? ""),
+        accessionNumber: String(payload.accessionNumber ?? ""),
+        primaryDocument: String(payload.primaryDocument ?? "")
+      });
+    }
+
+    if (path === "/internal/sec/metrics") {
+      return service.fetchMetrics({
+        cik: String(payload.cik ?? ""),
+        tags: Array.isArray(payload.tags) ? payload.tags.map((tag) => String(tag)) : []
+      });
+    }
+
+    if (path === "/internal/sec/filing-assets") {
+      return service.fetchFilingAssets({
+        cik: String(payload.cik ?? ""),
+        accessionNumber: String(payload.accessionNumber ?? ""),
+        primaryDocument: String(payload.primaryDocument ?? ""),
+        tags: Array.isArray(payload.tags) ? payload.tags.map((tag) => String(tag)) : []
+      });
+    }
+
+    if (path === "/internal/sec/prepared-filing") {
+      const formType = payload.formType === "10-K" || payload.formType === "10-Q" ? payload.formType : null;
+      if (!formType) {
+        throw new AppError(400, "Invalid SEC fetcher payload", "prepared filing formType must be 10-K or 10-Q");
+      }
+
+      return service.fetchPreparedFiling({
+        cik: String(payload.cik ?? ""),
+        accessionNumber: String(payload.accessionNumber ?? ""),
+        primaryDocument: String(payload.primaryDocument ?? ""),
+        formType,
+        tags: Array.isArray(payload.tags) ? payload.tags.map((tag) => String(tag)) : []
+      });
+    }
+
+    throw new AppError(404, "Not found", `Cloudflare internal SEC fetcher path is not supported: ${path}`);
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    logErrorEvent("sec_fetcher_failure", {
+      path,
+      attempt: 0,
+      reason: String(error),
+      mode: CLOUDFLARE_INTERNAL_FETCHER
+    });
+    throw new AppError(
+      503,
+      "SEC data is temporarily unavailable",
+      `Cloudflare internal SEC fetcher request failed for ${path}: ${String(error)}`
+    );
+  }
 }
 
 async function waitForSecRateLimit(env: Env, path: string): Promise<void> {
