@@ -44,6 +44,7 @@ export function buildChatFactualPack(
     case "risk_factors":
       return buildRiskFactualPack(filing);
     case "cash_flow":
+    case "liquidity_debt":
     case "historical_comparison":
     case "investment_view":
     case "margin_profitability":
@@ -738,4 +739,3 @@ function dedupeRevenueFacts(facts: RevenueFact[]): RevenueFact[] {
   }
   return result;
 }
-

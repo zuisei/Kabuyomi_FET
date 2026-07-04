@@ -55,8 +55,12 @@ describe("hard-intent source gate", () => {
       metrics: filing.metrics
     });
 
-    console.log(result);
-    expect(result.sourceSufficient).toBe(true);
+    expect({
+      sourceSufficient: result.sourceSufficient,
+      followupTargetFound: result.followupTargetFound,
+      identifiedDrivers: result.identifiedDrivers,
+      failureLabels: result.failureLabels
+    }).toMatchObject({ sourceSufficient: true });
     expect(result.identifiedDrivers[0]?.category).toBe("bank_revenue_driver");
     expect(result.failureLabels).not.toContain("revenue_driver_evidence_too_generic");
   });
@@ -303,7 +307,12 @@ describe("hard-intent source gate", () => {
 
     expect(result.hardIntent).toBe("margin_durability_followup");
     expect(result.followupTargetFound).toBe(true);
-    expect(result.sourceSufficient).toBe(true);
+    expect({
+      sourceSufficient: result.sourceSufficient,
+      followupTargetFound: result.followupTargetFound,
+      identifiedDrivers: result.identifiedDrivers,
+      failureLabels: result.failureLabels
+    }).toMatchObject({ sourceSufficient: true });
     expect(slots.marginDrivers.length).toBeGreaterThan(0);
     expect(result.failureLabels).not.toContain("missing_margin_driver_evidence");
   });
@@ -338,6 +347,141 @@ describe("hard-intent source gate", () => {
       "margin_driver_slots_empty",
       "source_gate_failed"
     ]));
+  });
+
+  it("recovers WMT Q06 when traffic and unit-volume context includes margin levers", () => {
+    const filing = makeFiling("WMT", "Walmart Inc.", [
+      metric("operatingIncome", 29_825_000_000, 29_348_000_000, 1.6)
+    ], [
+      metricSource("S9", "営業利益: 29825000000 USD / 比較値: 29348000000 / YoY: 1.6%"),
+      source(
+        "S1",
+        "md_a",
+        "Comparable sales were driven by growth in unit volumes and transactions. Advertising income and membership income are higher-margin revenue streams, while fulfillment costs and wage pressure may continue to affect operating income."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "前問で挙げた利益率の要因（価格・ミックス、広告収入、会員収入）は一時的ですか？",
+      previousAnswer: "利益率要因は価格・ミックス、広告収入、会員収入、フルフィルメント費用です。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    const slots = extractEvidenceSlots({ filing, sources: filing.sourceChunks, sourceGateResult: result });
+
+    expect(result.hardIntent).toBe("margin_durability_followup");
+    expect({
+      sourceSufficient: result.sourceSufficient,
+      followupTargetFound: result.followupTargetFound,
+      identifiedDrivers: result.identifiedDrivers,
+      failureLabels: result.failureLabels
+    }).toMatchObject({ sourceSufficient: true });
+    expect(slots.marginDrivers.length).toBeGreaterThan(0);
+    expect(result.failureLabels).not.toContain("q06_margin_context_revenue_only");
+  });
+
+  it("recovers AAPL Q06 from gross-margin tariff and foreign-exchange context", () => {
+    const filing = makeFiling("AAPL", "Apple Inc.", [
+      metric("netIncome", 42_097_000_000, 36_330_000_000, 15.9)
+    ], [
+      metricSource("S10", "純利益: 42097000000 USD / 比較値: 36330000000 / YoY: 15.9%"),
+      source(
+        "S1",
+        "md_a",
+        "To protect gross margins from fluctuations in foreign exchange rates, the Company may use forwards and options. New tariffs on imports may continue to affect inventory purchases and cost of sales."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "前問で挙げた利益率の要因（関税、為替、製造コスト）は一時的ですか？",
+      previousAnswer: "利益率要因は関税、為替、製造コストです。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    const slots = extractEvidenceSlots({ filing, sources: filing.sourceChunks, sourceGateResult: result });
+
+    expect(result.hardIntent).toBe("margin_durability_followup");
+    expect({
+      sourceSufficient: result.sourceSufficient,
+      followupTargetFound: result.followupTargetFound,
+      identifiedDrivers: result.identifiedDrivers,
+      failureLabels: result.failureLabels
+    }).toMatchObject({ sourceSufficient: true });
+    expect(slots.marginDrivers.length).toBeGreaterThan(0);
+    expect(result.failureLabels).not.toContain("missing_margin_driver_evidence");
+  });
+
+  it("recovers GOOGL Q06 from bullet cost-of-revenues driver context", () => {
+    const filing = makeFiling("GOOGL", "Alphabet Inc.", [
+      metric("netIncome", 62_578_000_000, 34_540_000_000, 81.2)
+    ], [
+      metricSource("S10", "純利益: 62578000000 USD / 比較値: 34540000000 / YoY: 81.2%"),
+      source(
+        "S1",
+        "md_a",
+        "• Revenues were $109.9 billion, an increase of 22% year over year, primarily driven by an increase in Google Services revenues and Google Cloud revenues. • Cost of revenues was $41.3 billion, an increase of 14% year over year, primarily driven by increases in depreciation expense, TAC, content acquisition costs, and employee compensation expenses."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "前問で挙げた利益率の要因（TAC、減価償却費、コンテンツ調達費、人件費）は一時的ですか？",
+      previousAnswer: "利益率要因はTAC、減価償却費、コンテンツ調達費、人件費です。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    const slots = extractEvidenceSlots({ filing, sources: filing.sourceChunks, sourceGateResult: result });
+
+    expect(result.hardIntent).toBe("margin_durability_followup");
+    expect({
+      sourceSufficient: result.sourceSufficient,
+      followupTargetFound: result.followupTargetFound,
+      identifiedDrivers: result.identifiedDrivers,
+      failureLabels: result.failureLabels
+    }).toMatchObject({ sourceSufficient: true });
+    expect(slots.marginDrivers.length).toBeGreaterThan(0);
+    expect(result.failureLabels).not.toContain("margin_driver_slots_empty");
+  });
+
+  it("recovers V Q06 from operating-expense driver context with Results of Operations text", () => {
+    const filing = makeFiling("V", "Visa Inc.", [
+      metric("netIncome", 6_021_000_000, 4_577_000_000, 31.5)
+    ], [
+      metricSource("S10", "純利益: 6021000000 USD / 比較値: 4577000000 / YoY: 31.5%"),
+      source(
+        "S1",
+        "md_a",
+        "For the three months ended March 31, 2026, operating expenses decreased 4% over the prior-year comparable period, primarily driven by lower litigation provision, partially offset by higher personnel and marketing expenses. For the six months ended March 31, 2026, operating expenses increased 10% over the prior-year comparable period, primarily driven by higher marketing, personnel and professional fees. See Results of Operations."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "前問で挙げた利益率の要因（訴訟引当、人件費、マーケティング費）は一時的ですか？",
+      previousAnswer: "利益率要因は訴訟引当、人件費、マーケティング費、専門家費用です。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    const slots = extractEvidenceSlots({ filing, sources: filing.sourceChunks, sourceGateResult: result });
+
+    expect(result.hardIntent).toBe("margin_durability_followup");
+    expect(result.sourceSufficient).toBe(true);
+    expect(slots.marginDrivers.length).toBeGreaterThan(0);
+    expect(result.failureLabels).not.toContain("missing_margin_driver_evidence");
   });
 
   it("recognizes bank provision and noninterest expense as Q06 profitability evidence", () => {
@@ -989,15 +1133,17 @@ describe("evidence-slot fallback", () => {
     });
 
     expect(fallback.answer.answer).toContain("売上高は");
-    expect(fallback.answer.answer).toContain("net interest income");
-    expect(fallback.answer.answer).toContain("noninterest income");
-    expect(fallback.answer.answer).toContain("provision");
+    expect(fallback.answer.answer).toContain("純利息収入");
+    expect(fallback.answer.answer).toContain("非金利収入・費用");
+    expect(fallback.answer.answer).toContain("信用損失引当");
     expect(fallback.answer.answer).toContain("セグメント実績");
     expect(fallback.answer.answer).toContain("会社固有の売上要因までは追いきれません");
     expect(fallback.answer.answer).toContain("次に見るなら");
     expect(fallback.answer.answer).not.toContain("不足しているのは");
     expect(fallback.answer.answer).not.toContain("MD&AとMD&A");
     expect(fallback.answer.answer).not.toContain("主因はnet interest income");
+    expect(fallback.answer.answer).not.toContain("net interest income");
+    expect(fallback.answer.answer).not.toContain("noninterest income");
     expect(hasBannedPhrase(fallback.answer.answer)).toBe(false);
   });
 
@@ -1122,6 +1268,179 @@ describe("evidence-slot fallback", () => {
     expect(result.sourceSufficient).toBe(false);
   });
 
+  it("does not fail Q04 solely because table-heavy context is mixed with source-backed durability evidence", () => {
+    const filing = makeFiling("XOM", "Exxon Mobil Corporation", [
+      revenueMetric(332_238_000_000, 349_585_000_000, -5.0)
+    ], [
+      metricSource("S9", "売上高: 332238000000 USD / 比較値: 349585000000 / YoY: -5.0%"),
+      source(
+        "S1",
+        "md_a",
+        "Crude prices remained within the 10-year historical range, while robust demand helped move natural gas prices above the top of the 10-year range. ExxonMobil believes prices over the long term will continue to be driven by market supply and demand."
+      ),
+      source(
+        "S2",
+        "md_a",
+        "As described in Notes 1, 3, and 9, consolidated upstream property, plant, and equipment was $228.2 billion as of December 31, 2025, and depreciation and depletion expense was $21.4 billion for the year ended December 31, 2025."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "前問で挙げた売上高の要因（crude prices、natural gas prices、demand）は一時的ですか？継続性と不明点を分けて説明してください。",
+      previousAnswer: "売上要因はcrude prices、natural gas prices、demandです。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.hardIntent).toBe("driver_durability_followup");
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.failureLabels).not.toContain("q04_table_heavy_context");
+  });
+
+  it("does not treat period-specific revenue driver narrative as Q04 table-heavy solely because it contains dates and percentages", () => {
+    const filing = makeFiling("LLY", "Eli Lilly and Company", [
+      revenueMetric(19_800_000_000, 12_730_000_000, 55.5)
+    ], [
+      metricSource("S9", "売上高: 19800000000 USD / 比較値: 12730000000 / YoY: 55.5%"),
+      source(
+        "S1",
+        "md_a",
+        "Revenue increased for the three months ended March 31, 2026, driven primarily by increased volume, partially offset by lower realized prices. Revenue of Mounjaro increased 59 percent in the U.S. during the three months ended March 31, 2026, reflecting strong demand, partially offset by lower realized prices and a favorable one-time adjustment to estimates for rebates and discounts."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "前問で挙げた売上高の要因（販売数量、需要、実現価格）は一時的ですか？継続性と不明点を分けて説明してください。",
+      previousAnswer: "売上高の要因は販売数量、strong demand、lower realized pricesです。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.hardIntent).toBe("driver_durability_followup");
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.failureLabels).not.toContain("q04_table_heavy_context");
+    expect(result.failureLabels).not.toContain("q04_driver_evidence_too_generic");
+  });
+
+  it("recovers Q04 from subscription and cloud revenue durability clues", () => {
+    const filing = makeFiling("MSFT", "Microsoft Corporation", [
+      revenueMetric(81_269_000_000, 69_632_000_000, 16.7)
+    ], [
+      metricSource("S9", "売上高: 81269000000 USD / 比較値: 69632000000 / YoY: 16.7%"),
+      source(
+        "S1",
+        "md_a",
+        "• Microsoft 365 Commercial products and cloud services revenue increased $3.4 billion or 16%. Microsoft 365 Commercial cloud revenue grew 17% with growth in revenue per user driven by Microsoft 365 E5 and Microsoft 365 Copilot. Microsoft 365 Commercial seats grew 6% driven by small and medium businesses and frontline workers."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "前問で挙げた売上高の要因（Microsoft 365 cloud、revenue per user、Copilot、seats）は一時的ですか？継続性と不明点を分けて説明してください。",
+      previousAnswer: "売上高の要因はMicrosoft 365 cloud、revenue per user、Copilot、seatsです。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.hardIntent).toBe("driver_durability_followup");
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.failureLabels).not.toContain("driver_slots_empty");
+    expect(result.failureLabels).not.toContain("durability_context_missing");
+  });
+
+  it("recovers Q04 from unit-case-volume demand signals", () => {
+    const filing = makeFiling("KO", "The Coca-Cola Company", [
+      revenueMetric(12_470_000_000, 11_130_000_000, 12.1)
+    ], [
+      metricSource("S9", "売上高: 12470000000 USD / 比較値: 11130000000 / YoY: 12.1%"),
+      source(
+        "S1",
+        "md_a",
+        "Unit case volume growth is a key metric used by management to evaluate the Company's performance because it measures demand for our products at the consumer level. Unit case volume in Asia Pacific increased 5%, including growth in water, sports, coffee and tea and Trademark Coca-Cola."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "前問で挙げた売上高の要因（unit case volume、demand）は一時的ですか？継続性と不明点を分けて説明してください。",
+      previousAnswer: "売上高の要因はunit case volumeとdemandです。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.hardIntent).toBe("driver_durability_followup");
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.failureLabels).not.toContain("durability_context_missing");
+  });
+
+  it("recognizes Japanese prior revenue-driver labels as Q04 follow-up targets", () => {
+    const filing = makeFiling("CAT", "Caterpillar Inc.", [
+      revenueMetric(67_589_000_000, 64_809_000_000, 4.3)
+    ], [
+      metricSource("S9", "売上高: 67589000000 USD / 比較値: 64809000000 / YoY: 4.3%"),
+      source(
+        "S1",
+        "md_a",
+        "Total sales and revenues increased compared with the prior year, primarily due to higher sales volume in regional end markets and stronger equipment to end users. Backlog and dealer inventory trends are expected to continue affecting demand."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "これは一時要因？それとも継続要因？",
+      previousAnswer: "前問で挙がっていた売上要因候補は、地域別売上、販売量、受注です。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.hardIntent).toBe("driver_durability_followup");
+    expect(result.followupTargetFound).toBe(true);
+    expect(result.failureLabels).not.toContain("followup_target_empty");
+    expect(result.failureLabels).not.toContain("missing_followup_target_driver");
+  });
+
+  it("keeps NVDA-style prior data-center and AI drivers despite later caveats", () => {
+    const filing = makeFiling("NVDA", "NVIDIA Corporation", [
+      revenueMetric(215_940_000_000, 130_500_000_000, 65.5)
+    ], [
+      metricSource("S9", "売上高: 215940000000 USD / 比較値: 130500000000 / YoY: 65.5%"),
+      source(
+        "S1",
+        "md_a",
+        "Data Center revenue was up 68% from a year ago. The strong year-on-year growth was driven by the major platform shifts to accelerated computing and AI. Gaming revenue was driven by strong Blackwell demand, while supply constraints may be a headwind."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "売上高が変化した要因は一時的ですか？",
+      previousAnswer:
+        "本文要因: データセンターの計算とネットワークプラットフォーム（加速型計算とAI）による成長が主因。追加確認が必要な点: ゲーミング売上の伸びや供給制約の影響、顧客構成の変動が売上にどう寄与したかの詳述が不足。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.hardIntent).toBe("driver_durability_followup");
+    expect(result.followupTargetFound).toBe(true);
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.failureLabels).not.toContain("followup_target_empty");
+    expect(result.failureLabels).not.toContain("missing_followup_target_driver");
+  });
+
   it("fails Q04 when the prior driver only has generic macro text without source-backed durability", () => {
     const filing = makeFiling("AAPL", "Apple Inc.", [
       revenueMetric(143_756_000_000, 124_300_000_000, 15.7)
@@ -1152,7 +1471,7 @@ describe("evidence-slot fallback", () => {
     ]));
   });
 
-  it("does not apply the source gate to non-hard intents", async () => {
+  it("applies the source gate to business-model intents", async () => {
     const filing = makeFiling("AAPL", "Apple Inc.", [], [
       source("S1", "md_a", "Apple designs and sells products and services.")
     ]);
@@ -1165,7 +1484,85 @@ describe("evidence-slot fallback", () => {
       timings: createChatTimingTracker()
     });
 
-    expect(result.modelResponse.qualityControl?.sourceGateApplied).toBeUndefined();
+    expect(result.modelResponse.qualityControl?.sourceGateApplied).toBe(true);
+  });
+
+  it("keeps business-model evidence drivers in evidence slots", () => {
+    const filing = makeFiling("GOOGL", "Alphabet Inc.", [], [
+      source(
+        "S1",
+        "md_a",
+        "Revenues and Monetization Metrics. We generate revenues by delivering relevant online advertising, cloud-based solutions for enterprise customers, and subscription-based products, apps, in-app purchases, and devices."
+      )
+    ]);
+    const gate = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "business_overview",
+      question: "この会社は何で儲けている？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+    const slots = extractEvidenceSlots({ filing, sources: filing.sourceChunks, sourceGateResult: gate });
+
+    expect(gate.hardIntent).toBe("business_model");
+    expect(gate.sourceSufficient).toBe(true);
+    expect(slots.companyExplainedDrivers.length).toBeGreaterThan(0);
+    expect(slots.failureLabels).not.toContain("driver_slots_empty");
+    expect(slots.failureLabels).not.toContain("source_gate_false_positive");
+  });
+
+  it("rejects business-model answers when retrieval only selected XBRL metrics", () => {
+    const filing = makeFiling("AAPL", "Apple Inc.", [revenueMetric(143_756_000_000, 124_300_000_000, 15.7)], [
+      metricSource("S9", "売上高: 143756000000 USD / 比較値: 124300000000 / YoY: 15.7%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "business_overview",
+      question: "Appleは何で稼いでる？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceGateApplied).toBe(true);
+    expect(result.hardIntent).toBe("business_model");
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "retrieval_overfocused_xbrl",
+      "business_model_sources_missing",
+      "source_gate_failed"
+    ]));
+    expect(result.missingSourceTypes).toEqual(expect.arrayContaining([
+      "business description",
+      "segment/revenue context",
+      "product/service/customer/revenue mechanism evidence"
+    ]));
+  });
+
+  it("passes business-model gate with product/service and revenue-mechanism evidence", () => {
+    const filing = makeFiling("AAPL", "Apple Inc.", [], [
+      source(
+        "S1",
+        "md_a",
+        "Apple designs, manufactures and markets smartphones, personal computers, tablets, wearables and accessories, and sells a variety of related services including advertising, AppleCare and cloud services. Net sales are reported by products and services."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "business_overview",
+      question: "Appleは何で稼いでる？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.hardIntent).toBe("business_model");
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers[0]?.category).toBe("technology_business_model");
+    expect(result.failureLabels).not.toContain("business_model_sources_missing");
   });
 });
 

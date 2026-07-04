@@ -30,14 +30,38 @@ describe("Japanese-only final answer guard", () => {
     expect(checkFinalAnswerJapaneseOnly(answer).ok).toBe(true);
   });
 
+  it("rejects short hybrid English/Japanese business fragments", () => {
+    const examples = [
+      "利益率はProfitability contextを見ます。",
+      "price-コスト spread discussion が必要です。",
+      "Re資料 Industries の説明です。",
+      "higher 稼働率 expense が要因です。",
+      "un価格実現が影響しました。",
+      "geography revenue が中心です。",
+      "segment revenue が最大です。"
+    ];
+
+    for (const answer of examples) {
+      expect(checkFinalAnswerJapaneseOnly(answer).labels).toEqual(expect.arrayContaining([
+        "hybrid_english_business_phrase",
+        "final_answer_language_violation"
+      ]));
+    }
+  });
+
   it("humanizes internal revenue coverage labels before fallback answers reach users", () => {
     expect(joinMissingSourceLabels([
       "segment results",
       "product revenue discussion",
       "services revenue discussion",
       "geographic revenue discussion",
-      "product launch or channel inventory discussion"
-    ])).toBe("セグメント実績、製品別売上、サービス売上、地域別売上、新製品投入や販売チャネル在庫");
+      "product launch or channel inventory discussion",
+      "price-cost spread discussion",
+      "manufacturing cost discussion",
+      "vehicle pricing discussion",
+      "automotive gross margin discussion",
+      "refining or chemical margin discussion"
+    ])).toBe("セグメント実績、製品別売上、サービス売上、地域別売上、新製品投入や販売チャネル在庫、価格とコスト・製造コスト、車両価格、自動車粗利益率、精製・化学マージン");
 
     const fallback = buildJapaneseLanguageGuardFallback({
       questionIntent: "revenue_driver",
@@ -100,6 +124,78 @@ describe("Japanese-only final answer guard", () => {
           }
         ]
       }
+    });
+
+    expect(repair).toBeNull();
+  });
+
+  it("repairs durability follow-ups from concrete selected excerpts even when source gate is insufficient", () => {
+    const repair = buildJapaneseLanguageGuardRepair({
+      question: "その要因は一時的？それとも続きそう？",
+      questionIntent: "driver_durability_followup",
+      sourceGateSufficient: false,
+      selectedSourceExcerpts: [
+        "Comparable sales increased due to traffic, ticket and eCommerce growth, partially offset by lower fuel prices."
+      ]
+    });
+
+    expect(repair).toContain("売上要因候補");
+    expect(repair).toContain("比較可能売上");
+    expect(repair).toContain("客数");
+    expect(repair).toContain("客単価");
+    expect(repair).toContain("EC売上");
+    expect(repair).toContain("断定しません");
+    expect(repair).not.toContain("Comparable sales");
+    expect(repair).not.toContain("eCommerce");
+    expect(checkFinalAnswerJapaneseOnly(repair ?? "").ok).toBe(true);
+  });
+
+  it("repairs margin durability language violations from concrete cost excerpts", () => {
+    const repair = buildJapaneseLanguageGuardRepair({
+      question: "これは一時要因？それとも構造的な変化？",
+      questionIntent: "margin_durability_followup",
+      sourceGateSufficient: true,
+      selectedSourceExcerpts: [
+        "Total operating expense increased primarily due to higher expenses related to refinery sales to third parties, salaries and related costs and aircraft fuel costs.",
+        "Total operating cost per available seat mile increased, while non-fuel unit cost also increased."
+      ]
+    });
+
+    expect(repair).toContain("利益率要因候補");
+    expect(repair).toContain("営業費用");
+    expect(repair).toContain("燃料費");
+    expect(repair).toContain("人件費");
+    expect(repair).toContain("単位コスト");
+    expect(repair).toContain("一時要因か構造的変化かは断定しません");
+    expect(repair).not.toContain("Total operating expense");
+    expect(repair).not.toContain("aircraft fuel");
+    expect(checkFinalAnswerJapaneseOnly(repair ?? "").ok).toBe(true);
+  });
+
+  it("repairs risk summary language violations from selected source excerpts", () => {
+    const repair = buildJapaneseLanguageGuardRepair({
+      question: "この filing で重要なリスクは？",
+      questionIntent: "risk_factors",
+      selectedSourceExcerpts: [
+        "Management's discussion and analysis on pages 146-149 includes a discussion of cybersecurity risk.",
+        "The Firm may incur costs in connection with excess properties, premises or facilities."
+      ]
+    });
+
+    expect(repair).toContain("サイバーセキュリティ");
+    expect(repair).toContain("不動産・施設コスト");
+    expect(repair).toContain("重要度や影響額までは断定しません");
+    expect(repair).not.toContain("Management's discussion");
+    expect(repair).not.toContain("excess properties");
+    expect(checkFinalAnswerJapaneseOnly(repair ?? "").ok).toBe(true);
+  });
+
+  it("does not repair risk summaries when selected excerpts lack risk signals", () => {
+    const repair = buildJapaneseLanguageGuardRepair({
+      questionIntent: "risk_factors",
+      selectedSourceExcerpts: [
+        "Net sales increased because of higher volume and favorable pricing."
+      ]
     });
 
     expect(repair).toBeNull();
@@ -216,7 +312,7 @@ describe("Japanese-only final answer guard", () => {
     expect(response.debug?.languageGuardOk).toBe(true);
     expect(response.debug?.languageGuardFallbackUsed).toBe(false);
     expect(response.debug?.finalAnswerLanguageLabels).toEqual(expect.arrayContaining([
-      "english_answer_leak",
+      "final_answer_language_violation",
       "answer_repaired_to_japanese"
     ]));
     expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["language_guard_source_backed_repair"]));
@@ -354,7 +450,7 @@ describe("Japanese-only final answer guard", () => {
       includeWebSupplement: false
     });
 
-    expect(response.answer).toContain("このfilingだけでは継続性は断定できません");
+    expect(response.answer).toContain("提出資料だけでは継続性は断定できません");
     expect(response.answer).toContain("comparable sales");
     expect(response.answer).toContain("eCommerce");
     expect(response.answer).toContain("member engagement");
@@ -366,6 +462,60 @@ describe("Japanese-only final answer guard", () => {
     expect(response.debug?.fallbackCategory).toBe("none");
     expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q04_retail_durability_source_backed_repair"]));
     expect(response.debug?.sourceIdsValid).toBe(true);
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("repairs generic source-gate-passed Q04 underanswers from driver durability evidence", async () => {
+    const filing = makeFiling({ ticker: "V", companyName: "Visa Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "売上高は 112.3億ドル で、前年同期比 17.1%増 です。全社売上の増減は確認できますが、セグメント・地域別の強弱はこの資料では十分に分解できません。確認すべき箇所は、セグメント実績、地域別売上、製品・カテゴリ別売上です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        fallbackKind: "evidence_slot",
+        evidenceFallbackUsed: true,
+        fallbackUserReason: "revenue_driver_sources_missing",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        sourceGateEvidenceSlots: {
+          companyExplainedDrivers: [
+            {
+              category: "general_driver_durability_followup",
+              driver: "Other revenue increased primarily due to growth in Advisory and Other Services and select pricing modifications. Client incentives will vary based on future performance expectations and payments volume.",
+              sourceIds: ["S1"],
+              confidence: "high"
+            }
+          ],
+          segmentOrBusinessSignals: []
+        },
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackReason).toBeNull();
+    expect(response.debug?.fallbackKind).toBe("none");
+    expect(response.debug?.sourceRepairLabels).toContain("q04_generic_durability_source_backed_repair");
+    expect(response.answer).toContain("提出資料だけでは継続性は断定できません");
+    expect(response.answer).toContain("決済ボリューム");
+    expect(response.answer).toContain("Advisory・その他サービス");
     expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
   });
 
@@ -423,7 +573,7 @@ describe("Japanese-only final answer guard", () => {
       includeWebSupplement: false
     });
 
-    expect(response.answer).toContain("このfilingだけでは継続性は断定できません");
+    expect(response.answer).toContain("提出資料だけでは継続性は断定できません");
     expect(response.answer).toContain("NII");
     expect(response.answer).toContain("NIR");
     expect(response.answer).toContain("金利環境次第");
@@ -482,6 +632,423 @@ describe("Japanese-only final answer guard", () => {
 
     expect(response.answer).toBe(answer);
     expect(response.debug?.sourceRepairLabels ?? []).not.toContain("q04_bank_durability_source_backed_repair");
+  });
+
+  it("uses the previous answer to avoid losing Q04 follow-up drivers when source gate is insufficient", async () => {
+    const filing = makeFiling({ ticker: "AAPL", companyName: "Apple Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "前問の具体的な要因が十分に特定できていません。そのため、選択された資料だけで一時要因か継続要因かは分類しません。判断には、経営陣による業績説明、製品別売上、サービス売上、地域別売上の追加確認が必要です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: false,
+        followupPreviousAnswer: "本文の要因としては Americas、Europe、Greater China、Rest of Asia Pacific など地域別での Net Sales の増加が挙げられ、iPhone と Services の寄与割合や関税影響の確認が必要です。",
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("前問で挙がっていた売上要因候補");
+    expect(response.answer).toContain("地域別売上");
+    expect(response.answer).toContain("iPhone");
+    expect(response.answer).toContain("サービス売上");
+    expect(response.answer).toContain("一時要因か継続要因かは断定しません");
+    expect(response.answer).not.toContain("前問の具体的な要因が十分に特定");
+    expect(response.responsePath).toBe("fallback");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q04_previous_answer_driver_candidate_repair"]));
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("does not reuse a previous Q03 answer that mistook tax or expenses for revenue drivers", async () => {
+    const filing = makeFiling({ ticker: "MU", companyName: "Micron Technology, Inc." });
+    const answer = "前問の具体的な要因が十分に特定できていません。そのため、選択された資料だけで一時要因か継続要因かは分類しません。判断には、経営陣による業績説明、セグメント実績、売上説明の追加確認が必要です。";
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer,
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "driver_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: false,
+        followupPreviousAnswer: "本文では、higher noncurrent income taxes payable related to the implementation of Pillar Two が売上変化の要因として説明されています。",
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toBe(answer);
+    expect(response.debug?.sourceRepairLabels ?? []).not.toContain("q04_previous_answer_driver_candidate_repair");
+  });
+
+  it("uses the previous answer to avoid losing Q06 margin follow-up drivers when source gate is insufficient", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "前問の具体的な利益率要因が十分に特定できていません。そのため、選択された資料だけで一時要因か構造的変化かは分類しません。判断には、利益率、原価、価格とコストの追加確認が必要です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "margin_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: false,
+        followupPreviousAnswer: "利益率要因としては、出荷量増加、price realizationの不利、manufacturing cost悪化、cost pressure、tariffs が挙がっています。",
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("前問で挙がっていた利益率要因候補");
+    expect(response.answer).toContain("販売数量・出荷量");
+    expect(response.answer).toContain("価格・ミックス");
+    expect(response.answer).toContain("製造コスト");
+    expect(response.answer).toContain("関税");
+    expect(response.answer).toContain("一時要因か構造的変化かは断定しません");
+    expect(response.answer).not.toContain("前問の具体的な利益率要因が十分に特定");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q06_previous_answer_margin_candidate_repair"]));
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("uses previous Q06 margin drivers when source gate passed but the fallback answer lost them", async () => {
+    const filing = makeFiling({ ticker: "JPM", companyName: "JPMorgan Chase & Co." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "純利益は 570.5億ドル で、前年同期比 2.4%減 です。利益率の方向は確認できますが、改善/悪化の具体的な要因は十分に特定できません。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "margin_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        fallbackUserReason: "margin_driver_sources_missing",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        followupPreviousAnswer: "利益率の変化要因としては、非利息費用が4%増加（人件費・ブローカレッジ費用・マーケティング支出の増加など）と、信用損失引当金の変動や市場関連の収益の要因が挙げられています。",
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.answer).toContain("前問で挙がっていた利益率要因候補");
+    expect(response.answer).toContain("人件費");
+    expect(response.answer).toContain("販売管理費");
+    expect(response.answer).toContain("訴訟費用・引当");
+    expect(response.answer).toContain("一時要因か構造的変化かは断定しません");
+    expect(response.debug?.fallbackReason).toBeNull();
+    expect(response.debug?.fallbackKind).toBe("none");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q06_previous_answer_margin_candidate_repair"]));
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("extracts baseline-style sector revenue drivers from the previous answer for Q04 follow-ups", async () => {
+    const cases = [
+      {
+        ticker: "XOM",
+        previousAnswer: "本文で説明されている要因: 原油価格は10年平均レンジ内、需要が堅調でも市場価格要因と供給動向が影響。上流投資増加やPioneer買収の影響も言及。",
+        expected: ["資源価格", "需給環境", "買収影響"]
+      },
+      {
+        ticker: "LLY",
+        previousAnswer: "売上は主に量の増加によって押し上げられ、実現価格の低下で部分的に相殺。Mounjaro と Zepbound による需要拡大が主な推進要因。",
+        expected: ["販売数量・出荷量", "価格・ミックス", "製品カテゴリ成長"]
+      },
+      {
+        ticker: "KO",
+        previousAnswer: "ボトリング投資およびコーヒー・水・スポーツ飲料などのカテゴリ成長を含むボリューム拡大が売上増の要因で、unit case volume の成長が主要指標です。",
+        expected: ["販売数量・出荷量", "製品カテゴリ成長", "ボトリング投資"]
+      }
+    ] as const;
+
+    for (const testCase of cases) {
+      const filing = makeFiling({ ticker: testCase.ticker });
+      const response = await finalizeChatResponse({
+        filing,
+        question: "その要因は一時的？それとも続きそう？",
+        response: {
+          answer: "前問の具体的な要因を十分に特定できていないため、この資料だけで一時要因か継続要因かは分類しません。判断には、経営陣による業績説明、セグメント実績、売上説明の追加確認が必要です。",
+          sources: [sourceToEvidence(filing.sourceChunks[0])]
+        },
+        responsePath: "fallback",
+        debug: {
+          questionIntent: "driver_durability_followup",
+          responsePath: "fallback",
+          fallbackReason: "low_quality_answer",
+          sourceIdsValid: true,
+          contentMode: "full",
+          geminiCalled: true,
+          geminiSucceeded: true,
+          schemaValid: true,
+          sourceGateApplied: true,
+          sourceGateSufficient: false,
+          followupPreviousAnswer: testCase.previousAnswer,
+          modelProvider: "openai",
+          modelName: "gpt-5-nano"
+        },
+        env: {} as Env,
+        config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+        timings: createChatTimingTracker(),
+        includeWebSupplement: false
+      });
+
+      expect(response.answer).toContain("前問で挙がっていた売上要因候補");
+      for (const expected of testCase.expected) {
+        expect(response.answer).toContain(expected);
+      }
+      expect(response.answer).not.toContain("前問の具体的な要因を十分に特定");
+      expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q04_previous_answer_driver_candidate_repair"]));
+      expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+    }
+  });
+
+  it("extracts baseline-style airline margin drivers from the previous answer for Q06 follow-ups", async () => {
+    const filing = makeFiling({ ticker: "DAL", companyName: "Delta Air Lines, Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "利益率の方向は確認できますが、具体的な利益率要因は十分に特定できません。そのため、この資料だけで一時要因か構造的変化かは分類しません。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "margin_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: false,
+        followupPreviousAnswer: "本文では、原価・人件費・燃料費などのコスト、販管費・開発費などの営業費用が利益率や利益の動きを見る材料として出ています。",
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("前問で挙がっていた利益率要因候補");
+    expect(response.answer).toContain("製造コスト");
+    expect(response.answer).toContain("人件費");
+    expect(response.answer).toContain("燃料費");
+    expect(response.answer).toContain("販売管理費");
+    expect(response.answer).not.toContain("具体的な利益率要因は十分に特定できません");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q06_previous_answer_margin_candidate_repair"]));
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("does not reuse a previous Q06 answer that only points to tax mechanics", async () => {
+    const filing = makeFiling({ ticker: "MU", companyName: "Micron Technology, Inc." });
+    const answer = "前問の具体的な利益率要因が十分に特定できていません。そのため、選択された資料だけで一時要因か構造的変化かは分類しません。";
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer,
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "margin_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: false,
+        followupPreviousAnswer: "前問では Pillar Two と noncurrent income taxes payable の増加が主な説明でした。",
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toBe(answer);
+    expect(response.debug?.sourceRepairLabels ?? []).not.toContain("q06_previous_answer_margin_candidate_repair");
+  });
+
+  it("uses ad-platform cost drivers from the previous Q06 answer", async () => {
+    const filing = makeFiling({ ticker: "GOOGL", companyName: "Alphabet Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "確認できているのは、純利益が625.8億ドル、前年同期比81.2%という点です。ただし、利益率変化の具体的な要因は十分に特定できていません。そのため、選択された資料だけで一時要因か構造的変化かは分類しません。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "margin_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: false,
+        followupPreviousAnswer: "改善/悪化の要因としては、売上総利益を含むコストの増加（減価償却費、TAC、コンテンツ調達費、従業員報酬など）も同時に発生していることが挙げられ、これが営業利益の伸びを抑制する要因となっています。",
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("前問で挙がっていた利益率要因候補");
+    expect(response.answer).toContain("製造コスト");
+    expect(response.answer).toContain("減価償却費");
+    expect(response.answer).toContain("トラフィック獲得コスト");
+    expect(response.answer).toContain("コンテンツ調達費");
+    expect(response.answer).toContain("人件費");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q06_previous_answer_margin_candidate_repair"]));
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("classifies source-insufficient Q06 fallbacks as margin-driver missing rather than revenue-driver missing", async () => {
+    const filing = makeFiling({ ticker: "KO", companyName: "The Coca-Cola Company" });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "営業利益は 43.6億ドル で、前年同期比 19.1%増です。利益率の方向は確認できますが、改善/悪化の具体的な要因は十分に特定できません。判断には、コスト、mix、pricing、営業費用、provision、restructuring、impairment、segment margin の説明が必要です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "margin_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: false,
+        sourceGateMissingSourceTypes: ["margin discussion", "cost discussion", "segment margin"],
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.debug?.fallbackCategory).toBe("source_insufficient");
+    expect(response.debug?.fallbackUserReason).toBe("margin_driver_sources_missing");
+    expect(response.debug?.fallbackUserReason).not.toBe("revenue_driver_sources_missing");
+    expect(response.debug?.missingEvidenceLabelsJa).toEqual(expect.arrayContaining(["利益率・採算性の説明"]));
+    expect(response.answer).not.toMatch(/\bmix\b|pricing|provision|restructuring|impairment|segment margin/i);
+  });
+
+  it("keeps source-insufficient Q03 fallbacks classified as revenue-driver missing", async () => {
+    const filing = makeFiling({ ticker: "MSFT", companyName: "Microsoft Corp" });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "売上成長、または減収の主な要因は？",
+      response: {
+        answer: "売上高は812.7億ドルで、前年同期比16.7%です。ただし、この資料だけだと会社固有の売上要因までは追いきれません。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "yoy_change",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: false,
+        sourceGateMissingSourceTypes: ["profitability discussion", "segment margin"],
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.debug?.fallbackUserReason).toBe("revenue_driver_sources_missing");
+    expect(response.debug?.fallbackUserReason).not.toBe("margin_driver_sources_missing");
   });
 
   it("rewrites globally banned generic phrases before returning a final answer", async () => {
@@ -706,6 +1273,188 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).toBe("売上高は 10.4億ドル で、前年同期比 3.1%減 です。");
   });
 
+  it("replaces generic revenue-breakdown category labels with a source-insufficient answer", async () => {
+    const filing = makeFiling({ ticker: "KO", companyName: "The Coca-Cola Company" });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "直近決算の売上はどうだった？",
+      response: {
+        answer: "主な売上区分: 厳密な内訳は資料中で「geography revenue」として区分されています。大きい区分: geography revenue が最大の売上区分です。変化の方向: YoYで約12.1%増加しています。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "revenue_snapshot",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.answer).toContain("会社固有の売上の柱");
+    expect(response.answer).toContain("分類名だけでは、どの事業が大きいか・どこが伸びたかまでは判断しません");
+    expect(response.answer).not.toContain("geography revenue");
+    expect(response.debug?.fallbackCategory).toBe("source_insufficient");
+    expect(response.debug?.fallbackUserReason).toBe("revenue_breakdown_sources_missing");
+    expect(response.debug?.guardLabels).toEqual(expect.arrayContaining(["revenue_breakdown_generic_category_only"]));
+  });
+
+  it("replaces baseline-style total-revenue-only breakdown answers", async () => {
+    const examples = [
+      {
+        ticker: "MU",
+        question: "直近決算の売上はどうだった？",
+        questionIntent: "revenue_snapshot",
+        answer: "主な売上区分: 売上高。大きい区分: なし（区分別の内訳は本資料には記載されていません）。変化があればその方向: YoYで約345.72%増となっています。"
+      },
+      {
+        ticker: "MSFT",
+        question: "どのセグメントや地域が伸びた？弱かった部分は？",
+        questionIntent: "segment_driver",
+        answer: "主な売上区分: 売上高。大きい区分: セグメント別内訳は資料内で具体のセグメント名は示されていません。変化の方向: YoYで売上高は16.7%増。"
+      },
+      {
+        ticker: "TSLA",
+        question: "直近決算の売上はどうだった？",
+        questionIntent: "revenue_snapshot",
+        answer: "主な売上区分: 売上高は 0.9億ドル。大きい区分: 総売上高（Revenues）として公開。変化: YoY -2.9% 増減。この資料だけでは分からない内訳: 売上の製品別・地域別の内訳は提供データに含まれていません。"
+      },
+      {
+        ticker: "LLY",
+        question: "どのセグメントや地域が伸びた？弱かった部分は？",
+        questionIntent: "segment_driver",
+        answer: "主な売上区分: セグメント別の売上は公表された全体売上高に関する言及のみで、個別セグメント別の数値は本資料からは読み取れません。大きい区分: 大きな区分の内訳は明示されていません。"
+      },
+      {
+        ticker: "MSFT",
+        question: "どのセグメントや地域が伸びた？弱かった部分は？",
+        questionIntent: "segment_driver",
+        answer: "主な売上区分: セグメント別の売上高の内訳は本文の要約には示されていません。 大きい区分としては売上高全体が前年比16.7%増の812.7億ドルとなっていますが、どのセグメントや地域が伸びたかの内訳はこの資料だけでは分かりません。"
+      },
+      {
+        ticker: "JPM",
+        question: "どのセグメントや地域が伸びた？弱かった部分は？",
+        questionIntent: "segment_driver",
+        answer: "主な売上区分: 売上高全体は前年度比2.8%増。 大きい区分や地域別の内訳は本資料の提供情報では不明。 変化の方向としては全体の成長は緩やか、ただしセグメント別の寄与度や地域別の詳細は分からない。 この資料だけでは分からない内訳: セグメント別の売上や地域別の内訳、各セグメントの成長率。"
+      },
+      {
+        ticker: "V",
+        question: "直近決算の売上はどうだった？",
+        questionIntent: "revenue_snapshot",
+        answer: "主な売上区分は service revenue が最大。 大きい区分としてはサービス売上が主力。 直近の売上は前年比で17.1%増の112.3億ドル。 この資料だけでは内訳の詳細な区分は分からない。"
+      },
+      {
+        ticker: "V",
+        question: "どのセグメントや地域が伸びた？弱かった部分は？",
+        questionIntent: "segment_driver",
+        answer: "セグメント別の内訳情報は本文で明示されていません。 大きい区分として売上高は全体で112.3億ドル、前年同期比17.1%増です。 変化の方向としては価値付加サービスが3ヶ月・6ヶ月ベースで増加、全体の伸びは取引量や処理件数の拡大が要因と説明されていますが、地域別や具体的セグメント別の伸び弱さはこの資料単体では分かりません。"
+      },
+      {
+        ticker: "MSFT",
+        question: "どのセグメントや地域が伸びた？弱かった部分は？",
+        questionIntent: "segment_driver",
+        answer: "主な売上区分: セグメント別売上高は公表値として全体売上高は812.7億ドル、前年同期比で増加。大きい区分についてはセグメント別内訳は本資料には記載なし。変化の方向としては前年比増加が示唆されるが、セグメント別の成長ドライバーや地域別の内訳は本資料では不明瞭。この資料だけでは分からない内訳: セグメント別の売上構成比、地域別の寄与、各大区分の個別成長率。"
+      },
+      {
+        ticker: "TSLA",
+        question: "どのセグメントや地域が伸びた？弱かった部分は？",
+        questionIntent: "segment_analysis",
+        answer: "主な売上区分: 売上高全体の内訳は提示されていません。 大きい区分: セグメント別の内訳は本資料には記載なし。 変化の方向: 全体売上高は前年比-2.9%減、規模の大きい区分の伸び/縮みは不明。 この資料だけでは分からない内訳: セグメント別、地域別の成長・不振の内訳は示されていません。"
+      },
+      {
+        ticker: "LLY",
+        question: "どのセグメントや地域が伸びた？弱かった部分は？",
+        questionIntent: "segment_driver",
+        answer: "主な売上区分は不明。 大きい区分や具体的なセグメント別の伸びの方向性は、提供された資料内のセグメント別売上の内訳情報が示されていません。 この資料だけでは分からない内訳。"
+      },
+      {
+        ticker: "V",
+        question: "どのセグメントや地域が伸びた？弱かった部分は？",
+        questionIntent: "segment_driver",
+        answer: "主な売上区分: 売上高全体を回答として扱います。 大きい区分としては支払い関連サービス全般が中心です。 変化の方向: 売上高は前年比で増加（YoY +17.1%）しています。 この資料だけでは分からない内訳: セグメント別の具体的な売上成長寄与（例：地域別、仕組み別の内訳）は明示されていません。"
+      }
+    ] as const;
+
+    for (const example of examples) {
+      const filing = makeFiling({ ticker: example.ticker });
+      const response = await finalizeChatResponse({
+        filing,
+        question: example.question,
+        response: {
+          answer: example.answer,
+          sources: [sourceToEvidence(filing.sourceChunks[0])]
+        },
+        responsePath: "openai",
+        debug: {
+          questionIntent: example.questionIntent,
+          responsePath: "openai",
+          fallbackReason: null,
+          sourceIdsValid: true,
+          contentMode: "full",
+          geminiCalled: true,
+          geminiSucceeded: true,
+          schemaValid: true,
+          modelProvider: "openai",
+          modelName: "gpt-5-nano"
+        },
+        env: {} as Env,
+        config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+        timings: createChatTimingTracker(),
+        includeWebSupplement: false
+      });
+
+      expect(response.responsePath).toBe("fallback");
+      expect(response.answer).toContain("会社固有の売上の柱");
+      expect(response.debug?.fallbackUserReason).toBe("revenue_breakdown_sources_missing");
+      expect(response.debug?.guardLabels).toContain("revenue_breakdown_generic_category_only");
+    }
+  });
+
+  it("does not downgrade revenue-breakdown answers with concrete company categories", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "どの売上区分が伸びてる？",
+      response: {
+        answer: "主な売上区分は Google Services と Google Cloud。大きい区分は Google Services で、YouTube ads は成長、Google Network は減少です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "segment_driver",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.answer).toContain("Google Services");
+    expect(response.debug?.fallbackUserReason).not.toBe("revenue_breakdown_sources_missing");
+    expect(response.debug?.guardLabels ?? []).not.toContain("revenue_breakdown_generic_category_only");
+  });
+
   it("rewrites remote business-model answers that lead with financial metrics", async () => {
     const filing = makeFiling();
     const response = await finalizeChatResponse({
@@ -734,9 +1483,9 @@ describe("Japanese-only final answer guard", () => {
       includeWebSupplement: false
     });
 
-    expect(response.responsePath).toBe("openai");
+    expect(response.responsePath).toBe("fallback");
     expect(response.debug?.sourceIdsValid).toBe(true);
-    expect(response.debug?.fallbackKind).toBe("none");
+    expect(response.debug?.fallbackKind).toBe("low_quality");
     expect(response.debug?.fallbackCategory).toBe("answer_quality_guard");
     expect(response.debug?.fallbackUserReason).toBe("answer_too_metric_only");
     expect(response.debug?.modelProvider).toBe("openai");
@@ -745,6 +1494,40 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).not.toContain("source");
     expect(response.answer).not.toMatch(/^(この会社は)?主に?売上/);
     expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("rewrites generic product-or-service business-model answers", async () => {
+    const filing = makeFiling({ ticker: "MSFT", companyName: "Microsoft Corp" });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "この会社は何で儲けている？",
+      response: {
+        answer: "主な収益源は顧客との契約に基づく売上高で、製品やサービスの提供を通じて収益を上げています。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "business_overview",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.debug?.fallbackUserReason).toBe("business_model_sources_missing");
+    expect(response.answer).toContain("事業内容");
+    expect(response.answer).not.toContain("製品やサービスの提供");
   });
 
   it("preserves business-model answers that start with what the company sells", async () => {
@@ -913,7 +1696,8 @@ describe("Japanese-only final answer guard", () => {
       includeWebSupplement: false
     });
 
-    expect(response.responsePath).toBe("openai");
+    expect(response.responsePath).toBe("fallback");
+    expect(response.debug?.fallbackKind).toBe("low_quality");
     expect(response.debug?.fallbackCategory).toBe("answer_quality_guard");
     expect(response.debug?.fallbackUserReason).toBe("answer_too_metric_only");
     expect(response.answer).toBe("この会社は主に半導体関連のソリューションを提供し、売上は主に製品の販売から稼いでいます。");
@@ -994,6 +1778,94 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).not.toContain("億USD");
   });
 
+  it("does not treat taxes or expenses as revenue drivers", async () => {
+    const filing = makeFiling({ ticker: "MU", companyName: "Micron Technology, Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "売上成長、または減収の主な要因は？",
+      response: {
+        answer: "売上高は414.6億ドルで、前年同期比345.7%増です。本文では、higher noncurrent income taxes payable related to the implementation of Pillar Two が売上変化の要因として説明されています。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "revenue_driver",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.debug?.fallbackCategory).toBe("source_insufficient");
+    expect(response.debug?.fallbackUserReason).toBe("revenue_driver_sources_missing");
+    expect(response.debug?.guardLabels).toContain("revenue_driver_non_revenue_cause_removed");
+    expect(response.answer).toContain("売上の増減は確認できます");
+    expect(response.answer).toContain("売上以外の損益項目だけでは、売上要因として扱いません");
+    expect(response.answer).not.toContain("Pillar Two");
+    expect(response.answer).not.toContain("income taxes payable");
+  });
+
+  it("does not treat JPM expense wording or Google TAC as revenue drivers", async () => {
+    const cases = [
+      {
+        ticker: "JPM",
+        answer: "売上高は 1,824.5億ドル で、前年同期比 2.8%増 です。本文では、higher brokerage expenseとdistribution fees、higher auto lease depreciationとcontinued investments in technologyとmarketing、as well as higher 稼働率 expense が売上変化の要因として説明されています。",
+        forbidden: /brokerage|distribution fees|auto lease depreciation|technology|marketing|稼働率 expense|ブローカー費用|流通費用|オートリース減価償却|技術投資|マーケティング費用/
+      },
+      {
+        ticker: "GOOGL",
+        answer: "売上高は 1,099億ドル で、前年同期比 21.8%増 です。本文では、an increase in revenues、partially offset by an increase in TAC が売上変化の要因として説明されています。",
+        forbidden: /traffic acquisition|partially offset|一部相殺/
+      }
+    ] as const;
+
+    for (const testCase of cases) {
+      const filing = makeFiling({ ticker: testCase.ticker });
+      const response = await finalizeChatResponse({
+        filing,
+        question: "売上成長、または減収の主な要因は？",
+        response: {
+          answer: testCase.answer,
+          sources: [sourceToEvidence(filing.sourceChunks[0])]
+        },
+        responsePath: "openai",
+        debug: {
+          questionIntent: "revenue_driver",
+          responsePath: "openai",
+          fallbackReason: null,
+          sourceIdsValid: true,
+          contentMode: "full",
+          geminiCalled: true,
+          geminiSucceeded: true,
+          schemaValid: true,
+          modelProvider: "openai",
+          modelName: "gpt-5-nano"
+        },
+        env: {} as Env,
+        config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+        timings: createChatTimingTracker(),
+        includeWebSupplement: false
+      });
+
+      expect(response.responsePath).toBe("fallback");
+      expect(response.debug?.fallbackUserReason).toBe("revenue_driver_sources_missing");
+      expect(response.debug?.guardLabels).toContain("revenue_driver_non_revenue_cause_removed");
+      expect(response.answer).toContain("売上以外の損益項目だけでは、売上要因として扱いません");
+      expect(response.answer).not.toMatch(testCase.forbidden);
+    }
+  });
+
   it("replaces generic risk-summary style answers for liquidity/debt questions", async () => {
     const filing = makeFiling();
     const response = await finalizeChatResponse({
@@ -1070,6 +1942,419 @@ describe("Japanese-only final answer guard", () => {
     expect(response.debug?.sourceIdsValid).toBe(true);
   });
 
+  it("repairs raw-English risk answers using selected excerpts before falling back", async () => {
+    const filing = makeFiling();
+    const response = await finalizeChatResponse({
+      filing,
+      question: "この filing で重要なリスクは？",
+      response: {
+        answer: "Part I. Item 1A Risk Factors states that cybersecurity risk and costs related to excess properties, premises or facilities may affect results.",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "risk_factors",
+        responsePath: "openai",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        selectedSourceExcerpts: [
+          "Management's discussion and analysis on pages 146-149 includes a discussion of cybersecurity risk.",
+          "The Firm may incur costs in connection with excess properties, premises or facilities."
+        ],
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackKind).not.toBe("language_guard_fallback");
+    expect(response.debug?.languageGuardOk).toBe(true);
+    expect(response.debug?.finalAnswerLanguageLabels).toContain("answer_repaired_to_japanese");
+    expect(response.debug?.sourceRepairLabels).toContain("language_guard_source_backed_repair");
+    expect(response.answer).toContain("サイバーセキュリティ");
+    expect(response.answer).toContain("不動産・施設コスト");
+    expect(response.answer).not.toContain("cybersecurity risk");
+    expect(response.answer).not.toContain("excess properties");
+  });
+
+  it("repairs raw-English margin durability answers using selected cost excerpts", async () => {
+    const filing = makeFiling({ ticker: "DAL", companyName: "Delta Air Lines, Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "利益率要因として確認できるのは、Operating expense increased primarily due to refinery sales to third parties, salaries and aircraft fuel costs...です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "margin_durability_followup",
+        responsePath: "openai",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        selectedSourceExcerpts: [
+          "Total operating expense increased primarily due to higher expenses related to refinery sales to third parties, salaries and related costs and aircraft fuel costs.",
+          "Total operating cost per available seat mile increased, while non-fuel unit cost also increased."
+        ],
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackKind).not.toBe("language_guard_fallback");
+    expect(response.debug?.languageGuardOk).toBe(true);
+    expect(response.debug?.finalAnswerLanguageLabels).toContain("answer_repaired_to_japanese");
+    expect(response.answer).toContain("利益率要因候補");
+    expect(response.answer).toContain("営業費用");
+    expect(response.answer).toContain("燃料費");
+    expect(response.answer).toContain("一時要因か構造的変化かは断定しません");
+    expect(response.answer).not.toContain("Operating expense");
+    expect(response.answer).not.toContain("aircraft fuel");
+  });
+
+  it("accepts source-gate-passed Q06 evidence fallback as source-backed answer", async () => {
+    const filing = makeFiling({ ticker: "NVDA", companyName: "NVIDIA Corporation" });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "利益率要因として確認できるのは、在庫評価、価格、製造コストです。一時要因か構造的変化かは、このfilingだけでは断定しません。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "margin_durability_followup",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        fallbackKind: "evidence_slot",
+        fallbackKindSource: "model_quality_control",
+        evidenceFallbackUsed: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        selectedSourceExcerpts: [
+          "Cost of revenue includes manufacturing support costs, inventory provisions, tariffs and shipping costs."
+        ],
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackReason).toBeNull();
+    expect(response.debug?.fallbackKind).toBe("none");
+    expect(response.debug?.fallbackKindSource).toBe("finalizer");
+  });
+
+  it("accepts source-backed Q06 answers even when runtime intent stayed margin profitability", async () => {
+    const filing = makeFiling({ ticker: "DAL", companyName: "Delta Air Lines, Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "前問の利益率要因候補として確認できるのは、営業費用、燃料費、人件費、単位コストです。ただし、選択された抜粋だけでは一時要因か構造的変化かは断定しません。次に見るべき指標は、営業費用、燃料費、人件費、単位コストです。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "margin_profitability",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        fallbackUserReason: "margin_driver_sources_missing",
+        fallbackKind: "evidence_slot",
+        fallbackKindSource: "model_quality_control",
+        evidenceFallbackUsed: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        selectedSourceExcerpts: [
+          "Total operating expense increased primarily due to salaries and related costs and aircraft fuel costs.",
+          "Total operating cost per available seat mile increased, while non-fuel unit cost also increased."
+        ],
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackReason).toBeNull();
+    expect(response.debug?.fallbackKind).toBe("none");
+  });
+
+  it("accepts source-gate-passed hard follow-up answers inferred from the question text", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも継続しそう？",
+      response: {
+        answer: "前問の売上要因は、販売数量、価格実現、エンドユーザー向け機械販売、ディーラー在庫 に関する説明が中心です。提出資料には次期の販売数量や価格実現への見通しも示されていますが、これだけで継続性は断定しません。次に見るべき指標は、販売数量、価格実現、エンドユーザー向け機械販売、ディーラー在庫です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        fallbackKind: "evidence_slot",
+        fallbackKindSource: "model_quality_control",
+        evidenceFallbackUsed: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        selectedSourceExcerpts: [
+          "Sales volume, price realization, end user demand and dealer inventory were discussed."
+        ],
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackReason).toBeNull();
+    expect(response.debug?.fallbackKind).toBe("none");
+  });
+
+  it("does not accept source-gate-passed hard follow-up answers with no substantive driver", async () => {
+    const filing = makeFiling({ ticker: "KO", companyName: "The Coca-Cola Company" });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "営業利益は 43.6億ドル で、前年同期比 19.1%増 です。利益率の方向は確認できますが、改善/悪化の具体的な要因は十分に特定できません。判断には、コスト、構成、価格改定、営業費用、引当、構造改革費用、減損、セグメント利益率 の説明が必要です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        fallbackKind: "evidence_slot",
+        fallbackKindSource: "model_quality_control",
+        evidenceFallbackUsed: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        selectedSourceExcerpts: [
+          "The selected excerpt is a general filing introduction and does not discuss operating performance."
+        ],
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("fallback");
+    expect(response.debug?.fallbackKind).toBe("evidence_slot");
+  });
+
+  it("repairs source-gate-passed Q06 under-answers from margin driver evidence slots", async () => {
+    const filing = makeFiling({ ticker: "KO", companyName: "The Coca-Cola Company" });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "営業利益は 43.6億ドル で、前年同期比 19.1%増 です。利益率の方向は確認できますが、改善/悪化の具体的な要因は十分に特定できません。判断には、コスト、構成、価格改定、営業費用、引当、構造改革費用、減損、セグメント利益率 の説明が必要です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        fallbackKind: "evidence_slot",
+        fallbackKindSource: "model_quality_control",
+        evidenceFallbackUsed: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        sourceGateEvidenceSlots: {
+          confirmedMetricMovement: {
+            metricName: "純利益",
+            currentValue: "39.2億ドル",
+            comparisonValue: "33.3億ドル",
+            changePct: "17.8%",
+            comparisonBasis: "前年同期比",
+            sourceIds: ["S9"]
+          },
+          companyExplainedDrivers: [],
+          segmentOrBusinessSignals: [
+            {
+              fact: "Operating income increased primarily driven by concentrate sales volume, favorable price/mix and lower operating expenses, partially offset by marketing spending and commodity costs.",
+              sourceIds: ["S5"],
+              confidence: "medium"
+            }
+          ],
+          marginDriverCount: 3,
+          unknowns: [],
+          sourceLimitations: [],
+          failureLabels: []
+        },
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        selectedSourceExcerpts: [
+          "Operating income increased primarily driven by concentrate sales volume, favorable price/mix and lower operating expenses, partially offset by marketing spending and commodity costs."
+        ],
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackReason).toBeNull();
+    expect(response.debug?.fallbackKind).toBe("none");
+    expect(response.debug?.sourceRepairLabels).toContain("q06_source_backed_followup_repair");
+    expect(response.answer).toContain("利益率要因候補");
+    expect(response.answer).toContain("営業費用");
+    expect(response.answer).toContain("価格・単価");
+  });
+
+  it("repairs generic margin durability follow-ups when selected context is margin evidence", async () => {
+    const filing = makeFiling({ ticker: "AAPL", companyName: "Apple Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "これは一時要因？それとも構造的な変化？",
+      response: {
+        answer: "一時的とは断定しにくいです。本文では、higher net sales of Pro models が売上変化の要因として説明されています。価格、数量、需要、コスト、mixのような営業要因は次回も確認する論点です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "risk_factors",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        lowQualityReason: "profit_cause_revenue_only",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        selectedSourceSectionFamilies: ["margin_discussion", "cost_discussion"],
+        selectedSourceLabels: ["10-Q Margin and profitability discussion"],
+        selectedSourceExcerpts: [
+          "Gross margin changed due to product mix, cost of sales, foreign exchange and tariff exposure."
+        ],
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackReason).toBeNull();
+    expect(response.debug?.languageGuardOk).toBe(true);
+    expect(response.debug?.sourceRepairLabels).toContain("language_guard_source_backed_repair");
+    expect(response.answer).toContain("利益率要因候補");
+    expect(response.answer).toContain("製品・顧客ミックス");
+    expect(response.answer).not.toMatch(/higher net sales|mix|foreign exchange|tariff/i);
+  });
+
+  it("repairs MU-style average-selling-price and bit-shipment durability follow-ups", async () => {
+    const filing = makeFiling({ ticker: "MU", companyName: "Micron Technology, Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "その要因は一時的？それとも続きそう？",
+      response: {
+        answer: "前問の要因は、3 % Other operating income expense net 15 — % 26 — % 56 1 %です。継続性の判断には追加確認が必要です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "fallback",
+      debug: {
+        questionIntent: "yoy_change",
+        responsePath: "fallback",
+        fallbackReason: "low_quality_answer",
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        sourceGateApplied: true,
+        sourceGateSufficient: true,
+        sourceGateEvidenceSlots: {
+          companyExplainedDrivers: [
+            {
+              category: "semiconductor_equipment_driver_durability_followup",
+              driver: "Revenue increased primarily due to increases in average selling prices and bit shipments, with favorable mix and manufacturing cost reductions.",
+              sourceIds: ["S1"],
+              confidence: "medium"
+            }
+          ],
+          segmentOrBusinessSignals: []
+        },
+        selectedSourceExcerpts: [
+          "AEBU revenue increased 71%, primarily due to increases in average selling prices and bit shipments. Gross margins improved due to favorable mix and manufacturing cost reductions."
+        ],
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.debug?.fallbackReason).toBeNull();
+    expect(response.debug?.languageGuardOk).toBe(true);
+    expect(response.debug?.sourceRepairLabels).toContain("language_guard_source_backed_repair");
+    expect(response.answer).toContain("平均販売価格");
+    expect(response.answer).toContain("出荷量");
+    expect(response.answer).not.toMatch(/Other operating|average selling prices|bit shipments/i);
+  });
+
   it("normalizes raw USD and comma-decimal currency strings", async () => {
     const filing = makeFiling();
     const response = await finalizeChatResponse({
@@ -1114,7 +2399,7 @@ describe("Japanese-only final answer guard", () => {
       filing,
       question: "その要因は一時的？それとも続きそう？",
       response: {
-        answer: "売上高 1,824억4700万 USD、総売上高は 7131.63 亿 USD、WMT売上高7131.63亿美元、比較値680.985亿美元、2025年売上高67.589十億 USD、7.9十億ドルの影響、純利益は57億ドルです。2026年第1四半期の在庫増加が1兆円超の規模と seasonality に依存します。",
+        answer: "売上高 1,824억4700万 USD、総売上高は 7131.63 亿 USD、WMT売上高7131.63亿美元、比較値680.985亿美元、2025年売上高67.589十億 USD、7.9十億ドルの影響、現金等は13.8 млрдドル、純利益は57億ドルです。短期债務の maturities と2026年第1四半期の在庫増加が1兆円超の規模と seasonality に依存します。",
         sources: [sourceToEvidence(filing.sourceChunks[0])]
       },
       responsePath: "openai",
@@ -1141,9 +2426,13 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).toContain("681.0億ドル");
     expect(response.answer).toContain("675.9億ドル");
     expect(response.answer).toContain("79.0億ドル");
+    expect(response.answer).toContain("138.0億ドル");
+    expect(response.answer).toContain("短期債務の 満期");
     expect(response.answer).toContain("金額規模");
     expect(response.answer).toContain("季節性");
     expect(response.answer).not.toContain("억");
+    expect(response.answer).not.toContain("млрд");
+    expect(response.answer).not.toContain("债務");
     expect(response.answer).not.toContain("亿");
     expect(response.answer).not.toContain("美元");
     expect(response.answer).not.toContain("十億 USD");
@@ -1236,7 +2525,7 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).toContain("コスト");
     expect(response.answer).toContain("関税");
     expect(response.answer).toContain("新興国");
-    expect(response.answer).toContain("Construction Industries");
+    expect(response.answer).toContain("建設機械");
     expect(response.answer).not.toContain("678.9億ドル");
     expect(response.answer).not.toContain("88.82百万ドル");
     expect(response.answer).not.toContain("一時的というより");
@@ -1575,6 +2864,155 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).toBe(answer);
   });
 
+  it("normalizes English revenue labels without corrupting Resource Industries", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "セグメント別の売上は？",
+      response: {
+        answer: "主な売上区分は Construction Industries と Resource Industries です。Geography revenue と segment revenue も確認できます。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "revenue_breakdown",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.responsePath).toBe("openai");
+    expect(response.answer).toContain("建設機械");
+    expect(response.answer).toContain("資源産業");
+    expect(response.answer).toContain("地域別売上");
+    expect(response.answer).toContain("セグメント別売上");
+    expect(response.answer).not.toContain("Re資料");
+    expect(response.answer).not.toContain("Geography revenue");
+    expect(response.answer).not.toContain("segment revenue");
+  });
+
+  it("normalizes baseline CAT mixed source and revenue wording", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "どのセグメントや地域が伸びた？弱かった部分は？",
+      response: {
+        answer: "主な売上区分は Construction Industries と Re資料 Industries の2つです。今期の売上は 67.589 billion USD で、内訳として分かる範囲は全体 Revenue の増加率とセグメントの説明のみです。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "segment_driver",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("建設機械");
+    expect(response.answer).toContain("資源産業");
+    expect(response.answer).toContain("675.9億ドル");
+    expect(response.answer).toContain("全体売上");
+    expect(response.answer).not.toContain("Re資料");
+    expect(response.answer).not.toContain("billion USD");
+    expect(response.answer).not.toContain("Revenue");
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("normalizes common hybrid English/Japanese driver wording in final answers", async () => {
+    const filing = makeFiling({ ticker: "JPM", companyName: "JPMorgan Chase & Co." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "利益率に影響した費用項目は？",
+      response: {
+        answer: "本文では、higher brokerage expenseとdistribution fees、higher auto lease depreciationとcontinued investments in technologyとmarketing、as well as higher 稼働率 expense が利益率に影響した項目として説明されています。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "margin_driver",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("ブローカー費用の増加");
+    expect(response.answer).toContain("流通費用");
+    expect(response.answer).toContain("オートリース減価償却の増加");
+    expect(response.answer).toContain("継続的な技術投資");
+    expect(response.answer).toContain("稼働関連費用の増加");
+    expect(response.answer).not.toMatch(/higher|distribution fees|continued investments in technology|expense/i);
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
+  it("normalizes source-label discussion phrases that leak into margin durability fallbacks", async () => {
+    const filing = makeFiling({ ticker: "CAT", companyName: "Caterpillar Inc." });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "この説明を整えて",
+      response: {
+        answer: "判断には、sales volume、price-コスト spread discussion、製造コスト discussion、SG&A/R&D discussion、セグメント実績、価格実現 の説明が必要です。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "unknown",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("販売数量");
+    expect(response.answer).toContain("価格とコスト差の説明");
+    expect(response.answer).toContain("製造コストの説明");
+    expect(response.answer).toContain("販管費・研究開発費の説明");
+    expect(response.answer).not.toMatch(/sales volume|price-コスト|discussion|SG&A\/R&D/i);
+    expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
+  });
+
   it("removes bank-specific cash-flow wording from non-bank answers", async () => {
     const filing = makeFiling({ ticker: "AAPL", companyName: "Apple Inc." });
     const response = await finalizeChatResponse({
@@ -1604,6 +3042,44 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).toContain("営業CFは、運転資本");
     expect(response.answer).toContain("キャッシュフロー計算書");
     expect(response.answer).not.toMatch(/貸出|預金|信用損失|deposit base/i);
+    expect(response.debug?.fallbackCategory).toBe("sanitation_guard");
+    expect(response.debug?.fallbackUserReason).toBe("wrong_sector_wording");
+  });
+
+  it("does not treat non-bank filings as financial just because source text mentions financial statements", async () => {
+    const filing = makeFiling({
+      ticker: "CAT",
+      companyName: "Caterpillar Inc.",
+      sourceText: "Management discusses financial statements, customer financing subsidiaries, loans to dealers, and cash provided by operating activities."
+    });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "営業CFはどう見る？",
+      response: {
+        answer: "営業CFはプラスですが、金融機関ではdeposit base、loan book、net interest incomeも合わせて見る必要があります。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "cash_flow",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("営業CFは、運転資本");
+    expect(response.answer).not.toMatch(/金融機関|deposit base|loan book|net interest income/i);
     expect(response.debug?.fallbackCategory).toBe("sanitation_guard");
     expect(response.debug?.fallbackUserReason).toBe("wrong_sector_wording");
   });
@@ -1715,6 +3191,42 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).not.toContain("schema");
   });
 
+  it("normalizes Coca-Cola margin wording that mixes short English labels", async () => {
+    const filing = makeFiling({ ticker: "KO", companyName: "The Coca-Cola Company" });
+    const response = await finalizeChatResponse({
+      filing,
+      question: "利益率が改善、または悪化した理由は？",
+      response: {
+        answer: "改善/悪化の要因としては、地域別の販売量増加（ concentrate 販売数量 の増加）、価格/構成の有利、外国為替の影響が寄与しています。North America では販売量増、Bottling Investments は unit case volume 増加と re franchising の影響もありました。",
+        sources: [sourceToEvidence(filing.sourceChunks[0])]
+      },
+      responsePath: "openai",
+      debug: {
+        questionIntent: "margin_driver",
+        responsePath: "openai",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode: "full",
+        geminiCalled: true,
+        geminiSucceeded: true,
+        schemaValid: true,
+        modelProvider: "openai",
+        modelName: "gpt-5-nano"
+      },
+      env: {} as Env,
+      config: { ...DEFAULT_REMOTE_CONFIG, webSupplementEnabled: false },
+      timings: createChatTimingTracker(),
+      includeWebSupplement: false
+    });
+
+    expect(response.answer).toContain("原液販売数量");
+    expect(response.answer).toContain("北米");
+    expect(response.answer).toContain("ボトリング投資");
+    expect(response.answer).toContain("ユニットケース販売数量");
+    expect(response.answer).toContain("再フランチャイズ化");
+    expect(response.answer).not.toMatch(/concentrate|North America|Bottling Investments|unit case volume|re franchising/i);
+  });
+
   it("rewrites unsupported operating-margin growth wording conservatively", async () => {
     const filing = makeFiling({ ticker: "WMT", companyName: "Walmart Inc." });
     const response = await finalizeChatResponse({
@@ -1815,13 +3327,13 @@ describe("Japanese-only final answer guard", () => {
   });
 });
 
-function makeFiling(overrides: Partial<Pick<FilingCacheRecord, "ticker" | "companyName">> = {}): FilingCacheRecord {
+function makeFiling(overrides: Partial<Pick<FilingCacheRecord, "ticker" | "companyName">> & { sourceText?: string } = {}): FilingCacheRecord {
   const chunk: SourceChunkRecord = {
     sourceId: "S1",
     sectionType: "md_a",
     sectionTitle: "Item 7",
     sourceLabel: "10-K Item 7",
-    text: "Liquidity discussion mentions cash and debt.",
+    text: overrides.sourceText ?? "Liquidity discussion mentions cash and debt.",
     startOffset: 0,
     endOffset: 45,
     sortOrder: 1

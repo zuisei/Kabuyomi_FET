@@ -482,6 +482,11 @@ function intentSourceScore(source: SourceChunkRecord, questionIntent: QuestionIn
       return scoreMatches(haystack, [
         [/cash flow|liquidity|capital resources|operating activities|free cash flow|repurchase|dividend|capital allocation/i, 80]
       ]);
+    case "liquidity_debt":
+      return scoreMatches(haystack, [
+        [/liquidity|capital resources|cash flow|operating activities|cash and cash equivalents|debt|borrowings?|maturit|credit facilit|revolver|commercial paper|notes payable|capital lease|finance lease/i, 95],
+        [/repurchase|dividend|capital allocation|working capital|cash requirements/i, 45]
+      ]);
     case "risk_factors":
       if (isAccountingEstimateRiskDistractor(haystack)) {
         return 0;
@@ -522,6 +527,8 @@ function metricSourceScore(source: SourceChunkRecord, questionIntent: QuestionIn
         : 0;
     case "cash_flow":
       return /cash|operatingcashflow|operating activities|netincome|revenue|sales/.test(haystack) ? 35 : 0;
+    case "liquidity_debt":
+      return /cash|operatingcashflow|operating activities|debt|borrowings?|maturit|liabilities|credit/.test(haystack) ? 35 : 0;
     case "historical_comparison":
       return /revenue|sales|net sales|operatingincome|operating income|netincome|net income|profit|income/.test(haystack)
         ? 35
@@ -679,6 +686,8 @@ function supplementalPattern(questionIntent: QuestionIntent): RegExp {
       return /margin|gross profit|operating income|net income|profitability|cost|pricing|expenses?/gi;
     case "cash_flow":
       return /cash flow|liquidity|capital resources|operating activities|repurchase|dividend|capital allocation/gi;
+    case "liquidity_debt":
+      return /liquidity|capital resources|cash flow|operating activities|cash and cash equivalents|debt|borrowings?|maturit|credit facilit|revolver|commercial paper|notes payable|cash requirements|working capital/gi;
     case "yoy_change":
     case "historical_comparison":
     case "unknown":
@@ -704,6 +713,8 @@ function supplementalSectionTitle(questionIntent: QuestionIntent): string {
       return "Profitability context";
     case "cash_flow":
       return "Cash flow context";
+    case "liquidity_debt":
+      return "Cash flow / liquidity context";
     case "yoy_change":
     case "historical_comparison":
     case "unknown":

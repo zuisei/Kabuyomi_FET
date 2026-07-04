@@ -17,7 +17,9 @@ export function buildCacheKey(extractorVersion: string, cik: string, accessionNu
 }
 
 export function isCurrentCacheRecord(record: FilingCacheRecord, config: RemoteConfig): boolean {
-  return record.extractorVersion === config.extractorVersion && record.promptVersion === config.promptVersion;
+  return record.extractorVersion === config.extractorVersion &&
+    record.promptVersion === config.promptVersion &&
+    !looksLikeAmendedAnnualOrQuarterlyRecord(record);
 }
 
 export async function loadFilingByKey(filingKey: string, env: Env): Promise<FilingCacheRecord | null> {
@@ -70,4 +72,17 @@ export async function cacheLatestFilingMetadata(
     upsertLatestFilingAliases(extractorVersion, ticker, filingKey, env),
     latestFormType ? upsertSearchFormTypeCache(ticker, latestFormType, env) : Promise.resolve()
   ]);
+}
+
+function looksLikeAmendedAnnualOrQuarterlyRecord(record: FilingCacheRecord): boolean {
+  const documentName = (() => {
+    try {
+      return new URL(record.primaryDocumentUrl).pathname.split("/").filter(Boolean).pop()?.toLowerCase() ?? "";
+    } catch {
+      return record.primaryDocumentUrl.toLowerCase();
+    }
+  })();
+
+  return /(?:^|[-_])(10k|10q)a(?:[-_.]|$)/i.test(documentName) ||
+    /(?:^|[-_])10-[kq]a(?:[-_.]|$)/i.test(documentName);
 }

@@ -333,7 +333,7 @@ export function hasPeriodSpecificRevenueDriverText(text: string): boolean {
     /(up|down|increase|decrease|growth|decline|higher|lower).{0,220}(total net revenue|net revenue|net sales|sales and revenues|sales|revenue|comparable sales)/i.test(normalized);
   const hasCausalLanguage = /(driven by|due to|primarily due to|reflecting|reflected|attributable to|resulted from|resulting in|because of|partially offset|offset by|as a result)/i.test(normalized);
   const hasSectorDriver =
-    /(net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|card services|commodity prices?|crude demand|natural gas prices?|production volumes?|refining margins?|chemical margins?|upstream|downstream|sales volume|price realization|backlog|dealer inventory|equipment to end users|end-market demand|comparable sales|traffic|average ticket|transactions?|ecommerce|e-commerce|membership|unit volumes|iphone|product launches?|geographic segments?|services net sales|services revenue|product net sales|product revenue)/i.test(normalized);
+    /(net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|card services|commodity prices?|crude demand|natural gas prices?|production volumes?|refining margins?|chemical margins?|upstream|downstream|vehicle deliveries|deliveries|automotive revenues?|automotive sales|vehicle pricing|average selling price|energy generation|energy storage|services and other|sales volume|price realization|backlog|dealer inventory|equipment to end users|end-market demand|comparable sales|traffic|average ticket|transactions?|ecommerce|e-commerce|membership|unit volumes|iphone|product launches?|geographic segments?|services net sales|services revenue|product net sales|product revenue)/i.test(normalized);
   const hasCurrentPeriodCue = /(202[0-9]|fiscal|year ended|three months ended|quarter|current year|compared with|compared to|前年比|前年同期比|%)/i.test(normalized);
   if (hasEnergyRevenueDriverTerm(normalized) && !hasCurrentPeriodEnergyResultContext(normalized)) {
     return false;
@@ -395,7 +395,7 @@ function selectMarginDriverParagraphs(text: string): string[] {
 function splitMarginSearchParagraphs(text: string): string[] {
   const collapsed = text.replace(/\s+/g, " ").trim();
   const paragraphs = text
-    .split(/\n{2,}|(?<=\.)\s+(?=(?:Gross margin|Operating margin|Operating income|Segment operating profit|Net income|Provision for credit losses|Refining margins|Chemical margins|Upstream earnings|Downstream earnings)\b)/i)
+    .split(/\n{2,}|(?<=\.)\s+(?=(?:Gross margin|Automotive gross margin|Operating margin|Operating income|Segment operating profit|Net income|Provision for credit losses|Refining margins|Chemical margins|Upstream earnings|Downstream earnings)\b)/i)
     .map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
     .filter((paragraph) => paragraph.length >= 80 && paragraph.length <= 4_000)
     .filter((paragraph) => !looksLikeTocParagraph(paragraph));
@@ -404,7 +404,7 @@ function splitMarginSearchParagraphs(text: string): string[] {
   }
 
   const chunks: string[] = [];
-  const pattern = /gross margin|operating margin|operating income|segment operating profit|cost of sales|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|credit loss expense|price realization|manufacturing cost|markdown|shrink|inventory|refining margins?|chemical margins?|upstream earnings|downstream earnings|depreciation|depletion/gi;
+  const pattern = /gross margin|automotive gross margin|operating margin|operating income|segment operating profit|cost of sales|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|credit loss expense|vehicle pricing|average selling price|production costs?|warranty|restructuring|deliveries|price realization|manufacturing cost|markdown|shrink|inventory|refining margins?|chemical margins?|upstream earnings|downstream earnings|depreciation|depletion/gi;
   for (const match of collapsed.matchAll(pattern)) {
     const center = match.index ?? 0;
     const start = Math.max(0, center - 800);
@@ -420,13 +420,14 @@ function marginDriverParagraphScore(paragraph: string): number {
   }
   let score = 0;
   if (/(gross margin|operating margin|profit margin|gross profit|operating income|segment operating profit|net income)/i.test(paragraph)) score += 45;
-  if (/(cost of sales|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|credit loss expense|manufacturing costs?|markdowns?|shrink|inventory|fulfillment costs?|labor costs?|wage|refining margins?|chemical margins?|depreciation|depletion|impairment|restructuring)/i.test(paragraph)) score += 45;
+  if (/(cost of sales|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|credit loss expense|production costs?|manufacturing costs?|warranty|markdowns?|shrink|inventory|fulfillment costs?|labor costs?|wage|refining margins?|chemical margins?|depreciation|depletion|impairment|restructuring)/i.test(paragraph)) score += 45;
   if (/(increased|decreased|improved|declined|higher|lower|up|down|compared|%)/i.test(paragraph)) score += 30;
   if (/(driven by|primarily due to|reflecting|reflected|attributable to|resulted from|partially offset|offset by|because|expected|expects|outlook|continue|continued|temporary|one-time|uncertain|risk)/i.test(paragraph)) score += 45;
   if (/(products? gross margin|services gross margin|product mix|services mix|r&d|research and development|sg&a|sga|tariff|foreign exchange)/i.test(paragraph)) score += 30;
   if (/(gross margin rate|markdowns?|shrink|inventory|fulfillment|wage|labor|fuel|operating expense leverage|operating expense deleverage)/i.test(paragraph)) score += 35;
   if (/(price realization|price-cost|manufacturing costs?|volume leverage|cost absorption|dealer inventory|segment operating profit)/i.test(paragraph)) score += 35;
   if (/(refining margins?|chemical margins?|upstream earnings|downstream earnings|production costs?|operating expenses?)/i.test(paragraph)) score += 35;
+  if (/(automotive gross margin|vehicle pricing|average selling price|deliveries|production costs?|warranty|restructuring|energy generation|energy storage|services and other)/i.test(paragraph)) score += 35;
   if (isMarginDriverDistractor(paragraph)) score -= 140;
   return score;
 }
@@ -440,13 +441,13 @@ function hasPeriodSpecificMarginDriverText(text: string): boolean {
     return false;
   }
   const hasMarginTerm =
-    /(gross margin|operating margin|profit margin|gross profit|operating income|segment operating profit|net income|cost of sales|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|credit loss expense|manufacturing costs?|markdowns?|shrink|inventory|fulfillment costs?|labor costs?|wage|refining margins?|chemical margins?|depreciation|depletion|impairment|restructuring)/i.test(normalized);
+    /(gross margin|automotive gross margin|operating margin|profit margin|gross profit|operating income|segment operating profit|net income|cost of sales|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|credit loss expense|production costs?|manufacturing costs?|warranty|markdowns?|shrink|inventory|fulfillment costs?|labor costs?|wage|refining margins?|chemical margins?|depreciation|depletion|impairment|restructuring)/i.test(normalized);
   const hasPeriodMovement =
     /(increased|decreased|improved|declined|higher|lower|up|down|compared|year ended|three months ended|quarter|fiscal|202[0-9]|%)/i.test(normalized);
   const hasCausalOrDurability =
     /(driven by|primarily due to|reflecting|reflected|attributable to|resulted from|partially offset|offset by|because|expected|expects|outlook|continue|continued|temporary|one-time|uncertain|risk|headwind|tailwind|normalization|structural)/i.test(normalized);
   const hasSectorMarginSignal =
-    /(products? gross margin|services gross margin|product mix|services mix|r&d|research and development|sg&a|sga|tariff|foreign exchange|gross margin rate|markdowns?|shrink|inventory|fulfillment|wage|labor|fuel|price realization|price-cost|manufacturing costs?|volume leverage|cost absorption|dealer inventory|refining margins?|chemical margins?|upstream earnings|downstream earnings|production costs?)/i.test(normalized);
+    /(products? gross margin|services gross margin|automotive gross margin|product mix|services mix|vehicle pricing|average selling price|deliveries|warranty|r&d|research and development|sg&a|sga|tariff|foreign exchange|gross margin rate|markdowns?|shrink|inventory|fulfillment|wage|labor|fuel|price realization|price-cost|manufacturing costs?|volume leverage|cost absorption|dealer inventory|refining margins?|chemical margins?|upstream earnings|downstream earnings|production costs?)/i.test(normalized);
   return hasMarginTerm && hasPeriodMovement && (hasCausalOrDurability || hasSectorMarginSignal);
 }
 
@@ -465,7 +466,7 @@ function isMarginDriverDistractor(text: string): boolean {
 function chunkRevenueSearchText(text: string): string[] {
   const collapsed = text.replace(/\s+/g, " ").trim();
   const chunks: string[] = [];
-  const pattern = /total net revenue|net revenue|sales and revenues|sales and other operating revenue|net sales|comparable sales|upstream earnings|downstream earnings|energy products sales|record crude demand|refining margins|production volumes|sales volume|price realization|net interest income|noninterest revenue|investment banking fees/gi;
+  const pattern = /total net revenue|net revenue|sales and revenues|sales and other operating revenue|net sales|automotive revenues?|automotive sales|vehicle deliveries|deliveries|energy generation|energy storage|services and other|comparable sales|upstream earnings|downstream earnings|energy products sales|record crude demand|refining margins|production volumes|sales volume|price realization|net interest income|noninterest revenue|investment banking fees/gi;
   for (const match of collapsed.matchAll(pattern)) {
     const center = match.index ?? 0;
     const start = Math.max(0, center - 800);
@@ -485,6 +486,7 @@ function revenueDriverParagraphScore(paragraph: string): number {
   if (/(driven by|primarily due to|reflecting|reflected|attributable to|resulted from|partially offset|offset by)/i.test(paragraph)) score += 45;
   if (/(net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|card services)/i.test(paragraph)) score += 40;
   if (/(commodity prices?|crude demand|natural gas prices?|production volumes?|refining margins?|chemical margins?|upstream earnings|downstream earnings|energy products sales|upstream|downstream)/i.test(paragraph)) score += 40;
+  if (/(vehicle deliveries|deliveries|automotive revenues?|automotive sales|vehicle pricing|average selling price|energy generation|energy storage|services and other|automotive gross margin)/i.test(paragraph)) score += 40;
   if (/(sales volume|price realization|backlog|dealer inventory|equipment to end users|end-market demand)/i.test(paragraph)) score += 40;
   if (/(comparable sales|traffic|average ticket|transactions?|ecommerce|e-commerce|membership|unit volumes)/i.test(paragraph)) score += 40;
   if (isRevenueDriverDistractor(paragraph)) score -= 120;

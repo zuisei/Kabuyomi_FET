@@ -153,6 +153,7 @@ export interface ChatQualityControlDiagnostics {
   sourceGateMissingSourceTypes: string[];
   sourceGateFailureLabels: string[];
   sourceGateEvidenceSlots?: Record<string, unknown>;
+  followupPreviousAnswer?: string | null;
   sourceGateRetrievalRetryRecommended: boolean;
   retrievalRetryUsed: boolean;
   retrievalRetryOutcome: "improved" | "no_improvement" | "not_used";

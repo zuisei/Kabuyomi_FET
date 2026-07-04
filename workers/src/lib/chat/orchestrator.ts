@@ -1,5 +1,5 @@
 import type { Env, FilingCacheRecord } from "../../env";
-import type { GeminiChatAnswer } from "../../clients/gemini/types";
+import type { ChatFallbackKind, GeminiChatAnswer } from "../../clients/gemini/types";
 import { AppError } from "../errors";
 import { logErrorEvent, logEvent, logWarnEvent } from "../logging";
 import { DEFAULT_REMOTE_CONFIG, type RemoteConfig } from "../remote-config";
@@ -20,7 +20,9 @@ import {
   fallbackReasonForMissingValidSourceIds,
   fallbackReasonForNoSources,
   shouldLetModelTryBeforeDeterministic,
-  shouldPreferDeterministicBusinessOverview
+  shouldPreferDeterministicBusinessOverview,
+  shouldPreferDeterministicRevenueDrivers,
+  shouldPreferDeterministicMarginSnapshot
 } from "./route-policy";
 import {
   buildFallbackValidSourceIds,
@@ -206,7 +208,6 @@ export async function buildChatResponse(
       {
         questionIntent,
         responsePath: "deterministic",
-        fallbackReason: modelResponse.fallbackReason ?? "deterministic_repair",
         sourceIdsValid: deterministic.response.sources.length > 0,
         contentMode,
         geminiCalled: modelResponse.geminiCalled ?? true,
@@ -215,7 +216,86 @@ export async function buildChatResponse(
         retryAttempt: modelResponse.retryAttempt ?? 0,
         retryReason: modelResponse.retryReason ?? null,
         ...buildModelAttemptDebugFields(modelResponse),
-        ...buildContextDebugFields(contextPack)
+        ...buildContextDebugFields(contextPack),
+        fallbackReason: null,
+        sourceGateApplied: false,
+        sourceGatePassed: true,
+        sourceGateSufficient: true,
+        sourceGateFailureLabels: [],
+        sourceGateMissingSourceTypes: [],
+        sourceGateEvidenceSlots: {},
+        evidenceFallbackUsed: false,
+        fallbackKind: "none",
+        fallbackKindSource: "orchestrator",
+        sourceRepairLabels: ["business_overview_deterministic_repair"]
+      }
+    );
+    logDecision({
+      filing,
+      questionIntent,
+      responsePath: "deterministic",
+      geminiCalled: modelResponse.geminiCalled ?? true,
+      geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+      fallbackReason: null,
+      schemaValid: modelResponse.schemaValid ?? true,
+      sourceIdsValid: finalResponse.sources.length > 0,
+      sourceCount: finalResponse.sources.length,
+      contentMode,
+      contextPack,
+      retryAttempt: modelResponse.retryAttempt ?? 0,
+      retryReason: modelResponse.retryReason ?? null,
+      llmUsage: modelResponse.llmUsage
+    });
+    return finalResponse;
+  }
+
+  if (
+    deterministic?.strategy === "margin_snapshot" &&
+    shouldPreferDeterministicMarginSnapshot(
+      modelResponse.answer,
+      modelResponse.usedRemoteModel === true,
+      modelResponse.fallbackReason
+    )
+  ) {
+    logWarnEvent("chat_grounding_repair_used", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      reason: modelResponse.usedRemoteModel === true ? "weak_margin_driver_answer" : "margin_snapshot_remote_fallback"
+    });
+    logEvent("chat_path_selected", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      path: "deterministic",
+      strategy: deterministic.strategy
+    });
+    logChatLlmUsage(modelResponse, filing, "deterministic");
+
+    const finalResponse = await finalize(
+      deterministic.response,
+      "deterministic",
+      {
+        questionIntent,
+        responsePath: "deterministic",
+        sourceIdsValid: deterministic.response.sources.length > 0,
+        contentMode,
+        geminiCalled: modelResponse.geminiCalled ?? true,
+        geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+        schemaValid: modelResponse.schemaValid ?? true,
+        retryAttempt: modelResponse.retryAttempt ?? 0,
+        retryReason: modelResponse.retryReason ?? null,
+        ...buildModelAttemptDebugFields(modelResponse),
+        ...buildContextDebugFields(contextPack),
+        fallbackReason: null,
+        sourceGateApplied: false,
+        sourceGatePassed: true,
+        sourceGateSufficient: true,
+        sourceGateFailureLabels: [],
+        sourceGateMissingSourceTypes: [],
+        sourceGateEvidenceSlots: {},
+        evidenceFallbackUsed: false,
+        fallbackKind: "none",
+        fallbackKindSource: "orchestrator",
+        sourceRepairLabels: ["margin_snapshot_deterministic_repair"]
       }
     );
     logDecision({
@@ -225,6 +305,77 @@ export async function buildChatResponse(
       geminiCalled: modelResponse.geminiCalled ?? true,
       geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
       fallbackReason: modelResponse.fallbackReason ?? "deterministic_repair",
+      schemaValid: modelResponse.schemaValid ?? true,
+      sourceIdsValid: finalResponse.sources.length > 0,
+      sourceCount: finalResponse.sources.length,
+      contentMode,
+      contextPack,
+      retryAttempt: modelResponse.retryAttempt ?? 0,
+      retryReason: modelResponse.retryReason ?? null,
+      llmUsage: modelResponse.llmUsage
+    });
+    return finalResponse;
+  }
+
+  if (
+    deterministic?.strategy === "revenue_drivers" &&
+    (
+      approvedSourceIds.length !== modelResponse.sourceIds.length ||
+      shouldPreferDeterministicRevenueDrivers(
+        modelResponse.answer,
+        modelResponse.usedRemoteModel === true,
+        modelResponse.fallbackReason
+      )
+    )
+  ) {
+    logWarnEvent("chat_grounding_repair_used", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      reason: modelResponse.usedRemoteModel === true ? "weak_revenue_driver_answer" : "revenue_driver_remote_fallback"
+    });
+    logEvent("chat_path_selected", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      path: "deterministic",
+      strategy: deterministic.strategy
+    });
+    logChatLlmUsage(modelResponse, filing, "deterministic");
+
+    const finalResponse = await finalize(
+      deterministic.response,
+      "deterministic",
+      {
+        questionIntent,
+        responsePath: "deterministic",
+        sourceIdsValid: deterministic.response.sources.length > 0,
+        contentMode,
+        geminiCalled: modelResponse.geminiCalled ?? true,
+        geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+        schemaValid: modelResponse.schemaValid ?? true,
+        retryAttempt: modelResponse.retryAttempt ?? 0,
+        retryReason: modelResponse.retryReason ?? null,
+        ...buildModelAttemptDebugFields(modelResponse),
+        ...buildContextDebugFields(contextPack),
+        fallbackReason: null,
+        sourceGateApplied: false,
+        sourceGatePassed: true,
+        sourceGateSufficient: true,
+        sourceGateFailureLabels: [],
+        sourceGateMissingSourceTypes: [],
+        sourceGateEvidenceSlots: {},
+        evidenceFallbackUsed: false,
+        fallbackKind: "none",
+        fallbackKindSource: "orchestrator",
+        sourceRepairLabels: ["revenue_drivers_deterministic_repair"]
+      }
+    );
+    logDecision({
+      filing,
+      questionIntent,
+      responsePath: "deterministic",
+      geminiCalled: modelResponse.geminiCalled ?? true,
+      geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
+      fallbackReason: null,
       schemaValid: modelResponse.schemaValid ?? true,
       sourceIdsValid: finalResponse.sources.length > 0,
       sourceCount: finalResponse.sources.length,
@@ -266,27 +417,32 @@ export async function buildChatResponse(
       reason: "invalid_source_ids_guarded_fallback",
       recoveredByLocalFallback: recovered != null
     });
+    const repairedPath = recovered && repairedSourceIdsValid ? "deterministic" : "fallback";
+    const repairedFallbackReason = repairedPath === "deterministic" ? null : "invalid_source_id";
+    const repairedFallbackKind: ChatFallbackKind = repairedPath === "deterministic"
+      ? "none"
+      : recovered ? "evidence_slot" : "weak_grounding";
     logEvent("chat_path_selected", {
       filingKey: filing.filingKey,
       ticker: filing.ticker,
-      path: "fallback",
-      reason: "invalid_source_id"
+      path: repairedPath,
+      reason: repairedPath === "deterministic" ? "invalid_source_id_repaired" : "invalid_source_id"
     });
-    logChatLlmUsage(modelResponse, filing, "fallback");
+    logChatLlmUsage(modelResponse, filing, repairedPath);
 
     const finalResponse = await finalize(
       fallbackResponse,
-      "fallback",
+      repairedPath,
       {
         questionIntent,
-        responsePath: "fallback",
-        fallbackReason: "invalid_source_id",
+        responsePath: repairedPath,
+        fallbackReason: repairedFallbackReason,
         sourceIdsValid: repairedSourceIdsValid,
         contentMode,
         geminiCalled: modelResponse.geminiCalled ?? true,
         geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
         schemaValid: modelResponse.schemaValid ?? true,
-        fallbackKind: recovered ? "evidence_slot" : "weak_grounding",
+        fallbackKind: repairedFallbackKind,
         fallbackKindSource: "orchestrator",
         sourceRepairLabels: repairedSourceIdsValid
           ? ["invalid_sources", "fallback_source_repaired", "source_ids_invalid_prevented"]
@@ -300,10 +456,10 @@ export async function buildChatResponse(
     logDecision({
       filing,
       questionIntent,
-      responsePath: "fallback",
+      responsePath: repairedPath,
       geminiCalled: modelResponse.geminiCalled ?? true,
       geminiSucceeded: modelResponse.geminiSucceeded ?? modelResponse.usedRemoteModel === true,
-      fallbackReason: "invalid_source_id",
+      fallbackReason: repairedFallbackReason,
       schemaValid: modelResponse.schemaValid ?? true,
       sourceIdsValid: repairedSourceIdsValid,
       sourceCount: finalResponse.sources.length,

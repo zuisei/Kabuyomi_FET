@@ -53,7 +53,13 @@ describe("buildChatResponse", () => {
   });
 
   it("keeps cash-flow cause follow-ups anchored to operating cash flow", async () => {
-    const filing = makeCashFlowFiling();
+    const filing = {
+      ...makeCashFlowFiling(),
+      filingKey: "v3:0000320193:000032019326000006",
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      primaryDocumentUrl: "https://example.com/aapl"
+    } as any;
 
     const response = await buildChatResponse(
       filing,
@@ -68,6 +74,90 @@ describe("buildChatResponse", () => {
     expect(response.answer).not.toContain("売上高は");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S11"]);
     expect(response.responsePath).toBe("deterministic");
+  });
+
+  it("does not use bank cash-flow caveats for non-financial filings that mention financial statements", async () => {
+    const filing = {
+      ...makeCashFlowFiling(),
+      filingKey: "v3:0000320193:000032019326000006",
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      primaryDocumentUrl: "https://example.com/aapl",
+      sourceChunks: [
+        ...makeCashFlowFiling().sourceChunks,
+        {
+          sourceId: "S20",
+          sectionType: "md_a",
+          sectionTitle: "Financial Statements",
+          sourceLabel: "10-Q Part I Item 1, filed 2026-01-30",
+          text: "The accompanying unaudited condensed consolidated financial statements are filed under the Securities Exchange Act.",
+          startOffset: 0,
+          endOffset: 0,
+          sortOrder: 20
+        }
+      ]
+    } as any;
+
+    const response = await buildChatResponse(
+      filing,
+      "営業CFは健全？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.responsePath).toBe("deterministic");
+    expect(response.answer).toContain("営業CF");
+    expect(response.answer).toContain("運転資本");
+    expect(response.answer).toContain("設備投資");
+    expect(response.answer).not.toMatch(/貸出|預金|取引資産負債|信用損失|金融機関/);
+  });
+
+  it("does not use bank cash-flow caveats for industrial filings that mention finance subsidiaries", async () => {
+    const filing = {
+      ...makeCashFlowFiling(),
+      filingKey: "v3:0000018230:000001823026000001",
+      ticker: "CAT",
+      companyName: "Caterpillar Inc.",
+      primaryDocumentUrl: "https://example.com/cat",
+      sourceChunks: [
+        ...makeCashFlowFiling().sourceChunks,
+        {
+          sourceId: "S21",
+          sectionType: "md_a",
+          sectionTitle: "Management's Discussion and Analysis",
+          sourceLabel: "10-K Part II Item 7, filed 2026-02-13",
+          text: "Financial Products subsidiaries provide financing to customers and dealers and support sales of machinery, energy and transportation equipment.",
+          startOffset: 0,
+          endOffset: 0,
+          sortOrder: 21
+        }
+      ]
+    } as any;
+
+    const response = await buildChatResponse(
+      filing,
+      "営業CFは健全？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.responsePath).toBe("deterministic");
+    expect(response.answer).toContain("営業CF");
+    expect(response.answer).toContain("運転資本");
+    expect(response.answer).toContain("設備投資");
+    expect(response.answer).not.toMatch(/貸出|預金|取引資産負債|信用損失|金融機関/);
+  });
+
+  it("keeps bank cash-flow caveats for bank filings", async () => {
+    const response = await buildChatResponse(
+      makeCashFlowFiling(),
+      "営業CFは健全？",
+      {} as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.responsePath).toBe("deterministic");
+    expect(response.answer).toMatch(/貸出|預金|取引資産負債|金融機関/);
   });
 
   it("keeps revenue-driver questions conversational even without model output", async () => {
@@ -232,13 +322,12 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: false }
     );
 
-    expect(response.responsePath).toBe("fallback");
+    expect(response.responsePath).toBe("deterministic");
     expect(response.debug?.sourceIdsValid).toBe(true);
-    expect(response.debug?.fallbackKind).not.toBe("none");
-    expect(response.debug?.fallbackCategory).toBe("answer_quality_guard");
-    expect(response.debug?.fallbackUserReason).toBe("invalid_sources");
-    expect(response.debug?.guardLabels).toEqual(expect.arrayContaining(["invalid_sources"]));
-    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["source_ids_invalid_prevented"]));
+    expect(response.debug?.fallbackKind).toBe("none");
+    expect(response.debug?.fallbackCategory).toBe("none");
+    expect(response.debug?.fallbackUserReason).toBe("none");
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["revenue_drivers_deterministic_repair"]));
     expect(response.answer).not.toContain("RevenueFromContractWithCustomerExcludingAssessedTax");
     expect(response.answer).not.toContain("売上driver");
     expect(response.sources.length).toBeGreaterThan(0);
@@ -445,7 +534,7 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("Guardant Health, Inc.は");
     expect(response.answer).not.toMatch(/^は、/);
     expect(response.responsePath).toBe("deterministic");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("recovers business-overview prompts to deterministic filing context when remote output is weak", async () => {

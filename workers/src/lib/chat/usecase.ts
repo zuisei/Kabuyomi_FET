@@ -480,7 +480,7 @@ async function prepareFilingForChat(
   ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<FilingCacheRecord> {
   if (!isMetricsOnlyRecord(filing)) {
-    if (isTestEnvironment(env) && needsRevenueDriverSourceBackfill(filing)) {
+    if (needsRevenueDriverSourceBackfill(filing)) {
       try {
         filing = await backfillRevenueDriverSourceAssets(filing, env);
       } catch (error) {
@@ -491,7 +491,7 @@ async function prepareFilingForChat(
         });
       }
     }
-    if (isTestEnvironment(env) && needsMarginSourceBackfill(filing)) {
+    if (needsMarginSourceBackfill(filing)) {
       try {
         return await backfillMarginSourceAssets(filing, env);
       } catch (error) {
@@ -523,9 +523,5 @@ async function prepareFilingForChat(
 }
 
 function shouldIncludeChatDebug(env: Env): boolean {
-  return env.KABUYOMI_ENV === "test" || env.ENVIRONMENT === "test";
-}
-
-function isTestEnvironment(env: Env): boolean {
   return env.KABUYOMI_ENV === "test" || env.ENVIRONMENT === "test";
 }

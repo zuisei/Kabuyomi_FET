@@ -41,6 +41,7 @@ export function contextProfile(questionIntent: QuestionIntent, mode: ChatContext
 export function shouldLeadWithMetrics(questionIntent: QuestionIntent): boolean {
   return (
     questionIntent === "cash_flow" ||
+    questionIntent === "liquidity_debt" ||
     questionIntent === "historical_comparison"
   );
 }
@@ -126,16 +127,17 @@ function baseContextProfile(questionIntent: QuestionIntent): ContextProfile {
       };
     case "margin_profitability":
     case "cash_flow":
+    case "liquidity_debt":
     case "yoy_change":
     case "historical_comparison":
     case "unknown":
       return {
-        tokenBudget: questionIntent === "yoy_change" ? 8_000 : 6_000,
-        minSources: questionIntent === "yoy_change" ? 4 : 2,
-        maxSources: questionIntent === "yoy_change" ? 7 : 6,
-        supplementalSources: questionIntent === "yoy_change" ? 5 : 2,
-        sourceExcerptChars: questionIntent === "yoy_change" ? 1_300 : 900,
-        supplementalWindowChars: questionIntent === "yoy_change" ? 2_700 : 1_800
+        tokenBudget: questionIntent === "yoy_change" ? 8_000 : questionIntent === "liquidity_debt" ? 7_000 : 6_000,
+        minSources: questionIntent === "yoy_change" ? 4 : questionIntent === "liquidity_debt" ? 3 : 2,
+        maxSources: questionIntent === "yoy_change" ? 7 : questionIntent === "liquidity_debt" ? 7 : 6,
+        supplementalSources: questionIntent === "yoy_change" ? 5 : questionIntent === "liquidity_debt" ? 4 : 2,
+        sourceExcerptChars: questionIntent === "yoy_change" ? 1_300 : questionIntent === "liquidity_debt" ? 1_200 : 900,
+        supplementalWindowChars: questionIntent === "yoy_change" ? 2_700 : questionIntent === "liquidity_debt" ? 2_500 : 1_800
       };
   }
 }

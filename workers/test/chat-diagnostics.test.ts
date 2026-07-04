@@ -319,6 +319,90 @@ describe("chat diagnostics helpers", () => {
       )
     ).toBeNull();
   });
+
+  it("does not reject margin-driver answers that pair metrics with margin explanation terms", () => {
+    const filing = makeFiling();
+    filing.sourceChunks = [
+      {
+        sourceId: "S1",
+        sectionType: "md_a",
+        sectionTitle: "Item 7",
+        sourceLabel: "10-K Profitability context",
+        text: "Operating income increased while the discussion covers pricing, sales mix, operating expenses and segment margin trends.",
+        startOffset: 0,
+        endOffset: 118,
+        sortOrder: 1
+      },
+      {
+        sourceId: "S2",
+        sectionType: "xbrl_metric",
+        sectionTitle: "XBRL",
+        sourceLabel: "XBRL Operating income",
+        text: "営業利益: 29825000000 USD / 比較値: 29348000000 / YoY: 1.6%",
+        startOffset: 0,
+        endOffset: 68,
+        sortOrder: 2
+      }
+    ];
+
+    expect(
+      classifyLowQualityChatAnswer(
+        {
+          question: "利益率が改善、または悪化した理由は？",
+          filing,
+          contextPack: {
+            ...makeContextPack(),
+            questionIntent: "margin_profitability",
+            sourceChunks: filing.sourceChunks
+          }
+        },
+        "売上高は7131.6億ドル、営業利益は298.3億ドル、純利益は218.9億ドルです。利益率の変動要因として、販売構成の変化、価格、コスト構造、営業費用の動向を確認する必要があります。",
+        ["S1", "S2"]
+      )
+    ).toBeNull();
+  });
+
+  it("does not reject liquidity/debt answers that pair cash-flow metrics with debt caveats", () => {
+    const filing = makeFiling();
+    filing.sourceChunks = [
+      {
+        sourceId: "S1",
+        sectionType: "md_a",
+        sectionTitle: "Liquidity and Capital Resources",
+        sourceLabel: "10-K Cash flow / liquidity context",
+        text: "Liquidity and capital resources discussion describes operating cash flow, cash requirements, debt maturities and credit facilities.",
+        startOffset: 0,
+        endOffset: 126,
+        sortOrder: 1
+      },
+      {
+        sourceId: "S2",
+        sectionType: "xbrl_metric",
+        sectionTitle: "XBRL",
+        sourceLabel: "XBRL Operating cash flow",
+        text: "営業CF: 51970000000 USD / 比較値: 55022000000 / YoY: -5.5%",
+        startOffset: 0,
+        endOffset: 65,
+        sortOrder: 2
+      }
+    ];
+
+    expect(
+      classifyLowQualityChatAnswer(
+        {
+          question: "資金繰りや負債に懸念はある？",
+          filing,
+          contextPack: {
+            ...makeContextPack(),
+            questionIntent: "liquidity_debt",
+            sourceChunks: filing.sourceChunks
+          }
+        },
+        "営業CFは前年同期比5.5%減の519.7億ドルです。資金繰りの判断には、現金残高、流動性、負債返済、満期スケジュール、信用枠の確認が必要です。現時点では、営業CFは確認できますが、負債条件だけでは懸念を断定しません。",
+        ["S1", "S2"]
+      )
+    ).toBeNull();
+  });
 });
 
 function makeFiling(): FilingCacheRecord {

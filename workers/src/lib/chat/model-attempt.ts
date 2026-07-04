@@ -135,17 +135,19 @@ export async function buildValidatedModelAnswer({
         sources: expandedContextPack.sourceChunks,
         sourceGateResult: expandedGate
       });
-      retrievalRetryOutcome = expandedGate.sourceSufficient ||
+      const retrievalImproved = expandedGate.sourceSufficient ||
         expandedGate.missingSourceTypes.length < initialGate.missingSourceTypes.length ||
         expandedGate.identifiedDrivers.length > initialGate.identifiedDrivers.length ||
         expandedSlots.companyExplainedDrivers.length > initialSlots.companyExplainedDrivers.length ||
-        expandedSlots.marginDrivers.length > initialSlots.marginDrivers.length
-        ? "improved"
-        : "no_improvement";
-      contextPack = expandedContextPack;
-      sourceGateResult = expandedGate;
+        expandedSlots.marginDrivers.length > initialSlots.marginDrivers.length;
+      const retrievalAdopted = retrievalImproved && expandedGate.sourceSufficient;
+      retrievalRetryOutcome = retrievalAdopted ? "improved" : "no_improvement";
+      if (retrievalAdopted) {
+        contextPack = expandedContextPack;
+        sourceGateResult = expandedGate;
+      }
       hardRetrievalDiagnostics = createHardRetrievalDiagnostics(
-        contextPack,
+        retrievalAdopted ? contextPack : expandedContextPack,
         initialGate,
         hardPlan,
         {
@@ -161,7 +163,9 @@ export async function buildValidatedModelAnswer({
           coverage: initialCoverage
         }
       );
-      logChatContextSelection(filing, contextPack);
+      if (retrievalAdopted) {
+        logChatContextSelection(filing, contextPack);
+      }
     } else {
       hardRetrievalDiagnostics = createHardRetrievalDiagnostics(contextPack, initialGate, hardPlan, undefined, {
         mode: hardRetrievalMode,
@@ -192,6 +196,7 @@ export async function buildValidatedModelAnswer({
         evidenceFallbackUsed: true,
         fallbackKind: "evidence_slot",
         genericFallbackPhraseDetected: evidenceFallback.genericFallbackPhraseDetected,
+        followupPreviousAnswer: previousAnswer,
         hardRetrievalDiagnostics
       }
     );
@@ -247,6 +252,7 @@ export async function buildValidatedModelAnswer({
           evidenceFallbackUsed: true,
           fallbackKind: "evidence_slot",
           genericFallbackPhraseDetected: evidenceFallback.genericFallbackPhraseDetected,
+          followupPreviousAnswer: previousAnswer,
           hardRetrievalDiagnostics
         }
       );
@@ -298,6 +304,7 @@ export async function buildValidatedModelAnswer({
             ? "api_error"
             : "evidence_slot",
         genericFallbackPhraseDetected: evidenceFallback.genericFallbackPhraseDetected,
+        followupPreviousAnswer: previousAnswer,
         hardRetrievalDiagnostics
       }
     );
@@ -318,6 +325,7 @@ export async function buildValidatedModelAnswer({
           ? "evidence_slot"
           : "legacy_template",
       genericFallbackPhraseDetected: false,
+      followupPreviousAnswer: previousAnswer,
       hardRetrievalDiagnostics
     });
   }
@@ -329,7 +337,7 @@ export async function buildValidatedModelAnswer({
   });
   const retryBlockedReason = retryBlockedReasonForQuestion(retryReason, questionIntent, question);
   const hardIntent = resolveHardFinancialIntent(questionIntent, question);
-  const retryAllowed = hardIntent
+  const retryAllowed = hardIntent && retryReason !== "invalid_source_id"
     ? false
     : shouldRetryModelAnswer(modelResponse, retryReason, { questionIntent, question });
   let retryAttempted = false;
@@ -445,7 +453,7 @@ function attachQualityControl(
     NonNullable<GeminiChatAnswer["qualityControl"]>,
     "retrievalRetryUsed" | "retrievalRetryOutcome" | "evidenceFallbackUsed" | "fallbackKind" | "genericFallbackPhraseDetected"
   >
-    & { hardRetrievalDiagnostics?: HardRetrievalDiagnostics }
+    & { followupPreviousAnswer?: string | null; hardRetrievalDiagnostics?: HardRetrievalDiagnostics }
 ): GeminiChatAnswer {
   const hardRetrievalDiagnostics = options.hardRetrievalDiagnostics ?? createHardRetrievalDiagnosticsFromGate(sourceGateResult);
   return {
@@ -456,6 +464,7 @@ function attachQualityControl(
       sourceGateMissingSourceTypes: sourceGateResult.missingSourceTypes,
       sourceGateFailureLabels: [...new Set([...sourceGateResult.failureLabels, ...evidenceSlots.failureLabels])],
       sourceGateEvidenceSlots: summarizeEvidenceSlots(evidenceSlots),
+      followupPreviousAnswer: options.followupPreviousAnswer ? options.followupPreviousAnswer.slice(0, 1_500) : null,
       sourceGateRetrievalRetryRecommended: sourceGateResult.retrievalRetryRecommended,
       retrievalRetryUsed: options.retrievalRetryUsed,
       retrievalRetryOutcome: options.retrievalRetryOutcome,

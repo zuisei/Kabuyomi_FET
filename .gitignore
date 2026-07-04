@@ -2,6 +2,7 @@
 .swiftpm
 .build
 DerivedData
+ios/Build/
 node_modules
 .wrangler
 dist

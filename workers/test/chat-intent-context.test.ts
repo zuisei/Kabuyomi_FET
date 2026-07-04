@@ -53,6 +53,16 @@ describe("chat question intent and context packing", () => {
     expect(classifyQuestionIntent("利益率が悪化した理由は？")).toBe("margin_profitability");
   });
 
+  it("classifies liquidity/debt concern questions before generic risk wording", () => {
+    expect(classifyQuestionIntent("資金繰りや負債に懸念はある？")).toBe("liquidity_debt");
+    expect(classifyQuestionIntent("借入の満期や流動性に不安はある？")).toBe("liquidity_debt");
+  });
+
+  it("classifies plain revenue-source questions as business overview", () => {
+    expect(classifyQuestionIntent("この会社は何で儲けている？")).toBe("business_overview");
+    expect(classifyQuestionIntent("収益源は何？")).toBe("business_overview");
+  });
+
   it("keeps revenue-driver durability rewrites out of margin intent when AAPL-like drivers are present", () => {
     expect(
       classifyQuestionIntent("前問で挙げた売上高の要因（product mix、Services、foreign exchange、demand）は一時的ですか？継続性と不明点を分けて説明してください。")

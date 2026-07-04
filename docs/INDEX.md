@@ -1,6 +1,6 @@
 # Kabuyomi Documentation Index
 
-Last updated: 2026-05-06 JST
+Last updated: 2026-07-02 JST
 
 This index classifies docs and artifacts by release relevance. Current v1 truth is [release/RELEASE_TRUTH.md](./release/RELEASE_TRUTH.md). If older docs disagree with that file or current runtime code, treat older docs as historical.
 
@@ -8,6 +8,9 @@ This index classifies docs and artifacts by release relevance. Current v1 truth 
 
 | Status | Item | Purpose |
 | --- | --- | --- |
+| active transfer prep | [release/ACQUISITION_READINESS_PACKET_2026-06-06.md](./release/ACQUISITION_READINESS_PACKET_2026-06-06.md) | Buyer diligence and near-transfer technical state: assets, validation evidence, transfer checklist, and remaining external account gates. |
+| active transfer prep | [release/SALE_LISTING_DRAFT_2026-06-06.md](./release/SALE_LISTING_DRAFT_2026-06-06.md) | Private buyer outreach/listing draft, buyer profile, included assets, proof points, and disclosure copy. |
+| active transfer prep | [release/SELLING_CHANNELS_RESEARCH_2026-06-07.md](./release/SELLING_CHANNELS_RESEARCH_2026-06-07.md) | Researched sell-side channels and ranked marketplaces for Kabuyomi: startup marketplaces, app brokers, Japan M&A platforms, and source-code fallbacks. |
 | active v1.0.2 | [release/RELEASE_TRUTH.md](./release/RELEASE_TRUTH.md) | Current v1.0.2 monetization truth for this branch: 10-K/10-Q, `kabuyomi.credits.50`, `kabuyomi.credits.100` compatibility, Lite/Pro/Max subscriptions, release-visible optional rewarded ads with server-side SSV, no 8-K, no web search, no investment advice. |
 | active v1 | [release/CURRENT_SHIPPING_TRUTH.md](./release/CURRENT_SHIPPING_TRUTH.md) | Current shipping snapshot and implementation semantics. |
 | active v1 | [release/APP_STORE_SUBMISSION_NOTES.md](./release/APP_STORE_SUBMISSION_NOTES.md) | App Review notes, privacy questionnaire guidance, legal URLs, manual checks. |
@@ -28,6 +31,7 @@ This index classifies docs and artifacts by release relevance. Current v1 truth 
 | --- | --- | --- |
 | active v1 / internal only | [quality/WORKER_ARCHITECTURE_BRIEF.md](./quality/WORKER_ARCHITECTURE_BRIEF.md) | Current Worker architecture and testbench evidence brief. |
 | active v1 / internal only | [quality/V1_WORKER_CRITICAL_REVIEW.md](./quality/V1_WORKER_CRITICAL_REVIEW.md) | Final v1 Worker answer-safety review packet. Current recommendation is HOLD. |
+| active v1 / internal only | [quality/PROMPT_V2_EXPANDED_BASELINE_2026_07_02.md](./quality/PROMPT_V2_EXPANDED_BASELINE_2026_07_02.md) | Prompt-v2 expanded 180-row baseline, local hardening passes, quality gate evidence, and next Q03/Q04/Q06 smoke command. |
 | v1.1 planning / internal only | [quality/chat_quality_contract.md](./quality/chat_quality_contract.md) | Chat answer-quality contract and eval gate. |
 | v1.1 planning / internal only | [quality/chat_route_notes.md](./quality/chat_route_notes.md) | `/v1/chat` route and pipeline notes. |
 | v1.1 planning / internal only | [quality/worker_refactor_tickets.md](./quality/worker_refactor_tickets.md) | Worker reliability and chat-quality refactor tickets. |

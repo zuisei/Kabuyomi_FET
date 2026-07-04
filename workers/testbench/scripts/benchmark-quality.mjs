@@ -148,6 +148,7 @@ export function buildBenchmarkSummary(rows, options = {}) {
   return {
     rows: decoratedRows.length,
     tickers: Array.from(new Set(decoratedRows.map((row) => row.ticker).filter(Boolean))),
+    templates: Array.from(new Set(decoratedRows.map((row) => row.templateId).filter(Boolean))).sort(),
     sourceIdsValidFalse: decoratedRows.filter((row) => row.sourceIdsValid === false).length,
     rawResponsePathBreakdown: countBy(decoratedRows, (row) => row.responsePath ?? "unknown"),
     rawFallbackTotal: decoratedRows.filter((row) => row.responsePath === "fallback").length,
@@ -176,6 +177,18 @@ export function buildBenchmarkSummary(rows, options = {}) {
       !hasUserVisibleRawEnglish(row) && (row.finalAnswerRawExcerptLike === true || hasLabel(row, "raw_english_excerpt"))
     ).length,
     rawEnglishSurfaced: decoratedRows.filter((row) => hasUserVisibleRawEnglish(row)).length,
+    hybridEnglishJapaneseSurfaced: decoratedRows.filter((row) => hasVisibleHybridEnglishJapanese(row)).length,
+    genericBusinessModelAnswers: decoratedRows.filter((row) => hasGenericBusinessModelAnswer(row)).length,
+    genericRevenueBreakdownAnswers: decoratedRows.filter((row) => hasGenericRevenueBreakdownAnswer(row)).length,
+    misleadingRevenueDriverCauses: decoratedRows.filter((row) => hasMisleadingRevenueDriverCause(row)).length,
+    nonFinancialCashFlowBankLanguage: decoratedRows.filter((row) => hasNonFinancialCashFlowBankLanguage(row)).length,
+    metricOnlyImportantIntentAnswers: decoratedRows.filter((row) => hasMetricOnlyImportantIntentAnswer(row)).length,
+    durabilityFollowupLostPriorDriver: decoratedRows.filter((row) => hasDurabilityFollowupLostPriorDriver(row)).length,
+    numericDisplaySuspicious: decoratedRows.filter((row) => hasSuspiciousNumericDisplay(row)).length,
+    unsupportedDurabilityClassification: decoratedRows.filter((row) => hasUnsupportedDurabilityClassification(row)).length,
+    unsupportedRiskOrLiquidityConclusion: decoratedRows.filter((row) => hasUnsupportedRiskOrLiquidityConclusion(row)).length,
+    qualitySourceEvidenceWeak: qualityRowsList.filter((row) => hasWeakSourceEvidence(row)).length,
+    fallbackTaxonomyIntentMismatch: qualityRowsList.filter((row) => hasFallbackTaxonomyIntentMismatch(row)).length,
     bannedFallbackPhraseHits: decoratedRows.reduce(
       (sum, row) => sum + (Array.isArray(row.bannedFallbackPhraseHits) ? row.bannedFallbackPhraseHits.length : 0),
       0
@@ -217,6 +230,163 @@ export function buildBenchmarkSummary(rows, options = {}) {
       p95: percentile(qualityRowsList.map((row) => row.latencyMs), 0.95),
       p99: percentile(qualityRowsList.map((row) => row.latencyMs), 0.99)
     }
+  };
+}
+
+export const DEFAULT_QUALITY_GATE_THRESHOLDS = Object.freeze({
+  sourceIdsValidFalse: 0,
+  infraContaminated: false,
+  authErrorRows: 0,
+  engineeringErrorRows: 0,
+  rawEnglishSurfaced: 0,
+  hybridEnglishJapaneseSurfaced: 0,
+  genericBusinessModelAnswers: 0,
+  genericRevenueBreakdownAnswers: 0,
+  misleadingRevenueDriverCauses: 0,
+  nonFinancialCashFlowBankLanguage: 0,
+  metricOnlyImportantIntentAnswers: 0,
+  durabilityFollowupLostPriorDriver: 0,
+  numericDisplaySuspicious: 0,
+  unsupportedDurabilityClassification: 0,
+  unsupportedRiskOrLiquidityConclusion: 0,
+  qualitySourceEvidenceWeak: 0,
+  fallbackTaxonomyIntentMismatch: 0,
+  fallbackKindNoneOnFallbackRows: 0,
+  maxQualityFallbackRate: 0.15,
+  maxQualityQ03Q04Q06Fallback: 0,
+  maxQualityHardIntentFallback: 0,
+  maxQualityLatencyP95Ms: 12_000
+});
+
+export function qualityGateThresholdsFromEnv(env = process.env) {
+  return {
+    ...DEFAULT_QUALITY_GATE_THRESHOLDS,
+    maxQualityFallbackRate: parseNonNegativeNumber(
+      env.KABUYOMI_QUALITY_GATE_MAX_FALLBACK_RATE,
+      DEFAULT_QUALITY_GATE_THRESHOLDS.maxQualityFallbackRate
+    ),
+    maxQualityQ03Q04Q06Fallback: parseNonNegativeInt(
+      env.KABUYOMI_QUALITY_GATE_MAX_Q03_Q04_Q06_FALLBACK,
+      DEFAULT_QUALITY_GATE_THRESHOLDS.maxQualityQ03Q04Q06Fallback
+    ),
+    maxQualityHardIntentFallback: parseNonNegativeInt(
+      env.KABUYOMI_QUALITY_GATE_MAX_HARD_INTENT_FALLBACK,
+      DEFAULT_QUALITY_GATE_THRESHOLDS.maxQualityHardIntentFallback
+    ),
+    maxQualityLatencyP95Ms: parseNonNegativeInt(
+      env.KABUYOMI_QUALITY_GATE_MAX_P95_MS,
+      DEFAULT_QUALITY_GATE_THRESHOLDS.maxQualityLatencyP95Ms
+    ),
+    requiredTemplates: parseStringList(env.KABUYOMI_QUALITY_GATE_REQUIRED_TEMPLATES),
+    minCompanyTickers: parseNullableNonNegativeInt(env.KABUYOMI_QUALITY_GATE_MIN_COMPANY_TICKERS, null),
+    minRows: parseNullableNonNegativeInt(env.KABUYOMI_QUALITY_GATE_MIN_ROWS, null)
+  };
+}
+
+export function evaluateQualityGate(summary, thresholds = DEFAULT_QUALITY_GATE_THRESHOLDS) {
+  const failures = [];
+  const addCountCheck = (field, maxValue) => {
+    const actual = summary[field] ?? 0;
+    if (actual > maxValue) {
+      failures.push(`${field}=${actual} > ${maxValue}`);
+    }
+  };
+
+  if (thresholds.infraContaminated === false && summary.infraContaminated) {
+    failures.push(`infraContaminated=true (${(summary.infraContaminationReasons ?? []).join(", ") || "unknown"})`);
+  }
+
+  addCountCheck("sourceIdsValidFalse", thresholds.sourceIdsValidFalse);
+  addCountCheck("authErrorRows", thresholds.authErrorRows);
+  addCountCheck("engineeringErrorRows", thresholds.engineeringErrorRows);
+  addCountCheck("rawEnglishSurfaced", thresholds.rawEnglishSurfaced);
+  addCountCheck("hybridEnglishJapaneseSurfaced", thresholds.hybridEnglishJapaneseSurfaced);
+  addCountCheck("genericBusinessModelAnswers", thresholds.genericBusinessModelAnswers);
+  addCountCheck("genericRevenueBreakdownAnswers", thresholds.genericRevenueBreakdownAnswers);
+  addCountCheck("misleadingRevenueDriverCauses", thresholds.misleadingRevenueDriverCauses);
+  addCountCheck("nonFinancialCashFlowBankLanguage", thresholds.nonFinancialCashFlowBankLanguage);
+  addCountCheck("metricOnlyImportantIntentAnswers", thresholds.metricOnlyImportantIntentAnswers);
+  addCountCheck("durabilityFollowupLostPriorDriver", thresholds.durabilityFollowupLostPriorDriver);
+  addCountCheck("numericDisplaySuspicious", thresholds.numericDisplaySuspicious);
+  addCountCheck("unsupportedDurabilityClassification", thresholds.unsupportedDurabilityClassification);
+  addCountCheck("unsupportedRiskOrLiquidityConclusion", thresholds.unsupportedRiskOrLiquidityConclusion);
+  addCountCheck("qualitySourceEvidenceWeak", thresholds.qualitySourceEvidenceWeak);
+  addCountCheck("fallbackTaxonomyIntentMismatch", thresholds.fallbackTaxonomyIntentMismatch);
+  addCountCheck("fallbackKindNoneOnFallbackRows", thresholds.fallbackKindNoneOnFallbackRows);
+  addCountCheck("qualityQ03Q04Q06Fallback", thresholds.maxQualityQ03Q04Q06Fallback);
+  addCountCheck("qualityHardIntentFallback", thresholds.maxQualityHardIntentFallback);
+
+  if ((summary.qualityFallbackRate ?? 0) > thresholds.maxQualityFallbackRate) {
+    failures.push(`qualityFallbackRate=${formatRatio(summary.qualityFallbackRate)} > ${formatRatio(thresholds.maxQualityFallbackRate)}`);
+  }
+  if ((summary.qualityLatency?.p95 ?? 0) > thresholds.maxQualityLatencyP95Ms) {
+    failures.push(`qualityLatency.p95=${summary.qualityLatency.p95} > ${thresholds.maxQualityLatencyP95Ms}`);
+  }
+  const requiredTemplates = Array.isArray(thresholds.requiredTemplates) ? thresholds.requiredTemplates : [];
+  if (requiredTemplates.length > 0) {
+    const observedTemplates = new Set(summary.templates ?? []);
+    const missingTemplates = requiredTemplates.filter((template) => !observedTemplates.has(template));
+    if (missingTemplates.length > 0) {
+      failures.push(`requiredTemplatesMissing=${missingTemplates.join(",")}`);
+    }
+  }
+  if (typeof thresholds.minCompanyTickers === "number" && (summary.tickers?.length ?? 0) < thresholds.minCompanyTickers) {
+    failures.push(`companyTickers=${summary.tickers?.length ?? 0} < ${thresholds.minCompanyTickers}`);
+  }
+  if (typeof thresholds.minRows === "number" && (summary.rows ?? 0) < thresholds.minRows) {
+    failures.push(`rows=${summary.rows ?? 0} < ${thresholds.minRows}`);
+  }
+
+  return {
+    ok: failures.length === 0,
+    failures,
+    thresholds
+  };
+}
+
+export function collectQualityIssueRows(rows) {
+  const decoratedRows = rows.map((row) => (typeof row.qualityEvaluable === "boolean" ? row : decorateBenchmarkRow(row)));
+  const qualityRowsList = decoratedRows.filter((row) => row.qualityEvaluable !== false);
+  const issueRows = {
+    rawEnglishSurfaced: decoratedRows.filter((row) => hasUserVisibleRawEnglish(row)),
+    hybridEnglishJapaneseSurfaced: decoratedRows.filter((row) => hasVisibleHybridEnglishJapanese(row)),
+    genericBusinessModelAnswers: decoratedRows.filter((row) => hasGenericBusinessModelAnswer(row)),
+    genericRevenueBreakdownAnswers: decoratedRows.filter((row) => hasGenericRevenueBreakdownAnswer(row)),
+    misleadingRevenueDriverCauses: decoratedRows.filter((row) => hasMisleadingRevenueDriverCause(row)),
+    nonFinancialCashFlowBankLanguage: decoratedRows.filter((row) => hasNonFinancialCashFlowBankLanguage(row)),
+    metricOnlyImportantIntentAnswers: decoratedRows.filter((row) => hasMetricOnlyImportantIntentAnswer(row)),
+    durabilityFollowupLostPriorDriver: decoratedRows.filter((row) => hasDurabilityFollowupLostPriorDriver(row)),
+    numericDisplaySuspicious: decoratedRows.filter((row) => hasSuspiciousNumericDisplay(row)),
+    unsupportedDurabilityClassification: decoratedRows.filter((row) => hasUnsupportedDurabilityClassification(row)),
+    unsupportedRiskOrLiquidityConclusion: decoratedRows.filter((row) => hasUnsupportedRiskOrLiquidityConclusion(row)),
+    qualitySourceEvidenceWeak: qualityRowsList.filter((row) => hasWeakSourceEvidence(row)),
+    fallbackTaxonomyIntentMismatch: qualityRowsList.filter((row) => hasFallbackTaxonomyIntentMismatch(row)),
+    fallbackKindNoneOnFallbackRows: decoratedRows.filter(
+      (row) => row.responsePath === "fallback" && (row.fallbackKind == null || row.fallbackKind === "none")
+    ),
+    qualityQ03Q04Q06Fallback: qualityRowsList.filter(
+      (row) => ["Q03", "Q04", "Q06"].includes(row.templateId) && row.responsePath === "fallback"
+    ),
+    qualityHardIntentFallback: qualityRowsList.filter(
+      (row) => isHardIntent(row.intent) && row.responsePath === "fallback"
+    )
+  };
+
+  return Object.fromEntries(
+    Object.entries(issueRows).map(([key, values]) => [key, values.map(summarizeIssueRow)])
+  );
+}
+
+function summarizeIssueRow(row) {
+  return {
+    caseId: row.caseId ?? `${row.ticker ?? "UNKNOWN"}-${row.templateId ?? "unknown"}`,
+    ticker: row.ticker ?? null,
+    templateId: row.templateId ?? null,
+    intent: row.intent ?? null,
+    responsePath: row.responsePath ?? null,
+    fallbackKind: row.fallbackKind ?? null,
+    fallbackUserReason: row.fallbackUserReason ?? null,
+    answer: String(row.answer ?? "").replace(/\s+/g, " ").trim().slice(0, 220)
   };
 }
 
@@ -281,8 +451,232 @@ function hasUserVisibleRawEnglish(row) {
 }
 
 function isHardIntent(intent) {
-  return ["revenue_driver", "driver_durability_followup", "margin_durability_followup"].includes(intent);
+  return [
+    "business_model",
+    "business_overview",
+    "revenue_driver",
+    "margin_driver",
+    "driver_durability_followup",
+    "margin_durability_followup",
+    "liquidity_debt",
+    "risk_watchpoint",
+    "watch_point"
+  ].includes(intent);
 }
+
+function hasVisibleHybridEnglishJapanese(row) {
+  const answer = String(row.answer ?? "");
+  if (!answer) {
+    return false;
+  }
+  return [
+    /Profitability context/i,
+    /Revenue driver discussion/i,
+    /price-コスト/i,
+    /Re資料/i,
+    /higher\s+[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]+(?:\s+[a-z]+)?/iu,
+    /higher [a-z]/i,
+    /partially offset/i,
+    /unfavorable/i,
+    /favorable/i,
+    /comparable sales discussion/i,
+    /un[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]+/iu,
+    /geography revenue/i,
+    /segment revenue\s*(?:が|は|を|で|に)/i
+  ].some((pattern) => pattern.test(answer));
+}
+
+function hasGenericBusinessModelAnswer(row) {
+  if (!isBusinessModelRow(row)) {
+    return false;
+  }
+  if (hasLabel(row, "business_overview_metrics_only") || hasLabel(row, "business_overview_metric_lead")) {
+    return true;
+  }
+  const answer = String(row.answer ?? "").replace(/\s+/g, "");
+  if (!answer) {
+    return false;
+  }
+  return [
+    /製品(?:と|や|・)サービス(?:の提供)?(?:を通じて)?(?:収益|売上|利益)を(?:得ています|上げています|生み出しています)/,
+    /商品(?:と|や|・)サービス(?:の提供)?(?:を通じて)?(?:収益|売上|利益)を(?:得ています|上げています|生み出しています)/,
+    /金融サービス(?:で|を通じて)(?:収益|売上|利益)を(?:得ています|上げています|生み出しています)/,
+    /小売事業(?:で|を通じて)(?:収益|売上|利益)を(?:得ています|上げています|生み出しています|儲けています)/,
+    /建設機械など(?:で|を通じて)(?:収益|売上|利益)を(?:得ています|上げています|生み出しています|儲けています)/,
+    /石油(?:・|と)?ガス(?:で|を通じて)(?:収益|売上|利益)を(?:得ています|上げています|生み出しています)/
+  ].some((pattern) => pattern.test(answer));
+}
+
+function hasGenericRevenueBreakdownAnswer(row) {
+  if (!(row.templateId === "Q02" || row.templateId === "Q08" || row.intent === "revenue_snapshot" || row.intent === "revenue_breakdown" || row.intent === "segment_driver")) {
+    return false;
+  }
+  if (hasLabel(row, "revenue_breakdown_generic_category_only")) {
+    return false;
+  }
+  const answer = String(row.answer ?? "").replace(/\s+/g, "");
+  if (!answer) {
+    return false;
+  }
+  const hasGenericCategory = /(geographyrevenue|geographicrevenue|segmentrevenue|productrevenue|地域別売上|セグメント別売上|製品別売上|売上区分|大きい区分|主な売上区分)/i.test(answer);
+  if (!hasGenericCategory) {
+    return false;
+  }
+  if (hasConcreteRevenueBreakdownTerm(answer)) {
+    return false;
+  }
+  return /(geographyrevenue(?:が|は|を|として)|segmentrevenue(?:が|は|を|として)|地域別売上(?:が|は|を|として|という分類)|セグメント別売上(?:が|は|を|として|という分類)|製品別売上(?:が|は|を|として|という分類)|大きい区分|具体的な金額の内訳|詳細な内訳)/i.test(answer);
+}
+
+function hasConcreteRevenueBreakdownTerm(answer) {
+  return [
+    /ConstructionIndustries|ResourceIndustries|Energy&Transportation/i,
+    /建設機械|資源産業|エネルギー・輸送/,
+    /EnergyProducts|ChemicalProducts|SpecialtyProducts|Upstream|Downstream|Chemical/i,
+    /NII|NIR|Netinterestincome|Noninterestrevenue|利息収益|非利息収益/i,
+    /WalmartU\.?S\.?|WalmartInternational|Sam'?sClub/i,
+    /DRAM|NAND|NOR|Memory|Storage/i,
+    /GoogleServices|GoogleCloud|YouTubeads?|GoogleNetwork|AdSense/i,
+    /iPhone|iPad|Mac|Wearables|Services/i,
+    /Mounjaro|Zepbound|製品別売上/i,
+    /Coca-Cola|Trademark|AsiaPacific|EMEA|NorthAmerica/i,
+    /Advisory|OtherServices|Payments|service revenue|value-addedservices/i,
+    /Compute|Networking|Graphics|DataCenter/i,
+    /Automotive|EnergyGeneration/i,
+    /Passengerrevenue|Cargo|Refinery|MRO|Premiumproducts|loyalty/i
+  ].some((pattern) => pattern.test(answer));
+}
+
+function hasMisleadingRevenueDriverCause(row) {
+  if (!(row.templateId === "Q03" || row.intent === "revenue_driver")) {
+    return false;
+  }
+  if (hasLabel(row, "revenue_driver_non_revenue_cause_removed")) {
+    return false;
+  }
+  const answer = String(row.answer ?? "");
+  if (!/(売上(?:変化|成長|増減)?の?要因|売上要因|revenue driver)/i.test(answer)) {
+    return false;
+  }
+  return /(?:income taxes payable|Pillar Two|TAC|traffic acquisition costs?|brokerage expense|auto lease depreciation|marketing expense|occupancy expense|distribution fees|noncurrent income taxes|税金|税効果|費用|減価償却|販管費|人件費|信用損失|引当)/i.test(answer);
+}
+
+function hasNonFinancialCashFlowBankLanguage(row) {
+  if (!(row.templateId === "Q09" || row.intent === "cash_flow")) {
+    return false;
+  }
+  const ticker = String(row.ticker ?? "").toUpperCase();
+  if (BANK_TICKERS.has(ticker)) {
+    return false;
+  }
+  const answer = String(row.answer ?? "");
+  return /(?:預金|貸出|貸付|融資|銀行|金融機関|trading assets|trading liabilities|deposit|loan book|net interest)/i.test(answer);
+}
+
+function hasMetricOnlyImportantIntentAnswer(row) {
+  if (!isImportantIntent(row.intent)) {
+    return false;
+  }
+  return [
+    "answer_too_metric_only",
+    "contextual_reasoning_metric_only",
+    "business_overview_metrics_only",
+    "business_overview_metric_lead",
+    "metric_without_driver"
+  ].some((label) => hasLabel(row, label));
+}
+
+function hasDurabilityFollowupLostPriorDriver(row) {
+  if (!["Q04", "Q06"].includes(row.templateId) && !/durability_followup/.test(String(row.intent ?? ""))) {
+    return false;
+  }
+  if (hasLabel(row, "missing_durability_evidence") || hasLabel(row, "unsupported_durability_classification")) {
+    return true;
+  }
+  const answer = String(row.answer ?? "");
+  return /前問の具体的な要因を十分に特定できていない|具体的な(?:売上|利益率)?要因は十分に特定できません/.test(answer);
+}
+
+function hasSuspiciousNumericDisplay(row) {
+  const answer = String(row.answer ?? "");
+  return (
+    hasLabel(row, "numeric_display_mismatch") ||
+    hasLabel(row, "malformed_currency") ||
+    /(?:円|万円|億円|百万円|千\s*USD|千USD|USD\s*億|ドル円)/i.test(answer)
+  );
+}
+
+function hasUnsupportedDurabilityClassification(row) {
+  return hasLabel(row, "unsupported_durability_classification") || hasLabel(row, "durability_missing_assessment");
+}
+
+function hasUnsupportedRiskOrLiquidityConclusion(row) {
+  if (!/risk|watch|liquidity|debt/i.test(String(row.intent ?? ""))) {
+    return false;
+  }
+  return (
+    hasLabel(row, "unsupported_risk_conclusion") ||
+    hasLabel(row, "unsupported_liquidity_conclusion") ||
+    hasLabel(row, "generic_risk_answer") ||
+    hasLabel(row, "generic_liquidity_answer")
+  );
+}
+
+function hasWeakSourceEvidence(row) {
+  if (row.sourceIdsValid === false) {
+    return true;
+  }
+  if (row.sourceGateApplied === true && row.sourceGateSufficient === false) {
+    return true;
+  }
+  if (isImportantIntent(row.intent) && row.sourceCount === 0) {
+    return true;
+  }
+  return (row.sourceGateFailureLabels ?? []).some((label) =>
+    /(?:source_gate_failed|source_.*missing|missing_.*source|retrieval_overfocused_xbrl|xbrl_only|source_relevance_low|driver_slots_empty|margin_driver_slots_empty|followup_target_empty|missing_followup_target_driver|fallback_slot_incomplete)/i.test(String(label))
+  );
+}
+
+function hasFallbackTaxonomyIntentMismatch(row) {
+  const reason = row.fallbackUserReason ?? "";
+  if (!reason || reason === "none") {
+    return false;
+  }
+  const intent = String(row.intent ?? "");
+  if ((intent === "margin_driver" || intent === "margin_durability_followup") && reason !== "margin_driver_sources_missing") {
+    return /_sources_missing$/.test(reason);
+  }
+  if ((intent === "revenue_driver" || intent === "driver_durability_followup") && reason === "margin_driver_sources_missing") {
+    return true;
+  }
+  if ((intent === "liquidity_debt" || intent === "cash_flow") && reason !== "liquidity_sources_missing") {
+    return /_sources_missing$/.test(reason);
+  }
+  if (/risk|watch/i.test(intent) && reason !== "risk_sources_missing") {
+    return /_sources_missing$/.test(reason);
+  }
+  return false;
+}
+
+function isBusinessModelRow(row) {
+  return row.templateId === "Q01" || row.intent === "business_model" || row.intent === "business_overview";
+}
+
+function isImportantIntent(intent) {
+  return [
+    "business_model",
+    "business_overview",
+    "revenue_driver",
+    "margin_driver",
+    "driver_durability_followup",
+    "margin_durability_followup",
+    "liquidity_debt",
+    "risk_watchpoint",
+    "watch_point"
+  ].includes(intent);
+}
+
+const BANK_TICKERS = new Set(["JPM", "BAC", "WFC", "C", "GS", "MS", "USB", "PNC", "TFC", "BK", "STT"]);
 
 function ratio(numerator, denominator) {
   return denominator > 0 ? numerator / denominator : 0;
@@ -316,6 +710,31 @@ function parseNullableNonNegativeInt(rawValue, fallback) {
     return fallback;
   }
   return parseNonNegativeInt(rawValue, fallback);
+}
+
+function parseNonNegativeNumber(rawValue, fallback) {
+  if (rawValue == null || String(rawValue).trim().length === 0) {
+    return fallback;
+  }
+  const parsed = Number.parseFloat(String(rawValue));
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Expected a non-negative number, got ${rawValue}`);
+  }
+  return parsed;
+}
+
+function parseStringList(rawValue) {
+  if (rawValue == null || String(rawValue).trim().length === 0) {
+    return [];
+  }
+  return String(rawValue)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function formatRatio(value) {
+  return `${(value * 100).toFixed(1)}%`;
 }
 
 function parseInteger(rawValue, fallback) {

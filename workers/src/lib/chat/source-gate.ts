@@ -5,7 +5,7 @@ import type { QuestionIntent } from "./intent";
 import { hasRevenueDriverSignal, hasSegmentRevenueSignal } from "./source-family";
 
 export type SourceGateConfidence = "high" | "medium" | "low";
-export type HardFinancialIntent = "revenue_driver" | "driver_durability_followup" | "margin_durability_followup";
+export type HardFinancialIntent = "business_model" | "revenue_driver" | "driver_durability_followup" | "margin_durability_followup";
 
 export type EvidenceFact = {
   fact: string;
@@ -111,7 +111,12 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
 
   const sector = normalizeSector(input.sector, input.ticker, input.companyName);
   const knownFacts = extractKnownMetricFacts(input.metrics ?? [], input.selectedSources);
-  const drivers = extractSupportedDrivers(input.selectedSources, sector, hardIntent);
+  const drivers = hardIntent === "business_model"
+    ? extractBusinessModelDrivers(input.selectedSources, sector)
+    : extractSupportedDrivers(input.selectedSources, sector, hardIntent);
+  const businessModelCoverage = hardIntent === "business_model"
+    ? analyzeBusinessModelCoverage(input.selectedSources, drivers.length > 0)
+    : null;
   const hasStrongRevenueDriverEvidence = hardIntent === "revenue_driver"
     ? input.selectedSources.some(hasStrongRevenueDriverSource)
     : false;
@@ -138,7 +143,8 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
     hasMetricMovement: revenueCoverage?.hasRevenueMetric ?? knownFacts.length > 0,
     hasDrivers: drivers.length > 0,
     hasRevenueDiscussion: revenueCoverage?.hasRevenueDiscussion ?? drivers.length > 0,
-    hasSegmentRevenueContext: revenueCoverage?.hasSegmentRevenueContext ?? false
+    hasSegmentRevenueContext: revenueCoverage?.hasSegmentRevenueContext ?? businessModelCoverage?.hasSegmentOrRevenueContext ?? false,
+    hasBusinessDescription: businessModelCoverage?.hasBusinessDescription ?? false
   });
   const failureLabels = new Set<string>();
 
@@ -158,7 +164,11 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
     failureLabels.add("sector_required_source_missing");
   }
 
-  if (hardIntent !== "revenue_driver" && !followupTargetFound) {
+  if (
+    hardIntent !== "business_model" &&
+    hardIntent !== "revenue_driver" &&
+    !followupTargetFound
+  ) {
     failureLabels.add("followup_target_empty");
     failureLabels.add("missing_followup_target_driver");
   }
@@ -170,6 +180,9 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
   if (hardIntent === "revenue_driver") {
     addRevenueDriverQualityFailureLabels(input.selectedSources, sector, drivers.length > 0, hasStrongRevenueDriverEvidence, failureLabels);
   }
+  if (hardIntent === "business_model" && !businessModelCoverage?.hasBusinessModelEvidence) {
+    failureLabels.add("business_model_sources_missing");
+  }
   if (hardIntent === "driver_durability_followup") {
     addDriverDurabilityFailureLabels(input.selectedSources, followupTargetFound, drivers.length > 0, hasDurabilityContext, failureLabels);
     addDriverDurabilitySourceQualityFailureLabels(driverDurabilityQuality, failureLabels);
@@ -178,9 +191,11 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
     addMarginDurabilitySourceQualityFailureLabels(marginDurabilityQuality, failureLabels);
   }
 
-  const sourceSufficient = hardIntent === "revenue_driver"
-    ? Boolean(revenueCoverage?.hasRevenueMetric) && drivers.length > 0 && hasStrongRevenueDriverEvidence
-    : hardIntent === "driver_durability_followup"
+  const sourceSufficient = hardIntent === "business_model"
+    ? Boolean(businessModelCoverage?.hasBusinessModelEvidence)
+    : hardIntent === "revenue_driver"
+      ? Boolean(revenueCoverage?.hasRevenueMetric) && drivers.length > 0 && hasStrongRevenueDriverEvidence
+      : hardIntent === "driver_durability_followup"
       ? Boolean(followupTargetFound) &&
         drivers.length > 0 &&
         Boolean(driverDurabilityQuality?.hasStrongDriverEvidence) &&
@@ -232,6 +247,8 @@ export function resolveHardFinancialIntent(
   const asksDurability = /(一時|一過性|継続|続く|構造|temporary|transitory|recurring|sustain|continue)/.test(normalized);
   const asksRevenueDriver = /(売上|収益|sales|revenue)/.test(normalized) && /(主因|要因|原因|理由|なぜ|driver|cause|why|伸び|増収|減収)/.test(normalized);
   const asksMargin = /(利益率|マージン|粗利|営業利益率|純利益率|margin|profitability|採算)/.test(normalizedQuestion);
+  const asksBusinessModel = questionIntent === "business_overview" ||
+    /(何屋|なに屋|何で稼|なにで稼|何で儲|なにで儲|儲けている|儲けてる|稼いでる|稼いでん|なんの会社|何の会社|どんな会社|何してる|何をしてる|事業内容|収益源|businessmodel|whatdoes.*companydo|whatbusiness)/.test(normalizedQuestion);
 
   if (asksDurability && (asksMargin || questionIntent === "margin_profitability")) {
     return "margin_durability_followup";
@@ -243,6 +260,10 @@ export function resolveHardFinancialIntent(
 
   if (asksRevenueDriver || questionIntent === "yoy_change") {
     return "revenue_driver";
+  }
+
+  if (asksBusinessModel) {
+    return "business_model";
   }
 
   return null;
@@ -344,23 +365,46 @@ function extractSupportedDrivers(
   return drivers.slice(0, 4);
 }
 
+function extractBusinessModelDrivers(
+  sources: SourceChunkRecord[],
+  sector: SourceGateSector
+): EvidenceDriver[] {
+  const drivers: EvidenceDriver[] = [];
+  for (const source of sources) {
+    if (isMetricSource(source) || isBoilerplateSource(source)) {
+      continue;
+    }
+    const text = normalizeText(`${source.sourceLabel} ${source.text}`);
+    if (!hasBusinessModelEvidenceText(text, sector)) {
+      continue;
+    }
+    drivers.push({
+      driver: source.text.slice(0, 220).replace(/\s+/g, " ").trim(),
+      category: `${sector}_business_model`,
+      sourceIds: [source.sourceId],
+      confidence: "medium"
+    });
+  }
+  return drivers.slice(0, 4);
+}
+
 function matchedDriverCategory(
   text: string,
   sector: SourceGateSector,
   hardIntent: HardFinancialIntent
 ): string | null {
-  const commonRevenue = /(increase|decrease|growth|decline|higher|lower|primarily due|driven by|attributable to|because|resulted from|net sales|revenue).{0,120}(price|volume|mix|demand|customer|product|service|segment|geographic|foreign exchange|launch)/i;
-  const commonMargin = /(margin|profitability|gross profit|operating income|expense|sga|sg&a|r&d|tax|impairment|restructuring|one-time|provision|credit loss|price-cost|manufacturing cost)/i;
+  const commonRevenue = /(increase|decrease|growth|grew|decline|higher|lower|primarily due|driven by|attributable to|because|resulted from|net sales|revenue|sales).{0,160}(price|volume|mix|demand|customer|product|service|cloud|subscription|revenue per user|seats?|copilot|unit case|segment|geographic|foreign exchange|launch)/i;
+  const commonMargin = /(margin|profitability|gross profit|operating income|expense|sga|sg&a|r&d|tax|impairment|restructuring|one-time|provision|credit loss|price-cost|manufacturing cost|cost of sales|cost of revenues?|price\/mix|price mix|pricing|foreign exchange|tariff|commodity cost|input cost|markdown|shrink|fulfillment|labor|advertising income|membership income|depreciation|traffic acquisition costs?|\btac\b|content acquisition|employee compensation|personnel|marketing|professional fees|litigation)/i;
   const marginPatterns: Record<SourceGateSector, RegExp> = {
     bank: /(net interest margin|deposit margin compression|lower rates?|rate sensitivity|provision for credit losses|credit loss expense|net charge-offs?|noninterest expense|compensation expense|credit quality|funding costs|segment profitability|efficiency ratio)/i,
     capital_markets: /(compensation expense|noninterest expense|investment banking|trading|wealth management|asset management|segment profitability|pre-tax margin)/i,
     energy: /(refining margin|chemical margin|upstream earnings|downstream earnings|upstream spending|capital expenditures?|depreciation|depletion|costs?|impairment|restructuring|segment earnings|margin)/i,
     oilfield_services: /(oilfield services margins?|drilling activity|completion activity|north america margin|international margin|segment operating income|costs?)/i,
     industrial: /(price-cost|manufacturing cost|cost absorption|material costs?|sga|sg&a|r&d|volume leverage|restructuring|warranty|quality costs?|segment operating profit|operating margin|profit margin)/i,
-    retail: /(gross margin|inventory|markdown|shrink|wage|fulfillment cost|operating expense|membership income|advertising income|segment operating income)/i,
+    retail: /(gross margin|inventory|markdown|shrink|wage|labor|fulfillment cost|operating expense|membership income|advertising income|price\/mix|price mix|pricing|segment operating income)/i,
     consumer_staples: /(gross margin|commodity costs?|input costs?|pricing|volume|foreign exchange|advertising expense|organic sales)/i,
     auto: /(automotive gross margin|pricing|production cost|deliveries|warranty|restructuring|average selling price)/i,
-    technology: /(gross margin|product margin|services margin|operating expense|r&d|research and development|channel inventory|product mix|price-cost|tariff|foreign exchange|one-time|impairment)/i,
+    technology: /(gross margin|product margin|services margin|cost of sales|cost of revenues?|operating expense|r&d|research and development|channel inventory|product mix|price-cost|pricing|tariff|foreign exchange|one-time|impairment|depreciation|traffic acquisition costs?|\btac\b|content acquisition|employee compensation)/i,
     software: /(gross margin|operating margin|sales and marketing|r&d|research and development|infrastructure costs?|usage|subscription)/i,
     semiconductor_equipment: /(gross margin|operating expenses?|backlog|orders|customer demand|china|restructuring)/i,
     healthcare_medtech: /(gross margin|procedure volume|systems placements|instruments|accessories|operating expense|installed base)/i,
@@ -398,7 +442,7 @@ function matchedDriverCategory(
     media: /(advertising revenue|affiliate revenue|retransmission|subscriber|content costs?|distribution|segment results)/i,
     utility: /(rate case|regulated returns|fuel cost|load growth|weather|regulated operations|capex|capital expenditures)/i,
     mining: /(copper price|gold price|production volume|unit costs?|mining operations|commodity prices|segment results)/i,
-    general: /(segment results|revenue discussion|pricing|volume|mix|orders|backlog|gross margin|operating expenses)/i
+    general: /(segment results|revenue discussion|pricing|volume|unit case volume|mix|orders|backlog|cloud revenue|subscription(?:s)? revenue|revenue per user|seats?|copilot|gross margin|operating income|costs?|cost of revenues?|operating expenses|depreciation|traffic acquisition costs?|\btac\b|content acquisition|employee compensation|personnel|marketing|professional fees|litigation provision)/i
   };
 
   if (patterns[sector].test(text)) {
@@ -418,8 +462,16 @@ function missingSourceTypesFor(
     hasDrivers: boolean;
     hasRevenueDiscussion?: boolean;
     hasSegmentRevenueContext?: boolean;
+    hasBusinessDescription?: boolean;
   }
 ): string[] {
+  if (hardIntent === "business_model") {
+    const missing = [];
+    if (!state.hasBusinessDescription) missing.push("business description");
+    if (!state.hasSegmentRevenueContext) missing.push("segment/revenue context");
+    if (!state.hasDrivers) missing.push("product/service/customer/revenue mechanism evidence");
+    return missing.length > 0 ? missing : baseMissingSourceTypes(sector, hardIntent);
+  }
   if (state.hasDrivers && (hardIntent !== "revenue_driver" || state.hasMetricMovement)) {
     return [];
   }
@@ -434,6 +486,9 @@ function missingSourceTypesFor(
 }
 
 function baseMissingSourceTypes(sector: SourceGateSector, hardIntent: HardFinancialIntent): string[] {
+  if (hardIntent === "business_model") {
+    return ["business description", "segment/revenue context", "revenue breakdown", "MD&A business discussion"];
+  }
   const base: Record<SourceGateSector, string[]> = {
     bank: hardIntent === "margin_durability_followup"
       ? ["net interest margin discussion", "provision for credit losses discussion", "noninterest expense discussion", "segment profitability"]
@@ -476,6 +531,48 @@ function analyzeRevenueDriverCoverage(
     hasRevenueDiscussion: hasStrongRevenueDriverEvidence || hasDrivers || narrativeSources.some(hasRevenueDriverSignal),
     hasSegmentRevenueContext: narrativeSources.some(hasSegmentRevenueSignal)
   };
+}
+
+function analyzeBusinessModelCoverage(
+  sources: SourceChunkRecord[],
+  hasDrivers: boolean
+): { hasBusinessDescription: boolean; hasSegmentOrRevenueContext: boolean; hasBusinessModelEvidence: boolean } {
+  const narrativeSources = sources.filter((source) => !isMetricSource(source) && !isBoilerplateSource(source));
+  const haystack = narrativeSources.map((source) => `${source.sourceLabel} ${source.text}`).join(" ");
+  const hasBusinessDescription = /(business|overview|company|products?|services?|事業|製品|サービス|会社|segment information)/i.test(haystack);
+  const hasSegmentOrRevenueContext = narrativeSources.some((source) => {
+    const text = `${source.sourceLabel} ${source.text}`;
+    return hasSegmentRevenueSignal(source) || /(segment|revenue|net sales|sales by|product line|service line|売上|セグメント|内訳)/i.test(text);
+  });
+  return {
+    hasBusinessDescription,
+    hasSegmentOrRevenueContext,
+    hasBusinessModelEvidence: hasDrivers && (hasBusinessDescription || hasSegmentOrRevenueContext)
+  };
+}
+
+function hasBusinessModelEvidenceText(text: string, sector: SourceGateSector): boolean {
+  const businessLine = /(products?|services?|segments?|customers?|end[- ]markets?|revenue|net sales|sales|manufactures?|designs?|sells?|provides?|operates?|retail|stores?|membership|subscription|fees?|interest income|loans?|deposits?|製品|サービス|顧客|需要|向け|販売|提供|運営|手数料|金利|貸出|預金|店舗|会員|売上|収益|事業)/i;
+  const sectorSpecific: Record<SourceGateSector, RegExp> = {
+    bank: /(net interest income|noninterest income|loans?|deposits?|card|banking|asset management|investment banking|markets)/i,
+    capital_markets: /(investment banking|trading|wealth management|asset management|advisory|underwriting)/i,
+    energy: /(upstream|downstream|crude|natural gas|refining|chemical|production|commodity)/i,
+    oilfield_services: /(drilling|completion|oilfield services|customer spending|north america|international)/i,
+    industrial: /(construction industries|resource industries|energy & transportation|machinery|equipment|dealer|end users?)/i,
+    retail: /(walmart u\.s\.|sam'?s club|stores?|ecommerce|e-commerce|membership|grocery|health and wellness|general merchandise)/i,
+    consumer_staples: /(oral care|personal care|pet nutrition|home care|organic sales)/i,
+    auto: /(vehicles?|automotive|deliveries|energy generation|services)/i,
+    technology: /(iphone|mac|ipad|wearables|services|products?|installed base|app store|applecare|cloud services)/i,
+    software: /(subscription|customers?|usage|rpo|deferred revenue|cloud|saas)/i,
+    semiconductor_equipment: /(wafer fab|semiconductor equipment|orders|backlog|customer demand)/i,
+    healthcare_medtech: /(procedure volume|installed base|systems placements|instruments|accessories|recurring)/i,
+    reit: /(occupancy|same-store|senior housing|medical office|rental revenue|noi)/i,
+    media: /(advertising|affiliate|retransmission|subscriber|content|distribution)/i,
+    utility: /(regulated|electric|rate case|load|customers?|fuel cost)/i,
+    mining: /(copper|gold|production volume|mining|commodity)/i,
+    general: businessLine
+  };
+  return businessLine.test(text) && sectorSpecific[sector].test(text);
 }
 
 function addRevenueDriverQualityFailureLabels(
@@ -538,7 +635,9 @@ function retrievalQueriesFor(
   missingSourceTypes: string[]
 ): string[] {
   const term = missingSourceTypes.slice(0, 3).join(" ");
-  const intentTerm = hardIntent === "margin_durability_followup" ? "margin profitability MD&A" : "revenue drivers MD&A";
+  const intentTerm = hardIntent === "business_model"
+    ? "business description products services revenue breakdown"
+    : hardIntent === "margin_durability_followup" ? "margin profitability MD&A" : "revenue drivers MD&A";
   const sectorTerm = {
     bank: "net interest income noninterest income provision segment results",
     capital_markets: "investment banking trading wealth management segment results",
@@ -567,9 +666,10 @@ function retrievalQueriesFor(
 
 function hasConcretePriorDriver(previousAnswer: string, hardIntent: HardFinancialIntent): boolean {
   const text = normalizeText(previousAnswer);
+  const hasConcreteRevenueDriver = hasPriorRevenueDriverTerms(text);
   if (
     !text ||
-    /(具体的なdriverが十分に特定|十分に特定できていません|特定できていません|会社固有の売上要因は十分|要因.*不足|主因.*断定|増収だった.*点まで|利益率.*方向.* known)/i.test(text) ||
+    (/(具体的なdriverが十分に特定|十分に特定できていません|特定できていません|会社固有の売上要因は十分|要因.*不足|主因.*断定|増収だった.*点まで|利益率.*方向.* known)/i.test(text) && !hasConcreteRevenueDriver) ||
     /(前問のdriverは、|利益率driverとして確認できるのは、)\s*[A-Za-z]/.test(text) ||
     /(?:\.{3}|…|•\s*[A-Za-z]|Item\s+7|Part\s+I\.\s*Item|Risk Factors|Results of Operations)/i.test(text) ||
     /our ability to leverage|store and club footprint|business description|available information|corporate website/i.test(text) ||
@@ -579,7 +679,7 @@ function hasConcretePriorDriver(previousAnswer: string, hardIntent: HardFinancia
   }
   return hardIntent === "margin_durability_followup"
     ? hasPriorMarginDriverTerms(text)
-    : /(due to|driven by|because|price|pricing|volume|mix|segment|traffic|ticket|ecommerce|services|installed base|net interest|nii|noninterest|nir|markets revenue|investment banking|commodity|production|backlog|orders|要因|主因|価格|価格実現|数量|販売量|品目構成|セグメント|既存店|トラフィック|客数|客単価|サービス|受注|商品価格|金利収入|非金利収入)/i.test(text);
+    : hasConcreteRevenueDriver;
 }
 
 function hasConcreteFollowupTarget(question: string, hardIntent: HardFinancialIntent): boolean {
@@ -590,11 +690,15 @@ function hasConcreteFollowupTarget(question: string, hardIntent: HardFinancialIn
   if (hardIntent === "margin_durability_followup") {
     return /(利益率|粗利|営業利益率|純利益率|マージン|margin|profitability)/i.test(text) && hasPriorMarginDriverTerms(text);
   }
-  return /(net interest income|nii|noninterest income|noninterest revenue|nir|markets revenue|investment banking|card services|deposits?|services revenue|installed base|iphone|mac|ipad|wearables|foreign exchange|tariff|commodity|crude|natural gas|production volume|refining margin|sales volume|price realization|dealer inventor|backlog|comparable sales|transactions?|traffic|ticket|ecommerce|membership|売上高の要因（[^）]{3,})/i.test(text);
+  return /(net interest income|nii|noninterest income|noninterest revenue|nir|markets revenue|investment banking|card services|deposits?|services revenue|installed base|iphone|mac|ipad|wearables|foreign exchange|tariff|commodity|crude|natural gas|production volume|refining margin|sales volume|price realization|dealer inventor|backlog|comparable sales|transactions?|traffic|ticket|ecommerce|membership|売上高の要因（[^）]{3,}|地域別売上|製品カテゴリ|サービス売上|販売量|販売数量|出荷量|価格実現|既存店|客数|客単価)/i.test(text);
 }
 
 function hasPriorMarginDriverTerms(text: string): boolean {
-  return /(gross margin|operating margin|profit margin|net margin|margin rate|cost of sales|cost of revenue|operating expenses?|noninterest expense|compensation expense|provision for credit losses|credit loss expense|efficiency ratio|deposit margin compression|net interest margin|gross profit|operating income|segment operating profit|manufacturing costs?|cost absorption|price-cost|volume leverage|markdowns?|shrink|inventory|fulfillment costs?|labor costs?|wage|refining margins?|chemical margins?|depreciation|depletion|impairment|restructuring|sg&a|sga|r&d|research and development|粗利|販管費|営業費用|費用|コスト|引当|減損|一時費用)/i.test(text);
+  return /(gross margin|operating margin|profit margin|net margin|margin rate|cost of sales|cost of revenues?|cost of revenue|operating expenses?|noninterest expense|compensation expense|provision for credit losses|credit loss expense|efficiency ratio|deposit margin compression|net interest margin|gross profit|operating income|segment operating profit|manufacturing costs?|cost absorption|price-cost|volume leverage|markdowns?|shrink|inventory|fulfillment costs?|labor costs?|wage|refining margins?|chemical margins?|depreciation|depletion|impairment|restructuring|traffic acquisition costs?|\btac\b|content acquisition|employee compensation|personnel|marketing|professional fees|litigation|sg&a|sga|r&d|research and development|粗利|販管費|営業費用|費用|コスト|引当|減損|一時費用|交通獲得コスト|トラフィック獲得コスト|コンテンツ調達費|人件費|訴訟引当|専門家費用|マーケティング費)/i.test(text);
+}
+
+function hasPriorRevenueDriverTerms(text: string): boolean {
+  return /(due to|driven by|because|price|pricing|volume|mix|segment|traffic|ticket|ecommerce|services|installed base|data center|accelerated computing|\bai\b|blackwell|compute|networking|supply constraint|customer mix|cloud|copilot|revenue per user|seats grew|microsoft 365|net interest|nii|noninterest|nir|markets revenue|investment banking|commodity|production|backlog|orders|demand|価格|価格実現|数量|販売量|販売数量|出荷量|品目構成|製品構成|製品カテゴリ|地域別売上|地域別|セグメント|既存店|トラフィック|客数|客単価|サービス|サービス売上|受注|商品価格|金利収入|非金利収入|データセンター|加速型計算|顧客構成|供給制約|需要|需給|ブラックウェル|ネットワーク|クラウド|製品カテゴリ|製品|コパイロット)/i.test(text);
 }
 
 function hasDurabilityEvidence(
@@ -617,7 +721,7 @@ function hasDurabilityEvidence(
 
 function hasDriverDurabilitySignal(text: string, sector: SourceGateSector): boolean {
   const common =
-    /(temporary|transitory|one-time|seasonal|recurring|continue|continued|sustain|expected|expects|outlook|guidance|trend|uncertain|uncertainty|risk|sensitivity|headwind|tailwind|normalize|normalization|継続|一時|一過性|構造|見通し|不確実|感応度)/i;
+    /(temporary|transitory|one-time|seasonal|recurring|continue|continued|sustain|expected|expects|outlook|guidance|trend|uncertain|uncertainty|risk|sensitivity|headwind|tailwind|normalize|normalization|cloud revenue|revenue per user|copilot|seats grew|strong demand|unit case volume growth|demand for our products|average selling prices?|bit shipments?|favorable mix|product mix|manufacturing cost reductions?|customer usage|unit sales|継続|一時|一過性|構造|見通し|不確実|感応度)/i;
   const sectorPatterns: Record<SourceGateSector, RegExp> = {
     bank: /(deposit margin compression|lower rates?|higher rates?|interest rate sensitivity|credit normalization|card balances|revolving balances|investment banking fees|markets revenue|cyclical|wholesale deposit balances|net interest income excluding markets|flat when compared)/i,
     capital_markets: /(investment banking fees|trading revenue|markets revenue|asset management fees|wealth management|cyclical|advisory|underwriting|client activity)/i,
@@ -629,7 +733,7 @@ function hasDriverDurabilitySignal(text: string, sector: SourceGateSector): bool
     auto: /(deliveries|production volume|vehicle pricing|average selling price|automotive gross margin|expected|outlook|demand)/i,
     technology: /(services revenue|installed base|product introduction|product launch|channel inventory|macroeconomic conditions|tariff|foreign exchange|component pricing|recurring|continue|expected|outlook)/i,
     software: /(subscription|recurring|rpo|remaining performance obligations|deferred revenue|retention|usage|customers?|expected|outlook)/i,
-    semiconductor_equipment: /(orders|backlog|customer demand|china|wafer fab equipment|expected|outlook|demand)/i,
+    semiconductor_equipment: /(orders|backlog|customer demand|china|wafer fab equipment|expected|outlook|demand|average selling prices?|bit shipments?|favorable mix|product mix)/i,
     healthcare_medtech: /(procedure volume|installed base|recurring|instruments|accessories|systems placements|expected|outlook)/i,
     reit: /(occupancy|same-store|noi|interest rates?|lease|renewal|expected|outlook)/i,
     media: /(advertising revenue|affiliate revenue|subscriber|distribution|sports rights|cyclical|expected|outlook)/i,
@@ -663,15 +767,18 @@ function analyzeDriverDurabilitySourceQuality(
     hasDriverDurabilitySignal(normalizeText(source.text), sector) &&
     !hasSpecificQ04DurabilitySignal(source.text, sector)
   );
+  const tableHeavyDominates =
+    narrativeSources.length > 0 &&
+    narrativeSources.filter(isQ04MetricOrTableHeavySource).length >= Math.ceil(narrativeSources.length / 2);
+  const hasNonTableSourceBackedDurability =
+    strongDriverSources.length > 0 &&
+    specificDurabilitySources.length > 0;
 
   return {
     hasStrongDriverEvidence: strongDriverSources.length > 0,
     hasSpecificDurabilityEvidence: specificDurabilitySources.length > 0,
     metricOnlyContext: narrativeSources.length === 0,
-    tableHeavyContext: tableHeavyDriverSources.length > 0 || (
-      narrativeSources.length > 0 &&
-      narrativeSources.filter(isQ04MetricOrTableHeavySource).length >= Math.ceil(narrativeSources.length / 2)
-    ),
+    tableHeavyContext: (tableHeavyDriverSources.length > 0 || tableHeavyDominates) && !hasNonTableSourceBackedDurability,
     durabilityEvidenceTooGeneric: genericDurabilitySources.length > 0 && specificDurabilitySources.length === 0
   };
 }
@@ -804,7 +911,7 @@ function isQ06RevenueOnlyMarginContext(text: string, sector: SourceGateSector): 
   const normalized = normalizeText(text);
   const revenueOnly =
     /(net sales|sales and revenues|revenue|comparable sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership engagement|sales volume|equipment to end users|demand|unit volumes?)/i.test(normalized) &&
-    !/(gross margin|operating margin|profit margin|gross profit|operating income|segment operating profit|cost of sales|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|credit loss expense|efficiency ratio|deposit margin compression|manufacturing costs?|cost absorption|price-cost|volume leverage|markdowns?|shrink|inventory|fulfillment costs?|labor costs?|wage|refining margins?|chemical margins?|depreciation|depletion|impairment|restructuring)/i.test(normalized);
+    !/(gross margin|operating margin|profit margin|gross profit|operating income|segment operating profit|cost of sales|cost of revenues?|cost of revenue|operating expenses?|noninterest expense|provision for credit losses|credit loss expense|efficiency ratio|deposit margin compression|manufacturing costs?|cost absorption|price-cost|price\/mix|price mix|pricing|commodity costs?|input costs?|volume leverage|markdowns?|shrink|inventory|fulfillment costs?|labor costs?|wage|advertising income|membership income|refining margins?|chemical margins?|depreciation|depletion|impairment|restructuring|tariff|foreign exchange|traffic acquisition costs?|\btac\b|content acquisition|employee compensation|personnel|marketing|professional fees|litigation)/i.test(normalized);
   if (revenueOnly) {
     return true;
   }
@@ -813,7 +920,7 @@ function isQ06RevenueOnlyMarginContext(text: string, sector: SourceGateSector): 
     return true;
   }
   if (sector === "retail" && /(comparable sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership engagement|unit volumes?)/i.test(normalized) &&
-    !/(gross margin|markdown|shrink|inventory|fuel|fulfillment|operating expense|wage|labor|advertising income|membership income|segment operating)/i.test(normalized)) {
+    !/(gross margin|markdown|shrink|inventory|fuel|fulfillment|operating expense|wage|labor|advertising income|membership income|price\/mix|price mix|pricing|segment operating)/i.test(normalized)) {
     return true;
   }
   if (sector === "bank" && /(net interest income|noninterest income|nii|nir|markets revenue|investment banking fees|asset management fees|payments fees)/i.test(normalized) &&
@@ -829,17 +936,17 @@ function hasQ06ConcreteMarginDriverSignal(text: string, sector: SourceGateSector
     return false;
   }
   const common =
-    /(gross margin|operating margin|profit margin|cost of sales|costs?|expenses?|operating expenses?|pricing|price realization|mix|volume|sales volume|input costs?|manufacturing cost|sg&a|r&d|research and development|provision|credit losses?|impairment|restructuring|depreciation|depletion|tariff|foreign exchange|inventory|fuel|labor)/i;
+    /(gross margin|operating margin|profit margin|gross profit|operating income|cost of sales|cost of revenues?|cost of revenue|costs?|expenses?|operating expenses?|pricing|price realization|price\/mix|price mix|mix|volume|sales volume|input costs?|commodity costs?|manufacturing cost|sg&a|r&d|research and development|provision|credit losses?|impairment|restructuring|depreciation|depletion|tariff|foreign exchange|inventory|markdown|shrink|fulfillment|fuel|labor|wage|advertising income|membership income|traffic acquisition costs?|\btac\b|content acquisition|employee compensation|personnel|marketing|professional fees|litigation)/i;
   const sectorSpecific: Record<SourceGateSector, RegExp> = {
     bank: /(net interest margin|deposit margin compression|provision for credit losses|noninterest expense|compensation expense|efficiency ratio|credit quality|funding costs)/i,
     capital_markets: /(compensation expense|noninterest expense|pre-tax margin|segment profitability|trading|investment banking|asset management)/i,
     energy: /(depreciation|depletion|upstream spending|capital expenditures?|refining margins?|chemical margins?|upstream earnings|downstream earnings|impairment|restructuring|costs?)/i,
     oilfield_services: /(oilfield services margins?|north america margin|international margin|segment operating income|costs?|drilling activity|completion activity)/i,
     industrial: /(price-cost|manufacturing cost|price realization|sales volume|volume leverage|sg&a|r&d|segment operating profit|operating margin|dealer inventory)/i,
-    retail: /(gross margin|inventory|markdown|shrink|wage|fulfillment cost|operating expense|membership income|advertising income|segment operating income|fuel)/i,
+    retail: /(gross margin|inventory|markdown|shrink|wage|labor|fulfillment cost|operating expense|membership income|advertising income|price\/mix|price mix|pricing|segment operating income|fuel)/i,
     consumer_staples: /(gross margin|commodity costs?|input costs?|pricing|volume|foreign exchange|advertising expense|organic sales)/i,
     auto: /(automotive gross margin|pricing|production cost|warranty|deliveries|average selling price|restructuring)/i,
-    technology: /(gross margin|product margin|services margin|cost of sales|operating expense|r&d|research and development|channel inventory|mix|pricing|tariff|foreign exchange|component pricing)/i,
+    technology: /(gross margin|product margin|services margin|cost of sales|cost of revenues?|operating expense|r&d|research and development|channel inventory|mix|pricing|tariff|foreign exchange|component pricing|depreciation|traffic acquisition costs?|\btac\b|content acquisition|employee compensation)/i,
     software: /(gross margin|operating margin|sales and marketing|r&d|research and development|infrastructure costs?|usage|subscription)/i,
     semiconductor_equipment: /(gross margin|operating expenses?|backlog|orders|customer demand|china|restructuring)/i,
     healthcare_medtech: /(gross margin|procedure volume|systems placements|instruments|accessories|operating expense|installed base)/i,
@@ -858,7 +965,7 @@ function hasSpecificQ06MarginDurabilitySignal(text: string, sector: SourceGateSe
     return false;
   }
   const common =
-    /(temporary|transitory|one-time|recurring|continue|continued|expected|expects|outlook|guidance|trend|uncertain|uncertainty|risk|headwind|tailwind|seasonal|normalization|structural|restructuring|impairment|depreciation|depletion|capital expenditures?|tariff|foreign exchange|fuel|inventory|cost pressure)/i;
+    /(temporary|transitory|one-time|recurring|continue|continued|expected|expects|outlook|guidance|trend|uncertain|uncertainty|risk|headwind|tailwind|seasonal|normalization|structural|restructuring|impairment|depreciation|depletion|capital expenditures?|tariff|foreign exchange|fuel|inventory|cost pressure|price\/mix|price mix|pricing|commodity costs?|input costs?|markdown|shrink|fulfillment|labor|wage|advertising income|membership income|cost of revenues?|traffic acquisition costs?|\btac\b|content acquisition|employee compensation|personnel|marketing|professional fees|litigation provision)/i;
   const sectorSpecific: Record<SourceGateSector, RegExp> = {
     bank: /(deposit margin compression|lower rates?|higher rates?|interest rate sensitivity|credit normalization|provision for credit losses|funding costs|efficiency ratio)/i,
     capital_markets: /(cyclical|client activity|compensation expense|trading revenue|investment banking fees|markets revenue)/i,
@@ -868,7 +975,7 @@ function hasSpecificQ06MarginDurabilitySignal(text: string, sector: SourceGateSe
     retail: /(continued strength|inventory|markdown|shrink|wage|fulfillment cost|membership|advertising|fuel|expected|expects|transactions?|unit volumes?)/i,
     consumer_staples: /(commodity costs?|input costs?|pricing|volume|foreign exchange|continued|expected|outlook)/i,
     auto: /(deliveries|production volume|vehicle pricing|average selling price|automotive gross margin|expected|outlook|demand)/i,
-    technology: /(services margin|product margin|channel inventory|tariff|foreign exchange|component pricing|product launch|expected|outlook|recurring)/i,
+    technology: /(services margin|product margin|channel inventory|tariff|foreign exchange|component pricing|product launch|expected|outlook|recurring|cost of revenues?|depreciation|traffic acquisition costs?|\btac\b|content acquisition|employee compensation)/i,
     software: /(subscription|recurring|infrastructure costs?|usage|customers?|expected|outlook)/i,
     semiconductor_equipment: /(orders|backlog|customer demand|china|expected|outlook|restructuring)/i,
     healthcare_medtech: /(procedure volume|installed base|recurring|systems placements|expected|outlook)/i,
@@ -897,10 +1004,12 @@ function isQ04MetricOrTableHeavySource(source: SourceChunkRecord): boolean {
   const hasTableCue =
     /\b(?:three months ended|year ended|gross margin percentage|dollars in millions|percentage of total net sales|total gross margin|operating expenses?)\b/i.test(text) ||
     /\|\s*q[1-4]\s+20\d{2}\s+form\s+10-[qk]\s+\|/i.test(text);
+  const hasNarrativeCause =
+    /(primarily due to|driven by|attributable to|resulted from|because|reflect(?:ed|ing)|partially offset|offset by|expected|outlook|continue|continued|risk|uncertain|one-time|temporary)/i.test(text);
   const isProductMarginTable =
     /(products?|services).{0,80}gross margin/i.test(text) &&
     !/(increased|decreased|primarily due|driven by|attributable to|resulted from|because|expected|outlook|continue|continued)/i.test(text);
-  return (hasTableCue && numberTokens >= 8) || isProductMarginTable;
+  return (hasTableCue && numberTokens >= 8 && !hasNarrativeCause) || isProductMarginTable;
 }
 
 function isQ04GenericDurabilityContext(text: string): boolean {
@@ -918,7 +1027,7 @@ function hasQ04ConcreteDriverSignal(text: string, sector: SourceGateSector): boo
     return false;
   }
   const common =
-    /(primarily due to|driven by|attributable to|resulted from|because|reflect(?:ed|ing)|sales and revenues|net sales|revenue increased|revenue decreased|higher sales|lower sales|comparable sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership|sales volume|price realization|net interest income|noninterest income|commodity prices?|production volume|refining margins?|services revenue|installed base|channel inventory|product introductions?|foreign exchange|tariff)/i;
+    /(primarily due to|driven by|attributable to|resulted from|because|reflect(?:ed|ing)|sales and revenues|net sales|revenue increased|revenue decreased|higher sales|lower sales|comparable sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership|sales volume|price realization|net interest income|noninterest income|commodity prices?|production volume|refining margins?|services revenue|cloud revenue|subscription(?:s)? revenue|revenue per user|unit case volume|installed base|channel inventory|product introductions?|foreign exchange|tariff)/i;
   return common.test(normalized) || matchedDriverCategory(normalized, sector, "driver_durability_followup") !== null;
 }
 
@@ -928,7 +1037,7 @@ function hasSpecificQ04DurabilitySignal(text: string, sector: SourceGateSector):
     return false;
   }
   const common =
-    /(continue|continued|recurring|expected|expects|outlook|guidance|trend|uncertain|uncertainty|risk|headwind|tailwind|seasonal|one-time|temporary|transitory|normalization|感応度|見通し|不確実|一時|継続)/i;
+    /(continue|continued|recurring|expected|expects|outlook|guidance|trend|uncertain|uncertainty|risk|headwind|tailwind|seasonal|one-time|temporary|transitory|normalization|subscription(?:s)? revenue|cloud revenue|revenue per user|copilot|seats grew|strong demand|unit case volume growth|long-term growth rate|competitive environment|average selling prices?|bit shipments?|favorable mix|product mix|manufacturing cost reductions?|customer usage|unit sales|感応度|見通し|不確実|一時|継続)/i;
   const sectorSpecific: Record<SourceGateSector, RegExp> = {
     bank: /(deposit margin compression|lower rates?|higher rates?|interest rate sensitivity|card balances|revolving balances|investment banking fees|markets revenue|cyclical|wholesale deposit balances|flat when compared)/i,
     capital_markets: /(investment banking fees|trading revenue|markets revenue|asset management fees|client activity|cyclical|advisory|underwriting)/i,
@@ -940,7 +1049,7 @@ function hasSpecificQ04DurabilitySignal(text: string, sector: SourceGateSector):
     auto: /(deliveries|production volume|vehicle pricing|average selling price|automotive gross margin|expected|outlook|demand)/i,
     technology: /(services revenue|installed base|product introduction|product launch|channel inventory|macroeconomic conditions|tariff|foreign exchange|component pricing|recurring|continue|expected|outlook)/i,
     software: /(subscription|recurring|rpo|remaining performance obligations|deferred revenue|retention|usage|customers?|expected|outlook)/i,
-    semiconductor_equipment: /(orders|backlog|customer demand|china|wafer fab equipment|expected|outlook|demand)/i,
+    semiconductor_equipment: /(orders|backlog|customer demand|china|wafer fab equipment|expected|outlook|demand|average selling prices?|bit shipments?|favorable mix|product mix)/i,
     healthcare_medtech: /(procedure volume|installed base|recurring|instruments|accessories|systems placements|expected|outlook)/i,
     reit: /(occupancy|same-store|noi|interest rates?|lease|renewal|expected|outlook)/i,
     media: /(advertising revenue|affiliate revenue|subscriber|distribution|sports rights|cyclical|expected|outlook)/i,
@@ -955,7 +1064,7 @@ function isQ04MetricOrTableText(text: string): boolean {
   return (
     /\b(?:three months ended|year ended|gross margin percentage|dollars in millions|percentage of total net sales|total gross margin|operating expenses?)\b/i.test(text) ||
     /(products?|services).{0,80}gross margin/i.test(text)
-  ) && !/(primarily due to|driven by|expected|outlook|continue|continued|risk|uncertain)/i.test(text);
+  ) && !/(primarily due to|driven by|attributable to|resulted from|because|reflect(?:ed|ing)|partially offset|offset by|expected|outlook|continue|continued|risk|uncertain|one-time|temporary)/i.test(text);
 }
 
 function addDriverDurabilityFailureLabels(
@@ -995,6 +1104,9 @@ function isMetricSource(source: SourceChunkRecord): boolean {
 
 function isBoilerplateSource(source: SourceChunkRecord): boolean {
   if (hasRevenueDriverSignal(source)) {
+    return false;
+  }
+  if (/(unit case volume|demand for our products|cloud revenue|revenue per user|seats grew|driven by|primarily due|attributable to)/i.test(source.text)) {
     return false;
   }
   return /(investor relations website|available information|forward-looking statements|properties|website|http|www\.|trademark|table of contents)/i.test(

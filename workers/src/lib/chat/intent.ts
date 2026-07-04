@@ -3,6 +3,7 @@ export type QuestionIntent =
   | "revenue_breakdown"
   | "margin_profitability"
   | "cash_flow"
+  | "liquidity_debt"
   | "risk_factors"
   | "mda_summary"
   | "yoy_change"
@@ -40,11 +41,18 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
   }
 
   if (
-    /(なんの企業|何の企業|なんの会社|何の会社|どんな企業|どんな会社|何してる|何をしてる|何をやってる|事業内容|主な事業|事業は|主な製品|主要製品|製品と顧客|顧客|customers?|businessmodel|whatdoes.*companydo|whatcompany|whatbusiness)/.test(
+    /(何で儲け|なんで儲け|何で稼|なんで稼|収益源|なんの企業|何の企業|なんの会社|何の会社|どんな企業|どんな会社|何してる|何をしてる|何をやってる|事業内容|主な事業|事業は|主な製品|主要製品|製品と顧客|顧客|customers?|businessmodel|whatdoes.*companydo|whatcompany|whatbusiness)/.test(
       normalized
     )
   ) {
     return "business_overview";
+  }
+
+  if (
+    /(一時|一過性|継続|続く|続き|持続|構造的|temporary|transitory|recurring|sustain|continue)/.test(normalized) &&
+    /(利益率|マージン|営業利益率|純利益率|profitability|grossprofit|grossmargin|margin)/.test(normalized)
+  ) {
+    return "margin_profitability";
   }
 
   if (
@@ -54,10 +62,6 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
     !/(利益率|マージン|営業利益率|純利益率|profitability|grossprofit)/.test(normalized)
   ) {
     return "yoy_change";
-  }
-
-  if (/(リスク|懸念|逆風|不確実|不透明|risk|uncertain|uncertainty|macro|関税|tariff)/.test(normalized)) {
-    return "risk_factors";
   }
 
   if (
@@ -70,6 +74,14 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
 
   if (/(営業cf|フリーcf|キャッシュフロー|operatingcashflow|freecashflow|cashflow|cash flow|現金|お金.*稼|稼げてる)/.test(normalized)) {
     return "cash_flow";
+  }
+
+  if (/(資金繰り|負債|債務|借入|返済|満期|流動性|信用枠|debt|liquidity|maturity|borrowings?|creditfacility)/.test(normalized)) {
+    return "liquidity_debt";
+  }
+
+  if (/(リスク|懸念|逆風|不確実|不透明|risk|uncertain|uncertainty|macro|関税|tariff)/.test(normalized)) {
+    return "risk_factors";
   }
 
   if (/(利益率|マージン|粗利|採算|営業利益率|純利益率|margin|profitability|grossprofit)/.test(normalized)) {

@@ -60,6 +60,25 @@ describe("SEC filing selection", () => {
     expect(filing?.accessionNumber).toBe("0000320193-26-000057");
   });
 
+  it("skips amended 10-K/A filings when selecting the latest analyzable filing", () => {
+    const filing = pickLatestSupportedFiling(ticker, {
+      name: "Tesla, Inc.",
+      filings: {
+        recent: {
+          form: ["8-K", "10-K/A", "10-K"],
+          accessionNumber: ["0001-26-000003", "0001-26-000002", "0001-26-000001"],
+          primaryDocument: ["8k.htm", "tsla-10ka.htm", "tsla-10k.htm"],
+          filingDate: ["2026-05-01", "2026-04-30", "2026-01-29"],
+          reportDate: ["2026-05-01", "2025-12-31", "2025-12-31"]
+        }
+      }
+    });
+
+    expect(filing?.formType).toBe("10-K");
+    expect(filing?.accessionNumber).toBe("0001-26-000001");
+    expect(filing?.primaryDocument).toBe("tsla-10k.htm");
+  });
+
   it("picks a prior-year comparison for 10-Q", () => {
     const current = pickLatestSupportedFiling(ticker, submissions)!;
     const comparison = pickComparisonFiling(ticker, submissions, current);
@@ -524,6 +543,27 @@ describe("SEC filing selection", () => {
     expect(identity.chatLimitOverride).toBe(Number.MAX_SAFE_INTEGER);
     expect(identity.stockLimitOverride).toBe(Number.MAX_SAFE_INTEGER);
     expect(identity.quotaSubject).toMatch(/^pro:detached:[a-f0-9]{64}$/);
+  });
+
+  it("uses detached unlimited access for allowlisted device-key prefixes", async () => {
+    const identity = await readQuotaIdentity(
+      new Request("https://kabuyomi-api.example.workers.dev/v1/usage", {
+        headers: {
+          "x-device-key": "bench-2026-07-02-aapl-q01",
+          "x-kabuyomi-detached-access": "dev_unlimited"
+        }
+      }),
+      {
+        ...entitlementEnv(),
+        DEV_DETACHED_ACCESS_DEVICE_KEYS: "device-123,bench-*"
+      } as any
+    );
+
+    expect(identity.plan).toBe("pro");
+    expect(identity.identityKind).toBe("detached_device");
+    expect(identity.accessMode).toBe("dev_unlimited");
+    expect(identity.chatLimitOverride).toBe(Number.MAX_SAFE_INTEGER);
+    expect(identity.stockLimitOverride).toBe(Number.MAX_SAFE_INTEGER);
   });
 
   it("uses the synced pro entitlement when the original transaction id resolves server-side", async () => {

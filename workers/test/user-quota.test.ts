@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { UserQuotaDO } from "../src/durable/user-quota";
+
+const REWARDED_AD_TEST_NOW = new Date("2026-04-16T00:00:00.000Z");
+
+function useRewardedAdTestClock() {
+  vi.useFakeTimers();
+  vi.setSystemTime(REWARDED_AD_TEST_NOW);
+}
 
 function createState(initialEntries: Record<string, unknown> = {}) {
   const storage = new Map<string, unknown>(Object.entries(initialEntries));
@@ -69,6 +76,10 @@ async function postQuota(
 }
 
 describe("UserQuotaDO", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("returns 400 when the payload is not valid JSON", async () => {
     const quota = new UserQuotaDO(createState() as never);
 
@@ -1354,6 +1365,7 @@ describe("UserQuotaDO", () => {
   });
 
   it("grants rewarded ad credits into a promotional bucket idempotently", async () => {
+    useRewardedAdTestClock();
     const quota = new UserQuotaDO(createState() as never);
 
     const first = await postQuota(quota, {
@@ -1424,6 +1436,7 @@ describe("UserQuotaDO", () => {
   });
 
   it("serializes rewarded ad daily cap grants per user and day", async () => {
+    useRewardedAdTestClock();
     const quota = new UserQuotaDO(createSerialState() as never);
     const grantBody = (index: number) => ({
       action: "grantRewardedAdCredit",
@@ -1463,6 +1476,7 @@ describe("UserQuotaDO", () => {
   });
 
   it("does not increment rewarded ad daily count for concurrent duplicate transactions", async () => {
+    useRewardedAdTestClock();
     const quota = new UserQuotaDO(createSerialState() as never);
     const body = {
       action: "grantRewardedAdCredit",
@@ -1502,6 +1516,7 @@ describe("UserQuotaDO", () => {
   });
 
   it("resets rewarded ad daily cap on the next day", async () => {
+    useRewardedAdTestClock();
     const quota = new UserQuotaDO(createSerialState() as never);
     const grant = (index: number, day: string) =>
       postQuota(quota, {
@@ -1547,6 +1562,7 @@ describe("UserQuotaDO", () => {
   });
 
   it("consumes rewarded ad credits before paid credits after monthly credits are exhausted", async () => {
+    useRewardedAdTestClock();
     const quota = new UserQuotaDO(
       createState({
         credit_state: {

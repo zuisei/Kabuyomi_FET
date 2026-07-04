@@ -793,10 +793,11 @@ function normalizeForm(form: string | undefined): "10-K" | "10-Q" | null {
   if (!form) {
     return null;
   }
-  if (form.startsWith("10-K")) {
+  const normalized = form.trim().toUpperCase();
+  if (normalized === "10-K") {
     return "10-K";
   }
-  if (form.startsWith("10-Q")) {
+  if (normalized === "10-Q") {
     return "10-Q";
   }
   return null;

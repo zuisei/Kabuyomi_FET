@@ -25,9 +25,11 @@ export function isBoilerplateOrRiskOnly(
   sectionType = ""
 ): boolean {
   const normalized = normalize(`${sourceLabel} ${sectionType} ${text}`);
+  const hasPeriodDriverEvidence =
+    /(net sales|revenue increased|decreased|primarily due|driven by|attributable to|gross margin|operating margin|segment operating|unit case volume|cloud revenue|revenue per user|seats grew|demand for our products|growth in)/i.test(normalized);
   return (
     /(forward-looking statements|available information|investor relations website|trademark|table of contents|risk factors|risks related to|we urge you to carefully review|supervision and regulation)/i.test(normalized) &&
-    !/(net sales|revenue increased|decreased|primarily due|driven by|attributable to|gross margin|operating margin|segment operating)/i.test(normalized)
+    !hasPeriodDriverEvidence
   );
 }
 
@@ -45,19 +47,31 @@ export function isDriverLikeEvidence(
   sector: SourceGateSector
 ): boolean {
   const normalized = normalize(text);
+  const causal = /(primarily due to|driven by|attributable to|resulted from|because|reflecting|as a result of|increased due to|decreased due to|増加.*要因|減少.*要因|主因|要因)/i;
+  const financialTopic = intent === "margin_durability_followup"
+    ? /(margin|profitability|gross profit|operating income|expense|cost|price-cost|pricing|price\/mix|foreign exchange|tariff|commodity cost|input cost|provision|impairment|restructuring|segment operating|depreciation|content acquisition|employee compensation|personnel|marketing|professional fees|litigation)/i
+    : /(net sales|revenue|sales|segment|geographic|product|volume|price|orders|backlog|traffic|ticket|net interest|noninterest|commodity|production|cloud|subscription|revenue per user|seats?|copilot|unit case|demand)/i;
+  const strongMarginCausalEvidence =
+    intent === "margin_durability_followup" &&
+    normalized.length >= 100 &&
+    causal.test(normalized) &&
+    financialTopic.test(normalized);
+  const strongDriverCausalEvidence =
+    intent === "driver_durability_followup" &&
+    normalized.length >= 80 &&
+    (causal.test(normalized) || /(increased|grew|growth|decreased|higher|lower)/i.test(normalized)) &&
+    financialTopic.test(normalized);
+
   if (
-    isFragmentaryEvidenceText(normalized) ||
     isBoilerplateOrRiskOnly(normalized) ||
-    isSectionHeadingOrTableFragment(normalized) ||
     isCountryOrJurisdictionList(normalized)
   ) {
     return false;
   }
+  if (isFragmentaryEvidenceText(normalized) || isSectionHeadingOrTableFragment(normalized)) {
+    return strongMarginCausalEvidence || strongDriverCausalEvidence;
+  }
 
-  const causal = /(primarily due to|driven by|attributable to|resulted from|because|reflecting|as a result of|increased due to|decreased due to|増加.*要因|減少.*要因|主因|要因)/i;
-  const financialTopic = intent === "margin_durability_followup"
-    ? /(margin|profitability|gross profit|operating income|expense|cost|price-cost|provision|impairment|restructuring|segment operating)/i
-    : /(net sales|revenue|sales|segment|geographic|product|volume|price|orders|backlog|traffic|ticket|net interest|noninterest|commodity|production)/i;
   const sectorTopic = sectorPattern(sector).test(normalized);
 
   if ((causal.test(normalized) && financialTopic.test(normalized)) || (sectorTopic && causal.test(normalized))) {
@@ -75,8 +89,14 @@ export function isUnsafeDriverEvidence(
   intent: HardFinancialIntent,
   sector: SourceGateSector
 ): boolean {
-  return !isDriverLikeEvidence(source.text, intent, sector) ||
-    (isMostlyEnglishRawExcerpt(source.text) && isFragmentaryEvidenceText(source.text));
+  const driverLike = isDriverLikeEvidence(source.text, intent, sector);
+  if (!driverLike) {
+    return true;
+  }
+  if (intent === "margin_durability_followup" || intent === "driver_durability_followup") {
+    return false;
+  }
+  return isMostlyEnglishRawExcerpt(source.text) && isFragmentaryEvidenceText(source.text);
 }
 
 function sectorPattern(sector: SourceGateSector): RegExp {
@@ -98,7 +118,7 @@ function sectorPattern(sector: SourceGateSector): RegExp {
     case "auto":
       return /(deliveries|automotive gross margin|vehicle pricing|production volume|average selling price|energy generation|services revenue)/i;
     case "technology":
-      return /(product revenue|services revenue|subscription|usage|rpo|arr|customer growth|installed base|channel inventory)/i;
+      return /(product revenue|services revenue|subscription|usage|rpo|arr|customer growth|installed base|channel inventory|gross margins?|product margin|services margin|tariff|foreign exchange|cost of sales|cost of revenues?|inventory purchases|depreciation|traffic acquisition costs?|\btac\b|content acquisition|employee compensation)/i;
     case "software":
       return /(subscription revenue|usage|customers|rpo|remaining performance obligations|deferred revenue|retention|expansion)/i;
     case "semiconductor_equipment":

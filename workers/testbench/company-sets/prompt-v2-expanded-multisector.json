@@ -1,0 +1,21 @@
+{
+  "version": "prompt-v2-expanded-multisector-v1",
+  "description": "Expanded prompt-v2 smoke coverage across financials, energy, industrials, retail, software/cloud, semiconductors, platforms, autos, pharma, payments, staples, and travel when cached filings are available.",
+  "tickers": [
+    "AAPL",
+    "JPM",
+    "XOM",
+    "CAT",
+    "WMT",
+    "NVDA",
+    "MU",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "TSLA",
+    "LLY",
+    "V",
+    "KO",
+    "DAL"
+  ]
+}

@@ -50,6 +50,35 @@ The output is written to:
 workers/testbench/runs/<run-id>.jsonl
 ```
 
+## Final Prompt-v2 Full Smoke
+
+Use this for the final answer-quality evidence run after deploying the test Worker. It runs the expanded multi-sector company set against the prompt-v2 smoke questions, writes the answer report automatically, and then applies the quality gate with required-template and ticker-count coverage checks.
+
+```bash
+cd workers
+npm run secrets:test:setup
+npm run testbench:live-full-smoke
+```
+
+Check the final-run inputs without calling the Worker:
+
+```bash
+npm run testbench:full-smoke -- --check-only
+```
+
+`secrets:test:setup` prompts for an existing `OPENAI_API_KEY` and `CLOUDFLARE_API_TOKEN` without echoing them, writes them to ignored `workers/.dev.vars`, and uploads `OPENAI_API_KEY` to the test Worker secret store. If both variables are already exported in the shell, the command uses those values without prompting.
+
+`testbench:live-full-smoke` loads `workers/.dev.vars`, deploys the test Worker, runs the full-smoke input preflight, and then runs the final live quality gate. Override the run id with `KABUYOMI_TESTBENCH_RUN_ID=...` when needed.
+
+Defaults used by `testbench:full-smoke`:
+
+- `KABUYOMI_TESTBENCH_BASE_URL=https://kabuyomi-api-test.dznqjmctk7.workers.dev`
+- `KABUYOMI_TESTBENCH_COMPANY_SET=testbench/company-sets/prompt-v2-expanded-multisector.json`
+- `KABUYOMI_TESTBENCH_QUESTIONS=testbench/questions/prompt-v2-smoke-10.jsonl`
+- `KABUYOMI_QUALITY_GATE_REQUIRED_TEMPLATES=Q01,Q02,Q03,Q04,Q05,Q06,Q07,Q08,Q09,Q10`
+- `KABUYOMI_QUALITY_GATE_MIN_COMPANY_TICKERS=10`
+- `KABUYOMI_QUALITY_GATE_MIN_ROWS=150`
+
 ## Swap Tickers
 
 Use an inline ticker list:
@@ -90,4 +119,3 @@ The first quality pass should focus on:
 3. `followup_context_lost`
 4. `fallback_too_generic`
 5. `vague_answer`
-

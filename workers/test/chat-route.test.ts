@@ -49,7 +49,11 @@ vi.mock("../src/clients/gemini/request", () => ({
 
 import { handleChatRoute } from "../src/routes/chat";
 import { loadFilingByKey, isCurrentCacheRecord } from "../src/lib/filings/cache";
-import { upgradeMetricsOnlyRecord } from "../src/lib/filings/content-upgrade";
+import {
+  backfillRevenueDriverSourceAssets,
+  needsRevenueDriverSourceBackfill,
+  upgradeMetricsOnlyRecord
+} from "../src/lib/filings/content-upgrade";
 import { buildChatResponse } from "../src/lib/chat/orchestrator";
 import {
   consumeChatQuota,
@@ -66,6 +70,8 @@ const mockBuildChatResponse = vi.mocked(buildChatResponse);
 const mockLoadFilingByKey = vi.mocked(loadFilingByKey);
 const mockIsCurrentCacheRecord = vi.mocked(isCurrentCacheRecord);
 const mockUpgradeMetricsOnlyRecord = vi.mocked(upgradeMetricsOnlyRecord);
+const mockBackfillRevenueDriverSourceAssets = vi.mocked(backfillRevenueDriverSourceAssets);
+const mockNeedsRevenueDriverSourceBackfill = vi.mocked(needsRevenueDriverSourceBackfill);
 const mockReadQuotaIdentity = vi.mocked(readQuotaIdentity);
 const mockEnsureChatQuotaAvailable = vi.mocked(ensureChatQuotaAvailable);
 const mockLoadUsage = vi.mocked(loadUsage);
@@ -108,6 +114,8 @@ describe("handleChatRoute", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockNeedsRevenueDriverSourceBackfill.mockReturnValue(false);
+    mockBackfillRevenueDriverSourceAssets.mockImplementation(async (record) => record as never);
     mockLoadFilingByKey.mockResolvedValue({
       filingKey: "filing-1",
       ticker: "ORCL",
@@ -284,6 +292,95 @@ describe("handleChatRoute", () => {
           previousAnswer: "営業キャッシュフローはマイナスで、前年比で減少しました。"
         }
       }
+    );
+  });
+
+  it("anchors casual unclear follow-ups to a plain-language explanation request", async () => {
+    mockBuildChatResponse.mockResolvedValue({
+      answer: "売上高 explanation",
+      sources: [],
+      responsePath: "openai"
+    });
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "よくわからん",
+          conversationContext: [
+            { role: "user", content: "今回どう？" },
+            { role: "assistant", content: "売上高は前年同期比で大きく増加しました。" }
+          ]
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env: { KABUYOMI_ENV: "test", LLM_PROVIDER: "openai", OPENAI_CHAT_MODEL: "gpt-5-nano" } as never,
+      config: legacyQuotaConfig,
+      ctx
+    });
+
+    expect(response?.status).toBe(200);
+    expect(mockBuildChatResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ filingKey: "filing-1" }),
+      "売上高について、前の回答を投資初心者にも分かるように、何が起きたか・なぜ重要か・次に何を見るかに分けて説明してください。",
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        conversationContextSummary: "ユーザー: 今回どう？\nアシスタント: 売上高は前年同期比で大きく増加しました。",
+        followupContext: {
+          previousQuestion: "今回どう？",
+          previousAnswer: "売上高は前年同期比で大きく増加しました。"
+        }
+      })
+    );
+  });
+
+  it("runs revenue-driver source backfill before chat outside test env", async () => {
+    mockNeedsRevenueDriverSourceBackfill.mockReturnValue(true);
+    mockBackfillRevenueDriverSourceAssets.mockResolvedValue({
+      filingKey: "filing-1",
+      ticker: "TSLA",
+      contentMode: "full",
+      mdaText: "backfilled md&a",
+      sourceChunks: []
+    } as never);
+    mockBuildChatResponse.mockResolvedValue({
+      answer: "Backfilled answer",
+      sources: [],
+      responsePath: "deterministic"
+    });
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "売上成長、または減収の主な要因は？"
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env,
+      config: legacyQuotaConfig,
+      ctx
+    });
+
+    expect(response?.status).toBe(200);
+    expect(mockBackfillRevenueDriverSourceAssets).toHaveBeenCalled();
+    expect(mockBuildChatResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ mdaText: "backfilled md&a" }),
+      expect.any(String),
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
     );
   });
 

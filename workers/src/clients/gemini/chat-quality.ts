@@ -159,8 +159,25 @@ export function classifyLowQualityChatAnswer(input: ChatPromptInput, answer: str
       !/(本文|提出資料|決算資料|外部補足|この決算資料だけでは|この決算資料以外|この filing だけでは|この filing 以外|断定できません|切り分け|会社見通し|リスク|不確実|需要|iPhone|サービス|自社株買い|配当|株価|市場|反応|安全です)/.test(
         normalizedAnswer
       );
+    const asksMarginCause =
+      /(利益率|マージン|粗利|採算|営業利益率|純利益率|margin|profitability|grossprofit)/.test(normalizedQuestion) &&
+      /(主因|要因|原因|理由|なぜ|背景|driver|cause|why|改善|悪化)/.test(normalizedQuestion);
+    const hasMarginDriverExplanation =
+      /(利益率|マージン|粗利|採算|構成|ミックス|mix|価格|値上げ|price|pricing|コスト|費用|原価|営業費用|販管費|数量|volume|為替|fx|セグメント|segment)/.test(
+        normalizedAnswer
+      );
+    const asksLiquidityDebt =
+      /(資金繰り|負債|債務|借入|返済|満期|流動性|信用枠|debt|liquidity|maturity|borrowings?|creditfacility)/.test(normalizedQuestion);
+    const hasLiquidityDebtExplanation =
+      /(営業cf|キャッシュフロー|現金|資金|資金繰り|流動性|負債|債務|借入|返済|満期|信用枠|営業活動|capitalresources|cashandcashequivalents|cashflow|operatingcashflow|liquidity|debt|maturit|borrowings?|creditfacility|revolver|commercialpaper)/.test(
+        normalizedAnswer
+      );
 
-    if (answerLooksMetricOnly) {
+    if (
+      answerLooksMetricOnly &&
+      !(asksMarginCause && hasMarginDriverExplanation) &&
+      !(asksLiquidityDebt && hasLiquidityDebtExplanation)
+    ) {
       return "contextual_reasoning_metric_only";
     }
   }

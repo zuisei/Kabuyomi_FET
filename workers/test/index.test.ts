@@ -205,7 +205,15 @@ function base64Encode(bytes: Uint8Array): string {
 }
 
 describe("worker routing", () => {
+  const ACTIVE_SUBSCRIPTION_TEST_NOW = new Date("2026-05-15T00:00:00.000Z");
+
+  function useActiveSubscriptionTestClock() {
+    vi.useFakeTimers();
+    vi.setSystemTime(ACTIVE_SUBSCRIPTION_TEST_NOW);
+  }
+
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -377,6 +385,7 @@ describe("worker routing", () => {
   });
 
   it("syncs an active Lite subscription and grants the verified monthly period once", async () => {
+    useActiveSubscriptionTestClock();
     const { env, monthlyGrantRows, creditLedgerRows } = await createCreditPurchaseEnv();
     const signedTransactionInfo = fakeJws({
       transactionId: "sub-tx-lite-1",
@@ -454,6 +463,7 @@ describe("worker routing", () => {
   });
 
   it("keeps paid credits on the same device quota subject when subscription credits are granted", async () => {
+    useActiveSubscriptionTestClock();
     const { env } = await createCreditPurchaseEnv();
     const creditSignedTransactionInfo = fakeJws({
       transactionId: "tx-50",
@@ -535,6 +545,7 @@ describe("worker routing", () => {
     ["kabuyomi.sub.pro.monthly", "pro", 900],
     ["kabuyomi.sub.max.monthly", "pro_max", 2000]
   ])("syncs %s and grants its configured monthly credits", async (productId, plan, monthlyCredits) => {
+    useActiveSubscriptionTestClock();
     const { env } = await createCreditPurchaseEnv();
     const signedTransactionInfo = fakeJws({
       transactionId: `sub-tx-${plan}`,
@@ -586,6 +597,7 @@ describe("worker routing", () => {
   });
 
   it("uses no-clawback semantics for same-period subscription downgrade and leaves paid credits untouched", async () => {
+    useActiveSubscriptionTestClock();
     const { env, monthlyGrantRows, creditLedgerRows } = await createCreditPurchaseEnv();
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const creditSignedTransactionInfo = fakeJws({

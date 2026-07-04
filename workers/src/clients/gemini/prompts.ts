@@ -1,4 +1,6 @@
 import type { ChatPromptInput, QuoteTranslationPromptInput, SummaryPromptInput } from "./types";
+import type { MetricSnapshot, SourceChunkRecord } from "../../env";
+import { formatMetricValue, formatYoYDelta, metricLabel } from "../../lib/metrics";
 
 export function buildSummaryPrompt(input: SummaryPromptInput): string {
   return [
@@ -70,6 +72,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "For questions about 事業, セクター, セグメント, 売上内訳, or 売上の柱, answer with the major revenue buckets or business lines in plain Japanese first.",
     "For business_overview, revenue_breakdown, and risk_factors, use the Factual pack before using raw source excerpts. Treat geography revenue as secondary unless the Factual pack has no segment, product, or service revenue categories.",
     "Use numbers only when they appear in the Factual pack, Factual metrics pack, or provided Sources. If the Factual pack lists missingFields, mention the gap briefly at the end instead of turning the whole answer into a refusal.",
+    "When the Factual metrics pack contains display strings such as labelJa, valueJa, comparisonValueJa, or yoyJa, copy those display strings exactly. Do not recalculate, rescale, or reformat metric values.",
     "For risk_factors, do not answer from general business or AI strategy text when the Factual pack or Sources include risk-specific items such as competition, regulation, privacy/data, advertising dependence, customer concentration, supply, tariffs, or macro risks.",
     "For analytical questions, answer the user's question directly in 1 to 3 natural sentences. Add a caveat or next check only when it materially changes the answer.",
     "For prompts such as 前回との違い, 何が変わった, or 一番大きい変化, start with the biggest filing-backed numeric change, then add one short business explanation if the filing provides it.",
@@ -108,7 +111,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     }),
     "",
     "Factual metrics pack:",
-    JSON.stringify(contextPack.metrics),
+    JSON.stringify(buildPromptMetricDisplayPack(contextPack.metrics, contextPack.sourceChunks)),
     "",
     "Factual pack:",
     JSON.stringify(contextPack.factualPack ?? null),
@@ -144,10 +147,40 @@ export function buildChatPromptTemplateVariables(input: ChatPromptInput): Record
       filedAt: input.filing.filedAt,
       periodOfReport: input.filing.periodOfReport
     }),
-    factual_metrics_pack_json: JSON.stringify(contextPack.metrics),
+    factual_metrics_pack_json: JSON.stringify(buildPromptMetricDisplayPack(contextPack.metrics, contextPack.sourceChunks)),
     factual_pack_json: JSON.stringify(contextPack.factualPack ?? null),
     sources_json: JSON.stringify(contextPack.sourceChunks)
   };
+}
+
+export function buildPromptMetricDisplayPack(
+  metrics: MetricSnapshot[],
+  sourceChunks: SourceChunkRecord[] = []
+): Array<{
+  logicalName: MetricSnapshot["logicalName"];
+  labelJa: string;
+  valueJa: string;
+  comparisonValueJa?: string;
+  yoyJa?: string;
+  periodEnd: string;
+  unit: string;
+  tagUsed: string;
+  sourceId?: string;
+}> {
+  return metrics.map((metric) => {
+    const source = sourceChunks.find((chunk) => chunk.sectionType === "xbrl_metric" && chunk.tagName === metric.tagUsed);
+    return {
+      logicalName: metric.logicalName,
+      labelJa: metricLabel(metric.logicalName),
+      valueJa: formatMetricValue(metric.value, metric.unit),
+      ...(metric.comparisonValue !== undefined ? { comparisonValueJa: formatMetricValue(metric.comparisonValue, metric.unit) } : {}),
+      ...(metric.yoyPercent !== undefined ? { yoyJa: `前年比 ${formatYoYDelta(metric.yoyPercent)}` } : {}),
+      periodEnd: metric.periodEnd,
+      unit: metric.unit,
+      tagUsed: metric.tagUsed,
+      ...(source ? { sourceId: source.sourceId } : {})
+    };
+  });
 }
 
 export function buildQuoteTranslationPrompt(input: QuoteTranslationPromptInput): string {
@@ -242,6 +275,8 @@ export function answerFormatInstruction(intent: NonNullable<ChatPromptInput["que
       return "Cover, in this order: 売上・営業利益・純利益, 営業利益率または純利益率, 改善/悪化の要因, 注意点。";
     case "cash_flow":
       return "Cover, in this order: 営業CF, 利益との違い, 増減要因, 持続性を見る上で足りない情報。";
+    case "liquidity_debt":
+      return "Cover, in this order: 現金・営業CF, 負債または借入・満期, 資金繰りの懸念有無, この資料だけでは足りない情報。Do not infer a liquidity crisis from generic risk factors alone.";
     case "risk_factors":
       return "Cover, in this order: 主要リスク3つ以内, 影響, 根拠, まだ数字に出ているか。";
     case "mda_summary":

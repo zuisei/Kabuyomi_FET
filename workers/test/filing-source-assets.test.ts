@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FilingReference, MetricSnapshot } from "../src/env";
-import { buildSourceChunks, hasStrongRevenueDriverSource } from "../src/lib/filings/ingest";
+import { buildSourceChunks, hasStrongMarginDriverSource, hasStrongRevenueDriverSource } from "../src/lib/filings/ingest";
 import { deriveSourceSectionFamily } from "../src/lib/chat/source-family";
 
 describe("revenue driver source assets", () => {
@@ -78,6 +78,18 @@ describe("revenue driver source assets", () => {
     expect(chunks[0]?.sectionTitle).toBe("Revenue driver discussion");
     expect(chunks[0]?.text).toMatch(/downstream earnings|refining margins|chemical margins/i);
     expect(hasStrongRevenueDriverSource(chunks[0]!)).toBe(true);
+  });
+
+  it("creates a TSLA-like revenue driver source from deliveries, automotive sales and energy services discussion", () => {
+    const chunks = buildSourceChunks(filing("TSLA", "Tesla, Inc."), genericMda(), [revenueMetric()], {
+      revenueDriverSearchText:
+        "Total revenues decreased 3% in fiscal 2025 compared with the prior year, primarily due to lower automotive revenues as vehicle deliveries declined and average selling price decreased, partially offset by growth in energy generation and storage and services and other revenue."
+    });
+
+    expect(chunks[0]?.sectionTitle).toBe("Revenue driver discussion");
+    expect(chunks[0]?.text).toMatch(/vehicle deliveries|automotive revenues|energy generation/i);
+    expect(hasStrongRevenueDriverSource(chunks[0]!)).toBe(true);
+    expect(sourceIdsAreValid(chunks)).toBe(true);
   });
 
   it("does not classify long-term commodity outlook as energy revenue-driver evidence", () => {
@@ -197,6 +209,18 @@ describe("revenue driver source assets", () => {
 
     expect(deriveSourceSectionFamily(wmt.find((chunk) => chunk.sectionTitle === "Margin and profitability discussion")!)).toBe("retail_margin_discussion");
     expect(deriveSourceSectionFamily(cat.find((chunk) => chunk.sectionTitle === "Margin and profitability discussion")!)).toBe("industrial_margin_discussion");
+  });
+
+  it("creates a TSLA-like margin source from automotive gross margin and pricing/cost discussion", () => {
+    const chunks = buildSourceChunks(filing("TSLA", "Tesla, Inc."), genericMda(), [revenueMetric()], {
+      marginDriverSearchText:
+        "Automotive gross margin decreased in fiscal 2025 compared with the prior year, primarily due to lower average selling price, lower vehicle deliveries and higher production costs, partially offset by lower warranty and restructuring costs."
+    });
+    const marginSource = chunks.find((chunk) => chunk.sectionTitle === "Margin and profitability discussion");
+
+    expect(marginSource?.text).toMatch(/Automotive gross margin|average selling price|production costs/i);
+    expect(hasStrongMarginDriverSource(marginSource!)).toBe(true);
+    expect(sourceIdsAreValid(chunks)).toBe(true);
   });
 });
 

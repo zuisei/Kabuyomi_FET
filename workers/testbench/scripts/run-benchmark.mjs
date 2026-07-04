@@ -9,11 +9,13 @@ import {
   decorateBenchmarkRow,
   isRateLimitRow
 } from "./benchmark-quality.mjs";
+import { buildRunInputMetadata, resolveTickerInput } from "./run-metadata.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workersDir = resolve(__dirname, "../..");
 const rootDir = resolve(__dirname, "..");
 const runsDir = join(rootDir, "runs");
+const writeRunReportScriptPath = join(rootDir, "scripts/write-run-report.mjs");
 
 const baseURL = requiredEnv("KABUYOMI_TESTBENCH_BASE_URL");
 const runId = process.env.KABUYOMI_TESTBENCH_RUN_ID?.trim() || buildRunId();
@@ -28,8 +30,10 @@ const questionsPath = resolvePath(process.env.KABUYOMI_TESTBENCH_QUESTIONS, join
 const companySetPath = resolvePath(process.env.KABUYOMI_TESTBENCH_COMPANY_SET, join(rootDir, "company-sets/minimal-5.json"));
 
 const questions = await readJsonl(questionsPath);
-const tickers = await resolveTickers();
+const tickerInput = await loadTickerInput();
+const tickers = tickerInput.tickers;
 const rows = buildRows(tickers, questions).slice(0, limit ?? Number.POSITIVE_INFINITY);
+const runInputMetadata = buildRunInputMetadata({ questionsPath, questions, tickerInput, workersDir });
 const results = [];
 const filingKeyByTicker = new Map();
 const runStartedAt = new Date().toISOString();
@@ -66,6 +70,7 @@ for (const row of rows) {
     baseURL,
     appVersion,
     benchmarkDeviceKeyMode,
+    ...runInputMetadata,
     ticker: row.ticker,
     filingKey,
     caseId: row.caseId,
@@ -260,9 +265,11 @@ const summary = buildBenchmarkSummary(results, {
   markInfraContaminatedOnRateLimitThreshold: benchmarkControls.markInfraContaminatedOnRateLimitThreshold,
   benchmarkControls: sanitizeBenchmarkControls(benchmarkControls)
 });
-await writeFile(summaryPath, `${JSON.stringify({ ...summary, benchmarkControls: sanitizeBenchmarkControls(benchmarkControls) }, null, 2)}\n`);
+await writeFile(summaryPath, `${JSON.stringify({ ...summary, ...runInputMetadata, benchmarkControls: sanitizeBenchmarkControls(benchmarkControls) }, null, 2)}\n`);
+const answerReportPath = writeAnswerReport(outputPath);
 console.log(`Wrote ${results.length} rows to ${outputPath}`);
 console.log(`Wrote summary to ${summaryPath}`);
+console.log(`Wrote answer report to ${answerReportPath}`);
 
 function requiredEnv(name) {
   const value = process.env[name]?.trim();
@@ -277,17 +284,21 @@ function requiredEnv(name) {
   return value.replace(/\/+$/, "");
 }
 
-async function resolveTickers() {
+function writeAnswerReport(runOutputPath) {
+  return execFileSync(process.execPath, [writeRunReportScriptPath, runOutputPath], {
+    cwd: workersDir,
+    encoding: "utf8"
+  }).trim();
+}
+
+async function loadTickerInput() {
   const inlineTickers = parseTickers(process.env.KABUYOMI_TESTBENCH_TICKERS);
   if (inlineTickers.length > 0) {
-    return inlineTickers;
+    return resolveTickerInput({ inlineTickers, companySetPath, workersDir });
   }
 
   const companySet = JSON.parse(await readFile(companySetPath, "utf8"));
-  if (!Array.isArray(companySet.tickers) || companySet.tickers.length === 0) {
-    throw new Error(`${companySetPath} must contain a non-empty tickers array`);
-  }
-  return companySet.tickers.map((ticker) => String(ticker).trim().toUpperCase()).filter(Boolean);
+  return resolveTickerInput({ companySetTickers: companySet.tickers, companySetPath, workersDir });
 }
 
 function buildRows(tickers, questions) {

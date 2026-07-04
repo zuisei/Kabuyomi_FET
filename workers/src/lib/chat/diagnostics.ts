@@ -50,6 +50,7 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
   | "sourceGateMissingSourceTypes"
   | "sourceGateFailureLabels"
   | "sourceGateEvidenceSlots"
+  | "followupPreviousAnswer"
   | "sourceGateRetrievalRetryRecommended"
   | "retrievalRetryUsed"
   | "retrievalRetryOutcome"
@@ -137,6 +138,7 @@ export function buildModelAttemptDebugFields(modelResponse: GeminiChatAnswer): P
     sourceGateMissingSourceTypes: qualityControl?.sourceGateMissingSourceTypes ?? [],
     sourceGateFailureLabels: qualityControl?.sourceGateFailureLabels ?? [],
     sourceGateEvidenceSlots: qualityControl?.sourceGateEvidenceSlots ?? {},
+    followupPreviousAnswer: qualityControl?.followupPreviousAnswer ?? null,
     sourceGateRetrievalRetryRecommended: qualityControl?.sourceGateRetrievalRetryRecommended ?? false,
     retrievalRetryUsed: qualityControl?.retrievalRetryUsed ?? false,
     retrievalRetryOutcome: qualityControl?.retrievalRetryOutcome ?? "not_used",

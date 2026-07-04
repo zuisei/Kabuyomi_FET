@@ -78,6 +78,7 @@ export function shouldRejectNarrativeSource(questionIntent: QuestionIntent, qual
       return quality.isHeadingOnly || (quality.isTableFragment && quality.charCount < 300);
     case "margin_profitability":
     case "cash_flow":
+    case "liquidity_debt":
     case "yoy_change":
     case "historical_comparison":
     case "unknown":

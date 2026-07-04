@@ -11,6 +11,23 @@ describe("resolveContextualQuestion", () => {
     expect(resolveContextualQuestion("なぜ？", cashFlowContext)).toBe("営業CFが変化した理由は？");
   });
 
+  it("anchors unclear natural-language follow-ups to a plain-language explanation of the previous metric", () => {
+    expect(resolveContextualQuestion("よくわからん", cashFlowContext)).toBe(
+      "営業CFについて、前の回答を投資初心者にも分かるように、何が起きたか・なぜ重要か・次に何を見るかに分けて説明してください。"
+    );
+  });
+
+  it("anchors casual clarification follow-ups when the previous assistant answer contains the metric", () => {
+    const revenueContext = [
+      { role: "user" as const, content: "今回どう？" },
+      { role: "assistant" as const, content: "売上高は前年同期比で大きく増加しました。" }
+    ];
+
+    expect(resolveContextualQuestion("どういうこと？", revenueContext)).toBe(
+      "売上高について、前の回答を投資初心者にも分かるように、何が起きたか・なぜ重要か・次に何を見るかに分けて説明してください。"
+    );
+  });
+
   it("anchors durability follow-ups to the previous metric", () => {
     expect(resolveContextualQuestion("その要因は一時的？", cashFlowContext)).toBe("営業CFが変化した要因は一時的ですか？");
   });

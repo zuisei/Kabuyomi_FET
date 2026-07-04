@@ -25,7 +25,7 @@ export async function loadDetachedAccessFromRequest(request: Request, env: Env):
   }
 
   const allowlist = parseDetachedAccessDeviceKeys(env.DEV_DETACHED_ACCESS_DEVICE_KEYS);
-  if (!allowlist.has(deviceKey)) {
+  if (!isDetachedAccessDeviceAllowed(deviceKey, allowlist)) {
     return null;
   }
 
@@ -48,6 +48,18 @@ function parseDetachedAccessDeviceKeys(rawValue: string | undefined): Set<string
       .map((entry) => entry.trim().toLowerCase())
       .filter((entry) => entry.length > 0)
   );
+}
+
+function isDetachedAccessDeviceAllowed(deviceKey: string, allowlist: Set<string>): boolean {
+  if (allowlist.has(deviceKey)) {
+    return true;
+  }
+  for (const entry of allowlist) {
+    if (entry.endsWith("*") && deviceKey.startsWith(entry.slice(0, -1))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function sha256Hex(value: string): Promise<string> {

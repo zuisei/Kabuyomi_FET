@@ -20,8 +20,10 @@ export type FallbackUserReason =
   | "model_rate_limited"
   | "model_schema_invalid"
   | "business_model_sources_missing"
+  | "revenue_breakdown_sources_missing"
   | "management_discussion_sources_missing"
   | "revenue_driver_sources_missing"
+  | "margin_driver_sources_missing"
   | "liquidity_sources_missing"
   | "risk_sources_missing"
   | "answer_too_metric_only"
@@ -103,6 +105,7 @@ export interface ChatResponseDebug {
   sourceGateMissingSourceTypes?: string[];
   sourceGateFailureLabels?: string[];
   sourceGateEvidenceSlots?: Record<string, unknown>;
+  followupPreviousAnswer?: string | null;
   sourceGateRetrievalRetryRecommended?: boolean;
   retrievalRetryUsed?: boolean;
   retrievalRetryOutcome?: "improved" | "no_improvement" | "not_used";

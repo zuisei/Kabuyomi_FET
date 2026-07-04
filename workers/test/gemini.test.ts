@@ -524,6 +524,69 @@ describe("Gemini local chat fallback", () => {
     expect(result?.response.answer.length).toBeGreaterThan(80);
   });
 
+  it("answers margin cause questions with source-backed margin drivers", () => {
+    const result = buildDeterministicMetricAnswer(makeMarginDriverPatternFiling(), "利益率が改善、または悪化した理由は？");
+
+    expect(result?.strategy).toBe("margin_snapshot");
+    expect(result?.response.answer).toContain("営業利益率");
+    expect(result?.response.answer).toContain("本文で確認できる利益率・利益要因");
+    expect(result?.response.answer).toContain("粗利率・粗利益の改善");
+    expect(result?.response.answer).toContain("営業費用・原価の増加");
+    expect(result?.response.answer).toContain("一時要因か構造的変化か");
+    expect(result?.response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S9", "S10", "S1"]));
+  });
+
+  it("extracts source-backed revenue drivers from common MD&A wording", () => {
+    const filing = makeRevenueDriverPatternFiling();
+    const result = buildDeterministicMetricAnswer(filing, "売上成長、または減収の主な要因は？");
+
+    expect(result?.strategy).toBe("revenue_drivers");
+    expect(result?.response.answer).toContain("売上高は");
+    expect(result?.response.answer).toContain("取引件数と販売数量の増加");
+    expect(result?.response.answer).toContain("販売数量の増加");
+    expect(result?.response.answer).toContain("アドバイザリーとその他サービスの成長");
+    expect(result?.response.answer).toContain("純利息収入");
+    expect(result?.response.answer).toContain("カード事業のリボ残高増");
+    expect(result?.response.answer).toContain("非利息収入");
+    expect(result?.response.answer).toContain("投資銀行手数料増");
+    expect(result?.response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S9", "S1", "S2", "S3", "S4", "S5"]));
+  });
+
+  it("answers core business and revenue templates with ticker-specific fallback context", () => {
+    const filing = makeKnownTickerRevenueAxisFiling();
+
+    const business = buildDeterministicMetricAnswer(filing, "この会社は何で儲けている？");
+    expect(business?.strategy).toBe("business_overview");
+    expect(business?.response.answer).toContain("クラウド");
+    expect(business?.response.answer).toContain("Microsoft 365");
+
+    const snapshot = buildDeterministicMetricAnswer(filing, "直近決算の売上はどうだった？");
+    expect(snapshot?.strategy).toBe("revenue_breakdown");
+    expect(snapshot?.response.answer).toContain("売上高は");
+    expect(snapshot?.response.answer).toContain("売上構造を見る軸");
+    expect(snapshot?.response.answer).toContain("LinkedIn");
+    expect(snapshot?.response.answer).not.toContain("売上高の増減は確認できますが");
+
+    const segment = buildDeterministicMetricAnswer(filing, "どのセグメントや地域が伸びた？弱かった部分は？");
+    expect(segment?.strategy).toBe("revenue_breakdown");
+    expect(segment?.response.answer).toContain("セグメント・製品別に見る軸");
+    expect(segment?.response.answer).toContain("ゲーム");
+    expect(segment?.response.answer).not.toContain("会社固有の売上の柱までは特定できません");
+    expect(segment?.response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S9", "S1"]));
+  });
+
+  it("skips untranslated revenue-driver fragments in deterministic revenue snapshots", () => {
+    const filing = makeUntranslatedRevenueDriverFiling();
+    const result = buildDeterministicMetricAnswer(filing, "直近決算の売上はどうだった？");
+
+    expect(result?.strategy).toBe("revenue_breakdown");
+    expect(result?.response.answer).toContain("売上高は");
+    expect(result?.response.answer).toContain("売上構造を見る軸");
+    expect(result?.response.answer).not.toContain("several factors");
+    expect(result?.response.answer).not.toContain("payment processing");
+    expect(result?.response.answer).not.toContain("fulfillment");
+  });
+
   it("softens revenue-breakdown limitation wording in remote Gemini answers", async () => {
     vi.stubGlobal(
       "fetch",
@@ -3134,6 +3197,300 @@ function makeAdpMarginImprovementFiling() {
     ],
     summary: { verdict: "", highlights: [], changes: [] },
     generatedAt: "2026-04-14T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeMarginDriverPatternFiling() {
+  return {
+    filingKey: "v6:0000000000:000000000000000002",
+    ticker: "MRG",
+    companyName: "Margin Pattern Corp",
+    cik: "0000000000",
+    formType: "10-Q",
+    filedAt: "2026-04-30",
+    periodOfReport: "2026-03-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        value: 12000000000,
+        unit: "USD",
+        periodEnd: "2026-03-31",
+        comparisonValue: 10000000000,
+        yoyPercent: 20
+      },
+      {
+        logicalName: "operatingIncome",
+        tagUsed: "OperatingIncomeLoss",
+        value: 3000000000,
+        unit: "USD",
+        periodEnd: "2026-03-31",
+        comparisonValue: 2200000000,
+        yoyPercent: 36.4
+      },
+      {
+        logicalName: "netIncome",
+        tagUsed: "NetIncomeLoss",
+        value: 2500000000,
+        unit: "USD",
+        periodEnd: "2026-03-31",
+        comparisonValue: 2000000000,
+        yoyPercent: 25
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)",
+        text: "売上高: 12000000000 USD / 比較値: 10000000000 / YoY: 20.0%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        sortOrder: 9
+      },
+      {
+        sourceId: "S10",
+        sectionType: "xbrl_metric",
+        sectionTitle: "営業利益",
+        sourceLabel: "XBRL 営業利益 (OperatingIncomeLoss)",
+        text: "営業利益: 3000000000 USD / 比較値: 2200000000 / YoY: 36.4%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "OperatingIncomeLoss",
+        sortOrder: 10
+      },
+      {
+        sourceId: "S11",
+        sectionType: "xbrl_metric",
+        sectionTitle: "純利益",
+        sourceLabel: "XBRL 純利益 (NetIncomeLoss)",
+        text: "純利益: 2500000000 USD / 比較値: 2000000000 / YoY: 25.0%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "NetIncomeLoss",
+        sortOrder: 11
+      },
+      {
+        sourceId: "S1",
+        sectionType: "md_a",
+        sectionTitle: "Margin and profitability discussion",
+        sourceLabel: "10-Q Margin and profitability discussion",
+        text:
+          "Gross margin improved due to favorable price mix and lower manufacturing costs. Operating expenses increased due to higher research and development expenses and marketing, selling, and administrative expenses.",
+        startOffset: 0,
+        endOffset: 0,
+        sortOrder: 1
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-30T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeRevenueDriverPatternFiling() {
+  return {
+    filingKey: "v6:0000000000:000000000000000001",
+    ticker: "DRV",
+    companyName: "Driver Pattern Corp",
+    cik: "0000000000",
+    formType: "10-Q",
+    filedAt: "2026-04-30",
+    periodOfReport: "2026-03-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "Revenues",
+        value: 11230000000,
+        unit: "USD",
+        periodEnd: "2026-03-31",
+        comparisonValue: 9594000000,
+        yoyPercent: 17.1
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (Revenues)",
+        text: "売上高: 11230000000 USD / 比較値: 9594000000 / YoY: 17.1%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "Revenues",
+        sortOrder: 9
+      },
+      {
+        sourceId: "S1",
+        sectionType: "md_a",
+        sectionTitle: "Revenue driver discussion",
+        sourceLabel: "10-Q Revenue driver discussion",
+        text: "Comparable sales in fiscal 2025 were driven by growth in transactions and unit volumes, with strong sales in grocery and health and wellness.",
+        startOffset: 0,
+        endOffset: 0,
+        sortOrder: 1
+      },
+      {
+        sourceId: "S2",
+        sectionType: "md_a",
+        sectionTitle: "Revenue driver discussion",
+        sourceLabel: "10-Q Revenue driver discussion",
+        text: "Revenue increased for the three months ended March 31, 2026, driven primarily by increased volume, partially offset by lower realized prices.",
+        startOffset: 0,
+        endOffset: 0,
+        sortOrder: 2
+      },
+      {
+        sourceId: "S3",
+        sectionType: "md_a",
+        sectionTitle: "Revenue driver discussion",
+        sourceLabel: "10-Q Revenue driver discussion",
+        text: "Other revenue increased over the prior-year period primarily due to growth in Advisory and Other Services and select pricing modifications.",
+        startOffset: 0,
+        endOffset: 0,
+        sortOrder: 3
+      },
+      {
+        sourceId: "S4",
+        sectionType: "md_a",
+        sectionTitle: "Revenue driver discussion",
+        sourceLabel: "10-K Revenue driver discussion",
+        text: "Net interest income (“NII”) of $95.4 billion, up 3%, driven by higher Markets net interest income, higher revolving balances in Card Services, higher wholesale deposit balances, and the impact of investment securities activity.",
+        startOffset: 0,
+        endOffset: 0,
+        sortOrder: 4
+      },
+      {
+        sourceId: "S5",
+        sectionType: "md_a",
+        sectionTitle: "Revenue driver discussion",
+        sourceLabel: "10-K Revenue driver discussion",
+        text: "Noninterest revenue (“NIR”) was $87.0 billion, up 2%, reflecting higher Markets noninterest revenue, higher asset management fees in AWM and CCB, higher Payments fees, higher investment banking fees, and a $588 million First Republic-related gain recorded in the first quarter of 2025.",
+        startOffset: 0,
+        endOffset: 0,
+        sortOrder: 5
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-30T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeKnownTickerRevenueAxisFiling() {
+  return {
+    filingKey: "v6:0000789019:000078901926000001",
+    ticker: "MSFT",
+    companyName: "MICROSOFT CORP",
+    cik: "0000789019",
+    formType: "10-Q",
+    filedAt: "2026-04-24",
+    periodOfReport: "2026-03-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        value: 81270000000,
+        unit: "USD",
+        periodEnd: "2026-03-31",
+        comparisonValue: 69630000000,
+        yoyPercent: 16.7
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)",
+        text: "売上高: 81270000000 USD / 比較値: 69630000000 / YoY: 16.7%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        sortOrder: 9
+      },
+      {
+        sourceId: "S1",
+        sectionType: "md_a",
+        sectionTitle: "Management discussion",
+        sourceLabel: "10-Q Management discussion",
+        text: "Management discusses cloud demand, productivity software, LinkedIn and gaming, but this excerpt does not contain a full revenue table.",
+        startOffset: 0,
+        endOffset: 0,
+        sortOrder: 1
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-30T00:00:00.000Z",
+    extractorVersion: "v1",
+    promptVersion: "v1"
+  } as any;
+}
+
+function makeUntranslatedRevenueDriverFiling() {
+  return {
+    filingKey: "v6:0001018724:000101872426000001",
+    ticker: "AMZN",
+    companyName: "AMAZON COM INC",
+    cik: "0001018724",
+    formType: "10-Q",
+    filedAt: "2026-04-30",
+    periodOfReport: "2026-03-31",
+    primaryDocumentUrl: "https://example.com",
+    mdaText: "",
+    mdaTokenCount: 0,
+    metrics: [
+      {
+        logicalName: "revenue",
+        tagUsed: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        value: 181520000000,
+        unit: "USD",
+        periodEnd: "2026-03-31",
+        comparisonValue: 155820000000,
+        yoyPercent: 16.6
+      }
+    ],
+    sourceChunks: [
+      {
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "売上高",
+        sourceLabel: "XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)",
+        text: "売上高: 181520000000 USD / 比較値: 155820000000 / YoY: 16.6%",
+        startOffset: 0,
+        endOffset: 0,
+        tagName: "RevenueFromContractWithCustomerExcludingAssessedTax",
+        sortOrder: 9
+      },
+      {
+        sourceId: "S1",
+        sectionType: "md_a",
+        sectionTitle: "Revenue driver discussion",
+        sourceLabel: "10-Q Revenue driver discussion",
+        text:
+          "Revenue increased due to several factors, such as payment processing and related transaction costs, our level of productivity and accuracy, changes in volume, size, and weight of units received and fulfilled.",
+        startOffset: 0,
+        endOffset: 0,
+        sortOrder: 1
+      }
+    ],
+    summary: { verdict: "", highlights: [], changes: [] },
+    generatedAt: "2026-04-30T00:00:00.000Z",
     extractorVersion: "v1",
     promptVersion: "v1"
   } as any;

@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { buildBenchmarkSummary } from "./benchmark-quality.mjs";
+import { runMetadataLines } from "./run-output-metadata.mjs";
 
 const runPath = process.argv[2];
 
@@ -45,6 +46,9 @@ const benchmarkSummary = buildBenchmarkSummary(rows);
 
 console.log(`# Testbench Summary`);
 console.log(`file: ${runPath}`);
+for (const line of runMetadataLines(rows)) {
+  console.log(line);
+}
 console.log(`rows: ${rows.length}`);
 console.log(`tickers: ${Array.from(new Set(rows.map((row) => row.ticker))).join(", ")}`);
 console.log(`avg latency ms: ${average(rows.map((row) => row.latencyMs)).toFixed(0)}`);
@@ -63,6 +67,14 @@ console.log(`qualityQ03Q04Q06Fallback: ${benchmarkSummary.qualityQ03Q04Q06Fallba
 console.log(`qualityMetricWithoutDriver: ${benchmarkSummary.qualityMetricWithoutDriver}`);
 console.log(`qualityTemporalityNotAssessed: ${benchmarkSummary.qualityTemporalityNotAssessed}`);
 console.log(`qualityEvasiveAnswer: ${benchmarkSummary.qualityEvasiveAnswer}`);
+console.log(`hybridEnglishJapaneseSurfaced: ${benchmarkSummary.hybridEnglishJapaneseSurfaced}`);
+console.log(`genericBusinessModelAnswers: ${benchmarkSummary.genericBusinessModelAnswers}`);
+console.log(`nonFinancialCashFlowBankLanguage: ${benchmarkSummary.nonFinancialCashFlowBankLanguage}`);
+console.log(`metricOnlyImportantIntentAnswers: ${benchmarkSummary.metricOnlyImportantIntentAnswers}`);
+console.log(`durabilityFollowupLostPriorDriver: ${benchmarkSummary.durabilityFollowupLostPriorDriver}`);
+console.log(`numericDisplaySuspicious: ${benchmarkSummary.numericDisplaySuspicious}`);
+console.log(`unsupportedDurabilityClassification: ${benchmarkSummary.unsupportedDurabilityClassification}`);
+console.log(`unsupportedRiskOrLiquidityConclusion: ${benchmarkSummary.unsupportedRiskOrLiquidityConclusion}`);
 
 if (ratedRows.length > 0) {
   console.log(`avg human rating: ${average(ratedRows.map((row) => row.answerRating)).toFixed(2)} (${ratedRows.length} rated)`);

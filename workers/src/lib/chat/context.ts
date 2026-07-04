@@ -36,7 +36,7 @@ function isContextDependentFollowUp(question: string): boolean {
   const normalized = question.replace(/\s+/g, "").toLowerCase();
   return (
     normalized.length <= 24 &&
-    /^(なぜ|なんで|どうして|理由|原因|要因|主因|それ|その|これ|この|一時的|継続|続く|続き|改善|悪化)/.test(
+    /^(なぜ|なんで|どうして|理由|原因|要因|主因|それ|その|これ|この|一時的|継続|続く|続き|改善|悪化|よくわから|わからん|分からん|わかりにく|分かりにく|どういうこと|つまり|要するに|噛み砕|かみ砕)/.test(
       normalized
     )
   );
@@ -99,11 +99,15 @@ function expandFollowUpQuestion(anchor: ContextAnchor, question: string): string
 function expandFollowUpQuestionWithContext(anchor: ContextAnchor, question: string, context: ChatContextMessage[]): string {
   const normalized = question.replace(/\s+/g, "").toLowerCase();
   const asksCause = /(なぜ|なんで|どうして|理由|原因|要因|主因)/.test(normalized);
+  const asksPlainExplanation = /(よくわから|わからん|分からん|わかりにく|分かりにく|どういうこと|つまり|要するに|噛み砕|かみ砕)/.test(normalized);
   const asksTemporary = /(一時的|一時要因|一過性|構造的|構造|継続|続く|続き)/.test(normalized);
   const asksImprovement = /(改善|良化|向上)/.test(normalized);
   const asksDeterioration = /(悪化|低下|減少|落ち)/.test(normalized);
 
   const label = anchorLabel(anchor);
+  if (asksPlainExplanation) {
+    return `${label}について、前の回答を投資初心者にも分かるように、何が起きたか・なぜ重要か・次に何を見るかに分けて説明してください。`;
+  }
   if (asksTemporary) {
     const driverContext = extractLatestDriverContext(context, anchor);
     if (driverContext.driverCandidates.length > 0) {

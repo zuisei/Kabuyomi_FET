@@ -236,6 +236,7 @@ describe("chat Q3-lite factual packs", () => {
     });
 
     expect(prompt).toContain("Factual pack:");
+    expect(prompt).toContain("copy those display strings exactly");
     expect(prompt).toContain("use the Factual pack before using raw source excerpts");
     expect(prompt).toContain("Productivity and Business Processes");
     expect(prompt).toContain("Return valid sourceIds from the provided Sources list only.");

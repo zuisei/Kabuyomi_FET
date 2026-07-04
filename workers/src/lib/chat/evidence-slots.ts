@@ -40,7 +40,7 @@ export function extractEvidenceSlots({
   const hardIntent = sourceGateResult.hardIntent;
   const confirmedMetricMovement = extractMetricMovement(filing, sources, hardIntent);
   const filteredDrivers = filterSafeDrivers(sourceGateResult.identifiedDrivers, sources, hardIntent, sector);
-  const companyExplainedDrivers = hardIntent === "revenue_driver" || hardIntent === "driver_durability_followup"
+  const companyExplainedDrivers = hardIntent === "business_model" || hardIntent === "revenue_driver" || hardIntent === "driver_durability_followup"
     ? filteredDrivers.safe
     : [];
   const marginDrivers = hardIntent === "margin_durability_followup" ? filteredDrivers.safe : [];

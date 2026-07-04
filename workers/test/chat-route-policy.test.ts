@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Env, FilingCacheRecord, SourceChunkRecord } from "../src/env";
-import type { DeterministicChatAnswer } from "../src/lib/chat/deterministic";
+import { buildDeterministicMetricAnswer, type DeterministicChatAnswer } from "../src/lib/chat/deterministic";
 import {
   chooseRetryReason,
   combineLlmUsage,
@@ -10,12 +10,13 @@ import {
   retryBlockedReasonForQuestion,
   shouldLetModelTryBeforeDeterministic,
   shouldPreferDeterministicBusinessOverview,
+  shouldPreferDeterministicRevenueDrivers,
   shouldRetryModelAnswer
 } from "../src/lib/chat/route-policy";
 
 describe("chat route policy helpers", () => {
   it("lets Gemini try before deterministic only for model-worthy deterministic strategies", () => {
-    expect(shouldLetModelTryBeforeDeterministic({ GEMINI_API_KEY: "key" } as Env, deterministic("business_overview"))).toBe(true);
+    expect(shouldLetModelTryBeforeDeterministic({ GEMINI_API_KEY: "key" } as Env, deterministic("business_overview"))).toBe(false);
     expect(shouldLetModelTryBeforeDeterministic({ GEMINI_API_KEY: "key" } as Env, deterministic("revenue_drivers"))).toBe(true);
     expect(shouldLetModelTryBeforeDeterministic({ GEMINI_API_KEY: "key" } as Env, deterministic("margin_snapshot"))).toBe(true);
     expect(shouldLetModelTryBeforeDeterministic({} as Env, deterministic("revenue_drivers"))).toBe(false);
@@ -86,6 +87,19 @@ describe("chat route policy helpers", () => {
     ).toBe(true);
   });
 
+  it("still retries invalid source IDs for hard driver intents", () => {
+    expect(
+      shouldRetryModelAnswer({ answer: "answer", sourceIds: ["S9"] }, "invalid_source_id", {
+        questionIntent: "yoy_change",
+        question: "売上成長の主な要因は？"
+      })
+    ).toBe(true);
+    expect(
+      retryBlockedReasonForQuestion("invalid_source_id", "yoy_change", "売上成長の主な要因は？")
+    ).toBeNull();
+    expect(retryContextMode("invalid_source_id")).toBe("expanded");
+  });
+
   it("keeps fallback reason and usage merge behavior stable", () => {
     expect(fallbackReasonForNoSources({ answer: "answer", sourceIds: [] }, "metrics_only")).toBe("metrics_only_insufficient");
     expect(fallbackReasonForNoSources({ answer: "answer", sourceIds: [] }, "full")).toBe("no_sources");
@@ -97,8 +111,41 @@ describe("chat route policy helpers", () => {
   it("keeps deterministic business-overview repair policy stable", () => {
     expect(shouldPreferDeterministicBusinessOverview("売上高は 100億ドルです。", true)).toBe(true);
     expect(shouldPreferDeterministicBusinessOverview("この決算資料の範囲では確認できません。", true)).toBe(true);
+    expect(shouldPreferDeterministicBusinessOverview("この資料だけだと会社固有の売上要因までは追いきれません。", true)).toBe(true);
+    expect(shouldPreferDeterministicBusinessOverview("MSFTは主に製品・サービスの提供を通じて売上を稼いでいます。", true)).toBe(true);
+    expect(shouldPreferDeterministicBusinessOverview("主な収益源は石油・ガス・ petrochemical を中心とした事業による売上です。", true)).toBe(true);
+    expect(shouldPreferDeterministicBusinessOverview("NVIDIAは主にデータセンター向けのCompute & Networkingと Graphics の製品・ソリューションを通じて売上を得ています。", true)).toBe(true);
+    expect(shouldPreferDeterministicBusinessOverview("同社は主にMEMORY製品を中心に売上を上げています。", true)).toBe(true);
+    expect(shouldPreferDeterministicBusinessOverview("この会社は主に石油・ガス・石化製品の販売を通じて収益を得ています。", true)).toBe(true);
+    expect(shouldPreferDeterministicBusinessOverview("この会社は主に建設機械の製品と関連サービスで儲けています。", true)).toBe(true);
+    expect(shouldPreferDeterministicBusinessOverview("主な収益源は小売事業の売上高です。", true)).toBe(true);
+    expect(shouldPreferDeterministicBusinessOverview("主な収益源はデータセンター向け製品と関連ソリューションの販売です。", true)).toBe(true);
+    expect(shouldPreferDeterministicBusinessOverview("主な収益源はメモリ製品の売上です。", true)).toBe(true);
+    expect(shouldPreferDeterministicBusinessOverview("この会社の主な収益源は石油・ガス・石油化学製品の販売です。", true)).toBe(true);
+    expect(shouldPreferDeterministicBusinessOverview("同社は主にメモリ製品の売上を通じて収益を上げています。", true)).toBe(true);
+    expect(shouldPreferDeterministicBusinessOverview("COCA COLA COは主に飲料の販売から収益を得ています。", true)).toBe(true);
     expect(shouldPreferDeterministicBusinessOverview("同社はクラウドサービスを提供する会社です。", true)).toBe(false);
     expect(shouldPreferDeterministicBusinessOverview("同社はクラウドサービスを提供する会社です。", false)).toBe(true);
+  });
+
+  it("uses deterministic revenue-driver repair only for weak remote driver answers", () => {
+    expect(shouldPreferDeterministicRevenueDrivers("会社固有の売上要因までは十分に特定できません。", true)).toBe(true);
+    expect(shouldPreferDeterministicRevenueDrivers("確認すべき箇所は、経営陣による業績説明です。", true)).toBe(true);
+    expect(shouldPreferDeterministicRevenueDrivers("本文では、サービス売上とiPhoneが売上増を支えたと説明されています。", true)).toBe(false);
+    expect(shouldPreferDeterministicRevenueDrivers("本文では、サービス売上とiPhoneが売上増を支えたと説明されています。", false)).toBe(true);
+    expect(shouldPreferDeterministicRevenueDrivers("売上高は増加しました。", true, "low_quality_answer")).toBe(true);
+  });
+
+  it("uses ticker business overview when filing text cannot produce one", () => {
+    const result = buildDeterministicMetricAnswer(
+      makeFiling([source("S1", "Revenue was 100. Net income was 10.")], { ticker: "MSFT", companyName: "Microsoft" }),
+      "どんな会社ですか？"
+    );
+
+    expect(result?.strategy).toBe("business_overview");
+    expect(result?.response.answer).toContain("クラウド");
+    expect(result?.response.answer).toContain("Microsoft 365");
+    expect(result?.response.sources.length).toBeGreaterThan(0);
   });
 });
 
@@ -125,11 +172,14 @@ function source(sourceId: string, text = "source text"): SourceChunkRecord {
   };
 }
 
-function makeFiling(sourceChunks: SourceChunkRecord[]): FilingCacheRecord {
+function makeFiling(
+  sourceChunks: SourceChunkRecord[],
+  overrides: Partial<Pick<FilingCacheRecord, "ticker" | "companyName">> = {}
+): FilingCacheRecord {
   return {
     filingKey: "v1:0000000000:000000000000000001",
-    ticker: "TST",
-    companyName: "Test Corp",
+    ticker: overrides.ticker ?? "TST",
+    companyName: overrides.companyName ?? "Test Corp",
     cik: "0000000000",
     formType: "10-K",
     filedAt: "2026-01-01",

@@ -43,7 +43,6 @@ const ALLOWED_ENGLISH_TERMS = [
   "product revenue",
   "services revenue",
   "geographic revenue",
-  "segment revenue",
   "production volume",
   "commodity price",
   "refining margin",
@@ -73,6 +72,7 @@ export function checkFinalAnswerJapaneseOnly(answer: string): FinalAnswerLanguag
   const japaneseRatio = japaneseChars / Math.max(1, japaneseChars + letterChars);
   const englishSentenceCount = countEnglishSentences(masked);
   const rawExcerptLike = isRawEnglishExcerptLike(masked);
+  const badHybridEnglish = hasBadHybridEnglish(masked);
 
   if (englishSentenceCount > 0) {
     violations.push("English sentence leakage");
@@ -81,6 +81,10 @@ export function checkFinalAnswerJapaneseOnly(answer: string): FinalAnswerLanguag
   if (rawExcerptLike) {
     violations.push("Raw English SEC excerpt leakage");
     labels.add("raw_english_excerpt");
+  }
+  if (badHybridEnglish) {
+    violations.push("Hybrid English/Japanese business phrase leakage");
+    labels.add("hybrid_english_business_phrase");
   }
   if (japaneseChars === 0 && letterChars > 24) {
     violations.push("Answer is not primarily Japanese");
@@ -143,19 +147,32 @@ export function buildJapaneseLanguageGuardRepair({
   question,
   questionIntent,
   sourceGateSufficient,
-  sourceGateEvidenceSlots
+  sourceGateEvidenceSlots,
+  selectedSourceExcerpts = []
 }: {
   question?: string | null;
   questionIntent?: string | null;
   sourceGateSufficient?: boolean | null;
   sourceGateEvidenceSlots?: Record<string, unknown> | null;
+  selectedSourceExcerpts?: string[];
 }): string | null {
   const effectiveIntent = resolveFallbackIntent(questionIntent, question);
-  if (effectiveIntent !== "driver_durability_followup" || sourceGateSufficient !== true) {
+  if (effectiveIntent === "risk_summary" || effectiveIntent === "risk_factors") {
+    return buildRiskLanguageGuardRepair(selectedSourceExcerpts, sourceGateEvidenceSlots);
+  }
+
+  if (effectiveIntent === "margin_durability_followup") {
+    return buildMarginDurabilityLanguageGuardRepair(selectedSourceExcerpts, sourceGateEvidenceSlots);
+  }
+
+  if (effectiveIntent !== "driver_durability_followup") {
     return null;
   }
 
-  const evidenceText = extractEvidenceText(sourceGateEvidenceSlots);
+  const evidenceText = [
+    extractEvidenceText(sourceGateEvidenceSlots),
+    ...selectedSourceExcerpts
+  ].join(" ").replace(/\s+/g, " ").trim();
   if (!evidenceText) {
     return null;
   }
@@ -168,6 +185,13 @@ export function buildJapaneseLanguageGuardRepair({
   const durabilitySignals = inferDurabilitySignals(evidenceText);
   const nextIndicators = inferNextIndicators(evidenceText, driverLabels);
   const driverText = joinItems(driverLabels.slice(0, 4));
+  if (sourceGateSufficient !== true) {
+    const indicatorText = nextIndicators.length > 0
+      ? `次に見るべき指標は、${joinItems(nextIndicators.slice(0, 4))} です。`
+      : "次に見るべき指標は、同じ要因が次期にも続くかどうかです。";
+    return `前問の売上要因候補として確認できるのは、${driverText} です。ただし、選択された抜粋だけでは一時要因か継続要因かは断定しません。${indicatorText}`;
+  }
+
   const signalText = durabilitySignals.length > 0
     ? `提出資料には ${joinItems(durabilitySignals.slice(0, 3))} も示されていますが、これだけで継続性は断定しません。`
     : "ただし、提出資料だけでは継続性は断定できません。";
@@ -176,6 +200,52 @@ export function buildJapaneseLanguageGuardRepair({
     : "次に見るべき指標は、同じ要因が次期にも続くかどうかです。";
 
   return `前問の売上要因は、${driverText} に関する説明が中心です。${signalText}${indicatorText}`;
+}
+
+function buildMarginDurabilityLanguageGuardRepair(
+  selectedSourceExcerpts: string[],
+  sourceGateEvidenceSlots?: Record<string, unknown> | null
+): string | null {
+  const evidenceText = [
+    extractEvidenceText(sourceGateEvidenceSlots),
+    ...selectedSourceExcerpts
+  ].join(" ").replace(/\s+/g, " ").trim();
+  if (!evidenceText) {
+    return null;
+  }
+
+  const marginLabels = inferMarginDriverLabels(evidenceText);
+  if (marginLabels.length === 0) {
+    return null;
+  }
+
+  const driverText = joinItems(marginLabels.slice(0, 5));
+  const nextIndicators = inferMarginNextIndicators(evidenceText, marginLabels);
+  const indicatorText = nextIndicators.length > 0
+    ? `次に見るべき指標は、${joinItems(nextIndicators.slice(0, 5))} です。`
+    : "次に見るべき指標は、同じ費用・価格・ミックス要因が次期にも続くかどうかです。";
+  return `前問の利益率要因候補として確認できるのは、${driverText} です。ただし、選択された抜粋だけでは一時要因か構造的変化かは断定しません。${indicatorText}`;
+}
+
+function buildRiskLanguageGuardRepair(
+  selectedSourceExcerpts: string[],
+  sourceGateEvidenceSlots?: Record<string, unknown> | null
+): string | null {
+  const evidenceText = [
+    ...selectedSourceExcerpts,
+    extractEvidenceText(sourceGateEvidenceSlots)
+  ].join(" ").replace(/\s+/g, " ").trim();
+  if (!evidenceText) {
+    return null;
+  }
+
+  const riskLabels = inferRiskLabels(evidenceText);
+  if (riskLabels.length === 0) {
+    return null;
+  }
+
+  const riskText = joinItems(riskLabels.slice(0, 4));
+  return `確認できるリスクは、${riskText} です。ただし、選択された抜粋だけでは重要度や影響額までは断定しません。追加で見るべき箇所は、リスク要因、MD&Aのリスク説明、業種固有リスクの説明です。`;
 }
 
 function maskAllowedEnglishTerms(answer: string): string {
@@ -200,6 +270,31 @@ function isRawEnglishExcerptLike(maskedAnswer: string): boolean {
     /^[a-z];\s*•/.test(maskedAnswer) ||
     /(?:前問のdriverは、|利益率driverとして確認できるのは、|確認できるのは、)\s*[A-Za-z]/.test(maskedAnswer)
   );
+}
+
+function hasBadHybridEnglish(maskedAnswer: string): boolean {
+  const normalized = maskedAnswer.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return false;
+  }
+  const badHybridPatterns = [
+    /[A-Za-z]+-[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]+/u,
+    /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]+-[A-Za-z]+/u,
+    /Profitability context/i,
+    /Revenue driver discussion/i,
+    /price-コスト/i,
+    /Re資料/i,
+    /higher [a-z]/i,
+    /higher\s+[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]+(?:\s+[a-z]+)?/iu,
+    /partially offset/i,
+    /unfavorable/i,
+    /favorable/i,
+    /comparable sales discussion/i,
+    /un[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]+/iu,
+    /geography revenue/i,
+    /segment revenue\s*(?:が|は|を|で|に)/i
+  ];
+  return badHybridPatterns.some((pattern) => pattern.test(normalized));
 }
 
 function hasEnglishAfterDriverPrefix(maskedAnswer: string): boolean {
@@ -295,8 +390,15 @@ function inferDriverLabels(text: string): string[] {
     }
   };
 
-  add("販売数量", /\b(?:sales\s+)?volume|production volumes?|unit volume|数量/);
+  add("決済ボリューム", /payments volume|processed transactions|cross-border volume|決済/);
+  add("Advisory・その他サービス", /advisory|other services/);
+  add("販売数量", /\bsales\s+volume|production volumes?|unit volume|(?<!payments )\bvolume\b|数量/);
   add("価格実現", /price realization|pricing|price\/mix|price mix|価格/);
+  add("平均販売価格", /average selling prices?|asp\b/);
+  add("出荷量", /bit shipments?|shipments?/);
+  add("製品ミックス", /favorable mix|product mix|mix/);
+  add("製造コスト削減", /manufacturing cost reductions?/);
+  add("DRAM・NAND需要", /dram|nand|demand/);
   add("エンドユーザー向け機械販売", /equipment to end users?|end users?|machine sales/);
   add("backlog", /backlog/);
   add("dealer inventory", /dealer inventory|dealer inventories/);
@@ -311,6 +413,9 @@ function inferDriverLabels(text: string): string[] {
   add("production volume", /production volumes?|liquids production|gas production/);
   add("refining margin", /refin(?:ing|ery) margins?|downstream margins?/);
   add("services revenue", /services revenue|recurring revenue|installed base/);
+  add("energy revenue", /energy generation|energy storage|energy revenue/);
+  add("deliveries", /deliveries|vehicle deliveries/);
+  add("automotive gross margin", /automotive gross margin/);
 
   return [...new Set(labels)];
 }
@@ -351,6 +456,77 @@ function inferNextIndicators(text: string, driverLabels: string[]): string[] {
     indicators.push("販売数量");
   }
   return [...new Set(indicators)];
+}
+
+function inferMarginDriverLabels(text: string): string[] {
+  const labels: string[] = [];
+  const lower = text.toLowerCase();
+  const add = (label: string, pattern: RegExp) => {
+    if (pattern.test(lower)) {
+      labels.push(label);
+    }
+  };
+
+  add("営業費用", /operating expense|operating cost|cost per available seat mile|casm|non-fuel unit cost|cost structure|expenses?/);
+  add("燃料費", /fuel cost|aircraft fuel|jet fuel|fuel expense/);
+  add("人件費", /salaries|wages|labor cost|compensation|related costs/);
+  add("精製・第三者向け販売コスト", /refinery sales to third parties|refinery sales|third[- ]party sales/);
+  add("単位コスト", /unit cost|cost per available seat mile|casm|cost per unit/);
+  add("価格・単価", /pricing|price realization|premium products?|fare|average ticket|rate increase/);
+  add("製品・顧客ミックス", /mix|premium products?|corporate customers?|product mix|customer mix/);
+  add("販売数量・稼働率", /volume|capacity|available seat mile|asm|load factor|traffic/);
+  add("粗利益率", /gross margin|gross profit/);
+  add("信用損失・引当", /provision for credit losses|credit loss|allowance/);
+  add("販管費・研究開発費", /sg&a|selling, general and administrative|research and development|r&d/);
+  add("税金・評価損益", /tax expense|income tax|valuation allowance|impairment|fair value/);
+
+  return [...new Set(labels)];
+}
+
+function inferMarginNextIndicators(text: string, marginLabels: string[]): string[] {
+  const lower = text.toLowerCase();
+  const indicators = [...marginLabels];
+  if (/operating expense|operating cost|casm|unit cost/.test(lower)) {
+    indicators.push("単位コスト");
+  }
+  if (/fuel/.test(lower)) {
+    indicators.push("燃料費");
+  }
+  if (/salaries|wages|labor|compensation/.test(lower)) {
+    indicators.push("人件費");
+  }
+  if (/pricing|price|premium products?|fare|rate/.test(lower)) {
+    indicators.push("価格・単価");
+  }
+  if (/mix|premium products?|corporate customers?/.test(lower)) {
+    indicators.push("製品・顧客ミックス");
+  }
+  return [...new Set(indicators)];
+}
+
+function inferRiskLabels(text: string): string[] {
+  const labels: string[] = [];
+  const lower = text.toLowerCase();
+  const add = (label: string, pattern: RegExp) => {
+    if (pattern.test(lower)) {
+      labels.push(label);
+    }
+  };
+
+  add("サイバーセキュリティ", /cybersecurity|security vulnerabilit|cyber attack|data breach|security incident|unauthorized access/);
+  add("プライバシー・データ保護", /privacy|data protection|personal data|data security/);
+  add("規制・コンプライアンス", /regulat|compliance|legal proceedings?|antitrust|competition law|government investigation/);
+  add("競争環境", /competition|competitive|compete|market share/);
+  add("クラウド・サービス障害", /cloud services?|service outage|infrastructure|datacenter|data center|availability/);
+  add("サードパーティ・供給網", /third[- ]party|supplier|supply chain|vendor|partner|manufacturing partner/);
+  add("顧客集中・需要変動", /customer concentration|customers? accounted for|demand|inventory correction|pc market|gaming demand|advertiser demand/);
+  add("マクロ・金利・為替", /macroeconomic|inflation|interest rates?|currency fluctuation|foreign exchange|fx|recession/);
+  add("関税・地政学", /tariff|geopolitical|export controls?|trade restrictions?|sanctions/);
+  add("技術転換・AI", /artificial intelligence|\bai\b|technological change|technology transition|responsible ai/);
+  add("信用・流動性", /credit risk|credit quality|liquidity|capital adequacy|deposits?|counterpart/);
+  add("不動産・施設コスト", /properties|premises|facilities|disposition costs?|headquarters|office building/);
+
+  return [...new Set(labels)];
 }
 
 function isAllowedNameLikeEnglishSpan(span: string): boolean {
@@ -439,6 +615,26 @@ function humanizeSourceLabel(item: string): string {
     [/^channel inventory$/i, "販売チャネル在庫"],
     [/^cost discussion$/i, "コストの説明"],
     [/^operating expenses$/i, "営業費用"],
+    [/^net interest income$/i, "純利息収入"],
+    [/^noninterest income$/i, "非金利収入"],
+    [/^traffic$/i, "客数"],
+    [/^ticket$/i, "客単価"],
+    [/^ecommerce$/i, "EC売上"],
+    [/^membership$/i, "会員収益"],
+    [/^commodity price$/i, "資源価格"],
+    [/^production volume$/i, "生産量"],
+    [/^refining margin$/i, "精製マージン"],
+    [/^services revenue$/i, "サービス売上"],
+    [/^backlog$/i, "バックログ"],
+    [/^dealer inventory$/i, "ディーラー在庫"],
+    [/^price realization$/i, "価格実現"],
+    [/^energy revenue$/i, "エネルギー事業収益"],
+    [/^deliveries$/i, "納車台数"],
+    [/^automotive gross margin$/i, "自動車粗利益率"],
+    [/^operating expenses?$/i, "営業費用"],
+    [/^fuel costs?$/i, "燃料費"],
+    [/^labor costs?$/i, "人件費"],
+    [/^unit costs?$/i, "単位コスト"],
     [/^segment margin$/i, "セグメント利益率"],
     [/^driver$/i, "要因"],
     [/^margin driver$/i, "利益率要因"]
