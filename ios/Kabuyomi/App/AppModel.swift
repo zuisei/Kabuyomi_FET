@@ -321,9 +321,9 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     var chatCreditStatusText: String {
         guard let credits = usage?.credits else {
-            return "\(chatCreditCost) credits"
+            return "\(chatCreditCost)クレジット"
         }
-        return "\(chatCreditCost) credits / 残り \(credits.totalRemaining)"
+        return "\(chatCreditCost)クレジット / 残り \(credits.totalRemaining)"
     }
 
     var hasChatCreditAvailable: Bool {
@@ -2024,7 +2024,7 @@ credit残高に使う端末識別情報は維持されます。
 
         if rawMessage.contains("insufficient_credits") || rawMessage.contains("creditが不足") {
             let currentCredits = usage?.credits?.totalRemaining ?? 0
-            return "クレジットが不足しています\nこの操作には \(chatCreditCost) credits が必要です。\n現在の残高: \(currentCredits) credits"
+            return "クレジットが不足しています\nこの操作には \(chatCreditCost)クレジットが必要です。\n現在の残高: \(currentCredits)クレジット"
         }
 
         if rawMessage.contains("クレジット商品を読み込めません")

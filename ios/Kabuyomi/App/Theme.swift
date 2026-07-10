@@ -9,8 +9,9 @@ enum KabuyomiSurface {
 }
 
 enum KabuyomiTheme {
-    static let accent = Color(red: 0.82, green: 0.46, blue: 0.16)
-    static let accentDeep = Color(red: 0.56, green: 0.31, blue: 0.12)
+    // A deeper, editorial brown gives the warm palette more definition.
+    static let accent = Color(red: 0.72, green: 0.36, blue: 0.10)
+    static let accentDeep = Color(red: 0.50, green: 0.25, blue: 0.07)
     static let accentSoft = Color(red: 0.92, green: 0.84, blue: 0.73)
     static let accentMist = Color(red: 0.96, green: 0.90, blue: 0.82)
     static let ink = Color(red: 0.15, green: 0.12, blue: 0.10)
@@ -20,7 +21,7 @@ enum KabuyomiTheme {
     static let mist = Color(red: 0.92, green: 0.88, blue: 0.82)
     static let heroText = Color(red: 0.98, green: 0.95, blue: 0.90)
     static let heroSubtext = Color(red: 0.85, green: 0.80, blue: 0.73)
-    static let positive = Color(red: 0.18, green: 0.53, blue: 0.34)
+    static let positive = Color(red: 0.12, green: 0.43, blue: 0.26)
     static let negative = Color(red: 0.72, green: 0.24, blue: 0.18)
     static let tabBarBackground = Color(red: 0.94, green: 0.90, blue: 0.83)
     static let tabBarStroke = Color(red: 0.58, green: 0.47, blue: 0.31).opacity(0.24)

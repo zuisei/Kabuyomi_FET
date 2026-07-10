@@ -398,7 +398,8 @@ function inferDriverLabels(text: string): string[] {
   add("出荷量", /bit shipments?|shipments?/);
   add("製品ミックス", /favorable mix|product mix|mix/);
   add("製造コスト削減", /manufacturing cost reductions?/);
-  add("DRAM・NAND需要", /dram|nand|demand/);
+  add("DRAM・NAND需要", /dram|nand/);
+  add("需要", /demand|需要/);
   add("エンドユーザー向け機械販売", /equipment to end users?|end users?|machine sales/);
   add("backlog", /backlog/);
   add("dealer inventory", /dealer inventory|dealer inventories/);

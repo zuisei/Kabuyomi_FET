@@ -60,7 +60,7 @@ struct ConversationMessageRow: View {
     }
 
     private var visibleSources: [LocalMessageSourceRef] {
-        showsAllSources ? displaySources : Array(displaySources.prefix(2))
+        showsAllSources ? displaySources : Array(displaySources.prefix(1))
     }
 
     private var assistantBubble: some View {
@@ -70,6 +70,13 @@ struct ConversationMessageRow: View {
                 RoundedRectangle(cornerRadius: 17, style: .continuous)
                     .stroke(KabuyomiTheme.accentDeep.opacity(0.12), lineWidth: 1)
             )
+            .overlay(alignment: .leading) {
+                Capsule()
+                    .fill(KabuyomiTheme.accentDeep.opacity(0.72))
+                    .frame(width: 3)
+                    .padding(.vertical, 12)
+                    .padding(.leading, 3)
+            }
     }
 
     private var userBubble: some View {
@@ -172,38 +179,40 @@ struct ConversationMessageRow: View {
     }
 
     private var sourceFooter: some View {
-        HStack(spacing: 5) {
-            Spacer(minLength: 18)
-
-            if let primarySource = visibleSources.first {
-                Button(action: { openSource(primarySource) }) {
-                    sourceChip(for: primarySource)
+        VStack(alignment: .trailing, spacing: 6) {
+            ForEach(visibleSources) { source in
+                Button(action: { openSource(source) }) {
+                    sourceChip(for: source)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("参照元を開く: \(displaySourceLabel(for: primarySource))")
+                .accessibilityLabel("参照元を開く: \(displaySourceLabel(for: source))")
             }
 
             if displaySources.count > 1 {
                 Button {
-                    let nextSource = displaySources.dropFirst().first ?? displaySources[0]
-                    openSource(nextSource)
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showsAllSources.toggle()
+                    }
                 } label: {
-                    Text("+\(displaySources.count - 1)")
+                    Label(
+                        showsAllSources ? "参照元を閉じる" : "他\(displaySources.count - 1)件の参照元",
+                        systemImage: showsAllSources ? "chevron.up" : "chevron.down"
+                    )
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.86))
                         .padding(.horizontal, 7)
-                        .padding(.vertical, 5)
+                        .frame(minHeight: 44)
                         .background(
-                            Capsule(style: .continuous)
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .fill(Color.white.opacity(0.34))
                                 .overlay(
-                                    Capsule(style: .continuous)
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                                         .stroke(KabuyomiTheme.inkMuted.opacity(0.10), lineWidth: 0.8)
                                 )
                         )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("他の参照元を開く")
+                .accessibilityLabel(showsAllSources ? "参照元一覧を閉じる" : "他の参照元を表示")
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -257,16 +266,16 @@ struct ConversationMessageRow: View {
             Text(displaySourceLabel(for: source))
                 .font(.system(size: 12.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(KabuyomiTheme.inkSoft)
-                .lineLimit(1)
+                .lineLimit(2)
                 .truncationMode(.tail)
         }
         .padding(.horizontal, 9)
-        .padding(.vertical, 5)
+        .frame(minHeight: 44)
         .background(
-            Capsule(style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(sourceBadgeBackground(for: source))
                 .overlay(
-                    Capsule(style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(sourceBadgeForeground(for: source).opacity(0.17), lineWidth: 0.8)
                 )
         )
@@ -356,15 +365,19 @@ struct ConversationRecoverySuggestions: View {
                 .font(.system(.caption2, design: .rounded, weight: .bold))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
 
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(shortSuggestions, id: \.self) { suggestion in
-                    ConversationPromptChip(
-                        text: suggestion,
-                        systemImage: "arrow.turn.down.right",
-                        action: { applySuggestion(suggestion) }
-                    )
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(shortSuggestions, id: \.self) { suggestion in
+                        ConversationPromptChip(
+                            text: suggestion,
+                            systemImage: "arrow.turn.down.right",
+                            action: { applySuggestion(suggestion) }
+                        )
+                        .frame(width: 188)
+                    }
                 }
             }
+            .contentMargins(.horizontal, 1, for: .scrollContent)
         }
     }
 
@@ -948,7 +961,10 @@ func localizedAssistantDisplayText(_ text: String) -> String {
     guard !trimmed.isEmpty else { return text }
 
     let strippedEnglishBoilerplate = stripMixedEnglishBoilerplate(from: trimmed)
-    let candidate = strippedEnglishBoilerplate.isEmpty ? trimmed : strippedEnglishBoilerplate
+    let rawCandidate = strippedEnglishBoilerplate.isEmpty ? trimmed : strippedEnglishBoilerplate
+    let candidate = containsJapaneseCharacters(rawCandidate)
+        ? localizeAssistantInternalLabels(in: rawCandidate)
+        : rawCandidate
     let candidateNormalized = candidate.lowercased()
 
     if containsJapaneseCharacters(candidate),
@@ -998,6 +1014,68 @@ func localizedAssistantDisplayText(_ text: String) -> String {
     }
 
     return trimmed
+}
+
+private let assistantInternalDisplayTerms: [(String, String)] = [
+    ("MD&A revenue discussion", "MD&Aの売上要因説明"),
+    ("mda revenue discussion", "MD&Aの売上要因説明"),
+    ("revenue discussion", "売上要因の説明"),
+    ("product revenue", "製品別売上"),
+    ("services revenue", "サービス売上"),
+    ("service revenue", "サービス売上"),
+    ("geographic revenue", "地域別売上"),
+    ("geography revenue", "地域別売上"),
+    ("segment results", "セグメント別業績"),
+    ("segment result", "セグメント別業績"),
+    ("segment information", "セグメント情報"),
+    ("sector-specific KPIs", "業界固有KPI"),
+    ("sector specific KPIs", "業界固有KPI"),
+    ("sector KPIs", "業界KPI"),
+    ("new product launches", "新製品投入"),
+    ("product launches", "新製品投入"),
+    ("new product introductions", "新製品投入"),
+    ("product introductions", "新製品投入"),
+    ("channel inventory", "販売チャネル在庫"),
+    ("operating cash flow", "営業キャッシュフロー"),
+    ("free cash flow", "フリーキャッシュフロー"),
+    ("cash flow", "キャッシュフロー"),
+    ("gross margin", "粗利益率"),
+    ("operating margin", "営業利益率"),
+    ("margin drivers", "利益率要因"),
+    ("product mix", "製品ミックス"),
+    ("foreign exchange", "為替影響"),
+    ("customer demand", "顧客需要"),
+    ("market demand", "市場需要"),
+    ("holiday demand", "季節需要"),
+    ("pricing", "価格動向"),
+    ("inventory", "在庫"),
+    ("demand", "需要")
+]
+
+private func localizeAssistantInternalLabels(in text: String) -> String {
+    var localized = text
+
+    for (source, replacement) in assistantInternalDisplayTerms {
+        let escaped = NSRegularExpression.escapedPattern(for: source)
+        let pattern = #"(?i)(?<![A-Za-z0-9])"# + escaped + #"(?![A-Za-z0-9])"#
+        localized = localized.replacingOccurrences(
+            of: pattern,
+            with: replacement,
+            options: .regularExpression
+        )
+    }
+
+    let localizedLabelPattern = Set(assistantInternalDisplayTerms.map(\.1))
+        .sorted { $0.count > $1.count }
+        .map(NSRegularExpression.escapedPattern)
+        .joined(separator: "|")
+    let labelsBeforeParticlePattern = #"("# + localizedLabelPattern + #")\s+([のをにはがともで])"#
+
+    return localized
+        .replacingOccurrences(of: #"\s*,\s*(?=[ぁ-んァ-ヶ一-龠])"#, with: "、", options: .regularExpression)
+        .replacingOccurrences(of: labelsBeforeParticlePattern, with: "$1$2", options: .regularExpression)
+        .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 private func containsJapaneseCharacters(_ text: String) -> Bool {

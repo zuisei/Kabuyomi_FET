@@ -86,7 +86,7 @@ struct ConversationLibraryDrawer: View {
     private var quickActionSection: some View {
         VStack(spacing: 0) {
             DrawerQuickActionRow(
-                title: "Ask",
+                title: "質問",
                 subtitle: "いまの資料に戻る",
                 systemImage: "bubble.left",
                 action: { selectTicker(currentTicker, currentTicker) }
@@ -254,7 +254,7 @@ struct ConversationLibraryDrawer: View {
                 )
 
                 DrawerDockButton(
-                    title: "Settings",
+                    title: "設定",
                     subtitle: "アプリ設定",
                     systemImage: "gearshape",
                     action: openSettings
@@ -432,7 +432,7 @@ private struct DrawerEmptyWatchlistHint: View {
                     .font(.system(.caption, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.accentDeep)
                     .padding(.horizontal, 12)
-                    .frame(height: 34)
+                    .frame(minHeight: 44)
                     .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.72)))
             }
             .buttonStyle(.plain)
@@ -476,8 +476,7 @@ private struct DrawerDockButton: View {
                     .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.66))
             }
             .padding(.horizontal, 11)
-            .frame(maxWidth: .infinity)
-            .frame(height: 52)
+            .frame(maxWidth: .infinity, minHeight: 52)
             .kabuyomiCard(.primary, radius: 17)
         }
         .buttonStyle(.plain)
@@ -619,7 +618,7 @@ private struct DrawerFilingConversationRow: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .background(DrawerCellBackground(radius: 11, isCurrent: isCurrent, opacity: isCurrent ? 0.30 : 0.18))
         }
         .buttonStyle(.plain)

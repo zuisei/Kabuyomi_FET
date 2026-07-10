@@ -1,0 +1,1663 @@
+{
+    "wallTime": 667,
+    "cpuTime": 3,
+    "truncated": false,
+    "executionModel": "durableObject",
+    "outcome": "ok",
+    "durableObjectId": "036d930121a0829b4d79637eca1d7488f33c9bdfff9d397691853acdb9e5fa41",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "entrypoint": "UserQuotaDO",
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [],
+    "eventTimestamp": 1778391248022,
+    "event": {
+        "request": {
+            "url": "https://do/quota",
+            "method": "POST",
+            "headers": {
+                "content-type": "application/json"
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 1889,
+    "cpuTime": 26,
+    "truncated": false,
+    "executionModel": "stateless",
+    "outcome": "ok",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"credit_consume\",\"userId\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"operationId\":\"FB142D99-055A-4009-A23C-6A3DE58CBBE3\",\"status\":\"applied\",\"delta\":-2,\"creditsRemaining\":48,\"loggedAt\":\"2026-05-10T05:34:09.369Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391249369
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_historical_hydration_skipped\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"ticker\":\"AAPL\",\"reason\":\"history_already_available\",\"loggedAt\":\"2026-05-10T05:34:09.479Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391249479
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_selected\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"ticker\":\"AAPL\",\"path\":\"historical\",\"loggedAt\":\"2026-05-10T05:34:09.479Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391249479
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_decision\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"questionIntent\":\"yoy_change\",\"responsePath\":\"historical\",\"geminiCalled\":false,\"geminiSucceeded\":false,\"fallbackReason\":null,\"schemaValid\":true,\"sourceIdsValid\":true,\"sourceCount\":2,\"promptTokenCount\":null,\"candidatesTokenCount\":null,\"totalTokenCount\":null,\"latencyMs\":null,\"contentMode\":\"full\",\"retryAttempt\":0,\"retryReason\":null,\"finalFallbackReason\":null,\"contextTokenBudget\":null,\"selectedSourceCount\":null,\"selectedSourceCharCount\":null,\"estimatedContextTokens\":null,\"sourceSelectionStrategy\":null,\"selectedSourceIds\":[],\"selectedSourceLabels\":[],\"totalPipelineMs\":110,\"historicalLookupMs\":110,\"deterministicBuildMs\":null,\"contextBuildMs\":null,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":null,\"groundingMs\":0,\"loggedAt\":\"2026-05-10T05:34:09.479Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391249479
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_request\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"quotaSubject\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"identityKind\":\"device_key\",\"latencyMs\":110,\"contextMessageCount\":0,\"contextApplied\":false,\"sourceCount\":2,\"loggedAt\":\"2026-05-10T05:34:09.479Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391249479
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_quality_pipeline\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"originalQuestion\":\"売上要因の3年変化は？\",\"rewrittenQuestion\":\"売上要因の3年変化は？\",\"questionIntent\":\"yoy_change\",\"responsePath\":\"historical\",\"fallbackReason\":null,\"selectedSourceCount\":2,\"selectedSourceCharCount\":56,\"estimatedContextTokens\":14,\"modelName\":null,\"requestedModelName\":null,\"effectiveModelName\":null,\"requestedReasoningEffort\":null,\"effectiveReasoningEffort\":null,\"reasoningEffortInvalid\":false,\"modelProvider\":null,\"latencyMs\":110,\"selectedSourceIds\":[\"v6:0000320193:000032019326000013:S1\",\"v6:0000320193:000032019324000006:S1\"],\"selectedSourceLabels\":[\"10-Q filed 2026-05-01 · period 2026-03-28\",\"10-Q filed 2024-02-02 · period 2023-12-30\"],\"selectedSourceTypes\":[\"historical_metric\",\"historical_metric\"],\"selectedSourceSectionFamilies\":[],\"selectedSourceFamilies\":[],\"selectedSourceExcerpts\":[\"売上高: 1,111.8億ドル (2026-03-28)\",\"売上高: 1,195.8億ドル (2023-12-30)\"],\"selectedSourceTextPreview\":[\"売上高: 1,111.8億ドル (2026-03-28)\",\"売上高: 1,195.8億ドル (2023-12-30)\"],\"modelRawAnswerPreview\":null,\"lowQualityReason\":null,\"answerQualityFlags\":[],\"sourceIdsValid\":true,\"geminiCalled\":false,\"geminiSucceeded\":false,\"schemaValid\":true,\"retryAttempt\":0,\"retryReason\":null,\"retryAttempted\":false,\"retryAllowed\":false,\"retryBlockedReason\":null,\"retryOutcome\":null,\"retryWasted\":false,\"firstCallFailureKind\":null,\"sourceGateApplied\":false,\"sourceGatePassed\":null,\"sourceGateSufficient\":null,\"sourceGateMissingSourceTypes\":[],\"sourceGateFailureLabels\":[],\"sourceGateEvidenceSlots\":{},\"sourceGateRetrievalRetryRecommended\":false,\"retrievalRetryUsed\":false,\"retrievalRetryOutcome\":\"not_used\",\"evidenceFallbackUsed\":false,\"fallbackKind\":\"none\",\"driverSlotsCount\":0,\"marginDriverSlotsCount\":0,\"followupTargetFound\":null,\"genericFallbackPhraseDetected\":false,\"hardRetrievalPlanUsed\":false,\"hardRetrievalQueries\":[],\"hardRetrievalQueryPurposes\":[],\"hardRetrievalMissingSourceTypes\":[],\"hardRetrievalAddedSourceCount\":0,\"hardRetrievalAddedSourceLabels\":[],\"hardRetrievalAddedSourceIds\":[],\"hardRetrievalOutcome\":\"not_used\",\"sourceGateSufficientBeforeHardRetrieval\":null,\"sourceGateSufficientAfterHardRetrieval\":null,\"driverSlotsCountBeforeHardRetrieval\":null,\"driverSlotsCountAfterHardRetrieval\":null,\"marginDriverSlotsCountBeforeHardRetrieval\":null,\"marginDriverSlotsCountAfterHardRetrieval\":null,\"selectedSourceLabelsBeforeHardRetrieval\":[],\"selectedSourceLabelsAfterHardRetrieval\":[],\"hardRetrievalMode\":\"diagnostic\",\"hardSourceCoverageScore\":null,\"hardSourceCoverageMissing\":[],\"hardSourceCoverageSectorKpiHits\":[],\"hardSourceCoverageHasMdaRevenueDiscussion\":null,\"hardSourceCoverageHasSegmentResults\":null,\"hardSourceCoverageHasSectorKpiWindow\":null,\"geminiApiErrorKind\":null,\"geminiApiErrorStatus\":null,\"geminiApiErrorCode\":null,\"geminiApiErrorMessageSample\":null,\"geminiApiErrorRetryable\":null,\"geminiRequestPromptCharCount\":null,\"geminiRequestEstimatedTokens\":null,\"geminiRequestSourceCount\":null,\"geminiRequestContextCharCount\":null,\"geminiModelName\":null,\"geminiErrorOccurredBeforeResponse\":null,\"modelApiErrorKind\":null,\"modelApiErrorStatus\":null,\"modelApiErrorCode\":null,\"modelApiErrorMessageSample\":null,\"modelApiErrorRetryable\":null,\"modelRequestPromptCharCount\":null,\"modelRequestEstimatedTokens\":null,\"modelRequestSourceCount\":null,\"modelRequestContextCharCount\":null,\"modelErrorOccurredBeforeResponse\":null,\"promptTokenCount\":null,\"completionTokenCount\":null,\"totalTokenCount\":null,\"modelCallLatencyMs\":null,\"fallbackKindSource\":\"finalizer\",\"responsePathFallbackButKindNone\":false,\"finalAnswerJapaneseRatio\":1,\"finalAnswerEnglishSentenceCount\":0,\"finalAnswerRawExcerptLike\":false,\"finalAnswerLanguageLabels\":[],\"finalAnswerLanguageViolations\":[],\"languageGuardChecked\":true,\"languageGuardOk\":true,\"languageGuardViolationLabels\":[],\"languageGuardFallbackUsed\":false,\"languageGuardFallbackKind\":null,\"originalAnswerBeforeLanguageGuardLength\":null,\"originalAnswerBeforeLanguageGuardSample\":null,\"sourceRepairLabels\":[],\"totalPipelineMs\":110,\"historicalLookupMs\":110,\"deterministicBuildMs\":null,\"contextBuildMs\":null,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":null,\"groundingMs\":0,\"contextApplied\":false,\"contextMessageCount\":0,\"finalSourceIds\":[\"v6:0000320193:000032019326000013:S1\",\"v6:0000320193:000032019324000006:S1\"],\"finalSourceLabels\":[\"10-Q filed 2026-05-01 · period 2026-03-28\",\"10-Q filed 2024-02-02 · period 2023-12-30\"],\"loggedAt\":\"2026-05-10T05:34:09.479Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391249479
+        }
+    ],
+    "eventTimestamp": 1778391247619,
+    "event": {
+        "request": {
+            "url": "https://kabuyomi-api.dznqjmctk7.workers.dev/v1/chat",
+            "method": "POST",
+            "headers": {
+                "accept": "*/*",
+                "accept-encoding": "gzip, br",
+                "accept-language": "en-US,en;q=0.9",
+                "cf-connecting-ip": "175.129.225.49",
+                "cf-ipcountry": "JP",
+                "cf-ray": "9f9692b19d3cfd48",
+                "cf-visitor": "{\"scheme\":\"https\"}",
+                "connection": "Keep-Alive",
+                "content-length": "171",
+                "content-type": "application/json",
+                "host": "kabuyomi-api.dznqjmctk7.workers.dev",
+                "user-agent": "Kabuyomi/4 CFNetwork/3826.500.131 Darwin/25.4.0",
+                "x-device-key": "REDACTED",
+                "x-forwarded-proto": "https",
+                "x-real-ip": "175.129.225.49"
+            },
+            "cf": {
+                "httpProtocol": "HTTP/2",
+                "clientAcceptEncoding": "gzip, deflate, br",
+                "requestPriority": "weight=16;exclusive=0;group=0;group-weight=0",
+                "edgeRequestKeepAliveStatus": 1,
+                "requestHeaderNames": {},
+                "clientTcpRtt": 6,
+                "clientQuicRtt": 0,
+                "colo": "NRT",
+                "asn": 2516,
+                "asOrganization": "KDDI CORPORATION",
+                "country": "JP",
+                "isEUCountry": false,
+                "city": "Chōfu",
+                "continent": "AS",
+                "region": "Tokyo",
+                "regionCode": "13",
+                "timezone": "Asia/Tokyo",
+                "longitude": "139.54837",
+                "latitude": "35.65924",
+                "postalCode": "182-0000",
+                "tlsVersion": "TLSv1.3",
+                "tlsCipher": "AEAD-AES128-GCM-SHA256",
+                "tlsClientRandom": "MowrjoRiMZ4EPbLLmJ9iR26ZkLYQROFCJ8mrg/qC11s=",
+                "tlsClientCiphersSha1": "E9J8NXqw70FlfH1HcOL7UkkAtSk=",
+                "tlsClientExtensionsSha1": "uIi/8PeZZ2O/qNtYjcigAy09vsU=",
+                "tlsClientExtensionsSha1Le": "4WxaWOwh6SAvNNIqRKpUjRNiEvk=",
+                "tlsExportedAuthenticator": {
+                    "clientHandshake": "4d1cb428e7191b0e31d3eba6c83a2e893de09c06f3bad48c7c6176adf94466fc",
+                    "serverHandshake": "a2d635c8a1a40b1c27de6f66b6edcc97ed7fd30a1139fe6864ec503102c78468",
+                    "clientFinished": "cf59c6c957b2822055af679ed1ff93dbe60a610e0bc3351c5e5a29b3ca4e2760",
+                    "serverFinished": "9ddb9837dc55520b2ff497ebbb7ac8ce19f445c51869e6f869dd8ab347671084"
+                },
+                "tlsClientHelloLength": "508",
+                "tlsClientAuth": {
+                    "certPresented": "0",
+                    "certVerified": "NONE",
+                    "certRevoked": "0",
+                    "certIssuerDN": "",
+                    "certSubjectDN": "",
+                    "certIssuerDNRFC2253": "",
+                    "certSubjectDNRFC2253": "",
+                    "certIssuerDNLegacy": "",
+                    "certSubjectDNLegacy": "",
+                    "certSerial": "",
+                    "certIssuerSerial": "",
+                    "certSKI": "",
+                    "certIssuerSKI": "",
+                    "certFingerprintSHA1": "",
+                    "certFingerprintSHA256": "",
+                    "certNotBefore": "",
+                    "certNotAfter": "",
+                    "certRFC9440": "",
+                    "certRFC9440TooLarge": false,
+                    "certChainRFC9440": "",
+                    "certChainRFC9440TooLarge": false
+                },
+                "verifiedBotCategory": "",
+                "edgeL4": {
+                    "deliveryRate": 1121090
+                }
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 10,
+    "cpuTime": 1,
+    "truncated": false,
+    "executionModel": "durableObject",
+    "outcome": "ok",
+    "durableObjectId": "036d930121a0829b4d79637eca1d7488f33c9bdfff9d397691853acdb9e5fa41",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "entrypoint": "UserQuotaDO",
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [],
+    "eventTimestamp": 1778391248721,
+    "event": {
+        "request": {
+            "url": "https://do/quota",
+            "method": "POST",
+            "headers": {
+                "content-type": "application/json"
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 656,
+    "cpuTime": 504,
+    "truncated": false,
+    "executionModel": "stateless",
+    "outcome": "ok",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"credit_consume\",\"userId\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"operationId\":\"D4B5C1BF-6E42-45C9-ADF5-1B85DDE114BC\",\"status\":\"applied\",\"delta\":-2,\"creditsRemaining\":46,\"loggedAt\":\"2026-05-10T05:34:11.514Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391251514
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_context_selection\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"questionIntent\":\"yoy_change\",\"candidateSourceCount\":152,\"selectedSourceCount\":7,\"selectedSourceCharCount\":5195,\"avgSelectedSourceChars\":742,\"contextTokenBudget\":8000,\"estimatedContextTokens\":1547,\"sourceSelectionStrategy\":\"yoy_change:standard:intent_ranked\",\"rejectedShortCount\":0,\"rejectedTableFragmentCount\":0,\"rejectedLowTextQualityCount\":24,\"sectionHitCountBusiness\":59,\"sectionHitCountRisk\":58,\"sectionHitCountMda\":11,\"retryAttempt\":0,\"retryReason\":null,\"loggedAt\":\"2026-05-10T05:34:11.514Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391251514
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_selected\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"ticker\":\"AAPL\",\"path\":\"fallback\",\"sourceCount\":4,\"loggedAt\":\"2026-05-10T05:34:11.514Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391251514
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_decision\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"questionIntent\":\"yoy_change\",\"responsePath\":\"fallback\",\"geminiCalled\":false,\"geminiSucceeded\":false,\"fallbackReason\":\"low_quality_answer\",\"schemaValid\":true,\"sourceIdsValid\":true,\"sourceCount\":4,\"promptTokenCount\":null,\"candidatesTokenCount\":null,\"totalTokenCount\":null,\"latencyMs\":null,\"contentMode\":\"full\",\"retryAttempt\":0,\"retryReason\":null,\"finalFallbackReason\":\"low_quality_answer\",\"contextTokenBudget\":8000,\"selectedSourceCount\":7,\"selectedSourceCharCount\":5195,\"estimatedContextTokens\":1547,\"sourceSelectionStrategy\":\"yoy_change:standard:intent_ranked\",\"selectedSourceIds\":[\"CTX1\",\"CTX2\",\"CTX3\",\"S8\",\"S9\",\"S10\",\"S12\"],\"selectedSourceLabels\":[\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\"],\"totalPipelineMs\":0,\"historicalLookupMs\":0,\"deterministicBuildMs\":0,\"contextBuildMs\":0,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":0,\"groundingMs\":0,\"loggedAt\":\"2026-05-10T05:34:11.514Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391251514
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_request\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"quotaSubject\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"identityKind\":\"device_key\",\"latencyMs\":0,\"contextMessageCount\":2,\"contextApplied\":true,\"sourceCount\":4,\"loggedAt\":\"2026-05-10T05:34:11.514Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391251514
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_quality_pipeline\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"originalQuestion\":\"その要因は一時的？\",\"rewrittenQuestion\":\"売上高が変化した要因は一時的ですか？\",\"questionIntent\":\"yoy_change\",\"responsePath\":\"fallback\",\"fallbackReason\":\"low_quality_answer\",\"selectedSourceCount\":7,\"selectedSourceCharCount\":5195,\"estimatedContextTokens\":1547,\"modelName\":null,\"requestedModelName\":null,\"effectiveModelName\":null,\"requestedReasoningEffort\":null,\"effectiveReasoningEffort\":null,\"reasoningEffortInvalid\":false,\"modelProvider\":null,\"latencyMs\":0,\"selectedSourceIds\":[\"CTX1\",\"CTX2\",\"CTX3\",\"S8\",\"S9\",\"S10\",\"S12\"],\"selectedSourceLabels\":[\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\"],\"selectedSourceTypes\":[\"md_a\",\"xbrl_metric\"],\"selectedSourceSectionFamilies\":[\"cost_discussion\",\"revenue_note\",\"margin_discussion\",\"xbrl_metric\"],\"selectedSourceFamilies\":[\"cost_discussion\",\"revenue_note\",\"margin_discussion\",\"xbrl_metric\"],\"selectedSourceExcerpts\":[\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change Research and development $ 11,419 $ 8,550 34 % $ 22,306 $ 16,818 33 % Percentage of total net sales 10 % 9 % 9 % 8 % Selling, gene\",\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change iPhone $ 56,994 $ 46,841 22 % $ 142,263 $ 115,979 23 % Mac 8,399 7,949 6 % 16,785 16,936 (1) % iPad 6,914 6,402 8 % 15,509 14,49\",\"The Company is experiencing a period of supply constraints and increasing costs for components driven by factors such as industry supply-demand imbalances for components, including advanced semiconductors, storage (NAND) and memory (DRAM). The Company expects these trends to intensify, which, together with actions that may be taken by the Company in response to such trends, may materially adversely affect demand for \",\"This includes press releases and other information about financial performance, information on corporate governance, and details related to the Company’s annual meeting of shareholders. The information contained on the websites referenced in this Form 10-Q is not incorporated by reference into this filing. Further, the Company’s references to website URLs are intended to be inactive textual references only. Business \",\"売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%\",\"純利益: 29578000000 USD / 比較値: 24780000000 / YoY: 19.4%\",\"営業利益: 35885000000 USD / 比較値: 29589000000 / YoY: 21.3%\"],\"selectedSourceTextPreview\":[\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change Research and development $ 11,\",\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change iPhone $ 56,994 $ 46,841 22 \",\"The Company is experiencing a period of supply constraints and increasing costs for components driven by factors such as industry supply-demand imbalances for components, including advanced semiconductors, storage (NAND) and memory (DRAM). The Company expects these trends to intensify, which, together with actions that\",\"This includes press releases and other information about financial performance, information on corporate governance, and details related to the Company’s annual meeting of shareholders. The information contained on the websites referenced in this Form 10-Q is not incorporated by reference into this filing. Further, the\",\"売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%\",\"純利益: 29578000000 USD / 比較値: 24780000000 / YoY: 19.4%\",\"営業利益: 35885000000 USD / 比較値: 29589000000 / YoY: 21.3%\"],\"modelRawAnswerPreview\":null,\"lowQualityReason\":null,\"answerQualityFlags\":[\"context_rewritten\",\"fallback_path\",\"fallback:low_quality_answer\",\"source_gate_applied\",\"source_gate_failed\",\"followup_target_empty\",\"missing_followup_target_driver\",\"q04_table_heavy_context\",\"durability_context_missing\",\"q04_durability_evidence_too_generic\",\"evidence_fallback_used\",\"hard_retrieval_used\"],\"sourceIdsValid\":true,\"geminiCalled\":false,\"geminiSucceeded\":false,\"schemaValid\":true,\"retryAttempt\":0,\"retryReason\":null,\"retryAttempted\":false,\"retryAllowed\":false,\"retryBlockedReason\":null,\"retryOutcome\":null,\"retryWasted\":false,\"firstCallFailureKind\":null,\"sourceGateApplied\":true,\"sourceGatePassed\":false,\"sourceGateSufficient\":false,\"sourceGateMissingSourceTypes\":[],\"sourceGateFailureLabels\":[\"followup_target_empty\",\"missing_followup_target_driver\",\"q04_table_heavy_context\",\"durability_context_missing\",\"q04_durability_evidence_too_generic\",\"source_gate_failed\"],\"sourceGateEvidenceSlots\":{\"confirmedMetricMovement\":{\"metricName\":\"売上高\",\"currentValue\":\"1,111.8億ドル\",\"comparisonValue\":\"953.6億ドル\",\"changePct\":\"16.6%\",\"comparisonBasis\":\"前年同期比\",\"sourceIds\":[\"S9\",\"S10\",\"S12\"]},\"companyExplainedDrivers\":[{\"category\":\"revenue_driver\",\"driver\":\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions): Three Months Ended Six Months Ended Marc\",\"sourceIds\":[\"CTX1\"],\"confidence\":\"medium\"},{\"category\":\"technology_driver_durability_followup\",\"driver\":\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions): Three Months Ended Six Months Ended Ma\",\"sourceIds\":[\"CTX2\"],\"confidence\":\"medium\"},{\"category\":\"technology_driver_durability_followup\",\"driver\":\"This includes press releases and other information about financial performance, information on corporate governance, and details related to the Company’s annual meeting of shareholders. The information contained on the w\",\"sourceIds\":[\"S8\"],\"confidence\":\"medium\"}],\"segmentOrBusinessSignals\":[{\"fact\":\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions):\",\"sourceIds\":[\"CTX1\"],\"confidence\":\"medium\"},{\"fact\":\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions)\",\"sourceIds\":[\"CTX2\"],\"confidence\":\"medium\"}],\"marginDriverCount\":0,\"unknowns\":[\"前問の具体的な売上driverが十分に特定されていません。\"],\"sourceLimitations\":[],\"failureLabels\":[\"followup_target_empty\",\"missing_followup_target_driver\",\"q04_table_heavy_context\",\"durability_context_missing\",\"q04_durability_evidence_too_generic\",\"source_gate_failed\"]},\"sourceGateRetrievalRetryRecommended\":true,\"retrievalRetryUsed\":false,\"retrievalRetryOutcome\":\"not_used\",\"evidenceFallbackUsed\":true,\"fallbackKind\":\"evidence_slot\",\"driverSlotsCount\":3,\"marginDriverSlotsCount\":0,\"followupTargetFound\":false,\"genericFallbackPhraseDetected\":false,\"hardRetrievalPlanUsed\":true,\"hardRetrievalQueries\":[\"AAPL product revenue services revenue geographic revenue customer growth MD&A\",\"AAPL revenue drivers product launches services geographic revenue channel inventory\"],\"hardRetrievalQueryPurposes\":[\"Find prior revenue driver and durability evidence. Missing: product discussion, revenue discussion, services discussion, revenue discussion.\",\"Find prior revenue driver and durability evidence. Missing: product discussion, revenue discussion, services discussion, revenue discussion.\"],\"hardRetrievalMissingSourceTypes\":[\"product discussion\",\"revenue discussion\",\"services discussion\",\"revenue discussion\",\"geographic discussion\",\"product discussion\",\"revenue discussion\",\"services discussion\",\"revenue discussion\",\"geographic discussion\"],\"hardRetrievalAddedSourceCount\":0,\"hardRetrievalAddedSourceLabels\":[],\"hardRetrievalAddedSourceIds\":[],\"hardRetrievalOutcome\":\"not_used\",\"sourceGateSufficientBeforeHardRetrieval\":false,\"sourceGateSufficientAfterHardRetrieval\":null,\"driverSlotsCountBeforeHardRetrieval\":null,\"driverSlotsCountAfterHardRetrieval\":null,\"marginDriverSlotsCountBeforeHardRetrieval\":null,\"marginDriverSlotsCountAfterHardRetrieval\":null,\"selectedSourceLabelsBeforeHardRetrieval\":[\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\"],\"selectedSourceLabelsAfterHardRetrieval\":[],\"hardRetrievalMode\":\"diagnostic\",\"hardSourceCoverageScore\":76,\"hardSourceCoverageMissing\":[],\"hardSourceCoverageSectorKpiHits\":[\"channel inventory\"],\"hardSourceCoverageHasMdaRevenueDiscussion\":true,\"hardSourceCoverageHasSegmentResults\":true,\"hardSourceCoverageHasSectorKpiWindow\":true,\"geminiApiErrorKind\":null,\"geminiApiErrorStatus\":null,\"geminiApiErrorCode\":null,\"geminiApiErrorMessageSample\":null,\"geminiApiErrorRetryable\":null,\"geminiRequestPromptCharCount\":null,\"geminiRequestEstimatedTokens\":null,\"geminiRequestSourceCount\":null,\"geminiRequestContextCharCount\":null,\"geminiModelName\":null,\"geminiErrorOccurredBeforeResponse\":null,\"modelApiErrorKind\":null,\"modelApiErrorStatus\":null,\"modelApiErrorCode\":null,\"modelApiErrorMessageSample\":null,\"modelApiErrorRetryable\":null,\"modelRequestPromptCharCount\":null,\"modelRequestEstimatedTokens\":null,\"modelRequestSourceCount\":null,\"modelRequestContextCharCount\":null,\"modelErrorOccurredBeforeResponse\":null,\"promptTokenCount\":null,\"completionTokenCount\":null,\"totalTokenCount\":null,\"modelCallLatencyMs\":null,\"fallbackKindSource\":\"model_quality_control\",\"responsePathFallbackButKindNone\":false,\"finalAnswerJapaneseRatio\":0.7129629629629629,\"finalAnswerEnglishSentenceCount\":0,\"finalAnswerRawExcerptLike\":false,\"finalAnswerLanguageLabels\":[],\"finalAnswerLanguageViolations\":[],\"languageGuardChecked\":true,\"languageGuardOk\":true,\"languageGuardViolationLabels\":[],\"languageGuardFallbackUsed\":false,\"languageGuardFallbackKind\":null,\"originalAnswerBeforeLanguageGuardLength\":null,\"originalAnswerBeforeLanguageGuardSample\":null,\"sourceRepairLabels\":[],\"totalPipelineMs\":0,\"historicalLookupMs\":0,\"deterministicBuildMs\":0,\"contextBuildMs\":0,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":0,\"groundingMs\":0,\"contextApplied\":true,\"contextMessageCount\":2,\"finalSourceIds\":[\"S9\",\"S10\",\"S12\",\"CTX1\"],\"finalSourceLabels\":[\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\",\"10-Q Segment and revenue context, filed 2026-05-01\"],\"loggedAt\":\"2026-05-10T05:34:11.514Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391251514
+        }
+    ],
+    "eventTimestamp": 1778391251368,
+    "event": {
+        "request": {
+            "url": "https://kabuyomi-api.dznqjmctk7.workers.dev/v1/chat",
+            "method": "POST",
+            "headers": {
+                "accept": "*/*",
+                "accept-encoding": "gzip, br",
+                "accept-language": "en-US,en;q=0.9",
+                "cf-connecting-ip": "175.129.225.49",
+                "cf-ipcountry": "JP",
+                "cf-ray": "9f9692c90e4bfd48",
+                "cf-visitor": "{\"scheme\":\"https\"}",
+                "connection": "Keep-Alive",
+                "content-length": "472",
+                "content-type": "application/json",
+                "host": "kabuyomi-api.dznqjmctk7.workers.dev",
+                "user-agent": "Kabuyomi/4 CFNetwork/3826.500.131 Darwin/25.4.0",
+                "x-device-key": "REDACTED",
+                "x-forwarded-proto": "https",
+                "x-real-ip": "175.129.225.49"
+            },
+            "cf": {
+                "httpProtocol": "HTTP/2",
+                "clientAcceptEncoding": "gzip, deflate, br",
+                "requestPriority": "weight=16;exclusive=0;group=0;group-weight=0",
+                "edgeRequestKeepAliveStatus": 1,
+                "requestHeaderNames": {},
+                "clientTcpRtt": 18,
+                "clientQuicRtt": 0,
+                "colo": "NRT",
+                "asn": 2516,
+                "asOrganization": "KDDI CORPORATION",
+                "country": "JP",
+                "isEUCountry": false,
+                "city": "Chōfu",
+                "continent": "AS",
+                "region": "Tokyo",
+                "regionCode": "13",
+                "timezone": "Asia/Tokyo",
+                "longitude": "139.54837",
+                "latitude": "35.65924",
+                "postalCode": "182-0000",
+                "tlsVersion": "TLSv1.3",
+                "tlsCipher": "AEAD-AES128-GCM-SHA256",
+                "tlsClientRandom": "MowrjoRiMZ4EPbLLmJ9iR26ZkLYQROFCJ8mrg/qC11s=",
+                "tlsClientCiphersSha1": "E9J8NXqw70FlfH1HcOL7UkkAtSk=",
+                "tlsClientExtensionsSha1": "uIi/8PeZZ2O/qNtYjcigAy09vsU=",
+                "tlsClientExtensionsSha1Le": "4WxaWOwh6SAvNNIqRKpUjRNiEvk=",
+                "tlsExportedAuthenticator": {
+                    "clientHandshake": "4d1cb428e7191b0e31d3eba6c83a2e893de09c06f3bad48c7c6176adf94466fc",
+                    "serverHandshake": "a2d635c8a1a40b1c27de6f66b6edcc97ed7fd30a1139fe6864ec503102c78468",
+                    "clientFinished": "cf59c6c957b2822055af679ed1ff93dbe60a610e0bc3351c5e5a29b3ca4e2760",
+                    "serverFinished": "9ddb9837dc55520b2ff497ebbb7ac8ce19f445c51869e6f869dd8ab347671084"
+                },
+                "tlsClientHelloLength": "508",
+                "tlsClientAuth": {
+                    "certPresented": "0",
+                    "certVerified": "NONE",
+                    "certRevoked": "0",
+                    "certIssuerDN": "",
+                    "certSubjectDN": "",
+                    "certIssuerDNRFC2253": "",
+                    "certSubjectDNRFC2253": "",
+                    "certIssuerDNLegacy": "",
+                    "certSubjectDNLegacy": "",
+                    "certSerial": "",
+                    "certIssuerSerial": "",
+                    "certSKI": "",
+                    "certIssuerSKI": "",
+                    "certFingerprintSHA1": "",
+                    "certFingerprintSHA256": "",
+                    "certNotBefore": "",
+                    "certNotAfter": "",
+                    "certRFC9440": "",
+                    "certRFC9440TooLarge": false,
+                    "certChainRFC9440": "",
+                    "certChainRFC9440TooLarge": false
+                },
+                "verifiedBotCategory": "",
+                "edgeL4": {
+                    "deliveryRate": 1121090
+                }
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 11,
+    "cpuTime": 1,
+    "truncated": false,
+    "executionModel": "durableObject",
+    "outcome": "ok",
+    "durableObjectId": "036d930121a0829b4d79637eca1d7488f33c9bdfff9d397691853acdb9e5fa41",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "entrypoint": "UserQuotaDO",
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [],
+    "eventTimestamp": 1778391251506,
+    "event": {
+        "request": {
+            "url": "https://do/quota",
+            "method": "POST",
+            "headers": {
+                "content-type": "application/json"
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 183,
+    "cpuTime": 35,
+    "truncated": false,
+    "executionModel": "stateless",
+    "outcome": "ok",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"credit_consume\",\"userId\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"operationId\":\"EC70E4DE-4042-4CB8-8D70-440F76E61315\",\"status\":\"applied\",\"delta\":-2,\"creditsRemaining\":44,\"loggedAt\":\"2026-05-10T05:34:13.867Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391253867
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_context_selection\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"questionIntent\":\"margin_profitability\",\"candidateSourceCount\":44,\"selectedSourceCount\":6,\"selectedSourceCharCount\":2752,\"avgSelectedSourceChars\":459,\"contextTokenBudget\":6000,\"estimatedContextTokens\":890,\"sourceSelectionStrategy\":\"margin_profitability:standard:intent_ranked\",\"rejectedShortCount\":0,\"rejectedTableFragmentCount\":0,\"rejectedLowTextQualityCount\":7,\"sectionHitCountBusiness\":59,\"sectionHitCountRisk\":58,\"sectionHitCountMda\":11,\"retryAttempt\":0,\"retryReason\":null,\"loggedAt\":\"2026-05-10T05:34:13.867Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391253867
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_selected\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"ticker\":\"AAPL\",\"path\":\"fallback\",\"sourceCount\":4,\"loggedAt\":\"2026-05-10T05:34:13.867Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391253867
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_decision\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"questionIntent\":\"margin_profitability\",\"responsePath\":\"fallback\",\"geminiCalled\":false,\"geminiSucceeded\":false,\"fallbackReason\":\"low_quality_answer\",\"schemaValid\":true,\"sourceIdsValid\":true,\"sourceCount\":4,\"promptTokenCount\":null,\"candidatesTokenCount\":null,\"totalTokenCount\":null,\"latencyMs\":null,\"contentMode\":\"full\",\"retryAttempt\":0,\"retryReason\":null,\"finalFallbackReason\":\"low_quality_answer\",\"contextTokenBudget\":6000,\"selectedSourceCount\":6,\"selectedSourceCharCount\":2752,\"estimatedContextTokens\":890,\"sourceSelectionStrategy\":\"margin_profitability:standard:intent_ranked\",\"selectedSourceIds\":[\"S8\",\"S9\",\"S10\",\"S12\",\"CTX1\",\"CTX2\"],\"selectedSourceLabels\":[\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\",\"10-Q Profitability context, filed 2026-05-01\",\"10-Q Profitability context, filed 2026-05-01\"],\"totalPipelineMs\":0,\"historicalLookupMs\":0,\"deterministicBuildMs\":0,\"contextBuildMs\":0,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":0,\"groundingMs\":0,\"loggedAt\":\"2026-05-10T05:34:13.867Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391253867
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_request\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"quotaSubject\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"identityKind\":\"device_key\",\"latencyMs\":0,\"contextMessageCount\":4,\"contextApplied\":false,\"sourceCount\":4,\"loggedAt\":\"2026-05-10T05:34:13.867Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391253867
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_quality_pipeline\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"originalQuestion\":\"利益率は改善？\",\"rewrittenQuestion\":\"利益率は改善？\",\"questionIntent\":\"margin_profitability\",\"responsePath\":\"fallback\",\"fallbackReason\":\"low_quality_answer\",\"selectedSourceCount\":6,\"selectedSourceCharCount\":2752,\"estimatedContextTokens\":890,\"modelName\":null,\"requestedModelName\":null,\"effectiveModelName\":null,\"requestedReasoningEffort\":null,\"effectiveReasoningEffort\":null,\"reasoningEffortInvalid\":false,\"modelProvider\":null,\"latencyMs\":0,\"selectedSourceIds\":[\"S8\",\"S9\",\"S10\",\"S12\",\"CTX1\",\"CTX2\"],\"selectedSourceLabels\":[\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\",\"10-Q Profitability context, filed 2026-05-01\",\"10-Q Profitability context, filed 2026-05-01\"],\"selectedSourceTypes\":[\"md_a\",\"xbrl_metric\"],\"selectedSourceSectionFamilies\":[\"cost_discussion\",\"xbrl_metric\",\"margin_discussion\"],\"selectedSourceFamilies\":[\"cost_discussion\",\"xbrl_metric\",\"margin_discussion\"],\"selectedSourceExcerpts\":[\"Further, the Company’s references to website URLs are intended to be inactive textual references only. Business Seasonality and Product Introductions The Company has historically experienced higher net sales in its first quarter compared to other quarters in its fiscal year due in part to seasonal holiday demand. Additionally, new product and service introductions can significantly impact net sales, cost of sales and\",\"売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%\",\"純利益: 29578000000 USD / 比較値: 24780000000 / YoY: 19.4%\",\"営業利益: 35885000000 USD / 比較値: 29589000000 / YoY: 21.3%\",\"Year-over-year Mac net sales during the first six months of 2026 were relatively flat. iPad iPad net sales increased during the second quarter and first six months of 2026 compared to the same periods in 2025 primarily due to higher net sales of iPad, partially offset by lower net sales of iPad mini ®. Wearables, Home and Accessories Wearables, Home and Accessories net sales increased during the second quarter of 202\",\"Services Services net sales increased during the second quarter and first six months of 2026 compared to the same periods in 2025 primarily due to higher net sales from advertising, the App Store ® and cloud services. Apple Inc. | Q2 2026 Form 10-Q | 15 Gross Margin Products and Services gross margin and gross margin percentage for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as foll\"],\"selectedSourceTextPreview\":[\"Further, the Company’s references to website URLs are intended to be inactive textual references only. Business Seasonality and Product Introductions The Company has historically experienced higher net sales in its first quarter compared to other quarters in its fiscal year due in part to seasonal holiday demand. Addit\",\"売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%\",\"純利益: 29578000000 USD / 比較値: 24780000000 / YoY: 19.4%\",\"営業利益: 35885000000 USD / 比較値: 29589000000 / YoY: 21.3%\",\"Year-over-year Mac net sales during the first six months of 2026 were relatively flat. iPad iPad net sales increased during the second quarter and first six months of 2026 compared to the same periods in 2025 primarily due to higher net sales of iPad, partially offset by lower net sales of iPad mini ®. Wearables, Home \",\"Services Services net sales increased during the second quarter and first six months of 2026 compared to the same periods in 2025 primarily due to higher net sales from advertising, the App Store ® and cloud services. Apple Inc. | Q2 2026 Form 10-Q | 15 Gross Margin Products and Services gross margin and gross margin p\"],\"modelRawAnswerPreview\":null,\"lowQualityReason\":null,\"answerQualityFlags\":[\"fallback_path\",\"fallback:low_quality_answer\",\"source_gate_applied\",\"source_gate_failed\",\"missing_margin_durability_context\",\"evidence_fallback_used\",\"hard_retrieval_used\"],\"sourceIdsValid\":true,\"geminiCalled\":false,\"geminiSucceeded\":false,\"schemaValid\":true,\"retryAttempt\":0,\"retryReason\":null,\"retryAttempted\":false,\"retryAllowed\":false,\"retryBlockedReason\":null,\"retryOutcome\":null,\"retryWasted\":false,\"firstCallFailureKind\":null,\"sourceGateApplied\":true,\"sourceGatePassed\":false,\"sourceGateSufficient\":false,\"sourceGateMissingSourceTypes\":[],\"sourceGateFailureLabels\":[\"missing_margin_durability_context\",\"source_gate_failed\"],\"sourceGateEvidenceSlots\":{\"confirmedMetricMovement\":{\"metricName\":\"純利益\",\"currentValue\":\"295.8億ドル\",\"comparisonValue\":\"247.8億ドル\",\"changePct\":\"19.4%\",\"comparisonBasis\":\"前年同期比\",\"sourceIds\":[\"S9\",\"S10\",\"S12\"]},\"companyExplainedDrivers\":[],\"segmentOrBusinessSignals\":[{\"fact\":\"Further, the Company’s references to website URLs are intended to be inactive textual references only. Business Seasonality and Product Introductions The Company has historically e\",\"sourceIds\":[\"S8\"],\"confidence\":\"medium\"},{\"fact\":\"Year-over-year Mac net sales during the first six months of 2026 were relatively flat. iPad iPad net sales increased during the second quarter and first six months of 2026 compared\",\"sourceIds\":[\"CTX1\"],\"confidence\":\"medium\"}],\"marginDriverCount\":2,\"unknowns\":[],\"sourceLimitations\":[],\"failureLabels\":[\"missing_margin_durability_context\",\"source_gate_failed\"]},\"sourceGateRetrievalRetryRecommended\":true,\"retrievalRetryUsed\":false,\"retrievalRetryOutcome\":\"not_used\",\"evidenceFallbackUsed\":true,\"fallbackKind\":\"evidence_slot\",\"driverSlotsCount\":0,\"marginDriverSlotsCount\":2,\"followupTargetFound\":true,\"genericFallbackPhraseDetected\":false,\"hardRetrievalPlanUsed\":true,\"hardRetrievalQueries\":[\"AAPL gross margin operating margin operating expenses cost pricing mix segment margin\",\"AAPL gross margin product margin services margin operating expense R&D channel inventory mix pricing MD&A\",\"AAPL margin profitability drivers margin driver discussion cost discussion segment margin\"],\"hardRetrievalQueryPurposes\":[\"Find concrete margin driver and durability evidence. Missing: margin driver discussion, cost discussion, segment margin.\",\"Find concrete margin driver and durability evidence. Missing: margin driver discussion, cost discussion, segment margin.\",\"Find concrete margin driver and durability evidence. Missing: margin driver discussion, cost discussion, segment margin.\"],\"hardRetrievalMissingSourceTypes\":[\"margin driver discussion\",\"cost discussion\",\"segment margin\",\"margin driver discussion\",\"cost discussion\",\"segment margin\",\"margin driver discussion\",\"cost discussion\",\"segment margin\"],\"hardRetrievalAddedSourceCount\":0,\"hardRetrievalAddedSourceLabels\":[],\"hardRetrievalAddedSourceIds\":[],\"hardRetrievalOutcome\":\"not_used\",\"sourceGateSufficientBeforeHardRetrieval\":false,\"sourceGateSufficientAfterHardRetrieval\":null,\"driverSlotsCountBeforeHardRetrieval\":null,\"driverSlotsCountAfterHardRetrieval\":null,\"marginDriverSlotsCountBeforeHardRetrieval\":null,\"marginDriverSlotsCountAfterHardRetrieval\":null,\"selectedSourceLabelsBeforeHardRetrieval\":[\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\",\"10-Q Profitability context, filed 2026-05-01\",\"10-Q Profitability context, filed 2026-05-01\"],\"selectedSourceLabelsAfterHardRetrieval\":[],\"hardRetrievalMode\":\"diagnostic\",\"hardSourceCoverageScore\":76,\"hardSourceCoverageMissing\":[],\"hardSourceCoverageSectorKpiHits\":[\"channel inventory\"],\"hardSourceCoverageHasMdaRevenueDiscussion\":true,\"hardSourceCoverageHasSegmentResults\":true,\"hardSourceCoverageHasSectorKpiWindow\":true,\"geminiApiErrorKind\":null,\"geminiApiErrorStatus\":null,\"geminiApiErrorCode\":null,\"geminiApiErrorMessageSample\":null,\"geminiApiErrorRetryable\":null,\"geminiRequestPromptCharCount\":null,\"geminiRequestEstimatedTokens\":null,\"geminiRequestSourceCount\":null,\"geminiRequestContextCharCount\":null,\"geminiModelName\":null,\"geminiErrorOccurredBeforeResponse\":null,\"modelApiErrorKind\":null,\"modelApiErrorStatus\":null,\"modelApiErrorCode\":null,\"modelApiErrorMessageSample\":null,\"modelApiErrorRetryable\":null,\"modelRequestPromptCharCount\":null,\"modelRequestEstimatedTokens\":null,\"modelRequestSourceCount\":null,\"modelRequestContextCharCount\":null,\"modelErrorOccurredBeforeResponse\":null,\"promptTokenCount\":null,\"completionTokenCount\":null,\"totalTokenCount\":null,\"modelCallLatencyMs\":null,\"fallbackKindSource\":\"model_quality_control\",\"responsePathFallbackButKindNone\":false,\"finalAnswerJapaneseRatio\":0.6923076923076923,\"finalAnswerEnglishSentenceCount\":0,\"finalAnswerRawExcerptLike\":false,\"finalAnswerLanguageLabels\":[],\"finalAnswerLanguageViolations\":[],\"languageGuardChecked\":true,\"languageGuardOk\":true,\"languageGuardViolationLabels\":[],\"languageGuardFallbackUsed\":false,\"languageGuardFallbackKind\":null,\"originalAnswerBeforeLanguageGuardLength\":null,\"originalAnswerBeforeLanguageGuardSample\":null,\"sourceRepairLabels\":[],\"totalPipelineMs\":0,\"historicalLookupMs\":0,\"deterministicBuildMs\":0,\"contextBuildMs\":0,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":0,\"groundingMs\":0,\"contextApplied\":false,\"contextMessageCount\":4,\"finalSourceIds\":[\"S9\",\"S10\",\"S12\",\"S8\"],\"finalSourceLabels\":[\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\",\"10-Q Part I Item 2, filed 2026-05-01\"],\"loggedAt\":\"2026-05-10T05:34:13.867Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391253867
+        }
+    ],
+    "eventTimestamp": 1778391253722,
+    "event": {
+        "request": {
+            "url": "https://kabuyomi-api.dznqjmctk7.workers.dev/v1/chat",
+            "method": "POST",
+            "headers": {
+                "accept": "*/*",
+                "accept-encoding": "gzip, br",
+                "accept-language": "en-US,en;q=0.9",
+                "cf-connecting-ip": "175.129.225.49",
+                "cf-ipcountry": "JP",
+                "cf-ray": "9f9692d7bfcffd48",
+                "cf-visitor": "{\"scheme\":\"https\"}",
+                "connection": "Keep-Alive",
+                "content-length": "900",
+                "content-type": "application/json",
+                "host": "kabuyomi-api.dznqjmctk7.workers.dev",
+                "user-agent": "Kabuyomi/4 CFNetwork/3826.500.131 Darwin/25.4.0",
+                "x-device-key": "REDACTED",
+                "x-forwarded-proto": "https",
+                "x-real-ip": "175.129.225.49"
+            },
+            "cf": {
+                "httpProtocol": "HTTP/2",
+                "clientAcceptEncoding": "gzip, deflate, br",
+                "requestPriority": "weight=16;exclusive=0;group=0;group-weight=0",
+                "edgeRequestKeepAliveStatus": 1,
+                "requestHeaderNames": {},
+                "clientTcpRtt": 21,
+                "clientQuicRtt": 0,
+                "colo": "NRT",
+                "asn": 2516,
+                "asOrganization": "KDDI CORPORATION",
+                "country": "JP",
+                "isEUCountry": false,
+                "city": "Chōfu",
+                "continent": "AS",
+                "region": "Tokyo",
+                "regionCode": "13",
+                "timezone": "Asia/Tokyo",
+                "longitude": "139.54837",
+                "latitude": "35.65924",
+                "postalCode": "182-0000",
+                "tlsVersion": "TLSv1.3",
+                "tlsCipher": "AEAD-AES128-GCM-SHA256",
+                "tlsClientRandom": "MowrjoRiMZ4EPbLLmJ9iR26ZkLYQROFCJ8mrg/qC11s=",
+                "tlsClientCiphersSha1": "E9J8NXqw70FlfH1HcOL7UkkAtSk=",
+                "tlsClientExtensionsSha1": "uIi/8PeZZ2O/qNtYjcigAy09vsU=",
+                "tlsClientExtensionsSha1Le": "4WxaWOwh6SAvNNIqRKpUjRNiEvk=",
+                "tlsExportedAuthenticator": {
+                    "clientHandshake": "4d1cb428e7191b0e31d3eba6c83a2e893de09c06f3bad48c7c6176adf94466fc",
+                    "serverHandshake": "a2d635c8a1a40b1c27de6f66b6edcc97ed7fd30a1139fe6864ec503102c78468",
+                    "clientFinished": "cf59c6c957b2822055af679ed1ff93dbe60a610e0bc3351c5e5a29b3ca4e2760",
+                    "serverFinished": "9ddb9837dc55520b2ff497ebbb7ac8ce19f445c51869e6f869dd8ab347671084"
+                },
+                "tlsClientHelloLength": "508",
+                "tlsClientAuth": {
+                    "certPresented": "0",
+                    "certVerified": "NONE",
+                    "certRevoked": "0",
+                    "certIssuerDN": "",
+                    "certSubjectDN": "",
+                    "certIssuerDNRFC2253": "",
+                    "certSubjectDNRFC2253": "",
+                    "certIssuerDNLegacy": "",
+                    "certSubjectDNLegacy": "",
+                    "certSerial": "",
+                    "certIssuerSerial": "",
+                    "certSKI": "",
+                    "certIssuerSKI": "",
+                    "certFingerprintSHA1": "",
+                    "certFingerprintSHA256": "",
+                    "certNotBefore": "",
+                    "certNotAfter": "",
+                    "certRFC9440": "",
+                    "certRFC9440TooLarge": false,
+                    "certChainRFC9440": "",
+                    "certChainRFC9440TooLarge": false
+                },
+                "verifiedBotCategory": "",
+                "edgeL4": {
+                    "deliveryRate": 1121090
+                }
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 10,
+    "cpuTime": 1,
+    "truncated": false,
+    "executionModel": "durableObject",
+    "outcome": "ok",
+    "durableObjectId": "036d930121a0829b4d79637eca1d7488f33c9bdfff9d397691853acdb9e5fa41",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "entrypoint": "UserQuotaDO",
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [],
+    "eventTimestamp": 1778391253874,
+    "event": {
+        "request": {
+            "url": "https://do/quota",
+            "method": "POST",
+            "headers": {
+                "content-type": "application/json"
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 588,
+    "cpuTime": 449,
+    "truncated": false,
+    "executionModel": "stateless",
+    "outcome": "ok",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"credit_consume\",\"userId\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"operationId\":\"9E09E229-1A7C-42DD-A14A-405B26E08CB2\",\"status\":\"applied\",\"delta\":-2,\"creditsRemaining\":42,\"loggedAt\":\"2026-05-10T05:34:15.640Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391255640
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_context_selection\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"questionIntent\":\"yoy_change\",\"candidateSourceCount\":152,\"selectedSourceCount\":7,\"selectedSourceCharCount\":5195,\"avgSelectedSourceChars\":742,\"contextTokenBudget\":8000,\"estimatedContextTokens\":1547,\"sourceSelectionStrategy\":\"yoy_change:standard:intent_ranked\",\"rejectedShortCount\":0,\"rejectedTableFragmentCount\":0,\"rejectedLowTextQualityCount\":24,\"sectionHitCountBusiness\":59,\"sectionHitCountRisk\":58,\"sectionHitCountMda\":11,\"retryAttempt\":0,\"retryReason\":null,\"loggedAt\":\"2026-05-10T05:34:15.640Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391255640
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_selected\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"ticker\":\"AAPL\",\"path\":\"fallback\",\"sourceCount\":4,\"loggedAt\":\"2026-05-10T05:34:15.640Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391255640
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_decision\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"questionIntent\":\"yoy_change\",\"responsePath\":\"fallback\",\"geminiCalled\":false,\"geminiSucceeded\":false,\"fallbackReason\":\"low_quality_answer\",\"schemaValid\":true,\"sourceIdsValid\":true,\"sourceCount\":4,\"promptTokenCount\":null,\"candidatesTokenCount\":null,\"totalTokenCount\":null,\"latencyMs\":null,\"contentMode\":\"full\",\"retryAttempt\":0,\"retryReason\":null,\"finalFallbackReason\":\"low_quality_answer\",\"contextTokenBudget\":8000,\"selectedSourceCount\":7,\"selectedSourceCharCount\":5195,\"estimatedContextTokens\":1547,\"sourceSelectionStrategy\":\"yoy_change:standard:intent_ranked\",\"selectedSourceIds\":[\"CTX1\",\"CTX2\",\"CTX3\",\"S8\",\"S9\",\"S10\",\"S12\"],\"selectedSourceLabels\":[\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\"],\"totalPipelineMs\":0,\"historicalLookupMs\":0,\"deterministicBuildMs\":0,\"contextBuildMs\":0,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":0,\"groundingMs\":0,\"loggedAt\":\"2026-05-10T05:34:15.640Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391255640
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_request\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"quotaSubject\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"identityKind\":\"device_key\",\"latencyMs\":0,\"contextMessageCount\":6,\"contextApplied\":false,\"sourceCount\":4,\"loggedAt\":\"2026-05-10T05:34:15.640Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391255640
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_quality_pipeline\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"originalQuestion\":\"今回の最大変化は？\",\"rewrittenQuestion\":\"今回の最大変化は？\",\"questionIntent\":\"yoy_change\",\"responsePath\":\"fallback\",\"fallbackReason\":\"low_quality_answer\",\"selectedSourceCount\":7,\"selectedSourceCharCount\":5195,\"estimatedContextTokens\":1547,\"modelName\":null,\"requestedModelName\":null,\"effectiveModelName\":null,\"requestedReasoningEffort\":null,\"effectiveReasoningEffort\":null,\"reasoningEffortInvalid\":false,\"modelProvider\":null,\"latencyMs\":0,\"selectedSourceIds\":[\"CTX1\",\"CTX2\",\"CTX3\",\"S8\",\"S9\",\"S10\",\"S12\"],\"selectedSourceLabels\":[\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\"],\"selectedSourceTypes\":[\"md_a\",\"xbrl_metric\"],\"selectedSourceSectionFamilies\":[\"cost_discussion\",\"revenue_note\",\"margin_discussion\",\"xbrl_metric\"],\"selectedSourceFamilies\":[\"cost_discussion\",\"revenue_note\",\"margin_discussion\",\"xbrl_metric\"],\"selectedSourceExcerpts\":[\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change Research and development $ 11,419 $ 8,550 34 % $ 22,306 $ 16,818 33 % Percentage of total net sales 10 % 9 % 9 % 8 % Selling, gene\",\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change iPhone $ 56,994 $ 46,841 22 % $ 142,263 $ 115,979 23 % Mac 8,399 7,949 6 % 16,785 16,936 (1) % iPad 6,914 6,402 8 % 15,509 14,49\",\"The Company is experiencing a period of supply constraints and increasing costs for components driven by factors such as industry supply-demand imbalances for components, including advanced semiconductors, storage (NAND) and memory (DRAM). The Company expects these trends to intensify, which, together with actions that may be taken by the Company in response to such trends, may materially adversely affect demand for \",\"This includes press releases and other information about financial performance, information on corporate governance, and details related to the Company’s annual meeting of shareholders. The information contained on the websites referenced in this Form 10-Q is not incorporated by reference into this filing. Further, the Company’s references to website URLs are intended to be inactive textual references only. Business \",\"売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%\",\"純利益: 29578000000 USD / 比較値: 24780000000 / YoY: 19.4%\",\"営業利益: 35885000000 USD / 比較値: 29589000000 / YoY: 21.3%\"],\"selectedSourceTextPreview\":[\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change Research and development $ 11,\",\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change iPhone $ 56,994 $ 46,841 22 \",\"The Company is experiencing a period of supply constraints and increasing costs for components driven by factors such as industry supply-demand imbalances for components, including advanced semiconductors, storage (NAND) and memory (DRAM). The Company expects these trends to intensify, which, together with actions that\",\"This includes press releases and other information about financial performance, information on corporate governance, and details related to the Company’s annual meeting of shareholders. The information contained on the websites referenced in this Form 10-Q is not incorporated by reference into this filing. Further, the\",\"売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%\",\"純利益: 29578000000 USD / 比較値: 24780000000 / YoY: 19.4%\",\"営業利益: 35885000000 USD / 比較値: 29589000000 / YoY: 21.3%\"],\"modelRawAnswerPreview\":null,\"lowQualityReason\":null,\"answerQualityFlags\":[\"fallback_path\",\"fallback:low_quality_answer\",\"source_gate_applied\",\"source_gate_failed\",\"followup_target_empty\",\"missing_followup_target_driver\",\"q04_table_heavy_context\",\"durability_context_missing\",\"q04_durability_evidence_too_generic\",\"evidence_fallback_used\",\"hard_retrieval_used\"],\"sourceIdsValid\":true,\"geminiCalled\":false,\"geminiSucceeded\":false,\"schemaValid\":true,\"retryAttempt\":0,\"retryReason\":null,\"retryAttempted\":false,\"retryAllowed\":false,\"retryBlockedReason\":null,\"retryOutcome\":null,\"retryWasted\":false,\"firstCallFailureKind\":null,\"sourceGateApplied\":true,\"sourceGatePassed\":false,\"sourceGateSufficient\":false,\"sourceGateMissingSourceTypes\":[],\"sourceGateFailureLabels\":[\"followup_target_empty\",\"missing_followup_target_driver\",\"q04_table_heavy_context\",\"durability_context_missing\",\"q04_durability_evidence_too_generic\",\"source_gate_failed\"],\"sourceGateEvidenceSlots\":{\"confirmedMetricMovement\":{\"metricName\":\"売上高\",\"currentValue\":\"1,111.8億ドル\",\"comparisonValue\":\"953.6億ドル\",\"changePct\":\"16.6%\",\"comparisonBasis\":\"前年同期比\",\"sourceIds\":[\"S9\",\"S10\",\"S12\"]},\"companyExplainedDrivers\":[{\"category\":\"revenue_driver\",\"driver\":\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions): Three Months Ended Six Months Ended Marc\",\"sourceIds\":[\"CTX1\"],\"confidence\":\"medium\"},{\"category\":\"technology_driver_durability_followup\",\"driver\":\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions): Three Months Ended Six Months Ended Ma\",\"sourceIds\":[\"CTX2\"],\"confidence\":\"medium\"},{\"category\":\"technology_driver_durability_followup\",\"driver\":\"This includes press releases and other information about financial performance, information on corporate governance, and details related to the Company’s annual meeting of shareholders. The information contained on the w\",\"sourceIds\":[\"S8\"],\"confidence\":\"medium\"}],\"segmentOrBusinessSignals\":[{\"fact\":\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions):\",\"sourceIds\":[\"CTX1\"],\"confidence\":\"medium\"},{\"fact\":\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions)\",\"sourceIds\":[\"CTX2\"],\"confidence\":\"medium\"}],\"marginDriverCount\":0,\"unknowns\":[\"前問の具体的な売上driverが十分に特定されていません。\"],\"sourceLimitations\":[],\"failureLabels\":[\"followup_target_empty\",\"missing_followup_target_driver\",\"q04_table_heavy_context\",\"durability_context_missing\",\"q04_durability_evidence_too_generic\",\"source_gate_failed\"]},\"sourceGateRetrievalRetryRecommended\":true,\"retrievalRetryUsed\":false,\"retrievalRetryOutcome\":\"not_used\",\"evidenceFallbackUsed\":true,\"fallbackKind\":\"evidence_slot\",\"driverSlotsCount\":3,\"marginDriverSlotsCount\":0,\"followupTargetFound\":false,\"genericFallbackPhraseDetected\":false,\"hardRetrievalPlanUsed\":true,\"hardRetrievalQueries\":[\"AAPL product revenue services revenue geographic revenue customer growth MD&A\",\"AAPL revenue drivers product launches services geographic revenue channel inventory\"],\"hardRetrievalQueryPurposes\":[\"Find prior revenue driver and durability evidence. Missing: product discussion, revenue discussion, services discussion, revenue discussion.\",\"Find prior revenue driver and durability evidence. Missing: product discussion, revenue discussion, services discussion, revenue discussion.\"],\"hardRetrievalMissingSourceTypes\":[\"product discussion\",\"revenue discussion\",\"services discussion\",\"revenue discussion\",\"geographic discussion\",\"product discussion\",\"revenue discussion\",\"services discussion\",\"revenue discussion\",\"geographic discussion\"],\"hardRetrievalAddedSourceCount\":0,\"hardRetrievalAddedSourceLabels\":[],\"hardRetrievalAddedSourceIds\":[],\"hardRetrievalOutcome\":\"not_used\",\"sourceGateSufficientBeforeHardRetrieval\":false,\"sourceGateSufficientAfterHardRetrieval\":null,\"driverSlotsCountBeforeHardRetrieval\":null,\"driverSlotsCountAfterHardRetrieval\":null,\"marginDriverSlotsCountBeforeHardRetrieval\":null,\"marginDriverSlotsCountAfterHardRetrieval\":null,\"selectedSourceLabelsBeforeHardRetrieval\":[\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\"],\"selectedSourceLabelsAfterHardRetrieval\":[],\"hardRetrievalMode\":\"diagnostic\",\"hardSourceCoverageScore\":76,\"hardSourceCoverageMissing\":[],\"hardSourceCoverageSectorKpiHits\":[\"channel inventory\"],\"hardSourceCoverageHasMdaRevenueDiscussion\":true,\"hardSourceCoverageHasSegmentResults\":true,\"hardSourceCoverageHasSectorKpiWindow\":true,\"geminiApiErrorKind\":null,\"geminiApiErrorStatus\":null,\"geminiApiErrorCode\":null,\"geminiApiErrorMessageSample\":null,\"geminiApiErrorRetryable\":null,\"geminiRequestPromptCharCount\":null,\"geminiRequestEstimatedTokens\":null,\"geminiRequestSourceCount\":null,\"geminiRequestContextCharCount\":null,\"geminiModelName\":null,\"geminiErrorOccurredBeforeResponse\":null,\"modelApiErrorKind\":null,\"modelApiErrorStatus\":null,\"modelApiErrorCode\":null,\"modelApiErrorMessageSample\":null,\"modelApiErrorRetryable\":null,\"modelRequestPromptCharCount\":null,\"modelRequestEstimatedTokens\":null,\"modelRequestSourceCount\":null,\"modelRequestContextCharCount\":null,\"modelErrorOccurredBeforeResponse\":null,\"promptTokenCount\":null,\"completionTokenCount\":null,\"totalTokenCount\":null,\"modelCallLatencyMs\":null,\"fallbackKindSource\":\"model_quality_control\",\"responsePathFallbackButKindNone\":false,\"finalAnswerJapaneseRatio\":0.7129629629629629,\"finalAnswerEnglishSentenceCount\":0,\"finalAnswerRawExcerptLike\":false,\"finalAnswerLanguageLabels\":[],\"finalAnswerLanguageViolations\":[],\"languageGuardChecked\":true,\"languageGuardOk\":true,\"languageGuardViolationLabels\":[],\"languageGuardFallbackUsed\":false,\"languageGuardFallbackKind\":null,\"originalAnswerBeforeLanguageGuardLength\":null,\"originalAnswerBeforeLanguageGuardSample\":null,\"sourceRepairLabels\":[],\"totalPipelineMs\":0,\"historicalLookupMs\":0,\"deterministicBuildMs\":0,\"contextBuildMs\":0,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":0,\"groundingMs\":0,\"contextApplied\":false,\"contextMessageCount\":6,\"finalSourceIds\":[\"S9\",\"S10\",\"S12\",\"CTX1\"],\"finalSourceLabels\":[\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\",\"10-Q Segment and revenue context, filed 2026-05-01\"],\"loggedAt\":\"2026-05-10T05:34:15.640Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391255640
+        }
+    ],
+    "eventTimestamp": 1778391255504,
+    "event": {
+        "request": {
+            "url": "https://kabuyomi-api.dznqjmctk7.workers.dev/v1/chat",
+            "method": "POST",
+            "headers": {
+                "accept": "*/*",
+                "accept-encoding": "gzip, br",
+                "accept-language": "en-US,en;q=0.9",
+                "cf-connecting-ip": "175.129.225.49",
+                "cf-ipcountry": "JP",
+                "cf-ray": "9f9692e2ee8efd48",
+                "cf-visitor": "{\"scheme\":\"https\"}",
+                "connection": "Keep-Alive",
+                "content-length": "1440",
+                "content-type": "application/json",
+                "host": "kabuyomi-api.dznqjmctk7.workers.dev",
+                "user-agent": "Kabuyomi/4 CFNetwork/3826.500.131 Darwin/25.4.0",
+                "x-device-key": "REDACTED",
+                "x-forwarded-proto": "https",
+                "x-real-ip": "175.129.225.49"
+            },
+            "cf": {
+                "httpProtocol": "HTTP/2",
+                "clientAcceptEncoding": "gzip, deflate, br",
+                "requestPriority": "weight=16;exclusive=0;group=0;group-weight=0",
+                "edgeRequestKeepAliveStatus": 1,
+                "requestHeaderNames": {},
+                "clientTcpRtt": 19,
+                "clientQuicRtt": 0,
+                "colo": "NRT",
+                "asn": 2516,
+                "asOrganization": "KDDI CORPORATION",
+                "country": "JP",
+                "isEUCountry": false,
+                "city": "Chōfu",
+                "continent": "AS",
+                "region": "Tokyo",
+                "regionCode": "13",
+                "timezone": "Asia/Tokyo",
+                "longitude": "139.54837",
+                "latitude": "35.65924",
+                "postalCode": "182-0000",
+                "tlsVersion": "TLSv1.3",
+                "tlsCipher": "AEAD-AES128-GCM-SHA256",
+                "tlsClientRandom": "MowrjoRiMZ4EPbLLmJ9iR26ZkLYQROFCJ8mrg/qC11s=",
+                "tlsClientCiphersSha1": "E9J8NXqw70FlfH1HcOL7UkkAtSk=",
+                "tlsClientExtensionsSha1": "uIi/8PeZZ2O/qNtYjcigAy09vsU=",
+                "tlsClientExtensionsSha1Le": "4WxaWOwh6SAvNNIqRKpUjRNiEvk=",
+                "tlsExportedAuthenticator": {
+                    "clientHandshake": "4d1cb428e7191b0e31d3eba6c83a2e893de09c06f3bad48c7c6176adf94466fc",
+                    "serverHandshake": "a2d635c8a1a40b1c27de6f66b6edcc97ed7fd30a1139fe6864ec503102c78468",
+                    "clientFinished": "cf59c6c957b2822055af679ed1ff93dbe60a610e0bc3351c5e5a29b3ca4e2760",
+                    "serverFinished": "9ddb9837dc55520b2ff497ebbb7ac8ce19f445c51869e6f869dd8ab347671084"
+                },
+                "tlsClientHelloLength": "508",
+                "tlsClientAuth": {
+                    "certPresented": "0",
+                    "certVerified": "NONE",
+                    "certRevoked": "0",
+                    "certIssuerDN": "",
+                    "certSubjectDN": "",
+                    "certIssuerDNRFC2253": "",
+                    "certSubjectDNRFC2253": "",
+                    "certIssuerDNLegacy": "",
+                    "certSubjectDNLegacy": "",
+                    "certSerial": "",
+                    "certIssuerSerial": "",
+                    "certSKI": "",
+                    "certIssuerSKI": "",
+                    "certFingerprintSHA1": "",
+                    "certFingerprintSHA256": "",
+                    "certNotBefore": "",
+                    "certNotAfter": "",
+                    "certRFC9440": "",
+                    "certRFC9440TooLarge": false,
+                    "certChainRFC9440": "",
+                    "certChainRFC9440TooLarge": false
+                },
+                "verifiedBotCategory": "",
+                "edgeL4": {
+                    "deliveryRate": 1121090
+                }
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 10,
+    "cpuTime": 1,
+    "truncated": false,
+    "executionModel": "durableObject",
+    "outcome": "ok",
+    "durableObjectId": "036d930121a0829b4d79637eca1d7488f33c9bdfff9d397691853acdb9e5fa41",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "entrypoint": "UserQuotaDO",
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [],
+    "eventTimestamp": 1778391255642,
+    "event": {
+        "request": {
+            "url": "https://do/quota",
+            "method": "POST",
+            "headers": {
+                "content-type": "application/json"
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 512,
+    "cpuTime": 362,
+    "truncated": false,
+    "executionModel": "stateless",
+    "outcome": "ok",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"credit_consume\",\"userId\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"operationId\":\"AA5A0A78-DCFD-4432-B030-FB2CC42F523E\",\"status\":\"applied\",\"delta\":-2,\"creditsRemaining\":40,\"loggedAt\":\"2026-05-10T05:34:17.769Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391257769
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_context_selection\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"questionIntent\":\"mda_summary\",\"candidateSourceCount\":124,\"selectedSourceCount\":7,\"selectedSourceCharCount\":6432,\"avgSelectedSourceChars\":919,\"contextTokenBudget\":9000,\"estimatedContextTokens\":1837,\"sourceSelectionStrategy\":\"mda_summary:standard:intent_ranked\",\"rejectedShortCount\":0,\"rejectedTableFragmentCount\":0,\"rejectedLowTextQualityCount\":32,\"sectionHitCountBusiness\":59,\"sectionHitCountRisk\":58,\"sectionHitCountMda\":11,\"retryAttempt\":0,\"retryReason\":null,\"loggedAt\":\"2026-05-10T05:34:17.769Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391257769
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_selected\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"ticker\":\"AAPL\",\"path\":\"fallback\",\"sourceCount\":4,\"loggedAt\":\"2026-05-10T05:34:17.769Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391257769
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_decision\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"questionIntent\":\"mda_summary\",\"responsePath\":\"fallback\",\"geminiCalled\":false,\"geminiSucceeded\":false,\"fallbackReason\":\"low_quality_answer\",\"schemaValid\":true,\"sourceIdsValid\":true,\"sourceCount\":4,\"promptTokenCount\":null,\"candidatesTokenCount\":null,\"totalTokenCount\":null,\"latencyMs\":null,\"contentMode\":\"full\",\"retryAttempt\":0,\"retryReason\":null,\"finalFallbackReason\":\"low_quality_answer\",\"contextTokenBudget\":9000,\"selectedSourceCount\":7,\"selectedSourceCharCount\":6432,\"estimatedContextTokens\":1837,\"sourceSelectionStrategy\":\"mda_summary:standard:intent_ranked\",\"selectedSourceIds\":[\"CTX1\",\"CTX2\",\"CTX3\",\"S8\",\"S1\",\"S9\",\"S10\"],\"selectedSourceLabels\":[\"10-Q MD&A context, filed 2026-05-01\",\"10-Q MD&A context, filed 2026-05-01\",\"10-Q MD&A context, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\"],\"totalPipelineMs\":0,\"historicalLookupMs\":0,\"deterministicBuildMs\":0,\"contextBuildMs\":0,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":0,\"groundingMs\":0,\"loggedAt\":\"2026-05-10T05:34:17.769Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391257769
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_request\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"quotaSubject\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"identityKind\":\"device_key\",\"latencyMs\":0,\"contextMessageCount\":6,\"contextApplied\":false,\"sourceCount\":4,\"loggedAt\":\"2026-05-10T05:34:17.769Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391257769
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_quality_pipeline\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"originalQuestion\":\"経営陣が強調している論点は？\",\"rewrittenQuestion\":\"経営陣が強調している論点は？\",\"questionIntent\":\"mda_summary\",\"responsePath\":\"fallback\",\"fallbackReason\":\"low_quality_answer\",\"selectedSourceCount\":7,\"selectedSourceCharCount\":6432,\"estimatedContextTokens\":1837,\"modelName\":null,\"requestedModelName\":null,\"effectiveModelName\":null,\"requestedReasoningEffort\":null,\"effectiveReasoningEffort\":null,\"reasoningEffortInvalid\":false,\"modelProvider\":null,\"latencyMs\":0,\"selectedSourceIds\":[\"CTX1\",\"CTX2\",\"CTX3\",\"S8\",\"S1\",\"S9\",\"S10\"],\"selectedSourceLabels\":[\"10-Q MD&A context, filed 2026-05-01\",\"10-Q MD&A context, filed 2026-05-01\",\"10-Q MD&A context, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\"],\"selectedSourceTypes\":[\"md_a\",\"xbrl_metric\"],\"selectedSourceSectionFamilies\":[\"cost_discussion\",\"revenue_note\",\"margin_discussion\",\"xbrl_metric\"],\"selectedSourceFamilies\":[\"cost_discussion\",\"revenue_note\",\"margin_discussion\",\"xbrl_metric\"],\"selectedSourceExcerpts\":[\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change Research and development $ 11,419 $ 8,550 34 % $ 22,306 $ 16,818 33 % Percentage of total net sales 10 % 9 % 9 % 8 % Selling, gene\",\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change iPhone $ 56,994 $ 46,841 22 % $ 142,263 $ 115,979 23 % Mac 8,399 7,949 6 % 16,785 16,936 (1) % iPad 6,914 6,402 8 % 15,509 14,49\",\"Net sales can also be affected when consumers and distributors anticipate a product introduction. During the second quarter of 2026, the Company announced the following new or updated products: • iPad Air ® • iPhone 17e • MacBook Pro ® • MacBook Air ® • MacBook Neo™ • AirPods Max ® 2 Macroeconomic Conditions Macroeconomic conditions, including inflation, interest rates, component pricing and currency fluctuations, ha\",\"This includes press releases and other information about financial performance, information on corporate governance, and details related to the Company’s annual meeting of shareholders. The information contained on the websites referenced in this Form 10-Q is not incorporated by reference into this filing. Further, the Company’s references to website URLs are intended to be inactive textual references only. Business \",\"Item 2. Management’s Discussion and Analysis of Financial Condition and Results of Operations This Item and other sections of this Quarterly Report on Form 10-Q (“Form 10-Q”) contain forward-looking statements, within the meaning of the Private Securities Litigation Reform Act of 1995, that involve risks and uncertainties. Forward-looking statements provide current expectations of future events based on certain assum\",\"売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%\",\"純利益: 29578000000 USD / 比較値: 24780000000 / YoY: 19.4%\"],\"selectedSourceTextPreview\":[\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change Research and development $ 11,\",\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change iPhone $ 56,994 $ 46,841 22 \",\"Net sales can also be affected when consumers and distributors anticipate a product introduction. During the second quarter of 2026, the Company announced the following new or updated products: • iPad Air ® • iPhone 17e • MacBook Pro ® • MacBook Air ® • MacBook Neo™ • AirPods Max ® 2 Macroeconomic Conditions Macroecono\",\"This includes press releases and other information about financial performance, information on corporate governance, and details related to the Company’s annual meeting of shareholders. The information contained on the websites referenced in this Form 10-Q is not incorporated by reference into this filing. Further, the\",\"Item 2. Management’s Discussion and Analysis of Financial Condition and Results of Operations This Item and other sections of this Quarterly Report on Form 10-Q (“Form 10-Q”) contain forward-looking statements, within the meaning of the Private Securities Litigation Reform Act of 1995, that involve risks and uncertaint\",\"売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%\",\"純利益: 29578000000 USD / 比較値: 24780000000 / YoY: 19.4%\"],\"modelRawAnswerPreview\":null,\"lowQualityReason\":null,\"answerQualityFlags\":[\"fallback_path\",\"fallback:low_quality_answer\",\"source_gate_applied\",\"source_gate_failed\",\"followup_target_empty\",\"missing_followup_target_driver\",\"q04_table_heavy_context\",\"durability_context_missing\",\"q04_durability_evidence_too_generic\",\"evidence_fallback_used\",\"hard_retrieval_used\"],\"sourceIdsValid\":true,\"geminiCalled\":false,\"geminiSucceeded\":false,\"schemaValid\":true,\"retryAttempt\":0,\"retryReason\":null,\"retryAttempted\":false,\"retryAllowed\":false,\"retryBlockedReason\":null,\"retryOutcome\":null,\"retryWasted\":false,\"firstCallFailureKind\":null,\"sourceGateApplied\":true,\"sourceGatePassed\":false,\"sourceGateSufficient\":false,\"sourceGateMissingSourceTypes\":[],\"sourceGateFailureLabels\":[\"followup_target_empty\",\"missing_followup_target_driver\",\"q04_table_heavy_context\",\"durability_context_missing\",\"q04_durability_evidence_too_generic\",\"source_gate_failed\"],\"sourceGateEvidenceSlots\":{\"confirmedMetricMovement\":{\"metricName\":\"売上高\",\"currentValue\":\"1,111.8億ドル\",\"comparisonValue\":\"953.6億ドル\",\"changePct\":\"16.6%\",\"comparisonBasis\":\"前年同期比\",\"sourceIds\":[\"S9\",\"S10\"]},\"companyExplainedDrivers\":[{\"category\":\"revenue_driver\",\"driver\":\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions): Three Months Ended Six Months Ended Marc\",\"sourceIds\":[\"CTX1\"],\"confidence\":\"medium\"},{\"category\":\"technology_driver_durability_followup\",\"driver\":\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions): Three Months Ended Six Months Ended Ma\",\"sourceIds\":[\"CTX2\"],\"confidence\":\"medium\"},{\"category\":\"technology_driver_durability_followup\",\"driver\":\"This includes press releases and other information about financial performance, information on corporate governance, and details related to the Company’s annual meeting of shareholders. The information contained on the w\",\"sourceIds\":[\"S8\"],\"confidence\":\"medium\"}],\"segmentOrBusinessSignals\":[{\"fact\":\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions):\",\"sourceIds\":[\"CTX1\"],\"confidence\":\"medium\"},{\"fact\":\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions)\",\"sourceIds\":[\"CTX2\"],\"confidence\":\"medium\"}],\"marginDriverCount\":0,\"unknowns\":[\"前問の具体的な売上driverが十分に特定されていません。\"],\"sourceLimitations\":[],\"failureLabels\":[\"followup_target_empty\",\"missing_followup_target_driver\",\"q04_table_heavy_context\",\"durability_context_missing\",\"q04_durability_evidence_too_generic\",\"source_gate_failed\"]},\"sourceGateRetrievalRetryRecommended\":true,\"retrievalRetryUsed\":false,\"retrievalRetryOutcome\":\"not_used\",\"evidenceFallbackUsed\":true,\"fallbackKind\":\"evidence_slot\",\"driverSlotsCount\":3,\"marginDriverSlotsCount\":0,\"followupTargetFound\":false,\"genericFallbackPhraseDetected\":false,\"hardRetrievalPlanUsed\":true,\"hardRetrievalQueries\":[\"AAPL product revenue services revenue geographic revenue customer growth MD&A\",\"AAPL revenue drivers product launches services geographic revenue channel inventory\"],\"hardRetrievalQueryPurposes\":[\"Find prior revenue driver and durability evidence. Missing: product discussion, revenue discussion, services discussion, revenue discussion.\",\"Find prior revenue driver and durability evidence. Missing: product discussion, revenue discussion, services discussion, revenue discussion.\"],\"hardRetrievalMissingSourceTypes\":[\"product discussion\",\"revenue discussion\",\"services discussion\",\"revenue discussion\",\"geographic discussion\",\"product discussion\",\"revenue discussion\",\"services discussion\",\"revenue discussion\",\"geographic discussion\"],\"hardRetrievalAddedSourceCount\":0,\"hardRetrievalAddedSourceLabels\":[],\"hardRetrievalAddedSourceIds\":[],\"hardRetrievalOutcome\":\"not_used\",\"sourceGateSufficientBeforeHardRetrieval\":false,\"sourceGateSufficientAfterHardRetrieval\":null,\"driverSlotsCountBeforeHardRetrieval\":null,\"driverSlotsCountAfterHardRetrieval\":null,\"marginDriverSlotsCountBeforeHardRetrieval\":null,\"marginDriverSlotsCountAfterHardRetrieval\":null,\"selectedSourceLabelsBeforeHardRetrieval\":[\"10-Q MD&A context, filed 2026-05-01\",\"10-Q MD&A context, filed 2026-05-01\",\"10-Q MD&A context, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\"],\"selectedSourceLabelsAfterHardRetrieval\":[],\"hardRetrievalMode\":\"diagnostic\",\"hardSourceCoverageScore\":76,\"hardSourceCoverageMissing\":[],\"hardSourceCoverageSectorKpiHits\":[\"channel inventory\"],\"hardSourceCoverageHasMdaRevenueDiscussion\":true,\"hardSourceCoverageHasSegmentResults\":true,\"hardSourceCoverageHasSectorKpiWindow\":true,\"geminiApiErrorKind\":null,\"geminiApiErrorStatus\":null,\"geminiApiErrorCode\":null,\"geminiApiErrorMessageSample\":null,\"geminiApiErrorRetryable\":null,\"geminiRequestPromptCharCount\":null,\"geminiRequestEstimatedTokens\":null,\"geminiRequestSourceCount\":null,\"geminiRequestContextCharCount\":null,\"geminiModelName\":null,\"geminiErrorOccurredBeforeResponse\":null,\"modelApiErrorKind\":null,\"modelApiErrorStatus\":null,\"modelApiErrorCode\":null,\"modelApiErrorMessageSample\":null,\"modelApiErrorRetryable\":null,\"modelRequestPromptCharCount\":null,\"modelRequestEstimatedTokens\":null,\"modelRequestSourceCount\":null,\"modelRequestContextCharCount\":null,\"modelErrorOccurredBeforeResponse\":null,\"promptTokenCount\":null,\"completionTokenCount\":null,\"totalTokenCount\":null,\"modelCallLatencyMs\":null,\"fallbackKindSource\":\"model_quality_control\",\"responsePathFallbackButKindNone\":false,\"finalAnswerJapaneseRatio\":0.7129629629629629,\"finalAnswerEnglishSentenceCount\":0,\"finalAnswerRawExcerptLike\":false,\"finalAnswerLanguageLabels\":[],\"finalAnswerLanguageViolations\":[],\"languageGuardChecked\":true,\"languageGuardOk\":true,\"languageGuardViolationLabels\":[],\"languageGuardFallbackUsed\":false,\"languageGuardFallbackKind\":null,\"originalAnswerBeforeLanguageGuardLength\":null,\"originalAnswerBeforeLanguageGuardSample\":null,\"sourceRepairLabels\":[],\"totalPipelineMs\":0,\"historicalLookupMs\":0,\"deterministicBuildMs\":0,\"contextBuildMs\":0,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":0,\"groundingMs\":0,\"contextApplied\":false,\"contextMessageCount\":6,\"finalSourceIds\":[\"S9\",\"S10\",\"CTX1\",\"CTX2\"],\"finalSourceLabels\":[\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"10-Q MD&A context, filed 2026-05-01\",\"10-Q MD&A context, filed 2026-05-01\"],\"loggedAt\":\"2026-05-10T05:34:17.769Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391257769
+        }
+    ],
+    "eventTimestamp": 1778391257622,
+    "event": {
+        "request": {
+            "url": "https://kabuyomi-api.dznqjmctk7.workers.dev/v1/chat",
+            "method": "POST",
+            "headers": {
+                "accept": "*/*",
+                "accept-encoding": "gzip, br",
+                "accept-language": "en-US,en;q=0.9",
+                "cf-connecting-ip": "175.129.225.49",
+                "cf-ipcountry": "JP",
+                "cf-ray": "9f9692f02c24fd48",
+                "cf-visitor": "{\"scheme\":\"https\"}",
+                "connection": "Keep-Alive",
+                "content-length": "1583",
+                "content-type": "application/json",
+                "host": "kabuyomi-api.dznqjmctk7.workers.dev",
+                "user-agent": "Kabuyomi/4 CFNetwork/3826.500.131 Darwin/25.4.0",
+                "x-device-key": "REDACTED",
+                "x-forwarded-proto": "https",
+                "x-real-ip": "175.129.225.49"
+            },
+            "cf": {
+                "httpProtocol": "HTTP/2",
+                "clientAcceptEncoding": "gzip, deflate, br",
+                "requestPriority": "weight=16;exclusive=0;group=0;group-weight=0",
+                "edgeRequestKeepAliveStatus": 1,
+                "requestHeaderNames": {},
+                "clientTcpRtt": 25,
+                "clientQuicRtt": 0,
+                "colo": "NRT",
+                "asn": 2516,
+                "asOrganization": "KDDI CORPORATION",
+                "country": "JP",
+                "isEUCountry": false,
+                "city": "Chōfu",
+                "continent": "AS",
+                "region": "Tokyo",
+                "regionCode": "13",
+                "timezone": "Asia/Tokyo",
+                "longitude": "139.54837",
+                "latitude": "35.65924",
+                "postalCode": "182-0000",
+                "tlsVersion": "TLSv1.3",
+                "tlsCipher": "AEAD-AES128-GCM-SHA256",
+                "tlsClientRandom": "MowrjoRiMZ4EPbLLmJ9iR26ZkLYQROFCJ8mrg/qC11s=",
+                "tlsClientCiphersSha1": "E9J8NXqw70FlfH1HcOL7UkkAtSk=",
+                "tlsClientExtensionsSha1": "uIi/8PeZZ2O/qNtYjcigAy09vsU=",
+                "tlsClientExtensionsSha1Le": "4WxaWOwh6SAvNNIqRKpUjRNiEvk=",
+                "tlsExportedAuthenticator": {
+                    "clientHandshake": "4d1cb428e7191b0e31d3eba6c83a2e893de09c06f3bad48c7c6176adf94466fc",
+                    "serverHandshake": "a2d635c8a1a40b1c27de6f66b6edcc97ed7fd30a1139fe6864ec503102c78468",
+                    "clientFinished": "cf59c6c957b2822055af679ed1ff93dbe60a610e0bc3351c5e5a29b3ca4e2760",
+                    "serverFinished": "9ddb9837dc55520b2ff497ebbb7ac8ce19f445c51869e6f869dd8ab347671084"
+                },
+                "tlsClientHelloLength": "508",
+                "tlsClientAuth": {
+                    "certPresented": "0",
+                    "certVerified": "NONE",
+                    "certRevoked": "0",
+                    "certIssuerDN": "",
+                    "certSubjectDN": "",
+                    "certIssuerDNRFC2253": "",
+                    "certSubjectDNRFC2253": "",
+                    "certIssuerDNLegacy": "",
+                    "certSubjectDNLegacy": "",
+                    "certSerial": "",
+                    "certIssuerSerial": "",
+                    "certSKI": "",
+                    "certIssuerSKI": "",
+                    "certFingerprintSHA1": "",
+                    "certFingerprintSHA256": "",
+                    "certNotBefore": "",
+                    "certNotAfter": "",
+                    "certRFC9440": "",
+                    "certRFC9440TooLarge": false,
+                    "certChainRFC9440": "",
+                    "certChainRFC9440TooLarge": false
+                },
+                "verifiedBotCategory": "",
+                "edgeL4": {
+                    "deliveryRate": 1121090
+                }
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 11,
+    "cpuTime": 1,
+    "truncated": false,
+    "executionModel": "durableObject",
+    "outcome": "ok",
+    "durableObjectId": "036d930121a0829b4d79637eca1d7488f33c9bdfff9d397691853acdb9e5fa41",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "entrypoint": "UserQuotaDO",
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [],
+    "eventTimestamp": 1778391257762,
+    "event": {
+        "request": {
+            "url": "https://do/quota",
+            "method": "POST",
+            "headers": {
+                "content-type": "application/json"
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 172,
+    "cpuTime": 26,
+    "truncated": false,
+    "executionModel": "stateless",
+    "outcome": "ok",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"credit_consume\",\"userId\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"operationId\":\"797F4582-E8EB-4840-82CA-374AB444C4D4\",\"status\":\"applied\",\"delta\":-2,\"creditsRemaining\":38,\"loggedAt\":\"2026-05-10T05:34:19.955Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391259955
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_context_selection\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"questionIntent\":\"margin_profitability\",\"candidateSourceCount\":44,\"selectedSourceCount\":6,\"selectedSourceCharCount\":2752,\"avgSelectedSourceChars\":459,\"contextTokenBudget\":6000,\"estimatedContextTokens\":890,\"sourceSelectionStrategy\":\"margin_profitability:standard:intent_ranked\",\"rejectedShortCount\":0,\"rejectedTableFragmentCount\":0,\"rejectedLowTextQualityCount\":7,\"sectionHitCountBusiness\":59,\"sectionHitCountRisk\":58,\"sectionHitCountMda\":11,\"retryAttempt\":0,\"retryReason\":null,\"loggedAt\":\"2026-05-10T05:34:19.955Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391259955
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_selected\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"ticker\":\"AAPL\",\"path\":\"fallback\",\"sourceCount\":4,\"loggedAt\":\"2026-05-10T05:34:19.955Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391259955
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_decision\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"questionIntent\":\"margin_profitability\",\"responsePath\":\"fallback\",\"geminiCalled\":false,\"geminiSucceeded\":false,\"fallbackReason\":\"low_quality_answer\",\"schemaValid\":true,\"sourceIdsValid\":true,\"sourceCount\":4,\"promptTokenCount\":null,\"candidatesTokenCount\":null,\"totalTokenCount\":null,\"latencyMs\":null,\"contentMode\":\"full\",\"retryAttempt\":0,\"retryReason\":null,\"finalFallbackReason\":\"low_quality_answer\",\"contextTokenBudget\":6000,\"selectedSourceCount\":6,\"selectedSourceCharCount\":2752,\"estimatedContextTokens\":890,\"sourceSelectionStrategy\":\"margin_profitability:standard:intent_ranked\",\"selectedSourceIds\":[\"S8\",\"S9\",\"S10\",\"S12\",\"CTX1\",\"CTX2\"],\"selectedSourceLabels\":[\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\",\"10-Q Profitability context, filed 2026-05-01\",\"10-Q Profitability context, filed 2026-05-01\"],\"totalPipelineMs\":0,\"historicalLookupMs\":0,\"deterministicBuildMs\":0,\"contextBuildMs\":0,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":0,\"groundingMs\":0,\"loggedAt\":\"2026-05-10T05:34:19.955Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391259955
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_request\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"quotaSubject\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"identityKind\":\"device_key\",\"latencyMs\":0,\"contextMessageCount\":6,\"contextApplied\":false,\"sourceCount\":4,\"loggedAt\":\"2026-05-10T05:34:19.955Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391259955
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_quality_pipeline\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"originalQuestion\":\"利益率は改善？\",\"rewrittenQuestion\":\"利益率は改善？\",\"questionIntent\":\"margin_profitability\",\"responsePath\":\"fallback\",\"fallbackReason\":\"low_quality_answer\",\"selectedSourceCount\":6,\"selectedSourceCharCount\":2752,\"estimatedContextTokens\":890,\"modelName\":null,\"requestedModelName\":null,\"effectiveModelName\":null,\"requestedReasoningEffort\":null,\"effectiveReasoningEffort\":null,\"reasoningEffortInvalid\":false,\"modelProvider\":null,\"latencyMs\":0,\"selectedSourceIds\":[\"S8\",\"S9\",\"S10\",\"S12\",\"CTX1\",\"CTX2\"],\"selectedSourceLabels\":[\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\",\"10-Q Profitability context, filed 2026-05-01\",\"10-Q Profitability context, filed 2026-05-01\"],\"selectedSourceTypes\":[\"md_a\",\"xbrl_metric\"],\"selectedSourceSectionFamilies\":[\"cost_discussion\",\"xbrl_metric\",\"margin_discussion\"],\"selectedSourceFamilies\":[\"cost_discussion\",\"xbrl_metric\",\"margin_discussion\"],\"selectedSourceExcerpts\":[\"Further, the Company’s references to website URLs are intended to be inactive textual references only. Business Seasonality and Product Introductions The Company has historically experienced higher net sales in its first quarter compared to other quarters in its fiscal year due in part to seasonal holiday demand. Additionally, new product and service introductions can significantly impact net sales, cost of sales and\",\"売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%\",\"純利益: 29578000000 USD / 比較値: 24780000000 / YoY: 19.4%\",\"営業利益: 35885000000 USD / 比較値: 29589000000 / YoY: 21.3%\",\"Year-over-year Mac net sales during the first six months of 2026 were relatively flat. iPad iPad net sales increased during the second quarter and first six months of 2026 compared to the same periods in 2025 primarily due to higher net sales of iPad, partially offset by lower net sales of iPad mini ®. Wearables, Home and Accessories Wearables, Home and Accessories net sales increased during the second quarter of 202\",\"Services Services net sales increased during the second quarter and first six months of 2026 compared to the same periods in 2025 primarily due to higher net sales from advertising, the App Store ® and cloud services. Apple Inc. | Q2 2026 Form 10-Q | 15 Gross Margin Products and Services gross margin and gross margin percentage for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as foll\"],\"selectedSourceTextPreview\":[\"Further, the Company’s references to website URLs are intended to be inactive textual references only. Business Seasonality and Product Introductions The Company has historically experienced higher net sales in its first quarter compared to other quarters in its fiscal year due in part to seasonal holiday demand. Addit\",\"売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%\",\"純利益: 29578000000 USD / 比較値: 24780000000 / YoY: 19.4%\",\"営業利益: 35885000000 USD / 比較値: 29589000000 / YoY: 21.3%\",\"Year-over-year Mac net sales during the first six months of 2026 were relatively flat. iPad iPad net sales increased during the second quarter and first six months of 2026 compared to the same periods in 2025 primarily due to higher net sales of iPad, partially offset by lower net sales of iPad mini ®. Wearables, Home \",\"Services Services net sales increased during the second quarter and first six months of 2026 compared to the same periods in 2025 primarily due to higher net sales from advertising, the App Store ® and cloud services. Apple Inc. | Q2 2026 Form 10-Q | 15 Gross Margin Products and Services gross margin and gross margin p\"],\"modelRawAnswerPreview\":null,\"lowQualityReason\":null,\"answerQualityFlags\":[\"fallback_path\",\"fallback:low_quality_answer\",\"source_gate_applied\",\"source_gate_failed\",\"missing_margin_durability_context\",\"evidence_fallback_used\",\"hard_retrieval_used\"],\"sourceIdsValid\":true,\"geminiCalled\":false,\"geminiSucceeded\":false,\"schemaValid\":true,\"retryAttempt\":0,\"retryReason\":null,\"retryAttempted\":false,\"retryAllowed\":false,\"retryBlockedReason\":null,\"retryOutcome\":null,\"retryWasted\":false,\"firstCallFailureKind\":null,\"sourceGateApplied\":true,\"sourceGatePassed\":false,\"sourceGateSufficient\":false,\"sourceGateMissingSourceTypes\":[],\"sourceGateFailureLabels\":[\"missing_margin_durability_context\",\"source_gate_failed\"],\"sourceGateEvidenceSlots\":{\"confirmedMetricMovement\":{\"metricName\":\"純利益\",\"currentValue\":\"295.8億ドル\",\"comparisonValue\":\"247.8億ドル\",\"changePct\":\"19.4%\",\"comparisonBasis\":\"前年同期比\",\"sourceIds\":[\"S9\",\"S10\",\"S12\"]},\"companyExplainedDrivers\":[],\"segmentOrBusinessSignals\":[{\"fact\":\"Further, the Company’s references to website URLs are intended to be inactive textual references only. Business Seasonality and Product Introductions The Company has historically e\",\"sourceIds\":[\"S8\"],\"confidence\":\"medium\"},{\"fact\":\"Year-over-year Mac net sales during the first six months of 2026 were relatively flat. iPad iPad net sales increased during the second quarter and first six months of 2026 compared\",\"sourceIds\":[\"CTX1\"],\"confidence\":\"medium\"}],\"marginDriverCount\":2,\"unknowns\":[],\"sourceLimitations\":[],\"failureLabels\":[\"missing_margin_durability_context\",\"source_gate_failed\"]},\"sourceGateRetrievalRetryRecommended\":true,\"retrievalRetryUsed\":false,\"retrievalRetryOutcome\":\"not_used\",\"evidenceFallbackUsed\":true,\"fallbackKind\":\"evidence_slot\",\"driverSlotsCount\":0,\"marginDriverSlotsCount\":2,\"followupTargetFound\":true,\"genericFallbackPhraseDetected\":false,\"hardRetrievalPlanUsed\":true,\"hardRetrievalQueries\":[\"AAPL gross margin operating margin operating expenses cost pricing mix segment margin\",\"AAPL gross margin product margin services margin operating expense R&D channel inventory mix pricing MD&A\",\"AAPL margin profitability drivers margin driver discussion cost discussion segment margin\"],\"hardRetrievalQueryPurposes\":[\"Find concrete margin driver and durability evidence. Missing: margin driver discussion, cost discussion, segment margin.\",\"Find concrete margin driver and durability evidence. Missing: margin driver discussion, cost discussion, segment margin.\",\"Find concrete margin driver and durability evidence. Missing: margin driver discussion, cost discussion, segment margin.\"],\"hardRetrievalMissingSourceTypes\":[\"margin driver discussion\",\"cost discussion\",\"segment margin\",\"margin driver discussion\",\"cost discussion\",\"segment margin\",\"margin driver discussion\",\"cost discussion\",\"segment margin\"],\"hardRetrievalAddedSourceCount\":0,\"hardRetrievalAddedSourceLabels\":[],\"hardRetrievalAddedSourceIds\":[],\"hardRetrievalOutcome\":\"not_used\",\"sourceGateSufficientBeforeHardRetrieval\":false,\"sourceGateSufficientAfterHardRetrieval\":null,\"driverSlotsCountBeforeHardRetrieval\":null,\"driverSlotsCountAfterHardRetrieval\":null,\"marginDriverSlotsCountBeforeHardRetrieval\":null,\"marginDriverSlotsCountAfterHardRetrieval\":null,\"selectedSourceLabelsBeforeHardRetrieval\":[\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\",\"10-Q Profitability context, filed 2026-05-01\",\"10-Q Profitability context, filed 2026-05-01\"],\"selectedSourceLabelsAfterHardRetrieval\":[],\"hardRetrievalMode\":\"diagnostic\",\"hardSourceCoverageScore\":76,\"hardSourceCoverageMissing\":[],\"hardSourceCoverageSectorKpiHits\":[\"channel inventory\"],\"hardSourceCoverageHasMdaRevenueDiscussion\":true,\"hardSourceCoverageHasSegmentResults\":true,\"hardSourceCoverageHasSectorKpiWindow\":true,\"geminiApiErrorKind\":null,\"geminiApiErrorStatus\":null,\"geminiApiErrorCode\":null,\"geminiApiErrorMessageSample\":null,\"geminiApiErrorRetryable\":null,\"geminiRequestPromptCharCount\":null,\"geminiRequestEstimatedTokens\":null,\"geminiRequestSourceCount\":null,\"geminiRequestContextCharCount\":null,\"geminiModelName\":null,\"geminiErrorOccurredBeforeResponse\":null,\"modelApiErrorKind\":null,\"modelApiErrorStatus\":null,\"modelApiErrorCode\":null,\"modelApiErrorMessageSample\":null,\"modelApiErrorRetryable\":null,\"modelRequestPromptCharCount\":null,\"modelRequestEstimatedTokens\":null,\"modelRequestSourceCount\":null,\"modelRequestContextCharCount\":null,\"modelErrorOccurredBeforeResponse\":null,\"promptTokenCount\":null,\"completionTokenCount\":null,\"totalTokenCount\":null,\"modelCallLatencyMs\":null,\"fallbackKindSource\":\"model_quality_control\",\"responsePathFallbackButKindNone\":false,\"finalAnswerJapaneseRatio\":0.6923076923076923,\"finalAnswerEnglishSentenceCount\":0,\"finalAnswerRawExcerptLike\":false,\"finalAnswerLanguageLabels\":[],\"finalAnswerLanguageViolations\":[],\"languageGuardChecked\":true,\"languageGuardOk\":true,\"languageGuardViolationLabels\":[],\"languageGuardFallbackUsed\":false,\"languageGuardFallbackKind\":null,\"originalAnswerBeforeLanguageGuardLength\":null,\"originalAnswerBeforeLanguageGuardSample\":null,\"sourceRepairLabels\":[],\"totalPipelineMs\":0,\"historicalLookupMs\":0,\"deterministicBuildMs\":0,\"contextBuildMs\":0,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":0,\"groundingMs\":0,\"contextApplied\":false,\"contextMessageCount\":6,\"finalSourceIds\":[\"S9\",\"S10\",\"S12\",\"S8\"],\"finalSourceLabels\":[\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\",\"10-Q Part I Item 2, filed 2026-05-01\"],\"loggedAt\":\"2026-05-10T05:34:19.955Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391259955
+        }
+    ],
+    "eventTimestamp": 1778391259811,
+    "event": {
+        "request": {
+            "url": "https://kabuyomi-api.dznqjmctk7.workers.dev/v1/chat",
+            "method": "POST",
+            "headers": {
+                "accept": "*/*",
+                "accept-encoding": "gzip, br",
+                "accept-language": "en-US,en;q=0.9",
+                "cf-connecting-ip": "175.129.225.49",
+                "cf-ipcountry": "JP",
+                "cf-ray": "9f9692fdca65fd48",
+                "cf-visitor": "{\"scheme\":\"https\"}",
+                "connection": "Keep-Alive",
+                "content-length": "1577",
+                "content-type": "application/json",
+                "host": "kabuyomi-api.dznqjmctk7.workers.dev",
+                "user-agent": "Kabuyomi/4 CFNetwork/3826.500.131 Darwin/25.4.0",
+                "x-device-key": "REDACTED",
+                "x-forwarded-proto": "https",
+                "x-real-ip": "175.129.225.49"
+            },
+            "cf": {
+                "httpProtocol": "HTTP/2",
+                "clientAcceptEncoding": "gzip, deflate, br",
+                "requestPriority": "weight=16;exclusive=0;group=0;group-weight=0",
+                "edgeRequestKeepAliveStatus": 1,
+                "requestHeaderNames": {},
+                "clientTcpRtt": 36,
+                "clientQuicRtt": 0,
+                "colo": "NRT",
+                "asn": 2516,
+                "asOrganization": "KDDI CORPORATION",
+                "country": "JP",
+                "isEUCountry": false,
+                "city": "Chōfu",
+                "continent": "AS",
+                "region": "Tokyo",
+                "regionCode": "13",
+                "timezone": "Asia/Tokyo",
+                "longitude": "139.54837",
+                "latitude": "35.65924",
+                "postalCode": "182-0000",
+                "tlsVersion": "TLSv1.3",
+                "tlsCipher": "AEAD-AES128-GCM-SHA256",
+                "tlsClientRandom": "MowrjoRiMZ4EPbLLmJ9iR26ZkLYQROFCJ8mrg/qC11s=",
+                "tlsClientCiphersSha1": "E9J8NXqw70FlfH1HcOL7UkkAtSk=",
+                "tlsClientExtensionsSha1": "uIi/8PeZZ2O/qNtYjcigAy09vsU=",
+                "tlsClientExtensionsSha1Le": "4WxaWOwh6SAvNNIqRKpUjRNiEvk=",
+                "tlsExportedAuthenticator": {
+                    "clientHandshake": "4d1cb428e7191b0e31d3eba6c83a2e893de09c06f3bad48c7c6176adf94466fc",
+                    "serverHandshake": "a2d635c8a1a40b1c27de6f66b6edcc97ed7fd30a1139fe6864ec503102c78468",
+                    "clientFinished": "cf59c6c957b2822055af679ed1ff93dbe60a610e0bc3351c5e5a29b3ca4e2760",
+                    "serverFinished": "9ddb9837dc55520b2ff497ebbb7ac8ce19f445c51869e6f869dd8ab347671084"
+                },
+                "tlsClientHelloLength": "508",
+                "tlsClientAuth": {
+                    "certPresented": "0",
+                    "certVerified": "NONE",
+                    "certRevoked": "0",
+                    "certIssuerDN": "",
+                    "certSubjectDN": "",
+                    "certIssuerDNRFC2253": "",
+                    "certSubjectDNRFC2253": "",
+                    "certIssuerDNLegacy": "",
+                    "certSubjectDNLegacy": "",
+                    "certSerial": "",
+                    "certIssuerSerial": "",
+                    "certSKI": "",
+                    "certIssuerSKI": "",
+                    "certFingerprintSHA1": "",
+                    "certFingerprintSHA256": "",
+                    "certNotBefore": "",
+                    "certNotAfter": "",
+                    "certRFC9440": "",
+                    "certRFC9440TooLarge": false,
+                    "certChainRFC9440": "",
+                    "certChainRFC9440TooLarge": false
+                },
+                "verifiedBotCategory": "",
+                "edgeL4": {
+                    "deliveryRate": 1121090
+                }
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 10,
+    "cpuTime": 1,
+    "truncated": false,
+    "executionModel": "durableObject",
+    "outcome": "ok",
+    "durableObjectId": "036d930121a0829b4d79637eca1d7488f33c9bdfff9d397691853acdb9e5fa41",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "entrypoint": "UserQuotaDO",
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [],
+    "eventTimestamp": 1778391259962,
+    "event": {
+        "request": {
+            "url": "https://do/quota",
+            "method": "POST",
+            "headers": {
+                "content-type": "application/json"
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 609,
+    "cpuTime": 459,
+    "truncated": false,
+    "executionModel": "stateless",
+    "outcome": "ok",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"credit_consume\",\"userId\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"operationId\":\"FC023E46-FC43-45FA-AE6A-78412060AC0F\",\"status\":\"applied\",\"delta\":-2,\"creditsRemaining\":36,\"loggedAt\":\"2026-05-10T05:34:22.322Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391262322
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_context_selection\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"questionIntent\":\"yoy_change\",\"candidateSourceCount\":152,\"selectedSourceCount\":7,\"selectedSourceCharCount\":5195,\"avgSelectedSourceChars\":742,\"contextTokenBudget\":8000,\"estimatedContextTokens\":1547,\"sourceSelectionStrategy\":\"yoy_change:standard:intent_ranked\",\"rejectedShortCount\":0,\"rejectedTableFragmentCount\":0,\"rejectedLowTextQualityCount\":24,\"sectionHitCountBusiness\":59,\"sectionHitCountRisk\":58,\"sectionHitCountMda\":11,\"retryAttempt\":0,\"retryReason\":null,\"loggedAt\":\"2026-05-10T05:34:22.322Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391262322
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_selected\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"ticker\":\"AAPL\",\"path\":\"fallback\",\"sourceCount\":4,\"loggedAt\":\"2026-05-10T05:34:22.322Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391262322
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_path_decision\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"questionIntent\":\"yoy_change\",\"responsePath\":\"fallback\",\"geminiCalled\":false,\"geminiSucceeded\":false,\"fallbackReason\":\"low_quality_answer\",\"schemaValid\":true,\"sourceIdsValid\":true,\"sourceCount\":4,\"promptTokenCount\":null,\"candidatesTokenCount\":null,\"totalTokenCount\":null,\"latencyMs\":null,\"contentMode\":\"full\",\"retryAttempt\":0,\"retryReason\":null,\"finalFallbackReason\":\"low_quality_answer\",\"contextTokenBudget\":8000,\"selectedSourceCount\":7,\"selectedSourceCharCount\":5195,\"estimatedContextTokens\":1547,\"sourceSelectionStrategy\":\"yoy_change:standard:intent_ranked\",\"selectedSourceIds\":[\"CTX1\",\"CTX2\",\"CTX3\",\"S8\",\"S9\",\"S10\",\"S12\"],\"selectedSourceLabels\":[\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\"],\"totalPipelineMs\":0,\"historicalLookupMs\":0,\"deterministicBuildMs\":0,\"contextBuildMs\":0,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":0,\"groundingMs\":0,\"loggedAt\":\"2026-05-10T05:34:22.322Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391262322
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_request\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"quotaSubject\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"identityKind\":\"device_key\",\"latencyMs\":0,\"contextMessageCount\":6,\"contextApplied\":false,\"sourceCount\":4,\"loggedAt\":\"2026-05-10T05:34:22.322Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391262322
+        },
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"chat_quality_pipeline\",\"ticker\":\"AAPL\",\"filingKey\":\"v6:0000320193:000032019326000013\",\"originalQuestion\":\"今回の最大変化は？\",\"rewrittenQuestion\":\"今回の最大変化は？\",\"questionIntent\":\"yoy_change\",\"responsePath\":\"fallback\",\"fallbackReason\":\"low_quality_answer\",\"selectedSourceCount\":7,\"selectedSourceCharCount\":5195,\"estimatedContextTokens\":1547,\"modelName\":null,\"requestedModelName\":null,\"effectiveModelName\":null,\"requestedReasoningEffort\":null,\"effectiveReasoningEffort\":null,\"reasoningEffortInvalid\":false,\"modelProvider\":null,\"latencyMs\":0,\"selectedSourceIds\":[\"CTX1\",\"CTX2\",\"CTX3\",\"S8\",\"S9\",\"S10\",\"S12\"],\"selectedSourceLabels\":[\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\"],\"selectedSourceTypes\":[\"md_a\",\"xbrl_metric\"],\"selectedSourceSectionFamilies\":[\"cost_discussion\",\"revenue_note\",\"margin_discussion\",\"xbrl_metric\"],\"selectedSourceFamilies\":[\"cost_discussion\",\"revenue_note\",\"margin_discussion\",\"xbrl_metric\"],\"selectedSourceExcerpts\":[\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change Research and development $ 11,419 $ 8,550 34 % $ 22,306 $ 16,818 33 % Percentage of total net sales 10 % 9 % 9 % 8 % Selling, gene\",\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change iPhone $ 56,994 $ 46,841 22 % $ 142,263 $ 115,979 23 % Mac 8,399 7,949 6 % 16,785 16,936 (1) % iPad 6,914 6,402 8 % 15,509 14,49\",\"The Company is experiencing a period of supply constraints and increasing costs for components driven by factors such as industry supply-demand imbalances for components, including advanced semiconductors, storage (NAND) and memory (DRAM). The Company expects these trends to intensify, which, together with actions that may be taken by the Company in response to such trends, may materially adversely affect demand for \",\"This includes press releases and other information about financial performance, information on corporate governance, and details related to the Company’s annual meeting of shareholders. The information contained on the websites referenced in this Form 10-Q is not incorporated by reference into this filing. Further, the Company’s references to website URLs are intended to be inactive textual references only. Business \",\"売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%\",\"純利益: 29578000000 USD / 比較値: 24780000000 / YoY: 19.4%\",\"営業利益: 35885000000 USD / 比較値: 29589000000 / YoY: 21.3%\"],\"selectedSourceTextPreview\":[\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change Research and development $ 11,\",\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions): Three Months Ended Six Months Ended March 28, 2026 March 29, 2025 Change March 28, 2026 March 29, 2025 Change iPhone $ 56,994 $ 46,841 22 \",\"The Company is experiencing a period of supply constraints and increasing costs for components driven by factors such as industry supply-demand imbalances for components, including advanced semiconductors, storage (NAND) and memory (DRAM). The Company expects these trends to intensify, which, together with actions that\",\"This includes press releases and other information about financial performance, information on corporate governance, and details related to the Company’s annual meeting of shareholders. The information contained on the websites referenced in this Form 10-Q is not incorporated by reference into this filing. Further, the\",\"売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%\",\"純利益: 29578000000 USD / 比較値: 24780000000 / YoY: 19.4%\",\"営業利益: 35885000000 USD / 比較値: 29589000000 / YoY: 21.3%\"],\"modelRawAnswerPreview\":null,\"lowQualityReason\":null,\"answerQualityFlags\":[\"fallback_path\",\"fallback:low_quality_answer\",\"source_gate_applied\",\"source_gate_failed\",\"followup_target_empty\",\"missing_followup_target_driver\",\"q04_table_heavy_context\",\"durability_context_missing\",\"q04_durability_evidence_too_generic\",\"evidence_fallback_used\",\"hard_retrieval_used\"],\"sourceIdsValid\":true,\"geminiCalled\":false,\"geminiSucceeded\":false,\"schemaValid\":true,\"retryAttempt\":0,\"retryReason\":null,\"retryAttempted\":false,\"retryAllowed\":false,\"retryBlockedReason\":null,\"retryOutcome\":null,\"retryWasted\":false,\"firstCallFailureKind\":null,\"sourceGateApplied\":true,\"sourceGatePassed\":false,\"sourceGateSufficient\":false,\"sourceGateMissingSourceTypes\":[],\"sourceGateFailureLabels\":[\"followup_target_empty\",\"missing_followup_target_driver\",\"q04_table_heavy_context\",\"durability_context_missing\",\"q04_durability_evidence_too_generic\",\"source_gate_failed\"],\"sourceGateEvidenceSlots\":{\"confirmedMetricMovement\":{\"metricName\":\"売上高\",\"currentValue\":\"1,111.8億ドル\",\"comparisonValue\":\"953.6億ドル\",\"changePct\":\"16.6%\",\"comparisonBasis\":\"前年同期比\",\"sourceIds\":[\"S9\",\"S10\",\"S12\"]},\"companyExplainedDrivers\":[{\"category\":\"revenue_driver\",\"driver\":\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions): Three Months Ended Six Months Ended Marc\",\"sourceIds\":[\"CTX1\"],\"confidence\":\"medium\"},{\"category\":\"technology_driver_durability_followup\",\"driver\":\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions): Three Months Ended Six Months Ended Ma\",\"sourceIds\":[\"CTX2\"],\"confidence\":\"medium\"},{\"category\":\"technology_driver_durability_followup\",\"driver\":\"This includes press releases and other information about financial performance, information on corporate governance, and details related to the Company’s annual meeting of shareholders. The information contained on the w\",\"sourceIds\":[\"S8\"],\"confidence\":\"medium\"}],\"segmentOrBusinessSignals\":[{\"fact\":\"| Q2 2026 Form 10-Q | 16 Operating Expenses Operating expenses for the three- and six-month periods ended March 28, 2026 and March 29, 2025, were as follows (dollars in millions):\",\"sourceIds\":[\"CTX1\"],\"confidence\":\"medium\"},{\"fact\":\"Products and Services Performance The following table shows net sales by category for the three- and six-month periods ended March 28, 2026 and March 29, 2025 (dollars in millions)\",\"sourceIds\":[\"CTX2\"],\"confidence\":\"medium\"}],\"marginDriverCount\":0,\"unknowns\":[\"前問の具体的な売上driverが十分に特定されていません。\"],\"sourceLimitations\":[],\"failureLabels\":[\"followup_target_empty\",\"missing_followup_target_driver\",\"q04_table_heavy_context\",\"durability_context_missing\",\"q04_durability_evidence_too_generic\",\"source_gate_failed\"]},\"sourceGateRetrievalRetryRecommended\":true,\"retrievalRetryUsed\":false,\"retrievalRetryOutcome\":\"not_used\",\"evidenceFallbackUsed\":true,\"fallbackKind\":\"evidence_slot\",\"driverSlotsCount\":3,\"marginDriverSlotsCount\":0,\"followupTargetFound\":false,\"genericFallbackPhraseDetected\":false,\"hardRetrievalPlanUsed\":true,\"hardRetrievalQueries\":[\"AAPL product revenue services revenue geographic revenue customer growth MD&A\",\"AAPL revenue drivers product launches services geographic revenue channel inventory\"],\"hardRetrievalQueryPurposes\":[\"Find prior revenue driver and durability evidence. Missing: product discussion, revenue discussion, services discussion, revenue discussion.\",\"Find prior revenue driver and durability evidence. Missing: product discussion, revenue discussion, services discussion, revenue discussion.\"],\"hardRetrievalMissingSourceTypes\":[\"product discussion\",\"revenue discussion\",\"services discussion\",\"revenue discussion\",\"geographic discussion\",\"product discussion\",\"revenue discussion\",\"services discussion\",\"revenue discussion\",\"geographic discussion\"],\"hardRetrievalAddedSourceCount\":0,\"hardRetrievalAddedSourceLabels\":[],\"hardRetrievalAddedSourceIds\":[],\"hardRetrievalOutcome\":\"not_used\",\"sourceGateSufficientBeforeHardRetrieval\":false,\"sourceGateSufficientAfterHardRetrieval\":null,\"driverSlotsCountBeforeHardRetrieval\":null,\"driverSlotsCountAfterHardRetrieval\":null,\"marginDriverSlotsCountBeforeHardRetrieval\":null,\"marginDriverSlotsCountAfterHardRetrieval\":null,\"selectedSourceLabelsBeforeHardRetrieval\":[\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Segment and revenue context, filed 2026-05-01\",\"10-Q Part I Item 2, filed 2026-05-01\",\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\"],\"selectedSourceLabelsAfterHardRetrieval\":[],\"hardRetrievalMode\":\"diagnostic\",\"hardSourceCoverageScore\":76,\"hardSourceCoverageMissing\":[],\"hardSourceCoverageSectorKpiHits\":[\"channel inventory\"],\"hardSourceCoverageHasMdaRevenueDiscussion\":true,\"hardSourceCoverageHasSegmentResults\":true,\"hardSourceCoverageHasSectorKpiWindow\":true,\"geminiApiErrorKind\":null,\"geminiApiErrorStatus\":null,\"geminiApiErrorCode\":null,\"geminiApiErrorMessageSample\":null,\"geminiApiErrorRetryable\":null,\"geminiRequestPromptCharCount\":null,\"geminiRequestEstimatedTokens\":null,\"geminiRequestSourceCount\":null,\"geminiRequestContextCharCount\":null,\"geminiModelName\":null,\"geminiErrorOccurredBeforeResponse\":null,\"modelApiErrorKind\":null,\"modelApiErrorStatus\":null,\"modelApiErrorCode\":null,\"modelApiErrorMessageSample\":null,\"modelApiErrorRetryable\":null,\"modelRequestPromptCharCount\":null,\"modelRequestEstimatedTokens\":null,\"modelRequestSourceCount\":null,\"modelRequestContextCharCount\":null,\"modelErrorOccurredBeforeResponse\":null,\"promptTokenCount\":null,\"completionTokenCount\":null,\"totalTokenCount\":null,\"modelCallLatencyMs\":null,\"fallbackKindSource\":\"model_quality_control\",\"responsePathFallbackButKindNone\":false,\"finalAnswerJapaneseRatio\":0.7129629629629629,\"finalAnswerEnglishSentenceCount\":0,\"finalAnswerRawExcerptLike\":false,\"finalAnswerLanguageLabels\":[],\"finalAnswerLanguageViolations\":[],\"languageGuardChecked\":true,\"languageGuardOk\":true,\"languageGuardViolationLabels\":[],\"languageGuardFallbackUsed\":false,\"languageGuardFallbackKind\":null,\"originalAnswerBeforeLanguageGuardLength\":null,\"originalAnswerBeforeLanguageGuardSample\":null,\"sourceRepairLabels\":[],\"totalPipelineMs\":0,\"historicalLookupMs\":0,\"deterministicBuildMs\":0,\"contextBuildMs\":0,\"geminiFirstCallMs\":null,\"geminiRetryMs\":null,\"fallbackBuildMs\":null,\"webSupplementMs\":0,\"groundingMs\":0,\"contextApplied\":false,\"contextMessageCount\":6,\"finalSourceIds\":[\"S9\",\"S10\",\"S12\",\"CTX1\"],\"finalSourceLabels\":[\"XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax)\",\"XBRL 純利益 (NetIncomeLoss)\",\"XBRL 営業利益 (OperatingIncomeLoss)\",\"10-Q Segment and revenue context, filed 2026-05-01\"],\"loggedAt\":\"2026-05-10T05:34:22.322Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391262322
+        }
+    ],
+    "eventTimestamp": 1778391262177,
+    "event": {
+        "request": {
+            "url": "https://kabuyomi-api.dznqjmctk7.workers.dev/v1/chat",
+            "method": "POST",
+            "headers": {
+                "accept": "*/*",
+                "accept-encoding": "gzip, br",
+                "accept-language": "en-US,en;q=0.9",
+                "cf-connecting-ip": "175.129.225.49",
+                "cf-ipcountry": "JP",
+                "cf-ray": "9f96930c9c09fd48",
+                "cf-visitor": "{\"scheme\":\"https\"}",
+                "connection": "Keep-Alive",
+                "content-length": "1583",
+                "content-type": "application/json",
+                "host": "kabuyomi-api.dznqjmctk7.workers.dev",
+                "user-agent": "Kabuyomi/4 CFNetwork/3826.500.131 Darwin/25.4.0",
+                "x-device-key": "REDACTED",
+                "x-forwarded-proto": "https",
+                "x-real-ip": "175.129.225.49"
+            },
+            "cf": {
+                "httpProtocol": "HTTP/2",
+                "clientAcceptEncoding": "gzip, deflate, br",
+                "requestPriority": "weight=16;exclusive=0;group=0;group-weight=0",
+                "edgeRequestKeepAliveStatus": 1,
+                "requestHeaderNames": {},
+                "clientTcpRtt": 33,
+                "clientQuicRtt": 0,
+                "colo": "NRT",
+                "asn": 2516,
+                "asOrganization": "KDDI CORPORATION",
+                "country": "JP",
+                "isEUCountry": false,
+                "city": "Chōfu",
+                "continent": "AS",
+                "region": "Tokyo",
+                "regionCode": "13",
+                "timezone": "Asia/Tokyo",
+                "longitude": "139.54837",
+                "latitude": "35.65924",
+                "postalCode": "182-0000",
+                "tlsVersion": "TLSv1.3",
+                "tlsCipher": "AEAD-AES128-GCM-SHA256",
+                "tlsClientRandom": "MowrjoRiMZ4EPbLLmJ9iR26ZkLYQROFCJ8mrg/qC11s=",
+                "tlsClientCiphersSha1": "E9J8NXqw70FlfH1HcOL7UkkAtSk=",
+                "tlsClientExtensionsSha1": "uIi/8PeZZ2O/qNtYjcigAy09vsU=",
+                "tlsClientExtensionsSha1Le": "4WxaWOwh6SAvNNIqRKpUjRNiEvk=",
+                "tlsExportedAuthenticator": {
+                    "clientHandshake": "4d1cb428e7191b0e31d3eba6c83a2e893de09c06f3bad48c7c6176adf94466fc",
+                    "serverHandshake": "a2d635c8a1a40b1c27de6f66b6edcc97ed7fd30a1139fe6864ec503102c78468",
+                    "clientFinished": "cf59c6c957b2822055af679ed1ff93dbe60a610e0bc3351c5e5a29b3ca4e2760",
+                    "serverFinished": "9ddb9837dc55520b2ff497ebbb7ac8ce19f445c51869e6f869dd8ab347671084"
+                },
+                "tlsClientHelloLength": "508",
+                "tlsClientAuth": {
+                    "certPresented": "0",
+                    "certVerified": "NONE",
+                    "certRevoked": "0",
+                    "certIssuerDN": "",
+                    "certSubjectDN": "",
+                    "certIssuerDNRFC2253": "",
+                    "certSubjectDNRFC2253": "",
+                    "certIssuerDNLegacy": "",
+                    "certSubjectDNLegacy": "",
+                    "certSerial": "",
+                    "certIssuerSerial": "",
+                    "certSKI": "",
+                    "certIssuerSKI": "",
+                    "certFingerprintSHA1": "",
+                    "certFingerprintSHA256": "",
+                    "certNotBefore": "",
+                    "certNotAfter": "",
+                    "certRFC9440": "",
+                    "certRFC9440TooLarge": false,
+                    "certChainRFC9440": "",
+                    "certChainRFC9440TooLarge": false
+                },
+                "verifiedBotCategory": "",
+                "edgeL4": {
+                    "deliveryRate": 1121090
+                }
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 10,
+    "cpuTime": 1,
+    "truncated": false,
+    "executionModel": "durableObject",
+    "outcome": "ok",
+    "durableObjectId": "036d930121a0829b4d79637eca1d7488f33c9bdfff9d397691853acdb9e5fa41",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "entrypoint": "UserQuotaDO",
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [],
+    "eventTimestamp": 1778391262322,
+    "event": {
+        "request": {
+            "url": "https://do/quota",
+            "method": "POST",
+            "headers": {
+                "content-type": "application/json"
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 386,
+    "cpuTime": 188,
+    "truncated": false,
+    "executionModel": "stateless",
+    "outcome": "exceededCpu",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [
+        {
+            "name": "Error",
+            "message": "Worker exceeded CPU time limit.",
+            "timestamp": 1778391264456
+        }
+    ],
+    "logs": [
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"credit_consume\",\"userId\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"operationId\":\"C6146506-F0BD-4B86-B0AB-00F719AFF8C7\",\"status\":\"applied\",\"delta\":-2,\"creditsRemaining\":34,\"loggedAt\":\"2026-05-10T05:34:24.456Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391264456
+        }
+    ],
+    "eventTimestamp": 1778391264267,
+    "event": {
+        "request": {
+            "url": "https://kabuyomi-api.dznqjmctk7.workers.dev/v1/chat",
+            "method": "POST",
+            "headers": {
+                "accept": "*/*",
+                "accept-encoding": "gzip, br",
+                "accept-language": "en-US,en;q=0.9",
+                "cf-connecting-ip": "175.129.225.49",
+                "cf-ipcountry": "JP",
+                "cf-ray": "9f969319a9fefd48",
+                "cf-visitor": "{\"scheme\":\"https\"}",
+                "connection": "Keep-Alive",
+                "content-length": "1598",
+                "content-type": "application/json",
+                "host": "kabuyomi-api.dznqjmctk7.workers.dev",
+                "user-agent": "Kabuyomi/4 CFNetwork/3826.500.131 Darwin/25.4.0",
+                "x-device-key": "REDACTED",
+                "x-forwarded-proto": "https",
+                "x-real-ip": "175.129.225.49"
+            },
+            "cf": {
+                "httpProtocol": "HTTP/2",
+                "clientAcceptEncoding": "gzip, deflate, br",
+                "requestPriority": "weight=16;exclusive=0;group=0;group-weight=0",
+                "edgeRequestKeepAliveStatus": 1,
+                "requestHeaderNames": {},
+                "clientTcpRtt": 27,
+                "clientQuicRtt": 0,
+                "colo": "NRT",
+                "asn": 2516,
+                "asOrganization": "KDDI CORPORATION",
+                "country": "JP",
+                "isEUCountry": false,
+                "city": "Chōfu",
+                "continent": "AS",
+                "region": "Tokyo",
+                "regionCode": "13",
+                "timezone": "Asia/Tokyo",
+                "longitude": "139.54837",
+                "latitude": "35.65924",
+                "postalCode": "182-0000",
+                "tlsVersion": "TLSv1.3",
+                "tlsCipher": "AEAD-AES128-GCM-SHA256",
+                "tlsClientRandom": "MowrjoRiMZ4EPbLLmJ9iR26ZkLYQROFCJ8mrg/qC11s=",
+                "tlsClientCiphersSha1": "E9J8NXqw70FlfH1HcOL7UkkAtSk=",
+                "tlsClientExtensionsSha1": "uIi/8PeZZ2O/qNtYjcigAy09vsU=",
+                "tlsClientExtensionsSha1Le": "4WxaWOwh6SAvNNIqRKpUjRNiEvk=",
+                "tlsExportedAuthenticator": {
+                    "clientHandshake": "4d1cb428e7191b0e31d3eba6c83a2e893de09c06f3bad48c7c6176adf94466fc",
+                    "serverHandshake": "a2d635c8a1a40b1c27de6f66b6edcc97ed7fd30a1139fe6864ec503102c78468",
+                    "clientFinished": "cf59c6c957b2822055af679ed1ff93dbe60a610e0bc3351c5e5a29b3ca4e2760",
+                    "serverFinished": "9ddb9837dc55520b2ff497ebbb7ac8ce19f445c51869e6f869dd8ab347671084"
+                },
+                "tlsClientHelloLength": "508",
+                "tlsClientAuth": {
+                    "certPresented": "0",
+                    "certVerified": "NONE",
+                    "certRevoked": "0",
+                    "certIssuerDN": "",
+                    "certSubjectDN": "",
+                    "certIssuerDNRFC2253": "",
+                    "certSubjectDNRFC2253": "",
+                    "certIssuerDNLegacy": "",
+                    "certSubjectDNLegacy": "",
+                    "certSerial": "",
+                    "certIssuerSerial": "",
+                    "certSKI": "",
+                    "certIssuerSKI": "",
+                    "certFingerprintSHA1": "",
+                    "certFingerprintSHA256": "",
+                    "certNotBefore": "",
+                    "certNotAfter": "",
+                    "certRFC9440": "",
+                    "certRFC9440TooLarge": false,
+                    "certChainRFC9440": "",
+                    "certChainRFC9440TooLarge": false
+                },
+                "verifiedBotCategory": "",
+                "edgeL4": {
+                    "deliveryRate": 1121090
+                }
+            }
+        },
+        "response": {
+            "status": 503
+        }
+    }
+}
+{
+    "wallTime": 11,
+    "cpuTime": 2,
+    "truncated": false,
+    "executionModel": "durableObject",
+    "outcome": "ok",
+    "durableObjectId": "036d930121a0829b4d79637eca1d7488f33c9bdfff9d397691853acdb9e5fa41",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "entrypoint": "UserQuotaDO",
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [],
+    "eventTimestamp": 1778391264453,
+    "event": {
+        "request": {
+            "url": "https://do/quota",
+            "method": "POST",
+            "headers": {
+                "content-type": "application/json"
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 157,
+    "cpuTime": 10,
+    "truncated": false,
+    "executionModel": "stateless",
+    "outcome": "exceededCpu",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [
+        {
+            "name": "Error",
+            "message": "Worker exceeded CPU time limit.",
+            "timestamp": 1778391268382
+        }
+    ],
+    "logs": [
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"credit_consume\",\"userId\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"operationId\":\"CF9ACFBB-541C-4F54-9804-4A0EB4A31140\",\"status\":\"applied\",\"delta\":-2,\"creditsRemaining\":32,\"loggedAt\":\"2026-05-10T05:34:28.382Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391268382
+        }
+    ],
+    "eventTimestamp": 1778391268239,
+    "event": {
+        "request": {
+            "url": "https://kabuyomi-api.dznqjmctk7.workers.dev/v1/chat",
+            "method": "POST",
+            "headers": {
+                "accept": "*/*",
+                "accept-encoding": "gzip, br",
+                "accept-language": "en-US,en;q=0.9",
+                "cf-connecting-ip": "175.129.225.49",
+                "cf-ipcountry": "JP",
+                "cf-ray": "9f9693327953fd48",
+                "cf-visitor": "{\"scheme\":\"https\"}",
+                "connection": "Keep-Alive",
+                "content-length": "1583",
+                "content-type": "application/json",
+                "host": "kabuyomi-api.dznqjmctk7.workers.dev",
+                "user-agent": "Kabuyomi/4 CFNetwork/3826.500.131 Darwin/25.4.0",
+                "x-device-key": "REDACTED",
+                "x-forwarded-proto": "https",
+                "x-real-ip": "175.129.225.49"
+            },
+            "cf": {
+                "httpProtocol": "HTTP/2",
+                "clientAcceptEncoding": "gzip, deflate, br",
+                "requestPriority": "weight=16;exclusive=0;group=0;group-weight=0",
+                "edgeRequestKeepAliveStatus": 1,
+                "requestHeaderNames": {},
+                "clientTcpRtt": 22,
+                "clientQuicRtt": 0,
+                "colo": "NRT",
+                "asn": 2516,
+                "asOrganization": "KDDI CORPORATION",
+                "country": "JP",
+                "isEUCountry": false,
+                "city": "Chōfu",
+                "continent": "AS",
+                "region": "Tokyo",
+                "regionCode": "13",
+                "timezone": "Asia/Tokyo",
+                "longitude": "139.54837",
+                "latitude": "35.65924",
+                "postalCode": "182-0000",
+                "tlsVersion": "TLSv1.3",
+                "tlsCipher": "AEAD-AES128-GCM-SHA256",
+                "tlsClientRandom": "MowrjoRiMZ4EPbLLmJ9iR26ZkLYQROFCJ8mrg/qC11s=",
+                "tlsClientCiphersSha1": "E9J8NXqw70FlfH1HcOL7UkkAtSk=",
+                "tlsClientExtensionsSha1": "uIi/8PeZZ2O/qNtYjcigAy09vsU=",
+                "tlsClientExtensionsSha1Le": "4WxaWOwh6SAvNNIqRKpUjRNiEvk=",
+                "tlsExportedAuthenticator": {
+                    "clientHandshake": "4d1cb428e7191b0e31d3eba6c83a2e893de09c06f3bad48c7c6176adf94466fc",
+                    "serverHandshake": "a2d635c8a1a40b1c27de6f66b6edcc97ed7fd30a1139fe6864ec503102c78468",
+                    "clientFinished": "cf59c6c957b2822055af679ed1ff93dbe60a610e0bc3351c5e5a29b3ca4e2760",
+                    "serverFinished": "9ddb9837dc55520b2ff497ebbb7ac8ce19f445c51869e6f869dd8ab347671084"
+                },
+                "tlsClientHelloLength": "508",
+                "tlsClientAuth": {
+                    "certPresented": "0",
+                    "certVerified": "NONE",
+                    "certRevoked": "0",
+                    "certIssuerDN": "",
+                    "certSubjectDN": "",
+                    "certIssuerDNRFC2253": "",
+                    "certSubjectDNRFC2253": "",
+                    "certIssuerDNLegacy": "",
+                    "certSubjectDNLegacy": "",
+                    "certSerial": "",
+                    "certIssuerSerial": "",
+                    "certSKI": "",
+                    "certIssuerSKI": "",
+                    "certFingerprintSHA1": "",
+                    "certFingerprintSHA256": "",
+                    "certNotBefore": "",
+                    "certNotAfter": "",
+                    "certRFC9440": "",
+                    "certRFC9440TooLarge": false,
+                    "certChainRFC9440": "",
+                    "certChainRFC9440TooLarge": false
+                },
+                "verifiedBotCategory": "",
+                "edgeL4": {
+                    "deliveryRate": 1121090
+                }
+            }
+        },
+        "response": {
+            "status": 503
+        }
+    }
+}
+{
+    "wallTime": 10,
+    "cpuTime": 1,
+    "truncated": false,
+    "executionModel": "durableObject",
+    "outcome": "ok",
+    "durableObjectId": "036d930121a0829b4d79637eca1d7488f33c9bdfff9d397691853acdb9e5fa41",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "entrypoint": "UserQuotaDO",
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [],
+    "logs": [],
+    "eventTimestamp": 1778391268384,
+    "event": {
+        "request": {
+            "url": "https://do/quota",
+            "method": "POST",
+            "headers": {
+                "content-type": "application/json"
+            }
+        },
+        "response": {
+            "status": 200
+        }
+    }
+}
+{
+    "wallTime": 150,
+    "cpuTime": 10,
+    "truncated": false,
+    "executionModel": "stateless",
+    "outcome": "exceededCpu",
+    "scriptVersion": {
+        "id": "535fd8fb-cca5-412c-bf76-a3b781dde00b"
+    },
+    "scriptName": "kabuyomi-api",
+    "diagnosticsChannelEvents": [],
+    "exceptions": [
+        {
+            "name": "Error",
+            "message": "Worker exceeded CPU time limit.",
+            "timestamp": 1778391271408
+        }
+    ],
+    "logs": [
+        {
+            "message": [
+                "{\"level\":\"info\",\"event\":\"credit_consume\",\"userId\":\"free:device:7666604d93f2d4b80adc70f437ce87dc05d0b7d9e4eeaac01a438a976aafb152\",\"operationId\":\"BE7A9B37-4ADB-4A94-8083-415BD4EBCD68\",\"status\":\"applied\",\"delta\":-2,\"creditsRemaining\":30,\"loggedAt\":\"2026-05-10T05:34:31.408Z\"}"
+            ],
+            "level": "log",
+            "timestamp": 1778391271408
+        }
+    ],
+    "eventTimestamp": 1778391271271,
+    "event": {
+        "request": {
+            "url": "https://kabuyomi-api.dznqjmctk7.workers.dev/v1/chat",
+            "method": "POST",
+            "headers": {
+                "accept": "*/*",
+                "accept-encoding": "gzip, br",
+                "accept-language": "en-US,en;q=0.9",
+                "cf-connecting-ip": "175.129.225.49",
+                "cf-ipcountry": "JP",
+                "cf-ray": "9f9693456a2afd48",
+                "cf-visitor": "{\"scheme\":\"https\"}",
+                "connection": "Keep-Alive",
+                "content-length": "1583",
+                "content-type": "application/json",
+                "host": "kabuyomi-api.dznqjmctk7.workers.dev",
+                "user-agent": "Kabuyomi/4 CFNetwork/3826.500.131 Darwin/25.4.0",
+                "x-device-key": "REDACTED",
+                "x-forwarded-proto": "https",
+                "x-real-ip": "175.129.225.49"
+            },
+            "cf": {
+                "httpProtocol": "HTTP/2",
+                "clientAcceptEncoding": "gzip, deflate, br",
+                "requestPriority": "weight=16;exclusive=0;group=0;group-weight=0",
+                "edgeRequestKeepAliveStatus": 1,
+                "requestHeaderNames": {},
+                "clientTcpRtt": 20,
+                "clientQuicRtt": 0,
+                "colo": "NRT",
+                "asn": 2516,
+                "asOrganization": "KDDI CORPORATION",
+                "country": "JP",
+                "isEUCountry": false,
+                "city": "Chōfu",
+                "continent": "AS",
+                "region": "Tokyo",
+                "regionCode": "13",
+                "timezone": "Asia/Tokyo",
+                "longitude": "139.54837",
+                "latitude": "35.65924",
+                "postalCode": "182-0000",
+                "tlsVersion": "TLSv1.3",
+                "tlsCipher": "AEAD-AES128-GCM-SHA256",
+                "tlsClientRandom": "MowrjoRiMZ4EPbLLmJ9iR26ZkLYQROFCJ8mrg/qC11s=",
+                "tlsClientCiphersSha1": "E9J8NXqw70FlfH1HcOL7UkkAtSk=",
+                "tlsClientExtensionsSha1": "uIi/8PeZZ2O/qNtYjcigAy09vsU=",
+                "tlsClientExtensionsSha1Le": "4WxaWOwh6SAvNNIqRKpUjRNiEvk=",
+                "tlsExportedAuthenticator": {
+                    "clientHandshake": "4d1cb428e7191b0e31d3eba6c83a2e893de09c06f3bad48c7c6176adf94466fc",
+                    "serverHandshake": "a2d635c8a1a40b1c27de6f66b6edcc97ed7fd30a1139fe6864ec503102c78468",
+                    "clientFinished": "cf59c6c957b2822055af679ed1ff93dbe60a610e0bc3351c5e5a29b3ca4e2760",
+                    "serverFinished": "9ddb9837dc55520b2ff497ebbb7ac8ce19f445c51869e6f869dd8ab347671084"
+                },
+                "tlsClientHelloLength": "508",
+                "tlsClientAuth": {
+                    "certPresented": "0",
+                    "certVerified": "NONE",
+                    "certRevoked": "0",
+                    "certIssuerDN": "",
+                    "certSubjectDN": "",
+                    "certIssuerDNRFC2253": "",
+                    "certSubjectDNRFC2253": "",
+                    "certIssuerDNLegacy": "",
+                    "certSubjectDNLegacy": "",
+                    "certSerial": "",
+                    "certIssuerSerial": "",
+                    "certSKI": "",
+                    "certIssuerSKI": "",
+                    "certFingerprintSHA1": "",
+                    "certFingerprintSHA256": "",
+                    "certNotBefore": "",
+                    "certNotAfter": "",
+                    "certRFC9440": "",
+                    "certRFC9440TooLarge": false,
+                    "certChainRFC9440": "",
+                    "certChainRFC9440TooLarge": false
+                },
+                "verifiedBotCategory": "",
+                "edgeL4": {
+                    "deliveryRate": 1121090
+                }
+            }
+        },
+        "response": {
+            "status": 503
+        }
+    }
+}

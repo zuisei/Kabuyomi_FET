@@ -16,11 +16,7 @@ struct ComposerBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !aiConsentGranted {
-                consentStatusLine
-            }
-
-            creditStatusLine
+            composerStatusLine
             inputControls
         }
         .padding(.horizontal, 13)
@@ -147,29 +143,18 @@ struct ComposerBar: View {
             .shadow(color: sendButtonIsDisabled ? Color.clear : KabuyomiTheme.accentDeep.opacity(0.10), radius: 4, x: 0, y: 2)
     }
 
-    private var consentStatusLine: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "info.circle.fill")
-                .font(.system(size: 12, weight: .bold))
+    private var composerStatusLine: some View {
+        HStack(spacing: 10) {
+            if !aiConsentGranted {
+                Label("初回のみ同意", systemImage: "info.circle.fill")
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+            }
 
-            Text("初回は同意後にこの質問を送信します。")
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .font(.system(.caption2, design: .rounded, weight: .semibold))
-        .foregroundStyle(KabuyomiTheme.accentDeep)
-        .padding(.horizontal, 4)
-        .dynamicTypeSize(.xSmall ... .accessibility2)
-    }
-
-    private var creditStatusLine: some View {
-        HStack(spacing: 8) {
-            Image(systemName: hasEnoughCredits ? "bolt.circle.fill" : "exclamationmark.circle.fill")
-                .font(.system(size: 12, weight: .bold))
-
-            Text(hasEnoughCredits ? creditStatusText : "\(creditStatusText) / この質問には2 creditsが必要です")
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                .fixedSize(horizontal: false, vertical: true)
+            Label(
+                hasEnoughCredits ? creditStatusText : "残高不足",
+                systemImage: hasEnoughCredits ? "bolt.circle.fill" : "exclamationmark.circle.fill"
+            )
+            .foregroundStyle(hasEnoughCredits ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative)
 
             Spacer(minLength: 0)
 
@@ -183,8 +168,8 @@ struct ComposerBar: View {
             }
         }
         .font(.system(.caption2, design: .rounded, weight: .semibold))
-        .foregroundStyle(hasEnoughCredits ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative)
         .padding(.horizontal, 4)
+        .lineLimit(1)
         .dynamicTypeSize(.xSmall ... .accessibility2)
     }
 }

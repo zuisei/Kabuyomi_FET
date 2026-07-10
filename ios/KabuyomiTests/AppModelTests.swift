@@ -3,8 +3,8 @@ import XCTest
 
 @MainActor
 final class AppModelTests: XCTestCase {
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         Self.clearKabuyomiDefaults()
         DeviceIdentityStore().reset()
         #if DEBUG
@@ -13,7 +13,7 @@ final class AppModelTests: XCTestCase {
         #endif
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         MockAppModelURLProtocol.requestHandler = nil
         Self.clearKabuyomiDefaults()
         DeviceIdentityStore().reset()
@@ -21,7 +21,7 @@ final class AppModelTests: XCTestCase {
         AdMobConfig.setRewardedCreditSSVSmokeModeEnabled(false)
         AdMobConfig.setTestDeviceIdentifiers([])
         #endif
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testOpenConversationNormalizesTickerAndConsumesDraftQuestion() {
@@ -720,7 +720,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(SubscriptionStoreError.purchaseUnverified.errorDescription, "購入を確認できませんでした。購入を復元してください。")
     }
 
-    func testProjectVersionMetadataIsV102Build4() throws {
+    func testProjectVersionMetadataIsV102Build6() throws {
         let testFile = URL(fileURLWithPath: #filePath)
         let repoRoot = testFile
             .deletingLastPathComponent()
@@ -730,9 +730,9 @@ final class AppModelTests: XCTestCase {
         let pbxproj = try String(contentsOf: repoRoot.appendingPathComponent("ios/Kabuyomi.xcodeproj/project.pbxproj"), encoding: .utf8)
 
         XCTAssertTrue(projectYML.contains("MARKETING_VERSION: 1.0.2"))
-        XCTAssertTrue(projectYML.contains("CURRENT_PROJECT_VERSION: 4"))
+        XCTAssertTrue(projectYML.contains("CURRENT_PROJECT_VERSION: 6"))
         XCTAssertTrue(pbxproj.contains("MARKETING_VERSION = 1.0.2;"))
-        XCTAssertTrue(pbxproj.contains("CURRENT_PROJECT_VERSION = 4;"))
+        XCTAssertTrue(pbxproj.contains("CURRENT_PROJECT_VERSION = 6;"))
     }
 
     func testResetLocalDataClearsRecentStateAndKeepsDeviceIdentity() async throws {

@@ -74,6 +74,28 @@ final class ConversationPromptTests: XCTestCase {
         )
     }
 
+    func testLocalizedAssistantDisplayTextHumanizesInternalEvidenceLabels() {
+        let text = localizedAssistantDisplayText(
+            "判断には、経営陣による業績説明、product revenue, services revenue, geographic revenue, product launches, channel inventory の追加確認が必要です。"
+        )
+
+        XCTAssertEqual(
+            text,
+            "判断には、経営陣による業績説明、製品別売上、サービス売上、地域別売上、新製品投入、販売チャネル在庫の追加確認が必要です。"
+        )
+    }
+
+    func testLocalizedAssistantDisplayTextHumanizesSourceCoverageLabels() {
+        let text = localizedAssistantDisplayText(
+            "segment results, revenue discussion, sector-specific KPIs も確認すると精度が上がります。"
+        )
+
+        XCTAssertEqual(
+            text,
+            "セグメント別業績、売上要因の説明、業界固有KPIも確認すると精度が上がります。"
+        )
+    }
+
     func testStructureAssistantMessageKeepsEnumeratedReasonsInConclusion() {
         let structure = structureAssistantMessage(
             """
@@ -450,6 +472,20 @@ final class ConversationPromptTests: XCTestCase {
 
         XCTAssertEqual(chips.count, 1)
         XCTAssertEqual(chips.first?.source?.sourceIdSnapshot, "metric-op")
+    }
+
+    func testAnalyticalQuestionUsesReadableSourceReferenceQuestion() {
+        XCTAssertEqual(
+            analyticalQuestion(from: "10-Q 項目2 の記述を確認できます"),
+            "10-Q 項目2で何を確認する？"
+        )
+    }
+
+    func testAnalyticalQuestionFallsBackToDocumentWordingForConfirmationText() {
+        XCTAssertEqual(
+            analyticalQuestion(from: "本文の記述を確認できます"),
+            "提出資料の記述で何を確認する？"
+        )
     }
 
     func testDisplayableMessageSourcesDeduplicateRepeatedInvestorLabels() {

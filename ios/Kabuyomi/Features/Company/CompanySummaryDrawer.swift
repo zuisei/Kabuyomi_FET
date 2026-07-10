@@ -117,7 +117,7 @@ struct SummaryDrawer: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             SummaryDrawerHeader(
                 ticker: company.ticker,
                 formType: company.formType,
@@ -125,7 +125,7 @@ struct SummaryDrawer: View {
             )
 
             ScrollView(showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     SummaryLeadCard(
                         company: company,
                         tone: investorTone(for: company, positiveInsights: positiveInsights, negativeInsights: negativeInsights),
@@ -149,10 +149,6 @@ struct SummaryDrawer: View {
                         openSource: openSource
                     )
 
-                    InvestorChangeBoard(
-                        metrics: headlineMetrics
-                    )
-
                     if let historicalOverview = company.historicalOverview,
                        !historicalOverview.series.isEmpty {
                         InvestorHistoricalTrendBoard(overview: historicalOverview)
@@ -164,7 +160,7 @@ struct SummaryDrawer: View {
                 .padding(.bottom, 24)
             }
         }
-        .padding(20)
+        .padding(18)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(drawerShell)
     }
@@ -238,7 +234,7 @@ private struct SummaryDrawerHeader: View {
             Button(action: close) {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .bold))
-                    .frame(width: 38, height: 38)
+                    .frame(width: 44, height: 44)
                     .foregroundStyle(KabuyomiTheme.accentDeep)
                     .kabuyomiGlass(radius: 19, tint: Color.white.opacity(0.24), stroke: Color.white.opacity(0.56))
             }
@@ -258,12 +254,12 @@ private struct SummaryLeadCard: View {
     let focusCount: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 14) {
             header
 
             VStack(alignment: .leading, spacing: 10) {
                 Text(summarySentence ?? "提出資料から確認できる事実と、次に読むべき論点を整理します。")
-                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .font(.system(.headline, design: .rounded, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.ink)
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
@@ -287,14 +283,14 @@ private struct SummaryLeadCard: View {
                 formType: company.formType
             )
         }
-        .padding(18)
+        .padding(16)
         .background(background)
     }
 
     @ViewBuilder
     private var header: some View {
         let titleBlock = VStack(alignment: .leading, spacing: 7) {
-            Text("FILING BRIEF")
+            Text("決算要点")
                 .font(.system(.caption, design: .rounded, weight: .heavy))
                 .kerning(0.8)
                 .foregroundStyle(tone.tint.opacity(0.92))
@@ -414,21 +410,10 @@ private struct SummaryLeadMetaGrid: View {
     let formType: String
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                SummaryMetaPill(title: "提出日", value: shortDate(filedAt))
-                SummaryMetaPill(title: "対象期末", value: shortDate(periodOfReport))
-                SummaryMetaPill(title: "フォーム", value: formType)
-            }
-
-            VStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    SummaryMetaPill(title: "提出日", value: shortDate(filedAt))
-                    SummaryMetaPill(title: "対象期末", value: shortDate(periodOfReport))
-                }
-
-                SummaryMetaPill(title: "フォーム", value: formType)
-            }
+        HStack(spacing: 8) {
+            SummaryMetaPill(title: "提出日", value: shortDate(filedAt))
+            SummaryMetaPill(title: "対象期末", value: shortDate(periodOfReport))
+            SummaryMetaPill(title: "フォーム", value: formType)
         }
     }
 
@@ -438,7 +423,7 @@ private struct SummaryLeadMetaGrid: View {
         formatter.dateFormat = "yyyy-MM-dd"
 
         guard let date = formatter.date(from: rawValue) else { return rawValue }
-        formatter.dateFormat = "yyyy/MM/dd"
+        formatter.dateFormat = "yy/MM/dd"
         return formatter.string(from: date)
     }
 }
@@ -462,7 +447,7 @@ private struct SummaryMetaValue: View {
 
     var body: some View {
         Text(value)
-            .font(.system(.subheadline, design: .rounded, weight: .bold))
+            .font(.system(.footnote, design: .rounded, weight: .bold))
             .monospacedDigit()
             .foregroundStyle(KabuyomiTheme.ink)
             .lineLimit(1)
@@ -473,167 +458,12 @@ private struct SummaryMetaValue: View {
 
 private struct SummaryMetaCardBackground: View {
     var body: some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(Color.white.opacity(0.72))
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(KabuyomiTheme.accentMist.opacity(0.32))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(0.94), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(KabuyomiTheme.accentSoft.opacity(0.28), lineWidth: 1)
             )
-            .shadow(color: Color.black.opacity(0.03), radius: 10, x: 0, y: 4)
-    }
-}
-
-private struct InvestorChangeBoard: View {
-    let metrics: [MetricPayload]
-
-    private var comparableMetrics: [MetricPayload] {
-        metrics.filter { $0.comparisonValue != nil }
-    }
-
-    var body: some View {
-        SummaryBoardCard(
-            eyebrow: "比較",
-            title: "前回からの変化",
-            subtitle: "今回・前年同期・増減率を表で比較",
-            systemImage: "clock.arrow.circlepath"
-        ) {
-            if comparableMetrics.isEmpty {
-                Text("前回比で比較できる主要指標はまだ抽出されていません。")
-                    .font(.system(.footnote, design: .rounded))
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .kabuyomiCard(.muted, radius: 18)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(comparableMetrics.enumerated()), id: \.element.id) { index, metric in
-                        InvestorChangeTableRow(metric: metric, isLast: index == comparableMetrics.count - 1)
-                    }
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(Color.white.opacity(0.72))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .stroke(Color.white.opacity(0.88), lineWidth: 1)
-                        )
-                )
-            }
-        }
-    }
-}
-
-private struct InvestorChangeTableRow: View {
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    let metric: MetricPayload
-    let isLast: Bool
-
-    private var currentValueText: String {
-        formattedMetricValue(metric)
-    }
-
-    private var comparisonValueText: String {
-        metric.comparisonValue.map {
-            formattedMetricValue($0, logicalName: metric.logicalName, unit: metric.unit)
-        } ?? "—"
-    }
-
-    private var yoyDisplay: MetricYoYDisplay? {
-        metricYoYDisplay(for: metric)
-    }
-
-    private var yoyText: String {
-        yoyDisplay?.text ?? "—"
-    }
-
-    private var yoyTint: Color {
-        yoyDisplay?.tint ?? KabuyomiTheme.inkMuted
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                header
-                valueBlocks
-            }
-            .padding(.vertical, 12)
-
-            if !isLast {
-                Divider()
-                    .overlay(Color.white.opacity(0.7))
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var header: some View {
-        let title = Text(MetricLabeler.title(for: metric.logicalName))
-            .font(.system(.subheadline, design: .rounded, weight: .bold))
-            .foregroundStyle(KabuyomiTheme.ink)
-            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-            .fixedSize(horizontal: false, vertical: true)
-
-        let yoyBadge = Text(yoyText)
-            .font(.system(.footnote, design: .rounded, weight: .bold))
-            .foregroundStyle(yoyTint)
-            .lineLimit(1)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(yoyTint.opacity(0.14)))
-
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 8) {
-                title
-                yoyBadge
-            }
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                title
-                Spacer(minLength: 8)
-                yoyBadge
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var valueBlocks: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 10) {
-                InvestorChangeValueBlock(title: "今回", value: currentValueText, tint: KabuyomiTheme.ink)
-                InvestorChangeValueBlock(title: "前年", value: comparisonValueText, tint: KabuyomiTheme.inkSoft)
-            }
-        } else {
-            HStack(alignment: .top, spacing: 10) {
-                InvestorChangeValueBlock(title: "今回", value: currentValueText, tint: KabuyomiTheme.ink)
-                InvestorChangeValueBlock(title: "前年", value: comparisonValueText, tint: KabuyomiTheme.inkSoft)
-            }
-        }
-    }
-}
-
-private struct InvestorChangeValueBlock: View {
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    let title: String
-    let value: String
-    let tint: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.system(.caption2, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.inkMuted)
-            Text(value)
-                .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                .foregroundStyle(tint)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-                .minimumScaleFactor(0.78)
-                .monospacedDigit()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -725,7 +555,7 @@ private struct InvestorHistoricalSeriesChartCard: View {
     }
 
     private var latestYoYText: String {
-        latestYoYDisplay?.text ?? "YoY なし"
+        latestYoYDisplay?.text ?? "前年比なし"
     }
 
     private var latestYoYTint: Color {
@@ -940,7 +770,7 @@ private struct SummaryMetaPill: View {
             SummaryMetaValue(value: value)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(SummaryMetaCardBackground())
     }
@@ -1000,7 +830,7 @@ private struct InvestorMetricMapCard: View {
             AnalyticalSectionHeader(
             eyebrow: "数字",
             title: "主要指標",
-            subtitle: "指標 / 今回 / 前年同期 / YoY",
+            subtitle: "今回と前年同期を比較",
             systemImage: "tablecells"
             )
 
@@ -1038,7 +868,7 @@ private struct InvestorMetricTableHeader: View {
             metricHeader("指標", minWidth: 72)
             metricHeader("今回", minWidth: 82, alignment: .trailing)
             metricHeader("前年同期", minWidth: 78, alignment: .trailing)
-            metricHeader("YoY", minWidth: 58, alignment: .trailing)
+            metricHeader("前年比", minWidth: 58, alignment: .trailing)
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 8)
@@ -1212,7 +1042,7 @@ private struct InvestorMetricMapRow: View {
             }
         }
 
-        let yoyBadge = Text(yoyDisplay?.text ?? "YoY なし")
+        let yoyBadge = Text(yoyDisplay?.text ?? "前年比なし")
             .font(.system(.footnote, design: .rounded, weight: .bold))
             .foregroundStyle(metricTint)
             .padding(.horizontal, 10)
@@ -1316,12 +1146,12 @@ private struct InvestorDriverBoard: View {
 
             InvestorInsightLane(
                 company: company,
-                title: "確認論点",
-                subtitle: "弱さや注意点として追加確認したい論点",
+                title: "注意点",
+                subtitle: "弱さやリスクとして追加確認したい論点",
                 tint: KabuyomiTheme.negative,
                 systemImage: "arrow.down.right.circle.fill",
                 insights: negativeInsights,
-                emptyMessage: "明確な確認論点はまだ切り出されていません。",
+                emptyMessage: "注意点として追加確認すべき論点はまだ切り出されていません。",
                 openSource: openSource
             )
         }
@@ -1746,12 +1576,20 @@ private func analyticalDetail(from text: String, fallback: String) -> String {
     return withoutHeadline
 }
 
-private func analyticalQuestion(from text: String) -> String {
+func analyticalQuestion(from text: String) -> String {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return "次に何を確認する？" }
 
     if trimmed.hasSuffix("？") || trimmed.hasSuffix("?") {
         return trimmed
+    }
+
+    if shouldUseSourceReferenceQuestion(trimmed) {
+        if let sourceLabel = sourceReferenceLabelForQuestion(from: trimmed) {
+            return "\(sourceLabel)で何を確認する？"
+        }
+
+        return "提出資料の記述で何を確認する？"
     }
 
     if trimmed.contains("売上") || trimmed.localizedCaseInsensitiveContains("revenue") {
@@ -1774,7 +1612,42 @@ private func analyticalQuestion(from text: String) -> String {
     return "\(headline)をどう確認する？"
 }
 
+private func shouldUseSourceReferenceQuestion(_ text: String) -> Bool {
+    guard !text.contains("確認できません") else { return false }
+
+    return text.contains("確認できます")
+        || text.contains("確認できる")
+        || text.contains("記述を確認")
+}
+
+private func sourceReferenceLabelForQuestion(from text: String) -> String? {
+    let patterns = [
+        #"((?:10-[KQ]|10K|10Q)\s*(?:項目|Item)\s*[0-9A-Za-z.]+)"#,
+        #"((?:Form\s+)?10-[KQ]\s+Item\s+[0-9A-Za-z.]+)"#,
+        #"(Item\s+[0-9A-Za-z.]+)"#
+    ]
+
+    for pattern in patterns {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            continue
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, range: range),
+              let matchRange = Range(match.range(at: 1), in: text) else {
+            continue
+        }
+
+        return String(text[matchRange])
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    return nil
+}
+
 private struct InsightSourceChips: View {
+    @State private var showsAllSources = false
+
     let company: CompanyPayload
     let sourceIds: [String]
     let openSource: ((LocalMessageSourceRef) -> Void)?
@@ -1787,7 +1660,7 @@ private struct InsightSourceChips: View {
         if !chips.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(Array(chips.prefix(2))) { chip in
+                    ForEach(Array(chips.prefix(showsAllSources ? chips.count : 2))) { chip in
                         if let source = chip.source, let openSource {
                             Button(action: { openSource(source) }) {
                                 sourceChipLabel(chip.label, isInteractive: true)
@@ -1800,12 +1673,23 @@ private struct InsightSourceChips: View {
                     }
 
                     if chips.count > 2 {
-                        Text("+\(chips.count - 2)")
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                showsAllSources.toggle()
+                            }
+                        } label: {
+                            Label(
+                                showsAllSources ? "閉じる" : "他\(chips.count - 2)件",
+                                systemImage: showsAllSources ? "chevron.left" : "chevron.right"
+                            )
                             .font(.system(.caption2, design: .rounded, weight: .bold))
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                             .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
+                            .frame(minHeight: 44)
+                            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(KabuyomiTheme.fill(for: .secondary)))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(showsAllSources ? "根拠一覧を閉じる" : "他の根拠を表示")
                     }
                 }
                 .padding(.trailing, 20)
@@ -1829,7 +1713,7 @@ private struct InsightSourceChips: View {
             .font(.system(.caption2, design: .rounded, weight: .semibold))
             .foregroundStyle(KabuyomiTheme.accentDeep)
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+            .frame(minHeight: 44)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(KabuyomiTheme.accentSoft.opacity(0.58)))
     }
 }

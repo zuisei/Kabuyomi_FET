@@ -251,14 +251,6 @@ struct ConversationContextCard: View {
     let historicalQuestions: [String]
     let selectQuestion: (String) -> Void
 
-    private var promptColumns: [GridItem] {
-        if dynamicTypeSize.isAccessibilitySize {
-            return [GridItem(.flexible(), spacing: 10, alignment: .top)]
-        }
-
-        return [GridItem(.adaptive(minimum: 260), spacing: 8, alignment: .top)]
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             filingHeader
@@ -291,57 +283,69 @@ struct ConversationContextCard: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 14)
-        .kabuyomiGlass(radius: 24)
+        .kabuyomiCard(.primary, radius: 24)
     }
 
     @ViewBuilder
     private var filingHeader: some View {
         let marker = Image(systemName: "doc.text.fill")
             .font(.system(size: 14, weight: .bold))
-            .foregroundStyle(KabuyomiTheme.accentDeep)
+            .foregroundStyle(KabuyomiTheme.heroText)
             .frame(width: 34, height: 34)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(KabuyomiTheme.accentSoft.opacity(0.62))
+                    .fill(Color.white.opacity(0.12))
             )
 
         let titleBlock = VStack(alignment: .leading, spacing: 5) {
             Text("最新資料")
                 .font(.system(.caption2, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.accentDeep)
+                .foregroundStyle(KabuyomiTheme.accentSoft)
             Text(company.companyName)
                 .font(.system(.subheadline, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.ink)
+                .foregroundStyle(KabuyomiTheme.heroText)
                 .fixedSize(horizontal: false, vertical: true)
             Text("\(company.formType) ・ \(company.filedAt) 提出")
                 .font(.system(.footnote, design: .rounded, weight: .medium))
-                .foregroundStyle(KabuyomiTheme.inkMuted)
+                .foregroundStyle(KabuyomiTheme.heroSubtext)
                 .fixedSize(horizontal: false, vertical: true)
         }
 
         let formBadge = Text(company.formType)
             .font(.system(.caption, design: .rounded, weight: .bold))
-            .foregroundStyle(KabuyomiTheme.accentDeep)
+            .foregroundStyle(KabuyomiTheme.heroText)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(KabuyomiTheme.accentSoft.opacity(0.58)))
+            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.white.opacity(0.12)))
 
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 10) {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: 10) {
+                        marker
+                        titleBlock
+                    }
+                    formBadge
+                }
+            } else {
+                HStack(alignment: .center, spacing: 10) {
                     marker
                     titleBlock
+                    Spacer()
+                    formBadge
                 }
-                formBadge
-            }
-        } else {
-            HStack(alignment: .center, spacing: 10) {
-                marker
-                titleBlock
-                Spacer()
-                formBadge
             }
         }
+        .padding(13)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(KabuyomiTheme.fill(for: .hero))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(KabuyomiTheme.stroke(for: .hero), lineWidth: 1)
+                )
+                .shadow(color: KabuyomiTheme.shadow(for: .hero), radius: 12, x: 0, y: 7)
+        )
     }
 
     private func promptSection(
@@ -366,14 +370,30 @@ struct ConversationContextCard: View {
             }
             .foregroundStyle(KabuyomiTheme.accentDeep)
 
-            LazyVGrid(columns: promptColumns, alignment: .leading, spacing: 10) {
-                ForEach(questions, id: \.self) { question in
-                    ConversationPromptChip(
-                        text: question,
-                        systemImage: icon,
-                        action: { selectQuestion(question) }
-                    )
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 8) {
+                    ForEach(questions, id: \.self) { question in
+                        ConversationPromptChip(
+                            text: question,
+                            systemImage: icon,
+                            action: { selectQuestion(question) }
+                        )
+                    }
                 }
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 9) {
+                        ForEach(questions, id: \.self) { question in
+                            ConversationPromptChip(
+                                text: question,
+                                systemImage: icon,
+                                action: { selectQuestion(question) }
+                            )
+                            .frame(width: 176)
+                        }
+                    }
+                }
+                .contentMargins(.horizontal, 1, for: .scrollContent)
             }
         }
     }
@@ -407,7 +427,6 @@ struct ConversationPromptChip: View {
                     .foregroundStyle(KabuyomiTheme.inkSoft)
                     .multilineTextAlignment(.leading)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                    .minimumScaleFactor(0.9)
 
                 Spacer(minLength: 0)
 
@@ -416,8 +435,8 @@ struct ConversationPromptChip: View {
                     .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.38))
             }
             .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color.white.opacity(0.30))

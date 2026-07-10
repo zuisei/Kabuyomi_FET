@@ -110,6 +110,23 @@ describe("Japanese-only final answer guard", () => {
     expect(checkFinalAnswerJapaneseOnly(repair ?? "").ok).toBe(true);
   });
 
+  it("does not label generic demand as DRAM or NAND demand in durability repairs", () => {
+    const repair = buildJapaneseLanguageGuardRepair({
+      question: "その要因は一時的？それとも続きそう？",
+      questionIntent: "driver_durability_followup",
+      sourceGateSufficient: true,
+      selectedSourceExcerpts: [
+        "Revenue increased for the three months ended March 31, 2026, driven primarily by increased volume, partially offset by lower realized prices.",
+        "Revenue of Mounjaro increased 59 percent in the U.S., reflecting strong demand, partially offset by lower realized prices."
+      ]
+    });
+
+    expect(repair).toContain("販売数量");
+    expect(repair).toContain("需要");
+    expect(repair).not.toContain("DRAM・NAND需要");
+    expect(checkFinalAnswerJapaneseOnly(repair ?? "").ok).toBe(true);
+  });
+
   it("does not repair unsafe durability answers without sufficient source gate evidence", () => {
     const repair = buildJapaneseLanguageGuardRepair({
       questionIntent: "driver_durability_followup",

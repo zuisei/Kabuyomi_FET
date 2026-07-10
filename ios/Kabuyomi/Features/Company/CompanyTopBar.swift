@@ -30,15 +30,10 @@ struct ChatTopBar: View {
     }
 
     private var compactToolbar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             libraryButton
-
-            Spacer(minLength: 0)
-
             topBarTitle
-
-            Spacer(minLength: 0)
-
+                .frame(maxWidth: .infinity)
             actionCluster
         }
         .padding(.horizontal, 16)
@@ -70,7 +65,11 @@ struct ChatTopBar: View {
                 .font(.system(size: 18, weight: .semibold))
                 .frame(width: 44, height: 44)
                 .foregroundStyle(KabuyomiTheme.accentDeep)
-                .background(topBarControlBackground)
+                .background(
+                    Circle()
+                        .fill(KabuyomiTheme.accentMist.opacity(0.72))
+                        .overlay(Circle().stroke(Color.white.opacity(0.78), lineWidth: 1))
+                )
         }
         .buttonStyle(.plain)
         .accessibilityLabel("一覧を開く")
@@ -79,7 +78,7 @@ struct ChatTopBar: View {
     }
 
     private var actionCluster: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 0) {
             iconButton(
                 systemName: "sidebar.right",
                 accessibilityLabel: "要点を開く",
@@ -108,8 +107,16 @@ struct ChatTopBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("企業データを更新")
-            .background(topBarControlBackground)
         }
+        .padding(.horizontal, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.white.opacity(0.32))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.white.opacity(0.72), lineWidth: 1)
+                )
+        )
     }
 
     private var topBarTitle: some View {
@@ -165,32 +172,13 @@ struct ChatTopBar: View {
                     .foregroundStyle(KabuyomiTheme.accentDeep)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .frame(
             maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 190,
             minHeight: 38
         )
-        .background(topBarTitleBackground)
         .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private var topBarTitleBackground: some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(Color.white.opacity(0.36))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(KabuyomiTheme.accentDeep.opacity(0.12), lineWidth: 0.8)
-            )
-    }
-
-    private var topBarControlBackground: some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(Color.white.opacity(0.38))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(KabuyomiTheme.accentDeep.opacity(0.12), lineWidth: 0.8)
-            )
     }
 
     private func iconButton(
@@ -205,7 +193,6 @@ struct ChatTopBar: View {
                 .frame(width: 44, height: 44)
                 .foregroundStyle(isEnabled ? KabuyomiTheme.accentDeep : KabuyomiTheme.inkMuted.opacity(0.6))
         }
-        .background(topBarControlBackground)
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .accessibilityLabel(accessibilityLabel)

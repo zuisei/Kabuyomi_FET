@@ -135,7 +135,7 @@ struct SearchView: View {
             Text("質問したい銘柄を検索")
                 .font(.system(.headline, design: .rounded, weight: .bold))
 
-            Text("保存しなくても開けます。保存はあとで戻るためのブックマークです。v1 は 10-K / 10-Q に対応しています。")
+            Text("保存しなくても質問できます。保存すると一覧からすぐ戻れます。10-K / 10-Q 対応です。")
                 .font(.system(.footnote, design: .rounded))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
                 .lineSpacing(2)
@@ -368,7 +368,7 @@ private struct SearchResultCard: View {
                         .padding(.vertical, 7)
                         .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
 
-                    Text(item.filingSupportStatus == .unknown ? "保存不可" : "v1 対象外")
+                    Text(item.filingSupportStatus == .unknown ? "保存不可" : "10-K / 10-Q 対象外")
                         .font(.system(.caption2, design: .rounded, weight: .semibold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }

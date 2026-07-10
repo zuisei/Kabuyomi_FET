@@ -18,8 +18,7 @@ struct ConversationEntryView: View {
     private var openingQuestions: [String] {
         [
             "今回の最大変化は？",
-            "前回決算との違いは？",
-            "利益率の推移は？"
+            "前回決算との違いは？"
         ]
     }
 
@@ -358,25 +357,11 @@ struct ConversationEntryView: View {
                 .foregroundStyle(KabuyomiTheme.inkMuted)
                 .padding(.bottom, 8)
 
-                VStack(spacing: 0) {
-                    ForEach(Array(openingQuestions.enumerated()), id: \.element) { index, question in
+                HStack(spacing: 9) {
+                    ForEach(openingQuestions, id: \.self) { question in
                         openingQuestionRow(question)
-                        if index < openingQuestions.count - 1 {
-                            Divider()
-                                .overlay(KabuyomiTheme.accentSoft.opacity(0.42))
-                                .padding(.leading, 34)
-                        }
                     }
                 }
-                .padding(.vertical, 3)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(KabuyomiTheme.accentMist.opacity(0.32))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .stroke(KabuyomiTheme.accentSoft.opacity(0.24), lineWidth: 1)
-                        )
-                )
             }
         }
         .padding(16)
@@ -407,7 +392,15 @@ struct ConversationEntryView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 11)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(KabuyomiTheme.accentMist.opacity(0.34))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(KabuyomiTheme.accentSoft.opacity(0.28), lineWidth: 1)
+                    )
+            )
         }
         .buttonStyle(.plain)
     }
