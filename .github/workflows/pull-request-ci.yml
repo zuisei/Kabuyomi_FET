@@ -196,6 +196,7 @@ jobs:
             -destination "platform=iOS Simulator,id=${SIMULATOR_UDID}" \
             -derivedDataPath "${RUNNER_TEMP}/KabuyomiDerivedData" \
             -resultBundlePath "${RUNNER_TEMP}/KabuyomiTests.xcresult" \
+            -parallel-testing-enabled NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
