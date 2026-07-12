@@ -65,6 +65,7 @@ enum InstallationIdentityFailureKind: Equatable {
     case appAttestUnsupported
     case serverMaintenance
     case invalidCredentials
+    case identityConflict
     case secureStorageUnavailable
     case permanentAuthenticationFailure
     case unknown
@@ -77,7 +78,7 @@ struct InstallationIdentityFailure: Equatable {
         switch kind {
         case .networkUnavailable, .appAttestTemporarilyUnavailable, .serverMaintenance, .unknown:
             return true
-        case .appAttestUnsupported, .invalidCredentials, .secureStorageUnavailable,
+        case .appAttestUnsupported, .invalidCredentials, .identityConflict, .secureStorageUnavailable,
              .permanentAuthenticationFailure:
             return false
         }
@@ -95,6 +96,8 @@ struct InstallationIdentityFailure: Equatable {
             return "認証サービスを確認中"
         case .invalidCredentials:
             return "端末認証を確認できません"
+        case .identityConflict:
+            return "端末認証を更新できません"
         case .secureStorageUnavailable:
             return "安全な保存領域を確認できません"
         case .permanentAuthenticationFailure:
@@ -116,6 +119,8 @@ struct InstallationIdentityFailure: Equatable {
             return "認証サービスが一時的に利用できません。保存済みデータは閲覧できます。メンテナンス終了後に再試行してください。"
         case .invalidCredentials:
             return "保存済みデータは閲覧できますが、端末の認証情報が無効なため認証が必要な操作を停止しています。"
+        case .identityConflict:
+            return "端末の認証情報が以前の登録と一致しません。保存済みデータは閲覧できますが、認証が必要な操作は利用できません。"
         case .secureStorageUnavailable:
             return "端末の安全な保存領域から認証情報を読み出せません。保存済みデータは閲覧できます。"
         case .permanentAuthenticationFailure:
@@ -146,6 +151,9 @@ struct InstallationIdentityFailure: Equatable {
             case .serverStatus(let statusCode, _):
                 if statusCode == 401 {
                     return InstallationIdentityFailure(kind: .invalidCredentials)
+                }
+                if statusCode == 409 {
+                    return InstallationIdentityFailure(kind: .identityConflict)
                 }
                 if statusCode == 403 || statusCode == 410 || statusCode == 451 {
                     return InstallationIdentityFailure(kind: .permanentAuthenticationFailure)
@@ -2496,10 +2504,15 @@ credit残高に使う端末識別情報は維持されます。
     private func requireMutationAvailability(_ isAvailable: Bool, showAlert: Bool) -> Bool {
         guard isAvailable else {
             if showAlert, activeAlert == nil {
+                // The persistent authentication banner already explains degraded
+                // identity state and provides Retry. A second blocking alert adds no
+                // recovery path and interrupts access to cached content.
+                if installationAuthenticationStatus != nil {
+                    return false
+                }
+
                 let message: String
-                if let status = installationAuthenticationStatus {
-                    message = status.failure.message
-                } else if installationAuthenticationIsRetrying {
+                if installationAuthenticationIsRetrying {
                     message = "端末認証を確認しています。完了後にもう一度お試しください。"
                 } else {
                     message = apiClient.authenticatedActionUnavailableError.localizedDescription

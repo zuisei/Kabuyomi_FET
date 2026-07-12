@@ -3,16 +3,23 @@ import XCTest
 
 @MainActor
 final class StartupAuthenticationTests: XCTestCase {
+    private static func makeTestDeviceIdentityStore() -> DeviceIdentityStore {
+        DeviceIdentityStore(
+            service: "app.kabuyomi.identity.unit-tests",
+            account: "deviceKey.startup-authentication-tests"
+        )
+    }
+
     override func setUp() async throws {
         try await super.setUp()
         StartupAuthenticationURLProtocol.requestHandler = nil
-        DeviceIdentityStore().reset()
+        Self.makeTestDeviceIdentityStore().reset()
         Self.clearKabuyomiDefaults()
     }
 
     override func tearDown() async throws {
         StartupAuthenticationURLProtocol.requestHandler = nil
-        DeviceIdentityStore().reset()
+        Self.makeTestDeviceIdentityStore().reset()
         Self.clearKabuyomiDefaults()
         try await super.tearDown()
     }
@@ -63,6 +70,10 @@ final class StartupAuthenticationTests: XCTestCase {
             .invalidCredentials
         )
         XCTAssertEqual(
+            InstallationIdentityFailure.classify(APIError.serverStatus(statusCode: 409, message: "conflict")).kind,
+            .identityConflict
+        )
+        XCTAssertEqual(
             InstallationIdentityFailure.classify(InstallationIdentityError.invalidStoredCredential).kind,
             .secureStorageUnavailable
         )
@@ -108,9 +119,10 @@ final class StartupAuthenticationTests: XCTestCase {
         let didSend = await model.sendChat(question: "売上高は？", ticker: "AAPL")
         XCTAssertFalse(didSend)
         XCTAssertEqual(controller.chatCount, 0)
-        let firstAlertID = model.activeAlert?.id
+        XCTAssertNil(model.activeAlert)
         _ = await model.sendChat(question: "売上高は？", ticker: "AAPL")
-        XCTAssertEqual(model.activeAlert?.id, firstAlertID)
+        XCTAssertNil(model.activeAlert)
+        XCTAssertEqual(model.installationAuthenticationStatus?.failure.kind, .networkUnavailable)
     }
 
     func testTemporaryAppAttestFailureRetriesThenDegradesWithoutDialog() async {
@@ -167,6 +179,31 @@ final class StartupAuthenticationTests: XCTestCase {
         XCTAssertNil(model.installationAuthenticationStatus)
         XCTAssertNil(model.activeAlert)
         XCTAssertTrue(model.authenticatedCreditActionsAvailable)
+    }
+
+    func testSimulatorBootstrapConflictResetsLocalIdentityOnceAndRecovers() async throws {
+        let controller = StartupAuthenticationRequestController(mode: .bootstrapConflictThenUnavailable)
+        StartupAuthenticationURLProtocol.requestHandler = { request in
+            try controller.handle(request)
+        }
+        let store = StartupIdentityStore(state: InstallationIdentityState(
+            credential: nil,
+            appAttestKeyId: nil,
+            bootstrapOperationId: "stale-bootstrap-operation",
+            consumedChallengeIds: [],
+            consumedNonceDigests: []
+        ))
+        let client = makeClient(
+            identityStore: store,
+            appAttestClient: StartupAppAttestClient(isSupported: false)
+        )
+
+        let credential = try await client.bootstrapInstallationIdentity()
+
+        XCTAssertEqual(controller.bootstrapCount, 2)
+        XCTAssertEqual(credential.attestationStatus, .unavailable)
+        XCTAssertEqual(credential.creditMode, .none)
+        XCTAssertNotEqual(try store.loadState().bootstrapOperationId, "stale-bootstrap-operation")
     }
 
     func testInvalidStoredCredentialIsNonBlockingAndDoesNotLoop() async {
@@ -466,7 +503,7 @@ final class StartupAuthenticationTests: XCTestCase {
         identityStore: (any InstallationIdentityStateStoring)?,
         appAttestClient: (any AppAttestClient)?
     ) -> AppModel {
-        let deviceIdentity = DeviceIdentityStore()
+        let deviceIdentity = Self.makeTestDeviceIdentityStore()
         return AppModel(
             apiClient: makeClient(
                 deviceIdentity: deviceIdentity,
@@ -482,13 +519,14 @@ final class StartupAuthenticationTests: XCTestCase {
     }
 
     private func makeClient(
-        deviceIdentity: DeviceIdentityStore = DeviceIdentityStore(),
+        deviceIdentity: DeviceIdentityStore? = nil,
         requestContext: QuotaRequestContext? = nil,
         identityStore: (any InstallationIdentityStateStoring)?,
         appAttestClient: (any AppAttestClient)?
     ) -> APIClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StartupAuthenticationURLProtocol.self]
+        let deviceIdentity = deviceIdentity ?? Self.makeTestDeviceIdentityStore()
         return APIClient(
             session: URLSession(configuration: configuration),
             baseURL: URL(string: "https://example.com")!,
@@ -625,6 +663,7 @@ private final class StartupAuthenticationRequestController: @unchecked Sendable 
     enum Mode: Equatable {
         case offline
         case authenticated
+        case bootstrapConflictThenUnavailable
     }
 
     private let lock = NSLock()
@@ -647,6 +686,7 @@ private final class StartupAuthenticationRequestController: @unchecked Sendable 
         lock.lock()
         let mode = self.mode
         if path == "/v1/identity/bootstrap" { bootstrapRequests += 1 }
+        let bootstrapRequestNumber = bootstrapRequests
         if path == "/v1/chat" { chatRequests += 1 }
         lock.unlock()
 
@@ -669,7 +709,17 @@ private final class StartupAuthenticationRequestController: @unchecked Sendable 
             throw URLError(.notConnectedToInternet)
         }
 
+        if path == "/v1/identity/bootstrap",
+           mode == .bootstrapConflictThenUnavailable,
+           bootstrapRequestNumber == 1 {
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 409, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData(["error": "Installation bootstrap idempotency conflict"])
+            )
+        }
+
         if path == "/v1/identity/bootstrap" {
+            let unavailable = mode == .bootstrapConflictThenUnavailable
             return (
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                 try TestFixtures.jsonData([
@@ -679,8 +729,8 @@ private final class StartupAuthenticationRequestController: @unchecked Sendable 
                         "tokenReference": "itok_startup_test",
                         "tokenVersion": 1,
                         "issuedAt": "2026-07-11T00:00:00.000Z",
-                        "attestationStatus": "verified",
-                        "creditMode": "full"
+                        "attestationStatus": unavailable ? "unavailable" : "verified",
+                        "creditMode": unavailable ? "none" : "full"
                     ],
                     "attestationRequired": false
                 ])

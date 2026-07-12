@@ -16,10 +16,17 @@ private final class TestAccountCredentialStore: AccountCredentialStoring {
 
 @MainActor
 final class AppModelTests: XCTestCase {
+    private static func makeTestDeviceIdentityStore() -> DeviceIdentityStore {
+        DeviceIdentityStore(
+            service: "app.kabuyomi.identity.unit-tests",
+            account: "deviceKey.app-model-tests"
+        )
+    }
+
     override func setUp() async throws {
         try await super.setUp()
         Self.clearKabuyomiDefaults()
-        DeviceIdentityStore().reset()
+        Self.makeTestDeviceIdentityStore().reset()
         #if DEBUG
         AdMobConfig.setRewardedCreditSSVSmokeModeEnabled(false)
         AdMobConfig.setTestDeviceIdentifiers([])
@@ -29,7 +36,7 @@ final class AppModelTests: XCTestCase {
     override func tearDown() async throws {
         MockAppModelURLProtocol.requestHandler = nil
         Self.clearKabuyomiDefaults()
-        DeviceIdentityStore().reset()
+        Self.makeTestDeviceIdentityStore().reset()
         #if DEBUG
         AdMobConfig.setRewardedCreditSSVSmokeModeEnabled(false)
         AdMobConfig.setTestDeviceIdentifiers([])
@@ -1085,7 +1092,7 @@ final class AppModelTests: XCTestCase {
         let company = TestFixtures.companyPayload()
         try persistence.saveCompany(company, searchItem: nil)
 
-        let deviceIdentity = DeviceIdentityStore()
+        let deviceIdentity = Self.makeTestDeviceIdentityStore()
         deviceIdentity.reset()
         let originalDeviceKey = deviceIdentity.deviceKey()
 
@@ -1135,7 +1142,7 @@ final class AppModelTests: XCTestCase {
     }
 
     func testResetLocalDataIgnoresStaleUsageRefreshFromPreviousGeneration() async {
-        let deviceIdentity = DeviceIdentityStore()
+        let deviceIdentity = Self.makeTestDeviceIdentityStore()
         deviceIdentity.reset()
         let originalDeviceKey = deviceIdentity.deviceKey()
         let usageRequestCounter = ThreadSafeCounter()
@@ -1236,7 +1243,7 @@ final class AppModelTests: XCTestCase {
     }
 
     func testResetLocalDataKeepsCurrentCompanyLoadIndicatorWhenOldRequestFinishesLater() async {
-        let deviceIdentity = DeviceIdentityStore()
+        let deviceIdentity = Self.makeTestDeviceIdentityStore()
         deviceIdentity.reset()
         let originalDeviceKey = deviceIdentity.deviceKey()
 
@@ -1406,7 +1413,7 @@ final class AppModelTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockAppModelURLProtocol.self]
         let session = URLSession(configuration: configuration)
-        let deviceIdentity = DeviceIdentityStore()
+        let deviceIdentity = Self.makeTestDeviceIdentityStore()
         let model = AppModel(
             apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
             persistence: PersistenceController(inMemory: true),
@@ -2161,7 +2168,7 @@ final class AppModelTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockAppModelURLProtocol.self]
         let session = URLSession(configuration: configuration)
-        let deviceIdentity = DeviceIdentityStore()
+        let deviceIdentity = Self.makeTestDeviceIdentityStore()
         let model = AppModel(
             apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
             persistence: persistence,
@@ -2384,7 +2391,7 @@ final class AppModelTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockAppModelURLProtocol.self]
         let session = URLSession(configuration: configuration)
-        let deviceIdentity = DeviceIdentityStore()
+        let deviceIdentity = Self.makeTestDeviceIdentityStore()
         let model = AppModel(
             apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
             persistence: persistence,
@@ -2461,7 +2468,7 @@ final class AppModelTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockAppModelURLProtocol.self]
         let session = URLSession(configuration: configuration)
-        let deviceIdentity = DeviceIdentityStore()
+        let deviceIdentity = Self.makeTestDeviceIdentityStore()
         let model = AppModel(
             apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
             persistence: persistence,
@@ -2568,7 +2575,7 @@ final class AppModelTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockAppModelURLProtocol.self]
         let session = URLSession(configuration: configuration)
-        let deviceIdentity = DeviceIdentityStore()
+        let deviceIdentity = Self.makeTestDeviceIdentityStore()
         let model = AppModel(
             apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity),
             persistence: persistence,
@@ -3256,7 +3263,7 @@ final class AppModelTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockAppModelURLProtocol.self]
         let session = URLSession(configuration: configuration)
-        let deviceIdentity = DeviceIdentityStore()
+        let deviceIdentity = Self.makeTestDeviceIdentityStore()
 
         return AppModel(
             apiClient: makeAPIClient(

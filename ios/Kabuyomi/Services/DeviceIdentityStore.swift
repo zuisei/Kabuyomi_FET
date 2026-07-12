@@ -402,25 +402,33 @@ enum InstallationRequestBinding {
 @MainActor
 final class DeviceIdentityStore {
     static let shared = DeviceIdentityStore()
-    private static var cachedDeviceKey: String?
+    private var cachedDeviceKey: String?
 
-    private let service = "app.kabuyomi.identity"
-    private let account = "deviceKey"
+    private let service: String
+    private let account: String
+
+    init(
+        service: String = "app.kabuyomi.identity",
+        account: String = "deviceKey"
+    ) {
+        self.service = service
+        self.account = account
+    }
 
     // This UUID is retained only as migration input for /v1/identity/bootstrap.
     // Ongoing quota requests use the server-issued installation credential instead.
     func legacyDeviceKeyForMigration() -> String {
-        if let cached = Self.cachedDeviceKey {
+        if let cached = cachedDeviceKey {
             return cached
         }
 
         if let existing = readValue() {
-            Self.cachedDeviceKey = existing
+            cachedDeviceKey = existing
             return existing
         }
 
         let newValue = UUID().uuidString.lowercased()
-        Self.cachedDeviceKey = newValue
+        cachedDeviceKey = newValue
         saveValue(newValue)
         return newValue
     }
@@ -428,11 +436,11 @@ final class DeviceIdentityStore {
     // Read-only lookup for migrations that must not manufacture legacy identity
     // evidence when this installation never had a legacy device key.
     func existingLegacyDeviceKeyForMigration() -> String? {
-        if let cached = Self.cachedDeviceKey {
+        if let cached = cachedDeviceKey {
             return cached
         }
         guard let existing = readValue() else { return nil }
-        Self.cachedDeviceKey = existing
+        cachedDeviceKey = existing
         return existing
     }
 
@@ -442,7 +450,7 @@ final class DeviceIdentityStore {
     }
 
     func reset() {
-        Self.cachedDeviceKey = nil
+        cachedDeviceKey = nil
         SecItemDelete(queryAttributes as CFDictionary)
     }
 
