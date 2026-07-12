@@ -1,14 +1,40 @@
+import AuthenticationServices
 import SwiftUI
 
 private enum RewardedCreditReviewUI {
-    static let rewardedAdsVisibleInV102Review = true
+    static func isVisible(capability: RewardedCreditCapabilityPayload?) -> Bool {
+        guard AdMobConfig.hasRewardedCreditAdConfig else { return false }
 
-    static var isVisible: Bool {
         #if DEBUG
-        true
+        // Keep the released feature discoverable in test builds even while
+        // identity/usage bootstrap is recovering. The action itself still
+        // enforces SSV and server capability checks before granting credits.
+        guard let capability else { return true }
+        return capability.enabled
+            && capability.rewardedCreditEnabled
+            && !capability.emergencyDisabled
         #else
-        rewardedAdsVisibleInV102Review && AdMobConfig.hasRewardedCreditAdConfig
+        guard let capability else { return false }
+        return capability.enabled
+            && capability.rewardedCreditEnabled
+            && capability.ssvReady
+            && !capability.emergencyDisabled
+            && capability.environment == "production"
+            && AdMobConfig.rewardedAdRuntimeMode.allowsProductionRewardIntent
         #endif
+    }
+}
+
+enum ConsumableCreditReviewUI {
+    static func isVisible(
+        creditBillingEnabled: Bool?,
+        consumablePurchasesEnabled: Bool?
+    ) -> Bool {
+        creditBillingEnabled == true && consumablePurchasesEnabled == true
+    }
+
+    static func canShowProducts(accountRecoveryReady: Bool?, isAccountSignedIn: Bool) -> Bool {
+        accountRecoveryReady != true || isAccountSignedIn
     }
 }
 
@@ -22,12 +48,13 @@ struct CreditView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var activeSheet: CreditSheet?
     @State private var recoveryRequiredCredits: Int?
+    @State private var requestsPlanSheetAfterUsageRefresh: Bool
 
     init(initialSheet: CreditInitialSheet? = nil) {
         _activeSheet = State(initialValue: {
             switch initialSheet {
             case .plans:
-                return .plans
+                return nil
             case .insufficientCredits:
                 return nil
             case nil:
@@ -41,6 +68,10 @@ struct CreditView: View {
             case .plans, nil:
                 return nil
             }
+        }())
+        _requestsPlanSheetAfterUsageRefresh = State(initialValue: {
+            if case .plans = initialSheet { return true }
+            return false
         }())
     }
 
@@ -65,7 +96,12 @@ struct CreditView: View {
                             insufficientCreditRecoveryCard(requiredCredits: recoveryRequiredCredits)
                         }
                         balanceCard
-                        addCreditsCard
+                        if shouldShowPaidCreditAccountRecovery {
+                            paidCreditAccountCard
+                        }
+                        if shouldShowConsumablePurchases && canShowConsumableProducts {
+                            addCreditsCard
+                        }
                         purchaseManagementCard
                         if shouldShowRewardedCreditUI {
                             rewardCard
@@ -84,9 +120,35 @@ struct CreditView: View {
             }
         }
         .task {
+            if requestsPlanSheetAfterUsageRefresh, appModel.isCreditBillingEnabled {
+                activeSheet = .plans
+                requestsPlanSheetAfterUsageRefresh = false
+            }
             await appModel.refreshCreditUsage()
-            await appModel.loadSubscriptionProducts(showErrors: false)
-            await appModel.loadCreditPackProducts(showErrors: false)
+            if requestsPlanSheetAfterUsageRefresh {
+                if appModel.isCreditBillingEnabled {
+                    activeSheet = .plans
+                }
+                requestsPlanSheetAfterUsageRefresh = false
+            }
+            if appModel.isCreditBillingEnabled {
+                await appModel.loadSubscriptionProducts(showErrors: false)
+            }
+            if shouldShowConsumablePurchases && canShowConsumableProducts {
+                await appModel.loadCreditPackProducts(showErrors: false)
+            }
+        }
+        .onChange(of: appModel.isCreditBillingEnabled) { _, isEnabled in
+            guard !isEnabled else { return }
+            if case .plans? = activeSheet {
+                activeSheet = nil
+            }
+        }
+        .onChange(of: appModel.isConsumableCreditPurchasingEnabled) { _, isEnabled in
+            guard !isEnabled else { return }
+            if case .morePacks? = activeSheet {
+                activeSheet = nil
+            }
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
@@ -124,7 +186,9 @@ struct CreditView: View {
                 .accessibilityLabel("クレジット画面を閉じる")
             }
 
-            Text("残高、プラン、追加購入をひとつの画面で確認")
+            Text(appModel.isCreditBillingEnabled
+                ? "残高、プラン、追加購入をひとつの画面で確認"
+                : "残高とクレジットの内訳を確認")
                 .font(.system(.footnote, design: .rounded, weight: .semibold))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -200,10 +264,15 @@ struct CreditView: View {
                                 .foregroundStyle(KabuyomiTheme.inkMuted)
                         }
 
-                        HStack(alignment: .top, spacing: 8) {
-                            CreditBreakdownTile(title: monthlyCreditLabel, value: "\(credits.monthlyRemaining) / \(credits.monthlyLimit)")
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 112), spacing: 8)],
+                            alignment: .leading,
+                            spacing: 8
+                        ) {
+                            CreditBreakdownTile(title: "月額分", value: "\(credits.monthlyRemaining) / \(credits.monthlyLimit)")
+                            CreditBreakdownTile(title: "ウェルカム", value: credits.welcomeRemaining.map(String.init) ?? "—")
+                            CreditBreakdownTile(title: "広告分", value: credits.rewardedAdRemaining.map(String.init) ?? "—")
                             CreditBreakdownTile(title: "購入分", value: "\(credits.purchasedRemaining)")
-                            CreditBreakdownTile(title: "無料分", value: credits.rewardedAdRemaining.map(String.init) ?? "—")
                         }
                         .padding(.top, 4)
                     }
@@ -217,13 +286,15 @@ struct CreditView: View {
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
-                Divider()
-                    .overlay(KabuyomiTheme.inkMuted.opacity(0.18))
+                if appModel.isCreditBillingEnabled {
+                    Divider()
+                        .overlay(KabuyomiTheme.inkMuted.opacity(0.18))
 
-                HStack(alignment: .center, spacing: 12) {
-                    currentPlanSummary
-                    Spacer()
-                    planComparisonButton
+                    HStack(alignment: .center, spacing: 12) {
+                        currentPlanSummary
+                        Spacer()
+                        planComparisonButton
+                    }
                 }
             }
         }
@@ -234,7 +305,7 @@ struct CreditView: View {
             Text("現在のプラン")
                 .font(.system(.subheadline, design: .rounded, weight: .bold))
                 .foregroundStyle(KabuyomiTheme.ink)
-            Text(activeSubscriptionSummary ?? "無料 / 初回 50クレジット")
+            Text(activeSubscriptionSummary ?? "Free / 月次0 / 認証済み初回50クレジット")
                 .font(.footnote)
                 .foregroundStyle(KabuyomiTheme.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -394,6 +465,71 @@ struct CreditView: View {
         }
     }
 
+    private var paidCreditAccountCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Label("購入クレジットの復元", systemImage: "person.crop.circle.badge.checkmark")
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Text("Sign in with Appleは購入クレジットの復元と新規購入にだけ使います。SEC資料の閲覧や質問にアカウント作成は不要です。接続すると、端末を変更・紛失した場合も購入済みクレジットを復元できます。")
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if appModel.isPaidCreditAccountSignedIn {
+                    Label("復元用アカウントに接続済み", systemImage: "checkmark.seal.fill")
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.positive)
+
+                    Button("この端末でサインアウト") {
+                        Task {
+                            await appModel.signOutPaidCreditAccount()
+                        }
+                    }
+                    .font(.system(.footnote, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .disabled(appModel.billingActionInFlight)
+                } else {
+                    SignInWithAppleButton(.continue) { request in
+                        request.requestedScopes = []
+                    } onCompletion: { result in
+                        switch result {
+                        case .success(let authorization):
+                            guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                                  let tokenData = credential.identityToken,
+                                  let identityToken = String(data: tokenData, encoding: .utf8) else {
+                                appModel.activeAlert = AppAlertState(
+                                    message: "Appleの本人確認情報を取得できませんでした。もう一度お試しください。",
+                                    kind: .dismissOnly
+                                )
+                                return
+                            }
+                            Task {
+                                await appModel.completeAppleAccountSignIn(identityToken: identityToken)
+                            }
+                        case .failure(let error):
+                            if (error as? ASAuthorizationError)?.code != .canceled {
+                                appModel.activeAlert = AppAlertState(
+                                    message: "Appleアカウントで続行できませんでした。時間をおいてもう一度お試しください。",
+                                    kind: .dismissOnly
+                                )
+                            }
+                        }
+                    }
+                    .signInWithAppleButtonStyle(.black)
+                    .frame(height: 50)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    Text("追加クレジットの購入は、復元用アカウントへの接続後に表示されます。")
+                        .font(.caption)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                }
+            }
+        }
+    }
+
     private func insufficientCreditRecoveryCard(requiredCredits: Int) -> some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
@@ -446,35 +582,39 @@ struct CreditView: View {
                         }
                     }
 
-                    recoveryActionButton(
-                        title: "50 creditsを購入",
-                        systemImage: "plus.circle.fill",
-                        isLoading: appModel.billingActionInFlight || appModel.creditPackProductLoadInFlight,
-                        isDisabled: appModel.billingActionInFlight || primaryCreditPackProduct?.isAvailable != true
-                    ) {
-                        guard let productId = primaryCreditPackProduct?.id else { return }
-                        Task {
-                            await appModel.purchaseCreditPack(productId: productId)
+                    if shouldShowConsumablePurchases && canShowConsumableProducts {
+                        recoveryActionButton(
+                            title: "50 creditsを購入",
+                            systemImage: "plus.circle.fill",
+                            isLoading: appModel.billingActionInFlight || appModel.creditPackProductLoadInFlight,
+                            isDisabled: appModel.billingActionInFlight || primaryCreditPackProduct?.isAvailable != true
+                        ) {
+                            guard let productId = primaryCreditPackProduct?.id else { return }
+                            Task {
+                                await appModel.purchaseCreditPack(productId: productId)
+                            }
                         }
                     }
 
-                    recoveryActionButton(
-                        title: "サブスクを見る",
-                        systemImage: "crown.fill",
-                        isLoading: appModel.subscriptionProductLoadState == .loading,
-                        isDisabled: false
-                    ) {
-                        activeSheet = .plans
-                    }
+                    if appModel.isCreditBillingEnabled {
+                        recoveryActionButton(
+                            title: "サブスクを見る",
+                            systemImage: "crown.fill",
+                            isLoading: appModel.subscriptionProductLoadState == .loading,
+                            isDisabled: false
+                        ) {
+                            activeSheet = .plans
+                        }
 
-                    recoveryActionButton(
-                        title: "購入を復元",
-                        systemImage: "arrow.triangle.2.circlepath",
-                        isLoading: appModel.billingActionInFlight,
-                        isDisabled: appModel.billingActionInFlight
-                    ) {
-                        Task {
-                            await appModel.restorePurchases()
+                        recoveryActionButton(
+                            title: "購入を復元",
+                            systemImage: "arrow.triangle.2.circlepath",
+                            isLoading: appModel.billingActionInFlight,
+                            isDisabled: appModel.billingActionInFlight
+                        ) {
+                            Task {
+                                await appModel.restorePurchases()
+                            }
                         }
                     }
                 }
@@ -522,25 +662,29 @@ struct CreditView: View {
                     Text("管理")
                         .font(.system(.headline, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.ink)
-                    Text("購入同期、利用状況、クレジットの扱いを確認できます。")
+                    Text(appModel.isCreditBillingEnabled
+                        ? "購入同期、利用状況、クレジットの扱いを確認できます。"
+                        : "利用状況とクレジットの扱いを確認できます。")
                         .font(.footnote)
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
-                ManagementButton(
-                    title: "購入を復元 / 同期",
-                    subtitle: "App Storeの権利情報をサーバーへ同期",
-                    systemImage: "arrow.triangle.2.circlepath",
-                    isLoading: appModel.billingActionInFlight
-                ) {
-                    Task {
-                        await appModel.restorePurchases()
+                if appModel.isCreditBillingEnabled {
+                    ManagementButton(
+                        title: "購入を復元 / 同期",
+                        subtitle: "App Storeの権利情報をサーバーへ同期",
+                        systemImage: "arrow.triangle.2.circlepath",
+                        isLoading: appModel.billingActionInFlight
+                    ) {
+                        Task {
+                            await appModel.restorePurchases()
+                        }
                     }
                 }
                 ManagementButton(title: "利用状況", subtitle: "残高、次回更新、同期状態を表示", systemImage: "person.text.rectangle", isLoading: false) {
                     activeSheet = .accountStatus
                 }
-                ManagementButton(title: "クレジットのルール", subtitle: "月額分、購入分、広告分の違い", systemImage: "info.circle", isLoading: false) {
+                ManagementButton(title: "クレジットのルール", subtitle: "月額分、ウェルカム、広告分、購入分の違い", systemImage: "info.circle", isLoading: false) {
                     activeSheet = .creditRules
                 }
             }
@@ -603,10 +747,6 @@ struct CreditView: View {
         return "\(planTitle) / \(credits)クレジット / 月"
     }
 
-    private var monthlyCreditLabel: String {
-        appModel.usage?.activeSubscription == nil ? "初回付与" : "月額プラン分"
-    }
-
     private var nextRenewalText: String? {
         if let subscription = appModel.usage?.activeSubscription,
            let date = formattedOptionalDate(subscription.periodEnd ?? subscription.expiresAt) {
@@ -624,14 +764,6 @@ struct CreditView: View {
         guard let productID = product.tier.productID else { return false }
         return appModel.usage?.activeSubscription?.productId == productID
             || appModel.usage?.activePlan == product.tier.plan
-    }
-
-    private func creditSummaryText(for credits: CreditUsagePayload) -> String {
-        if let subscription = appModel.usage?.activeSubscription {
-            let planTitle = BillingCatalog.tier(for: subscription.plan).title
-            return "\(planTitle)の月額クレジットは \(formattedResetDate(credits.resetsAt)) にリセットされます。通常の質問は1回あたり \(appModel.chatCreditCost) クレジットです。購入分クレジットは別枠で保持され、サーバー表示上は失効しません。"
-        }
-        return "初回付与は50クレジットです。通常の質問は1回あたり \(appModel.chatCreditCost) クレジットです。購入分クレジットは別枠で保持されます。"
     }
 
     private var accountStatusSheet: some View {
@@ -683,16 +815,18 @@ struct CreditView: View {
                     }
                     #endif
 
-                    Button {
-                        Task {
-                            await appModel.restorePurchases()
-                        }
-                    } label: {
+                    if appModel.isCreditBillingEnabled {
+                        Button {
+                            Task {
+                                await appModel.restorePurchases()
+                            }
+                        } label: {
                             Text("購入を復元 / 同期")
                             .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(AccountStatusActionButtonStyle())
+                        .disabled(appModel.billingActionInFlight)
                     }
-                    .buttonStyle(AccountStatusActionButtonStyle())
-                    .disabled(appModel.billingActionInFlight)
 
                     #if DEBUG
                     Button {
@@ -732,7 +866,8 @@ struct CreditView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    RuleText(title: "月額プラン分クレジット", body: "Lite / Pro / Max はApp Storeの月額自動更新プランです。サーバー同期後に、プランごとの月額クレジットが反映されます。")
+                    RuleText(title: "月額プラン分クレジット", body: "Freeの月次付与は0です。Lite / Pro / Max はApp Storeの月額自動更新プランで、サーバー同期後にプランごとの月額クレジットが反映されます。")
+                    RuleText(title: "ウェルカムクレジット", body: "App Attestで確認できたinstallationには、50クレジットを一度だけ付与します。月ごとに繰り返す無料付与ではありません。")
                     RuleText(title: "購入分クレジット", body: "買い切りのクレジットはApple検証とサーバー確認後にだけ付与されます。現在のサーバー会計では失効しません。")
                     if shouldShowRewardedCreditUI {
                         RuleText(title: "広告クレジット", body: "広告報酬クレジットは任意の無料/ad creditです。アプリ内の広告完了だけでは付与せず、サーバー側でGoogle AdMobの確認が完了した場合だけ反映されます。1日3回まで、獲得から30日間有効です。")
@@ -755,7 +890,29 @@ struct CreditView: View {
     }
 
     private var shouldShowRewardedCreditUI: Bool {
-        RewardedCreditReviewUI.isVisible
+        appModel.isCreditBillingEnabled
+            && appModel.fraudSensitiveCreditActionsAvailable
+            && RewardedCreditReviewUI.isVisible(capability: appModel.usage?.capabilities?.rewardedCredit)
+    }
+
+    private var shouldShowConsumablePurchases: Bool {
+        ConsumableCreditReviewUI.isVisible(
+            creditBillingEnabled: appModel.usage?.creditBillingEnabled,
+            consumablePurchasesEnabled: appModel.usage?.capabilities?.consumablePurchasesEnabled
+        )
+    }
+
+    private var shouldShowPaidCreditAccountRecovery: Bool {
+        shouldShowConsumablePurchases
+            && appModel.fraudSensitiveCreditActionsAvailable
+            && appModel.usage?.capabilities?.accountRecoveryReady == true
+    }
+
+    private var canShowConsumableProducts: Bool {
+        ConsumableCreditReviewUI.canShowProducts(
+            accountRecoveryReady: appModel.usage?.capabilities?.accountRecoveryReady,
+            isAccountSignedIn: appModel.isPaidCreditAccountSignedIn
+        )
     }
 
     private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -956,7 +1113,8 @@ private struct SubscriptionPlanRow: View {
     }
 
     private var limitSummary: String {
-        "保存 \(product.tier.stockLimit)銘柄 / 質問 \(product.tier.chatLimit)回"
+        let approximateQuestions = product.tier.monthlyCredits / 2
+        return "通常質問 約\(approximateQuestions)回/月 / 保存 \(product.tier.stockLimit)銘柄 / 1日上限 \(product.tier.chatLimit)回"
     }
 
     private var useCaseText: String {
@@ -1095,7 +1253,7 @@ private struct CreditPackRow: View {
                         .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
                 }
             }
-            Text("\(product.credits)クレジット / 約\(product.credits / chatCreditCost)回分の質問")
+            Text("\(product.credits)クレジット / 通常質問 約\(product.credits / chatCreditCost)回分")
                 .font(.footnote)
                 .foregroundStyle(KabuyomiTheme.inkMuted)
         }
@@ -1427,9 +1585,10 @@ struct AccountStatusDisplayModel: Equatable {
             Row(title: "環境", value: Self.environmentName(from: apiEnvironment)),
             Row(title: "現在のプラン", value: BillingCatalog.displayLabel(for: activePlan)),
             Row(title: "合計クレジット", value: credits.map { "\($0.totalRemaining)" } ?? "不明"),
-            Row(title: "月額/初回分", value: credits.map { "\($0.monthlyRemaining) / \($0.monthlyLimit)" } ?? "不明"),
+            Row(title: "月額分", value: credits.map { "\($0.monthlyRemaining) / \($0.monthlyLimit)" } ?? "不明"),
+            Row(title: "ウェルカム", value: credits?.welcomeRemaining.map(String.init) ?? "未提供"),
             Row(title: "購入分", value: credits.map { "\($0.purchasedRemaining)" } ?? "不明"),
-            Row(title: "広告/無料分", value: credits?.rewardedAdRemaining.map(String.init) ?? "未提供"),
+            Row(title: "広告分", value: credits?.rewardedAdRemaining.map(String.init) ?? "未提供"),
             Row(title: "次回更新", value: renewal ?? "未提供"),
             Row(title: "最終利用同期", value: Self.format(date: lastUsageRefreshAt)),
             Row(title: "最終購入同期", value: Self.billingStatus(status: lastBillingSyncStatus, at: lastBillingSyncAt)),

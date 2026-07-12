@@ -9,6 +9,7 @@ import {
   resolveGeminiTranslationModel
 } from "../src/clients/gemini/request";
 import { buildDeterministicMetricAnswer } from "../src/lib/chat/deterministic";
+import { buildPromptMetricDisplayPack } from "../src/clients/gemini/prompts";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -22,6 +23,50 @@ describe("resolveGeminiModel", () => {
 
   it("normalizes Google model resource prefixes", () => {
     expect(resolveGeminiModel({ GEMINI_MODEL: "models/gemini-2.5-flash" } as never)).toBe("gemini-2.5-flash");
+  });
+});
+
+describe("typed metric prompt provenance", () => {
+  it("exposes distinct current and comparison filing sources and periods", () => {
+    const pack = buildPromptMetricDisplayPack([{
+      logicalName: "revenue",
+      tagUsed: "Revenues",
+      value: 100_000_000_000,
+      unit: "USD",
+      periodStart: "2026-01-01",
+      periodEnd: "2026-03-31",
+      periodKind: "quarter",
+      comparisonValue: 90_000_000_000,
+      comparisonTagUsed: "Revenues",
+      comparisonPeriodStart: "2025-01-01",
+      comparisonPeriodEnd: "2025-03-31",
+      comparisonPeriodKind: "quarter",
+      comparisonSourceUrl: "https://example.com/prior",
+      comparisonAccessionNumber: "prior-accession",
+      yoyPercent: 11.1111111111
+    }], [
+      {
+        sourceId: "CUR", sectionType: "xbrl_metric", sectionTitle: "Revenue", sourceLabel: "current revenue",
+        text: "Revenue 100000000000 USD", startOffset: 0, endOffset: 24, tagName: "Revenues",
+        metricRole: "current", sourceUrl: "https://example.com/current", sortOrder: 1
+      },
+      {
+        sourceId: "PRIOR", sectionType: "xbrl_metric", sectionTitle: "Revenue comparison", sourceLabel: "prior revenue",
+        text: "Revenue 90000000000 USD", startOffset: 0, endOffset: 23, tagName: "Revenues",
+        metricRole: "comparison", sourceUrl: "https://example.com/prior", sortOrder: 2
+      }
+    ]);
+
+    expect(pack[0]).toMatchObject({
+      sourceId: "CUR",
+      sourceUrl: "https://example.com/current",
+      periodStart: "2026-01-01",
+      periodEnd: "2026-03-31",
+      comparisonSourceId: "PRIOR",
+      comparisonSourceUrl: "https://example.com/prior",
+      comparisonPeriodStart: "2025-01-01",
+      comparisonPeriodEnd: "2025-03-31"
+    });
   });
 });
 
@@ -516,12 +561,10 @@ describe("Gemini local chat fallback", () => {
     expect(response.sourceIds).toEqual(expect.arrayContaining(["S9", "S12"]));
   });
 
-  it("adds context when deterministic margin answer says deterioration is not present", () => {
+  it("reports typed margin direction but explicit cause insufficiency when causal evidence is absent", () => {
     const result = buildDeterministicMetricAnswer(makeAdpMarginImprovementFiling(), "利益率が悪化した理由は？");
-
-    expect(result?.response.answer).toContain("利益率悪化は確認できません");
-    expect(result?.response.answer).toContain("悪化要因を探すより改善が続くか");
-    expect(result?.response.answer.length).toBeGreaterThan(80);
+    expect(result?.response.answer).toContain("利益率の方向は型付き数値から確認できます");
+    expect(result?.response.answer).toContain("具体的な要因は、選択された資料から特定できません");
   });
 
   it("answers margin cause questions with source-backed margin drivers", () => {
@@ -530,10 +573,57 @@ describe("Gemini local chat fallback", () => {
     expect(result?.strategy).toBe("margin_snapshot");
     expect(result?.response.answer).toContain("営業利益率");
     expect(result?.response.answer).toContain("本文で確認できる利益率・利益要因");
-    expect(result?.response.answer).toContain("粗利率・粗利益の改善");
-    expect(result?.response.answer).toContain("営業費用・原価の増加");
+    expect(result?.response.answer).toContain("価格実現・製品ミックスの改善");
+    expect(result?.response.answer).toContain("製造コストの減少");
+    expect(result?.response.answer).toContain("研究開発・販管費の増加");
     expect(result?.response.answer).toContain("一時要因か構造的変化か");
+    expect(result?.response.answer).not.toContain("このfiling");
     expect(result?.response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S9", "S10", "S1"]));
+  });
+
+  it("keeps JPM margin factors bank-specific when a typed margin denominator is unavailable", () => {
+    const base = makeMarginDriverPatternFiling();
+    const netIncome = base.metrics.find((metric: any) => metric.logicalName === "netIncome")!;
+    const netIncomeSource = base.sourceChunks.find((source: any) => source.sourceId === "S11")!;
+    const filing = {
+      ...base,
+      ticker: "JPM",
+      companyName: "JPMorgan Chase & Co.",
+      metrics: [netIncome],
+      sourceChunks: [
+        netIncomeSource,
+        {
+          ...base.sourceChunks.find((source: any) => source.sourceId === "S1")!,
+          text: "Noninterest expense was up 14%, driven by higher compensation expense and growth in employees, higher brokerage expense and distribution fees, and higher auto lease depreciation."
+        }
+      ]
+    } as any;
+
+    const result = buildDeterministicMetricAnswer(filing, "利益率が改善、または悪化した理由は？");
+    expect(result?.response.answer).toContain("利益率の改善・悪化は断定しません");
+    expect(result?.response.answer).toContain("比較期の 20億ドル から当期の 25億ドル");
+    expect(result?.response.answer).toContain("人件費・報酬費の増加");
+    expect(result?.response.answer).not.toContain("燃料");
+    expect(result?.response.answer).not.toContain("このfiling");
+  });
+
+  it("uses Amazon-specific margin factors instead of airline cost boilerplate", () => {
+    const base = makeMarginDriverPatternFiling();
+    const filing = {
+      ...base,
+      ticker: "AMZN",
+      companyName: "Amazon.com, Inc.",
+      sourceChunks: base.sourceChunks.map((source: any) => source.sourceId === "S1" ? {
+        ...source,
+        text: "International operating income increased due to increased unit sales and increased advertising sales, partially offset by increased shipping and fulfillment costs."
+      } : source)
+    } as any;
+
+    const result = buildDeterministicMetricAnswer(filing, "利益率が改善、または悪化した理由は？");
+    expect(result?.response.answer).toContain("販売数量・出荷量の増加");
+    expect(result?.response.answer).toContain("広告売上の増加");
+    expect(result?.response.answer).toContain("配送・フルフィルメント費用の増加");
+    expect(result?.response.answer).not.toContain("燃料");
   });
 
   it("extracts source-backed revenue drivers from common MD&A wording", () => {
@@ -552,6 +642,207 @@ describe("Gemini local chat fallback", () => {
     expect(result?.response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S9", "S1", "S2", "S3", "S4", "S5"]));
   });
 
+  it("extracts the complete live Q03 driver patterns instead of falling back to metrics or costs", () => {
+    const base = makeRevenueDriverPatternFiling();
+    const filing = {
+      ...base,
+      sourceChunks: [
+        base.sourceChunks[0],
+        {
+          ...base.sourceChunks[1],
+          sourceId: "S1",
+          text: "• Microsoft 365 Commercial cloud revenue grew 18% with growth in revenue per user driven by Microsoft 365 E5 and Microsoft 365 Copilot, and Microsoft 365 Commercial seats grew 6%."
+        },
+        {
+          ...base.sourceChunks[1],
+          sourceId: "S2",
+          text: "AWS sales increased 28% in Q1 2026. The sales growth primarily reflects increased customer usage, partially offset by pricing changes primarily driven by long-term customer contracts."
+        },
+        {
+          ...base.sourceChunks[1],
+          sourceId: "S3",
+          text: "North America sales increased 12% in Q1 2026. The sales growth primarily reflects increased unit sales, including sales by third-party sellers, advertising sales, and subscription services."
+        },
+        {
+          ...base.sourceChunks[1],
+          sourceId: "S4",
+          text: "Unit case volume in Asia Pacific increased 5%, which included growth in water, sports, coffee and tea, Trademark Coca-Cola and sparkling flavors."
+        }
+      ]
+    };
+
+    const result = buildDeterministicMetricAnswer(filing, "売上成長、または減収の主な要因は？");
+
+    expect(result?.strategy).toBe("revenue_drivers");
+    expect(result?.response.answer).toContain("Microsoft 365クラウド");
+    expect(result?.response.answer).toContain("ユーザー単価の上昇");
+    expect(result?.response.answer).toContain("AWS売上");
+    expect(result?.response.answer).toContain("顧客利用量の増加");
+    expect(result?.response.answer).toContain("北米売上");
+    expect(result?.response.answer).toContain("販売数量の増加");
+    expect(result?.response.answer).toContain("アジア太平洋の販売数量増");
+    expect(result?.response.answer).not.toMatch(/infrastructure costs?|depreciation|amortization/i);
+  });
+
+  it.each([
+    [
+      "AAPL",
+      "Products and Services Performance. The following table shows net sales by category for the three months ended March 28, 2026 and March 29, 2025: iPhone $56,994 $46,841 22%; Mac $8,399 $7,949 6%; Services $30,013 $26,340 14%.",
+      ["iPhone売上の増加", "Mac売上の増加", "サービス売上の増加"]
+    ],
+    [
+      "WMT",
+      "The increase was due to comparable sales of 4.3%, driven by growth in transactions and average ticket, reflecting strength in grocery and general merchandise. Walmart U.S. eCommerce net sales positively contributed to comparable sales.",
+      ["取引件数の増加", "客単価の上昇", "食品と一般商品の好調"]
+    ],
+    [
+      "MU",
+      "AEBU revenue increased 71%, primarily due to increases in average selling prices and bit shipments.",
+      ["平均販売価格の上昇", "ビット出荷量の増加"]
+    ],
+    [
+      "GOOGL",
+      "Revenues were $109.9 billion, an increase of 22% year over year, primarily driven by an increase in Google Services revenues of $12.4 billion and an increase in Google Cloud revenues of $7.8 billion.",
+      ["Googleサービス売上の増加", "Google Cloud売上の増加"]
+    ],
+    [
+      "TSLA",
+      "Automotive sales revenue increased $2.55 billion, or 20%, due to an increase of approximately 10% in cash deliveries and a higher average selling price per unit primarily driven by sales mix.",
+      ["納車台数の増加", "平均販売価格の上昇", "販売構成"]
+    ]
+  ])("builds a Japanese, filing-grounded Q03 answer for the r65 %s evidence", (ticker, text, expected) => {
+    const base = makeRevenueDriverPatternFiling();
+    const filing = {
+      ...base,
+      ticker,
+      sourceChunks: [
+        base.sourceChunks[0],
+        { ...base.sourceChunks[1], sourceId: "LIVE", text }
+      ]
+    };
+
+    const result = buildDeterministicMetricAnswer(filing, "売上成長、または減収の主な要因は？");
+
+    expect(result?.strategy).toBe("revenue_drivers");
+    for (const phrase of expected) expect(result?.response.answer).toContain(phrase);
+    expect(result?.response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S9", "LIVE"]));
+    expect(result?.response.answer).not.toMatch(/\b(?:Services|fees|Markets|period|driver|fulfillment)\b/i);
+  });
+
+  it.each([
+    ["XOM", "Base Volume – Decreased earnings by $260 million, mainly driven by Middle East supply disruptions. Other – Decreased earnings by $270 million, driven by unfavorable foreign exchange rate effects."],
+    ["TSLA", "During the three months ended March 31, 2026, we recognized total revenues of $22.39 billion, representing an increase of $3.05 billion compared to the same period in the prior year."]
+  ])("does not relabel non-revenue evidence as the %s sales driver", (ticker, text) => {
+    const base = makeRevenueDriverPatternFiling();
+    const filing = {
+      ...base,
+      ticker,
+      sourceChunks: [base.sourceChunks[0], { ...base.sourceChunks[1], sourceId: "LIMIT", text }]
+    };
+
+    const result = buildDeterministicMetricAnswer(filing, "売上成長、または減収の主な要因は？");
+
+    expect(result?.strategy).toBe("revenue_drivers");
+    expect(result?.response.answer).toContain("選択資料で明示された範囲を超えて、主因は断定しません");
+    expect(result?.response.answer).not.toMatch(/バイオ医薬|rate effects|depreciation|amortization/i);
+  });
+
+  it("maps XOM Q03 to the segment sales bridge without reusing earnings or FX explanations", () => {
+    const base = makeRevenueDriverPatternFiling();
+    const sourceUrl = "https://www.sec.gov/Archives/edgar/data/34088/000003408826000067/xom-20260331.htm";
+    const filing = {
+      ...base,
+      ticker: "XOM",
+      companyName: "Exxon Mobil Corporation",
+      sourceChunks: [
+        base.sourceChunks[0],
+        {
+          ...base.sourceChunks[1],
+          sourceId: "XOMSEG",
+          sectionTitle: "Segment revenue comparison",
+          sourceLabel: "10-Q Segment revenue comparison, filed 2026-05-04",
+          sourceUrl,
+          text: "Reportable-segment sales and other operating revenue comparison for the three months ended March 31, 2026 versus March 31, 2025: Energy Products increased and was the largest positive segment change; Upstream decreased and was the largest offset; Chemical Products increased; Specialty Products was essentially flat. This observed segment sales bridge does not establish price, production-volume, commodity-market, foreign-exchange, cost, or earnings causality."
+        }
+      ]
+    };
+
+    const result = buildDeterministicMetricAnswer(filing, "売上成長、または減収の主な要因は？");
+
+    expect(result?.strategy).toBe("revenue_drivers");
+    expect(result?.response.answer).toContain("エネルギー製品部門の増加");
+    expect(result?.response.answer).toContain("上流部門の減少");
+    expect(result?.response.answer).toContain("価格と生産量のどちらが寄与したか");
+    expect(result?.response.answer).not.toMatch(/利益|為替|earnings|foreign.exchange/i);
+    expect(result?.response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S9", "XOMSEG"]));
+    expect(result?.response.sources.find((source) => source.sourceId === "XOMSEG")?.sourceUrl).toBe(sourceUrl);
+  });
+
+  it("does not return a metric-only deterministic answer when revenue-driver narrative is absent", () => {
+    const base = makeKnownTickerRevenueAxisFiling();
+    const filing = {
+      ...base,
+      sourceChunks: base.sourceChunks.filter((source: { sectionType: string }) => source.sectionType === "xbrl_metric")
+    };
+
+    const result = buildDeterministicMetricAnswer(filing, "売上成長、または減収の主な要因は？");
+    expect(result).toBeNull();
+  });
+
+  it("returns an issuer-neutral deterministic limitation when only low-signal narrative is available", () => {
+    const base = makeKnownTickerRevenueAxisFiling();
+    const filing = {
+      ...base,
+      ticker: "NVDA",
+      companyName: "NVIDIA Corporation",
+      sourceChunks: base.sourceChunks.map((source: { sourceId: string; sectionType: string; text: string }) =>
+        source.sectionType === "md_a"
+          ? { ...source, text: "Forward-looking statements and general filing context." }
+          : source
+      )
+    } as any;
+
+    const result = buildDeterministicMetricAnswer(filing, "売上成長、または減収の主な要因は？");
+    expect(result?.strategy).toBe("revenue_drivers");
+    expect(result?.response.answer).toContain("全社売上の主因かを結び付ける説明は確認できません");
+    expect(result?.response.answer).not.toMatch(/バイオ医薬|提携収入|ロイヤリティ/);
+    expect(result?.response.sources.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("synthesizes JPM revenue drivers in Japanese from NII and NIR filing evidence", () => {
+    const base = makeKnownTickerRevenueAxisFiling();
+    const filing = {
+      ...base,
+      ticker: "JPM",
+      companyName: "JPMorgan Chase & Co.",
+      sourceChunks: [
+        ...base.sourceChunks.filter((source: { sectionType: string }) => source.sectionType === "xbrl_metric"),
+        {
+          ...base.sourceChunks[0],
+          sourceId: "JPM1",
+          sectionType: "md_a",
+          text: "Net interest income was up, driven by higher Markets net interest income, higher deposit balances, and higher revolving balances in Card Services, partially offset by lower rates."
+        },
+        {
+          ...base.sourceChunks[0],
+          sourceId: "JPM2",
+          sectionType: "md_a",
+          text: "Noninterest revenue increased, driven by higher asset management fees, higher investment banking fees, higher Markets noninterest revenue, and higher Payments fees. These increases were partially offset by the absence of the $588 million First Republic-related gain recorded in the prior year."
+        }
+      ]
+    } as any;
+
+    const result = buildDeterministicMetricAnswer(filing, "売上成長、または減収の主な要因は？");
+    expect(result?.strategy).toBe("revenue_drivers");
+    expect(result?.response.answer).toContain("市場部門の純利息収入");
+    expect(result?.response.answer).toContain("資産運用手数料");
+    expect(result?.response.answer).toContain("投資銀行手数料");
+    expect(result?.response.answer).toContain("金利低下の影響");
+    expect(result?.response.answer).toContain("前年に計上した買収関連利益");
+    expect(result?.response.answer).not.toMatch(/Noninterest|Markets|fees|First Republic/);
+    expect(result?.response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["JPM1", "JPM2"]));
+  });
+
   it("answers core business and revenue templates with ticker-specific fallback context", () => {
     const filing = makeKnownTickerRevenueAxisFiling();
 
@@ -559,6 +850,15 @@ describe("Gemini local chat fallback", () => {
     expect(business?.strategy).toBe("business_overview");
     expect(business?.response.answer).toContain("クラウド");
     expect(business?.response.answer).toContain("Microsoft 365");
+
+    const amazonBusiness = buildDeterministicMetricAnswer(
+      { ...filing, ticker: "AMZN", companyName: "AMAZON COM INC" },
+      "この会社は何で儲けている？"
+    );
+    expect(amazonBusiness?.response.answer).toBe(
+      "AMAZON COM INCは、オンライン小売、第三者販売サービス、広告、サブスクリプション、AWSで収益を得ている会社です。"
+    );
+    expect(amazonBusiness?.response.answer).not.toContain("International");
 
     const snapshot = buildDeterministicMetricAnswer(filing, "直近決算の売上はどうだった？");
     expect(snapshot?.strategy).toBe("revenue_breakdown");
@@ -569,10 +869,50 @@ describe("Gemini local chat fallback", () => {
 
     const segment = buildDeterministicMetricAnswer(filing, "どのセグメントや地域が伸びた？弱かった部分は？");
     expect(segment?.strategy).toBe("revenue_breakdown");
-    expect(segment?.response.answer).toContain("セグメント・製品別に見る軸");
-    expect(segment?.response.answer).toContain("ゲーム");
+    expect(segment?.response.answer).toContain("伸びた具体的なセグメント・地域・製品を特定できません");
+    expect(segment?.response.answer).toContain("減収・減益が明示されたセグメントや地域は");
     expect(segment?.response.answer).not.toContain("会社固有の売上の柱までは特定できません");
-    expect(segment?.response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S9", "S1"]));
+    expect(segment?.response.sources.map((source) => source.sourceId)).toEqual(["S9"]);
+
+    const directional = {
+      ...filing,
+      sourceChunks: filing.sourceChunks.map((source: { sourceId: string; text: string }) => source.sourceId === "S1"
+        ? { ...source, text: "Microsoft 365 revenue increased 18% while Gaming revenue declined 4% from the prior-year period." }
+        : source)
+    };
+    const directionalSegment = buildDeterministicMetricAnswer(
+      directional,
+      "どのセグメントや地域が伸びた？弱かった部分は？"
+    );
+    expect(directionalSegment?.response.answer).toContain("伸びた部分として提出資料に明示されているのは、Microsoft 365");
+    expect(directionalSegment?.response.answer).toContain("弱かった部分として明示されているのは、ゲーミング");
+    expect(directionalSegment?.response.answer).not.toMatch(/伸びた部分[^。]*ゲーミング/);
+    expect(directionalSegment?.response.answer).not.toMatch(/弱かった部分[^。]*Microsoft 365/);
+    expect(directionalSegment?.response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S9", "S1"]));
+  });
+
+  it.each([
+    ["MSFT", "Microsoft Corporation", "AWS revenue increased 18% while Microsoft 365 revenue declined 4%.", "AWS", "Microsoft 365"],
+    ["V", "Visa Inc.", "Walmart U.S. sales grew as inventory declined.", "Walmart米国", null],
+    ["JPM", "JPMorgan Chase & Co.", "Data Center sales volume increased while Gaming revenue declined.", "データセンター", null]
+  ])("keeps Q08 performance signals isolated to the issuer for %s", (ticker, companyName, sourceText, excludedLabel, allowedLabel) => {
+    const base = makeKnownTickerRevenueAxisFiling();
+    const filing = {
+      ...base,
+      ticker,
+      companyName,
+      sourceChunks: base.sourceChunks.map((source: { sourceId: string; text: string }) => source.sourceId === "S1"
+        ? { ...source, text: sourceText }
+        : source)
+    } as any;
+
+    const result = buildDeterministicMetricAnswer(filing, "どのセグメントや地域が伸びた？弱かった部分は？");
+    expect(result?.response.answer).not.toContain(excludedLabel);
+    if (allowedLabel) {
+      expect(result?.response.answer).toContain(allowedLabel);
+    } else {
+      expect(result?.response.answer).toContain("伸びた具体的なセグメント・地域・製品を特定できません");
+    }
   });
 
   it("skips untranslated revenue-driver fragments in deterministic revenue snapshots", () => {
@@ -585,6 +925,135 @@ describe("Gemini local chat fallback", () => {
     expect(result?.response.answer).not.toContain("several factors");
     expect(result?.response.answer).not.toContain("payment processing");
     expect(result?.response.answer).not.toContain("fulfillment");
+  });
+
+  it("answers cash-flow quality with net-income context, working-capital caveats, and safe sign-crossing wording", () => {
+    const filing = makeKnownTickerRevenueAxisFiling();
+    const cashFiling = {
+      ...filing,
+      ticker: "KO",
+      metrics: [
+        ...filing.metrics,
+        {
+          logicalName: "netIncome",
+          tagUsed: "NetIncomeLoss",
+          value: 800_000_000,
+          comparisonValue: 700_000_000,
+          unit: "USD",
+          periodStart: "2026-01-01",
+          periodEnd: "2026-03-31",
+          periodKind: "quarter",
+          yoyPercent: 14.3
+        },
+        {
+          logicalName: "operatingCashFlow",
+          tagUsed: "NetCashProvidedByUsedInOperatingActivities",
+          value: 1_000_000_000,
+          comparisonValue: -2_570_000_000,
+          unit: "USD",
+          periodStart: "2026-01-01",
+          periodEnd: "2026-03-31",
+          periodKind: "quarter",
+          yoyPercent: 138.9
+        }
+      ],
+      sourceChunks: [
+        ...filing.sourceChunks,
+        {
+          sourceId: "S10", sectionType: "xbrl_metric", sectionTitle: "純利益", sourceLabel: "XBRL 純利益",
+          text: "純利益: 800000000 USD / 比較値: 700000000", startOffset: 0, endOffset: 0,
+          tagName: "NetIncomeLoss", sortOrder: 10
+        },
+        {
+          sourceId: "S13", sectionType: "xbrl_metric", sectionTitle: "営業CF", sourceLabel: "XBRL 営業CF",
+          text: "営業CF: 1000000000 USD / 比較値: -2570000000", startOffset: 0, endOffset: 0,
+          tagName: "NetCashProvidedByUsedInOperatingActivities", sortOrder: 13
+        },
+        {
+          sourceId: "S14", sectionType: "md_a", sectionTitle: "Cash flows", sourceLabel: "10-Q Cash flows",
+          text: "Operating cash flow reflected changes in working capital, including inventory and accounts payable, as well as capital expenditures for property and equipment.",
+          startOffset: 0, endOffset: 0, sortOrder: 14
+        }
+      ]
+    } as any;
+
+    const result = buildDeterministicMetricAnswer(cashFiling, "営業キャッシュフローは健全？");
+    expect(result?.strategy).toBe("cash_generation");
+    expect(result?.response.answer).toContain("前年同期のマイナスから当期はプラスへ");
+    expect(result?.response.answer).toContain("純利益は 8億ドル");
+    expect(result?.response.answer).toContain("営業CFは純利益を上回っています");
+    expect(result?.response.answer).toContain("提出資料では運転資本の増減要因に触れています");
+    expect(result?.response.answer).toContain("提出資料では設備投資に触れています");
+    expect(result?.response.answer).not.toContain("138.9%増");
+    expect(result?.response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S10", "S13", "S14"]));
+  });
+
+  it("does not compare operating cash flow with net income from an incompatible period", () => {
+    const filing = makeKnownTickerRevenueAxisFiling();
+    const cashFiling = {
+      ...filing,
+      ticker: "KO",
+      metrics: [
+        ...filing.metrics,
+        {
+          logicalName: "netIncome", tagUsed: "NetIncomeLoss", value: 800_000_000, unit: "USD",
+          periodStart: "2026-01-01", periodEnd: "2026-03-31", periodKind: "quarter"
+        },
+        {
+          logicalName: "operatingCashFlow", tagUsed: "NetCashProvidedByUsedInOperatingActivities", value: 1_000_000_000, unit: "USD",
+          periodStart: "2025-10-01", periodEnd: "2026-03-31", periodKind: "year_to_date"
+        }
+      ],
+      sourceChunks: [
+        ...filing.sourceChunks,
+        { sourceId: "S10", sectionType: "xbrl_metric", sectionTitle: "純利益", sourceLabel: "XBRL 純利益",
+          text: "純利益: 800000000 USD", startOffset: 0, endOffset: 0, tagName: "NetIncomeLoss", sortOrder: 10 },
+        { sourceId: "S13", sectionType: "xbrl_metric", sectionTitle: "営業CF", sourceLabel: "XBRL 営業CF",
+          text: "営業CF: 1000000000 USD", startOffset: 0, endOffset: 0,
+          tagName: "NetCashProvidedByUsedInOperatingActivities", sortOrder: 13 }
+      ]
+    } as any;
+
+    const result = buildDeterministicMetricAnswer(cashFiling, "営業キャッシュフローは健全？");
+    expect(result?.response.answer).toContain("営業CFと同じ対象期間の純利益を確認できない");
+    expect(result?.response.answer).not.toContain("営業CFは純利益を上回っています");
+    expect(result?.response.sources.map((source) => source.sourceId)).not.toContain("S10");
+  });
+
+  it("treats exactly zero operating cash flow as neither positive nor negative", () => {
+    const filing = makeKnownTickerRevenueAxisFiling();
+    const cashFiling = {
+      ...filing,
+      ticker: "KO",
+      metrics: [
+        ...filing.metrics,
+        {
+          logicalName: "netIncome", tagUsed: "NetIncomeLoss", value: 800_000_000, unit: "USD",
+          periodStart: "2026-01-01", periodEnd: "2026-03-31", periodKind: "quarter"
+        },
+        {
+          logicalName: "operatingCashFlow", tagUsed: "NetCashProvidedByUsedInOperatingActivities", value: 0,
+          comparisonValue: -2_570_000_000, unit: "USD", periodStart: "2026-01-01",
+          periodEnd: "2026-03-31", comparisonPeriodStart: "2025-01-01",
+          comparisonPeriodEnd: "2025-03-31", periodKind: "quarter", comparisonPeriodKind: "quarter"
+        }
+      ],
+      sourceChunks: [
+        ...filing.sourceChunks,
+        { sourceId: "S10", sectionType: "xbrl_metric", sectionTitle: "純利益", sourceLabel: "XBRL 純利益",
+          text: "純利益: 800000000 USD", startOffset: 0, endOffset: 0, tagName: "NetIncomeLoss", sortOrder: 10 },
+        { sourceId: "S13", sectionType: "xbrl_metric", sectionTitle: "営業CF", sourceLabel: "XBRL 営業CF",
+          text: "営業CF: 0 USD / 比較値: -2570000000", startOffset: 0, endOffset: 0,
+          tagName: "NetCashProvidedByUsedInOperatingActivities", sortOrder: 13 }
+      ]
+    } as any;
+
+    const result = buildDeterministicMetricAnswer(cashFiling, "営業キャッシュフローは健全？");
+    expect(result?.response.answer).toContain("営業CFはゼロです");
+    expect(result?.response.answer).toContain("営業CFはゼロで");
+    expect(result?.response.answer).not.toContain("営業CFはプラス");
+    expect(result?.response.answer).not.toContain("営業CFはマイナス");
+    expect(result?.response.answer).not.toMatch(/%/u);
   });
 
   it("softens revenue-breakdown limitation wording in remote Gemini answers", async () => {
@@ -1061,6 +1530,7 @@ describe("Gemini local chat fallback", () => {
         questionIntent: "business_overview",
         contentMode: "full",
         metrics: [],
+        verifiedFacts: [],
         sourceChunks: [contextSource],
         contextTokenBudget: 7000,
         selectedSourceCount: 1,

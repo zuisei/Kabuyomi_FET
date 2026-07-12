@@ -2,7 +2,7 @@ import { InternalCreditPurchaseGrantRequestSchema } from "../lib/contracts";
 import { isAuthorizedInternalRequest } from "../lib/internal-auth";
 import { grantPurchasedCredits, readQuotaIdentity, type QuotaIdentity } from "../lib/quota";
 import { parseJsonBody } from "../lib/request";
-import { json } from "../lib/response";
+import { json, unavailable } from "../lib/response";
 import type { RouteHandler } from "./types";
 
 const INTERNAL_CREDIT_PURCHASE_GRANT_PAYLOAD_MAX_BYTES = 4_096;
@@ -14,6 +14,10 @@ export const handleInternalCreditPurchaseGrantRoute: RouteHandler = async ({ req
 
   if (!isAuthorizedInternalRequest(request, env)) {
     return json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (config.emergencyPaidGrantsDisabled) {
+    return unavailable("Internal credit purchase grants are temporarily unavailable");
   }
 
   const payload = await parseJsonBody(request, InternalCreditPurchaseGrantRequestSchema, {

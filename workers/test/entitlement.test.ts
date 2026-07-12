@@ -1,156 +1,148 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EntitlementDO } from "../src/durable/entitlement";
+
+const PRINCIPAL = "subscription:v1:test-principal";
+const BINDING = "a".repeat(64);
+const NOW = new Date("2026-07-11T00:00:00.000Z");
 
 function createState() {
   const storage = new Map<string, unknown>();
-
   return {
+    id: { name: PRINCIPAL },
     storage: {
-      async get<T>(key: string) {
-        return storage.get(key) as T | undefined;
-      },
-      async put(key: string, value: unknown) {
-        storage.set(key, value);
-      }
-    }
+      async get<T>(key: string) { return storage.get(key) as T | undefined; },
+      async put(key: string, value: unknown) { storage.set(key, structuredClone(value)); }
+    },
+    async blockConcurrencyWhile<T>(callback: () => Promise<T>) { return callback(); },
+    stored: storage
   };
 }
 
+function mutation(overrides: Record<string, unknown> = {}) {
+  return {
+    action: "apply_verified",
+    quotaSubject: PRINCIPAL,
+    principalKeyVersion: "v1",
+    originalTransactionId: "original-123",
+    transactionId: "transaction-123",
+    productId: "kabuyomi.sub.pro.monthly",
+    plan: "pro",
+    status: "active",
+    periodStart: "2026-07-01T00:00:00.000Z",
+    periodEnd: "2026-08-01T00:00:00.000Z",
+    expiresAt: "2026-08-01T00:00:00.000Z",
+    revokedAt: null,
+    monthlyCredits: 300,
+    monthlyGrantOperationId: "sub-grant:v1:test",
+    lastVerifiedAt: "2026-07-11T00:00:00.000Z",
+    verificationEnvironment: "production",
+    verificationVersion: "app-store-server-library-node@3.1.0",
+    verificationPayloadDigest: "b".repeat(64),
+    signedDate: "2026-07-11T00:00:00.000Z",
+    bindingHash: BINDING,
+    bindingMethod: "verified_sync",
+    ...overrides
+  };
+}
+
+async function post(entitlement: EntitlementDO, body: unknown) {
+  return entitlement.fetch(new Request("https://do/entitlement", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: typeof body === "string" ? body : JSON.stringify(body)
+  }));
+}
+
 describe("EntitlementDO", () => {
-  it("does not mint a pro entitlement from an unverified active client claim", async () => {
-    const entitlement = new EntitlementDO(createState() as never);
+  beforeEach(() => vi.useFakeTimers({ now: NOW }));
+  afterEach(() => vi.useRealTimers());
 
-    const response = await entitlement.fetch(
-      new Request("https://do/entitlement", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          originalTransactionId: "tx-123",
-          active: true,
-          productId: "kabuyomi.sub.pro.monthly"
-        })
-      })
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      plan: "free",
-      quotaSubject: expect.stringMatching(/^free:[a-f0-9]{64}$/),
-      productId: null
+  it("rejects an unverified client entitlement claim", async () => {
+    const response = await post(new EntitlementDO(createState() as never), {
+      originalTransactionId: "original-123",
+      active: true,
+      productId: "kabuyomi.sub.pro.monthly"
     });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: "Invalid verified entitlement payload" });
   });
 
-  it("stores a pro entitlement only for an internally server-verified mutation", async () => {
+  it("stores and returns a server-verified entitlement for the matching binding", async () => {
     const entitlement = new EntitlementDO(createState() as never);
-
-    const response = await entitlement.fetch(
-      new Request("https://do/entitlement", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-kabuyomi-device-binding": "device-hash-1" },
-        body: JSON.stringify({
-          originalTransactionId: "tx-123",
-          active: true,
-          productId: "kabuyomi.sub.pro.monthly",
-          serverVerified: true
-        })
-      })
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
+    const applied = await post(entitlement, mutation());
+    expect(applied.status).toBe(200);
+    await expect(applied.json()).resolves.toMatchObject({
       plan: "pro",
-      quotaSubject: expect.stringMatching(/^pro:[a-f0-9]{64}$/),
-      productId: "kabuyomi.sub.pro.monthly",
-      boundDeviceHash: "device-hash-1"
+      quotaSubject: PRINCIPAL,
+      status: "active",
+      bindings: [{ bindingHash: BINDING, status: "active" }]
     });
+
+    const read = await entitlement.fetch(new Request("https://do/entitlement", {
+      headers: { "x-kabuyomi-device-binding": BINDING }
+    }));
+    expect(read.status).toBe(200);
   });
 
-  it("rejects lookups when the stored device binding does not match", async () => {
+  it("expires access on every read even without a notification", async () => {
+    const state = createState();
+    const entitlement = new EntitlementDO(state as never);
+    await post(entitlement, mutation({ expiresAt: "2026-07-11T00:01:00.000Z" }));
+    vi.setSystemTime(new Date("2026-07-11T00:02:00.000Z"));
+    const read = await entitlement.fetch(new Request("https://do/entitlement", {
+      headers: { "x-kabuyomi-device-binding": BINDING }
+    }));
+    expect(read.status).toBe(404);
+    expect((state.stored.get("current:v2") as { status: string }).status).toBe("expired");
+  });
+
+  it("rejects a mismatched binding", async () => {
     const entitlement = new EntitlementDO(createState() as never);
-
-    await entitlement.fetch(
-      new Request("https://do/entitlement", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-kabuyomi-device-binding": "device-hash-1" },
-        body: JSON.stringify({
-          originalTransactionId: "tx-123",
-          active: true,
-          productId: "kabuyomi.sub.pro.monthly",
-          serverVerified: true
-        })
-      })
-    );
-
-    const response = await entitlement.fetch(
-      new Request("https://do/entitlement", {
-        method: "GET",
-        headers: { "x-kabuyomi-device-binding": "device-hash-2" }
-      })
-    );
-
+    await post(entitlement, mutation());
+    const response = await entitlement.fetch(new Request("https://do/entitlement", {
+      headers: { "x-kabuyomi-device-binding": "c".repeat(64) }
+    }));
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
-      error: "Entitlement device binding mismatch"
-    });
   });
 
-  it("stores a pro max entitlement for an internally server-verified mutation", async () => {
+  it("allows five verified bindings and rejects a silent sixth binding", async () => {
     const entitlement = new EntitlementDO(createState() as never);
-
-    const response = await entitlement.fetch(
-      new Request("https://do/entitlement", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          originalTransactionId: "tx-123",
-          active: true,
-          productId: "kabuyomi.sub.max.monthly",
-          serverVerified: true
-        })
-      })
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      plan: "pro_max",
-      quotaSubject: expect.stringMatching(/^pro_max:[a-f0-9]{64}$/),
-      productId: "kabuyomi.sub.max.monthly"
-    });
+    for (let index = 0; index < 5; index += 1) {
+      const response = await post(entitlement, mutation({ bindingHash: String(index).repeat(64) }));
+      expect(response.status).toBe(200);
+    }
+    const sixth = await post(entitlement, mutation({ bindingHash: "f".repeat(64) }));
+    expect(sixth.status).toBe(409);
   });
 
-  it("returns 400 when the payload is not valid JSON", async () => {
+  it("keeps revocation terminal and ignores stale state updates", async () => {
     const entitlement = new EntitlementDO(createState() as never);
-
-    const response = await entitlement.fetch(
-      new Request("https://do/entitlement", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{"
-      })
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: "Invalid entitlement payload"
-    });
+    await post(entitlement, mutation());
+    const revoked = await post(entitlement, mutation({
+      status: "revoked",
+      revokedAt: "2026-07-11T00:10:00.000Z",
+      signedDate: "2026-07-11T00:10:00.000Z",
+      lastVerifiedAt: "2026-07-11T00:10:00.000Z"
+    }));
+    expect(revoked.status).toBe(200);
+    const reactivation = await post(entitlement, mutation({
+      signedDate: "2026-07-11T00:05:00.000Z",
+      lastVerifiedAt: "2026-07-11T00:05:00.000Z"
+    }));
+    expect(reactivation.status).toBe(409);
   });
 
-  it("returns 400 when required entitlement fields are missing", async () => {
+  it("is idempotent for duplicate verified state", async () => {
     const entitlement = new EntitlementDO(createState() as never);
+    expect((await post(entitlement, mutation())).status).toBe(200);
+    const duplicate = await post(entitlement, mutation());
+    expect(duplicate.status).toBe(200);
+    expect(((await duplicate.json()) as { bindings: unknown[] }).bindings).toHaveLength(1);
+  });
 
-    const response = await entitlement.fetch(
-      new Request("https://do/entitlement", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          productId: "kabuyomi.sub.pro.monthly"
-        })
-      })
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: "Invalid entitlement payload"
-    });
+  it("returns 400 for invalid JSON or missing required verified fields", async () => {
+    const entitlement = new EntitlementDO(createState() as never);
+    expect((await post(entitlement, "{")).status).toBe(400);
+    expect((await post(entitlement, { action: "apply_verified", productId: "kabuyomi.sub.pro.monthly" })).status).toBe(400);
   });
 });

@@ -1,16 +1,35 @@
-import { generateModelQuoteTranslation, isQuoteTranslationAvailable } from "../clients/llm/provider";
+import {
+  generateModelQuoteTranslation,
+  isQuoteTranslationAvailable,
+  resolveLlmProvider
+} from "../clients/llm/provider";
+import type { Env } from "../env";
 import { TranslateQuoteRequestSchema } from "../lib/contracts";
-import { consumeBillableCredits, refundBillableCredits, type CreditChargeResult } from "../lib/credit-operation";
 import { logLlmUsage } from "../lib/llm-usage";
 import { hashForLog, logErrorEvent, logEvent, suffixForLog } from "../lib/logging";
-import { isCreditBillingEnabledForIdentity } from "../lib/remote-config";
-import { InsufficientCreditsError, readQuotaIdentity } from "../lib/quota";
+import {
+  beginRequestExecution,
+  completeRequestExecution,
+  failRequestExecution,
+  isQuoteTranslationExecutionResult,
+  type RequestExecutionBeginResult,
+  type RequestExecutionConfigSnapshot
+} from "../lib/request-execution";
+import { buildQuoteTranslationRequestHash } from "../lib/request-fingerprint";
+import { isCreditBillingEnabledForIdentity, type RemoteConfig } from "../lib/remote-config";
+import {
+  loadUsage,
+  readQuotaIdentity,
+  type QuotaIdentity,
+  type RequestExecutionReservationOptions
+} from "../lib/quota";
 import { parseJsonBody } from "../lib/request";
-import { json, unavailable } from "../lib/response";
+import { json, serverError, unavailable } from "../lib/response";
 import type { RouteHandler } from "./types";
 
 const TRANSLATE_QUOTE_PAYLOAD_MAX_BYTES = 4_096;
 const QUOTE_TRANSLATION_CREDIT_COST = 1;
+const QUOTE_TRANSLATION_EXECUTION_POLICY_VERSION = "quote-translation-execution-v1";
 
 export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, env, config }) => {
   if (!(request.method === "POST" && url.pathname === "/v1/translate-quote")) {
@@ -22,45 +41,58 @@ export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, en
     maxBytes: TRANSLATE_QUOTE_PAYLOAD_MAX_BYTES,
     tooLargeMessage: "Quote translation payload is too large"
   });
+  const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
+  const creditBillingEnabled = isCreditBillingEnabledForIdentity(config, identity);
+  const reservation = buildQuoteTranslationReservation(identity);
+  const providerAvailable = isQuoteTranslationAvailable(env);
+  const requestHash = await buildQuoteTranslationRequestHash({
+    text: payload.text,
+    sourceLanguage: payload.sourceLanguage,
+    targetLanguage: payload.targetLanguage,
+    creditCost: QUOTE_TRANSLATION_CREDIT_COST
+  });
+  const execution = await beginRequestExecution(identity, env, config, {
+    operationId: payload.operationId,
+    requestHash,
+    route: "quote_translation",
+    allowCreate: providerAvailable,
+    executionPolicyVersion: QUOTE_TRANSLATION_EXECUTION_POLICY_VERSION,
+    configSnapshot: buildQuoteTranslationExecutionConfigSnapshot(env, config, creditBillingEnabled),
+    reservation
+  });
 
-  if (!isQuoteTranslationAvailable(env)) {
+  if (execution.outcome === "not_started") {
+    return unavailable("Quote translation is temporarily disabled");
+  }
+  const executionResponse = nonLeaderExecutionResponse(execution);
+  if (executionResponse) {
+    return executionResponse;
+  }
+  if (execution.outcome === "replay") {
+    if (!isQuoteTranslationExecutionResult(execution.result)) {
+      return serverError("Cached quote translation is unavailable");
+    }
+    const usage = await loadUsage(identity, env, config);
+    return json({
+      translatedText: execution.result.translatedText,
+      modelName: execution.result.modelName,
+      usage: { ...usage, creditBillingEnabled },
+      creditsCharged: execution.result.creditsCharged,
+      creditsRemaining: usage.credits?.totalRemaining
+    });
+  }
+
+  if (!providerAvailable) {
+    await persistQuoteTranslationFailureSafely(identity, env, {
+      operationId: payload.operationId,
+      requestHash,
+      failureCode: "quote_translation_unavailable",
+      failureStatus: 503
+    });
     return unavailable("Quote translation is temporarily disabled");
   }
 
-  const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
   const startedAt = Date.now();
-  const creditBillingEnabled = isCreditBillingEnabledForIdentity(config, identity);
-  const operationId = payload.operationId || crypto.randomUUID();
-  let creditCharge: CreditChargeResult | undefined;
-
-  if (creditBillingEnabled) {
-    try {
-      creditCharge = await consumeBillableCredits({
-        identity,
-        env,
-        config,
-        operationId,
-        creditsRequired: QUOTE_TRANSLATION_CREDIT_COST,
-        reference: {
-          type: "quote_translation",
-          id: "source_preview"
-        }
-      });
-    } catch (error) {
-      if (error instanceof InsufficientCreditsError) {
-        return json(
-          {
-            error: "insufficient_credits",
-            creditsRequired: error.creditsRequired,
-            creditsRemaining: error.creditsRemaining
-          },
-          { status: 402 }
-        );
-      }
-      throw error;
-    }
-  }
-
   try {
     const translation = await generateModelQuoteTranslation(env, payload);
     logLlmUsage(translation.llmUsage, {
@@ -78,42 +110,151 @@ export const handleTranslateQuoteRoute: RouteHandler = async ({ request, url, en
       latencyMs: Date.now() - startedAt
     });
 
-    return json({
+    const cachedCreditsCharged = reservation.mode === "credits" ? QUOTE_TRANSLATION_CREDIT_COST : 0;
+    const stableResult: unknown = {
+      kind: "quote_translation",
       translatedText: translation.translatedText,
       modelName: translation.modelName,
-      usage: creditCharge?.usage,
-      creditsCharged: creditCharge?.creditsCharged ?? 0,
-      creditsRemaining: creditCharge?.creditsRemaining
+      creditsCharged: cachedCreditsCharged
+    };
+    if (!isQuoteTranslationExecutionResult(stableResult)) {
+      throw new Error("quote_translation_stable_result_invalid");
+    }
+    const completion = await completeRequestExecution(identity, env, {
+      operationId: payload.operationId,
+      requestHash,
+      route: "quote_translation",
+      resultBody: stableResult,
+      resultMetadata: {
+        responsePath: translation.providerName,
+        modelName: translation.modelName,
+        creditsCharged: stableResult.creditsCharged
+      },
+      chargeable: true
+    });
+    const usage = await loadUsage(identity, env, config);
+
+    return json({
+      translatedText: stableResult.translatedText,
+      modelName: stableResult.modelName,
+      usage: { ...usage, creditBillingEnabled },
+      creditsCharged: completion.creditsCharged,
+      creditsRemaining: usage.credits?.totalRemaining
     });
   } catch (error) {
-    if (creditBillingEnabled && creditCharge) {
-      try {
-        await refundBillableCredits({
-          identity,
-          env,
-          config,
-          charge: creditCharge,
-          reference: {
-            type: "quote_translation",
-            id: "source_preview"
-          }
-        });
-      } catch (refundError) {
-        logErrorEvent("quote_translation_refund_failed", {
-          quotaSubjectHash: hashForLog(identity.quotaSubject),
-          operationIdSuffix: suffixForLog(operationId),
-          reason: refundError instanceof Error ? refundError.message : String(refundError)
-        });
-      }
-    }
+    const failure = classifyQuoteTranslationFailure(error);
+    await persistQuoteTranslationFailureSafely(identity, env, {
+      operationId: payload.operationId,
+      requestHash,
+      ...failure
+    });
 
     logErrorEvent("quote_translation_failed", {
       quotaSubjectHash: hashForLog(identity.quotaSubject),
       identityKind: identity.identityKind,
       targetLanguage: payload.targetLanguage,
       inputLength: payload.text.length,
-      reason: error instanceof Error ? error.message : String(error)
+      errorClass: error instanceof Error ? error.name : typeof error
     });
     throw error;
   }
 };
+
+function nonLeaderExecutionResponse(result: RequestExecutionBeginResult): Response | null {
+  if (result.outcome === "pending") {
+    return json(
+      { error: "execution_pending" },
+      {
+        status: 202,
+        headers: { "retry-after": String(result.retryAfterSeconds) }
+      }
+    );
+  }
+  if (result.outcome === "payload_mismatch") {
+    return json({ error: "operation_id_payload_mismatch" }, { status: 409 });
+  }
+  if (result.outcome === "result_expired") {
+    return json({ error: "operation_result_expired" }, { status: 410 });
+  }
+  if (result.outcome === "failed") {
+    return json(
+      {
+        error: result.failureCode || "operation_execution_failed",
+        ...(result.failureDetails ?? {})
+      },
+      { status: result.failureStatus || 409 }
+    );
+  }
+  return null;
+}
+
+function buildQuoteTranslationExecutionConfigSnapshot(
+  env: Env,
+  config: RemoteConfig,
+  creditBillingEnabled: boolean
+): RequestExecutionConfigSnapshot {
+  const provider = resolveLlmProvider(env);
+  const requestedModelName = provider === "openai" ? env.OPENAI_CHAT_MODEL?.trim() : env.GEMINI_TRANSLATION_MODEL?.trim();
+  return {
+    creditBillingEnabled,
+    llmProvider: provider,
+    requestedModelName: requestedModelName || null,
+    modelConfigVersion: env.OPENAI_PROMPT_VERSION?.trim() || null,
+    routeAvailable: isQuoteTranslationAvailable(env),
+    promptVersion: config.promptVersion
+  };
+}
+
+function classifyQuoteTranslationFailure(error: unknown): {
+  failureCode: string;
+  failureStatus: number;
+  failureDetails?: RequestExecutionConfigSnapshot;
+} {
+  return {
+    failureCode: "quote_translation_failed",
+    failureStatus: 500
+  };
+}
+
+function buildQuoteTranslationReservation(
+  identity: QuotaIdentity
+): RequestExecutionReservationOptions {
+  if (identity.accessMode === "dev_unlimited") {
+    return { mode: "unmetered" };
+  }
+  return {
+    mode: "credits",
+    creditsRequired: QUOTE_TRANSLATION_CREDIT_COST,
+    reference: {
+      type: "quote_translation",
+      id: "source_preview"
+    }
+  };
+}
+
+async function persistQuoteTranslationFailureSafely(
+  identity: QuotaIdentity,
+  env: Env,
+  options: {
+    operationId: string;
+    requestHash: string;
+    failureCode: string;
+    failureStatus: number;
+    failureDetails?: RequestExecutionConfigSnapshot;
+  }
+): Promise<void> {
+  try {
+    await failRequestExecution(identity, env, {
+      ...options,
+      route: "quote_translation"
+    });
+  } catch (error) {
+    logErrorEvent("request_execution_failure_persist_failed", {
+      route: "quote_translation",
+      quotaSubjectHash: hashForLog(identity.quotaSubject),
+      operationIdSuffix: suffixForLog(options.operationId),
+      requestHashSuffix: options.requestHash.slice(-12),
+      errorClass: error instanceof Error ? error.name : typeof error
+    });
+  }
+}

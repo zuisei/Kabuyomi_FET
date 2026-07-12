@@ -419,12 +419,12 @@ struct ConversationPromptChip: View {
             HStack(alignment: .center, spacing: 8) {
                 Image(systemName: systemImage)
                     .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.64))
+                    .foregroundStyle(KabuyomiTheme.accentDeep.opacity(0.78))
                     .frame(width: 18, height: 24)
 
                 Text(text)
-                    .font(.system(.caption, design: .rounded, weight: .medium))
-                    .foregroundStyle(KabuyomiTheme.inkSoft)
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.ink)
                     .multilineTextAlignment(.leading)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
 
@@ -432,14 +432,14 @@ struct ConversationPromptChip: View {
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.38))
+                    .foregroundStyle(KabuyomiTheme.accentDeep.opacity(0.58))
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.white.opacity(0.30))
+                    .fill(KabuyomiTheme.fill(for: .secondary))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .stroke(KabuyomiTheme.accentDeep.opacity(0.12), lineWidth: 0.8)
@@ -448,85 +448,6 @@ struct ConversationPromptChip: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("質問を入力: \(text)")
-    }
-}
-
-struct ConversationEmptyState: View {
-    let company: CompanyPayload
-    let suggestions: [String]
-    let historicalSuggestions: [String]
-
-    var body: some View {
-        VStack(spacing: 18) {
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                KabuyomiTheme.accent.opacity(0.28),
-                                KabuyomiTheme.accentSoft.opacity(0.08),
-                                .clear
-                            ],
-                            center: .center,
-                            startRadius: 6,
-                            endRadius: 72
-                        )
-                    )
-                    .frame(width: 120, height: 120)
-
-                Image(systemName: "bubble.left.and.text.bubble.right.fill")
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-            }
-
-            VStack(spacing: 8) {
-                Text("まず 1 つだけ確認する")
-                    .font(.system(.title3, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-
-                Text(introCopy)
-                    .font(.system(.subheadline, design: .rounded))
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 314)
-            }
-
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 13, weight: .bold))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("上の提案から始めるか、履歴比較のショートカットで前回比や推移をそのまま聞けます")
-                    Text(company.formType == "10-Q" ? "同四半期ベースで必要な過去年だけ補完します" : "年次ベースで必要な過去年だけ補完します")
-                }
-                .font(.system(.footnote, design: .rounded, weight: .semibold))
-            }
-            .foregroundStyle(KabuyomiTheme.accentDeep)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .kabuyomiGlass(radius: 18, tint: Color.white.opacity(0.22), stroke: Color.white.opacity(0.5))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 2)
-        .padding(.bottom, 4)
-    }
-
-    private var introCopy: String {
-        let openingExample = suggestions.prefix(2).map { "「\($0)」" }.joined(separator: " / ")
-        let historyExample = historicalSuggestions.first
-
-        if openingExample.isEmpty {
-            if let historyExample {
-                return "\(company.companyName) の今回の決算資料で、最初に確認したい点をそのまま聞けます。たとえば \(historyExample) のような履歴比較にもすぐ進めます。"
-            }
-            return "\(company.companyName) の今回の決算資料で、最初に確認したい点をそのまま聞けます。"
-        }
-
-        if let historyExample {
-            return "\(company.companyName) の今回の決算資料で、最初に確認したい点をそのまま聞けます。たとえば \(openingExample) から入り、\(historyExample) のような履歴比較にもすぐ進めます。"
-        }
-
-        return "\(company.companyName) の今回の決算資料で、最初に確認したい点をそのまま聞けます。たとえば \(openingExample) から入ると全体像を掴みやすくなります。"
     }
 }
 

@@ -1,10 +1,20 @@
 import type { Env, FilingCacheRecord, FilingReference, MetricSnapshot, SourceChunkRecord, TickerRecord } from "../env";
 import { fetchSubmissionsWithHistory, listSupportedFilings, lookupTicker, pickComparisonFiling, pickLatestSupportedFiling } from "../clients/sec";
 import { logEvent } from "./logging";
-import { formatMetricValue, formatYoYDelta, metricLabel } from "./metrics";
+import { formatMetricValue, metricLabel } from "./metrics";
 import type { RemoteConfig } from "./remote-config";
 import { upsertLatestFilingAliases } from "./filings/latest-alias-store";
 import { upsertSearchFormTypeCache } from "./search-form-type-cache";
+import {
+  HISTORICAL_FINANCIAL_FACT,
+  type HistoricalFinancialFactEvidence
+} from "./chat/historical-financial-fact";
+import {
+  classifyHistoricalComparisonMode,
+  isHistoricalQuestion
+} from "./history-question";
+
+export { classifyHistoricalComparisonMode, isHistoricalQuestion } from "./history-question";
 
 const HISTORY_YEARS = 3;
 const ARCHIVE_PREFIX = "filings";
@@ -12,6 +22,7 @@ const DEFAULT_BACKFILL_FORMS: FilingReference["formType"][] = ["10-K"];
 const DEFAULT_BACKFILL_TOTAL_CAP = 8;
 const MAX_BACKFILL_TOTAL_CAP = 20;
 const SAME_QUARTER_MATCH_WINDOW_DAYS = 45;
+const MAX_IMMEDIATE_PRIOR_QUARTER_SPAN_DAYS = 250;
 
 type HistoricalSource = {
   sourceId: string;
@@ -21,6 +32,7 @@ type HistoricalSource = {
   sourceLabel: string;
   excerpt: string;
   sourceUrl?: string;
+  [HISTORICAL_FINANCIAL_FACT]?: HistoricalFinancialFactEvidence;
 };
 
 export interface HistoricalChatResponse {
@@ -57,6 +69,7 @@ export interface BackfillHistoryRequest {
   maxFilingsPerTicker: number;
   maxTotalFilings?: number;
   cursorByTicker?: Record<string, number>;
+  contentMode?: "metrics_only" | "full";
 }
 
 export interface BackfillHistoryResult {
@@ -83,6 +96,19 @@ interface HistoricalMetricRow {
   unit: string;
   yoyPercent: number | null;
   sourceId: string;
+  primaryDocumentUrl?: string;
+}
+
+interface TypedHistoricalMetricPoint {
+  row: HistoricalMetricRow;
+  filing: FilingCacheRecord;
+  metric: MetricSnapshot;
+}
+
+interface HistoricalFilingMetadataRow {
+  filingKey: string;
+  filedAt: string;
+  periodOfReport: string;
   primaryDocumentUrl?: string;
 }
 
@@ -120,13 +146,6 @@ export function hasHistoricalBindings(env: Partial<Env>): env is Env & { DB: D1D
     typeof candidate.DB?.batch === "function" &&
     typeof candidate.FILINGS_BUCKET?.get === "function" &&
     typeof candidate.FILINGS_BUCKET?.put === "function"
-  );
-}
-
-export function isHistoricalQuestion(question: string): boolean {
-  const normalized = question.replace(/\s+/g, "").toLowerCase();
-  return /(3年|三年|過去\d+年|過去|ここ\d+年|ここ数年|推移|比較|trend|trends|compare|comparison|timeseries|時系列)/.test(
-    normalized
   );
 }
 
@@ -196,11 +215,29 @@ export async function maybeBuildHistoricalChatResponse(
   question: string,
   env: Partial<Env>
 ): Promise<HistoricalChatResponse | null> {
-  if (!isHistoricalQuestion(question) || !hasHistoricalBindings(env)) {
+  const comparisonMode = classifyHistoricalComparisonMode(question);
+  if (!comparisonMode || !hasHistoricalBindings(env)) {
     return null;
   }
 
   await ensureHistoricalArtifacts(filing, env);
+
+  if (comparisonMode === "immediate_prior") {
+    const priorFilingMetadata = await loadImmediatePriorFiling(filing, env);
+    if (!priorFilingMetadata) {
+      return null;
+    }
+    const priorFiling = await loadArchivedFilingByKey(priorFilingMetadata.filingKey, env);
+    if (
+      !priorFiling
+      || priorFiling.formType !== filing.formType
+      || priorFiling.periodOfReport >= filing.periodOfReport
+      || !hasPlausibleImmediatePriorSpan(filing, priorFiling)
+    ) {
+      return null;
+    }
+    return buildImmediatePriorComparison(filing, priorFiling, selectImmediatePriorMetricNames(question));
+  }
 
   const metricNames = selectHistoricalMetricNames(question);
   const metricRows = await loadHistoricalMetricRows(
@@ -217,7 +254,11 @@ export async function maybeBuildHistoricalChatResponse(
     return null;
   }
 
-  const groups = groupMetricRows(metricRows);
+  const typedMetricPoints = await hydrateTypedHistoricalMetricPoints(metricRows, filing, env);
+  const groups = groupTypedHistoricalMetricPoints(typedMetricPoints, filing);
+  if (![...groups.values()].some((points) => points.length >= 2)) {
+    return null;
+  }
   const asksMargin = /(利益率|マージン|採算)/.test(question.replace(/\s+/g, "").toLowerCase());
   const asksDrivers = /(地域|事業|セグメント|支え|牽引|ドライバ|要因|原因|背景)/.test(question.replace(/\s+/g, "").toLowerCase());
 
@@ -421,12 +462,14 @@ export async function backfillHistoricalFilings(
           if (existingIndexed.ticker !== tickerRecord.ticker) {
             await normalizeIndexedFilingTicker(existingIndexed.filing_key, tickerRecord.ticker, env);
           }
-          skippedFilings.push({
-            ticker,
-            filingKey: existingIndexed.filing_key,
-            reason: "already_indexed"
-          });
-          continue;
+          if (request.contentMode !== "full") {
+            skippedFilings.push({
+              ticker,
+              filingKey: existingIndexed.filing_key,
+              reason: "already_indexed"
+            });
+            continue;
+          }
         }
 
         remainingBudget -= 1;
@@ -674,6 +717,26 @@ function extractSegmentHighlights(record: FilingCacheRecord): SegmentHighlightIn
   return highlights;
 }
 
+async function loadImmediatePriorFiling(
+  filing: FilingCacheRecord,
+  env: Env & { DB: D1Database }
+): Promise<HistoricalFilingMetadataRow | null> {
+  return env.DB.prepare(
+    `SELECT
+      filing_key AS filingKey,
+      filed_at AS filedAt,
+      period_of_report AS periodOfReport,
+      primary_document_url AS primaryDocumentUrl
+    FROM filings
+    WHERE cik = ? AND form_type = ? AND period_of_report < ? AND filing_key <> ?
+      AND substr(filing_key, 1, instr(filing_key, ':') - 1) = ?
+    ORDER BY period_of_report DESC, filed_at DESC
+    LIMIT 1`
+  )
+    .bind(filing.cik, filing.formType, filing.periodOfReport, filing.filingKey, filing.extractorVersion)
+    .first<HistoricalFilingMetadataRow>();
+}
+
 async function loadHistoricalMetricRows(
   cik: string,
   formType: FilingReference["formType"],
@@ -774,6 +837,15 @@ function selectHistoricalMetricNames(question: string): MetricSnapshot["logicalN
   return Array.from(new Set(metrics));
 }
 
+function selectImmediatePriorMetricNames(question: string): MetricSnapshot["logicalName"][] {
+  const selected = selectHistoricalMetricNames(question);
+  const normalized = question.replace(/\s+/g, "").toLowerCase();
+  if (/(大きく変わ|主な変化|違い|前回決算)/.test(normalized)) {
+    return ["revenue", "operatingIncome", "netIncome", "operatingCashFlow"];
+  }
+  return selected;
+}
+
 function groupMetricRows(rows: HistoricalMetricRow[]): Map<MetricSnapshot["logicalName"], HistoricalMetricRow[]> {
   const grouped = new Map<MetricSnapshot["logicalName"], HistoricalMetricRow[]>();
 
@@ -790,31 +862,288 @@ function groupMetricRows(rows: HistoricalMetricRow[]): Map<MetricSnapshot["logic
   return grouped;
 }
 
-function buildMetricHistorySummary(
-  rows: HistoricalMetricRow[]
-): { text: string; sources: HistoricalSource[] } | null {
-  if (rows.length < 2) {
+async function hydrateTypedHistoricalMetricPoints(
+  rows: HistoricalMetricRow[],
+  currentFiling: FilingCacheRecord,
+  env: Env & { DB: D1Database; FILINGS_BUCKET: R2Bucket }
+): Promise<TypedHistoricalMetricPoint[]> {
+  const filingByKey = new Map<string, FilingCacheRecord | null>([[currentFiling.filingKey, currentFiling]]);
+  const historicalKeys = Array.from(new Set(rows.map((row) => row.filingKey)))
+    .filter((filingKey) => filingKey !== currentFiling.filingKey);
+
+  await Promise.all(historicalKeys.map(async (filingKey) => {
+    filingByKey.set(filingKey, await loadArchivedFilingByKey(filingKey, env));
+  }));
+
+  return rows.flatMap((row) => {
+    const archived = filingByKey.get(row.filingKey);
+    if (
+      !archived
+      || archived.cik !== currentFiling.cik
+      || archived.formType !== currentFiling.formType
+      || archived.extractorVersion !== currentFiling.extractorVersion
+    ) {
+      return [];
+    }
+    const metric = archived.metrics.find((candidate) =>
+      candidate.logicalName === row.logicalName
+      && candidate.periodEnd === row.periodEnd
+      && candidate.unit === row.unit
+      && approximatelyEqual(candidate.value, row.value)
+    );
+    return metric ? [{ row, filing: archived, metric }] : [];
+  });
+}
+
+function groupTypedHistoricalMetricPoints(
+  points: TypedHistoricalMetricPoint[],
+  currentFiling: FilingCacheRecord
+): Map<MetricSnapshot["logicalName"], TypedHistoricalMetricPoint[]> {
+  const grouped = new Map<MetricSnapshot["logicalName"], TypedHistoricalMetricPoint[]>();
+  for (const point of points) {
+    const bucket = grouped.get(point.metric.logicalName) ?? [];
+    bucket.push(point);
+    grouped.set(point.metric.logicalName, bucket);
+  }
+
+  for (const [logicalName, bucket] of grouped) {
+    const current = bucket.find((point) =>
+      point.filing.filingKey === currentFiling.filingKey
+      && point.metric.periodEnd === currentFiling.periodOfReport
+    );
+    if (!current) {
+      grouped.set(logicalName, []);
+      continue;
+    }
+    const compatible = bucket.filter((point) =>
+      areHistoricalMetricsCompatible(current.filing, current.metric, point.filing, point.metric)
+    );
+    const selected = currentFiling.formType === "10-Q"
+      ? selectComparableTypedQuarterPoints(compatible, current.metric.periodEnd)
+      : selectDistinctTypedPeriodPoints(compatible, HISTORY_YEARS);
+    grouped.set(logicalName, selected.sort((left, right) => right.metric.periodEnd.localeCompare(left.metric.periodEnd)));
+  }
+  return grouped;
+}
+
+function approximatelyEqual(left: number, right: number): boolean {
+  const tolerance = Math.max(1e-6, Math.max(Math.abs(left), Math.abs(right)) * 1e-9);
+  return Math.abs(left - right) <= tolerance;
+}
+
+function buildImmediatePriorComparison(
+  filing: FilingCacheRecord,
+  priorFiling: FilingCacheRecord,
+  logicalNames: MetricSnapshot["logicalName"][]
+): HistoricalChatResponse | null {
+  const comparisons = logicalNames
+    .map((logicalName) => {
+      const current = filing.metrics.find((metric) => metric.logicalName === logicalName);
+      const previous = priorFiling.metrics.find((metric) => metric.logicalName === logicalName);
+      if (!current || !previous || !areHistoricalMetricsCompatible(filing, current, priorFiling, previous)) {
+        return null;
+      }
+      const percentChange = previous.value === 0
+        ? null
+        : ((current.value - previous.value) / Math.abs(previous.value)) * 100;
+      const signCrossing = (current.value < 0 && previous.value >= 0) || (current.value >= 0 && previous.value < 0);
+      return {
+        logicalName,
+        current,
+        previous,
+        percentChange: signCrossing ? null : percentChange,
+        signCrossing,
+        sortMagnitude: signCrossing
+          ? Number.POSITIVE_INFINITY
+          : percentChange === null
+            ? Math.abs(current.value - previous.value)
+            : Math.abs(percentChange)
+      };
+    })
+    .filter((comparison): comparison is NonNullable<typeof comparison> => comparison !== null)
+    .sort((left, right) => right.sortMagnitude - left.sortMagnitude)
+    .slice(0, 3);
+
+  if (comparisons.length === 0) {
     return null;
   }
 
-  const latest = rows[0]!;
-  const earliest = rows[rows.length - 1]!;
-  const direction = latest.value > earliest.value ? "増えています" : latest.value < earliest.value ? "減っています" : "ほぼ横ばいです";
-  const text = [
-    `${metricLabel(latest.logicalName)}は ${earliest.periodEnd} の ${formatMetricValue(earliest.value, earliest.unit)} から ${latest.periodEnd} の ${formatMetricValue(latest.value, latest.unit)} へ ${direction}。`,
-    latest.yoyPercent !== null ? `直近は前年同期比 ${formatYoYDelta(latest.yoyPercent)} です。` : ""
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const sources = dedupeSources(
+    comparisons.flatMap((comparison) => [
+      buildTypedHistoricalMetricSource(filing, comparison.current, "current"),
+      buildTypedHistoricalMetricSource(priorFiling, comparison.previous, "comparison")
+    ])
+  );
+  const citedFilingKeys = new Set(
+    sources.map((source) => source.sourceId.split(":").slice(0, 3).join(":"))
+  );
+  if (!citedFilingKeys.has(filing.filingKey) || !citedFilingKeys.has(priorFiling.filingKey)) {
+    return null;
+  }
+
+  const changeSentences = comparisons.map((comparison) => {
+    const label = metricLabel(comparison.logicalName);
+    const previousValue = formatMetricValue(comparison.previous.value, comparison.previous.unit);
+    const currentValue = formatMetricValue(comparison.current.value, comparison.current.unit);
+    const change = formatImmediatePriorDelta(
+      comparison.percentChange,
+      comparison.current.value,
+      comparison.previous.value,
+      comparison.signCrossing
+    );
+    return `${label}は ${formatPeriodForAnswer(comparison.previous.periodEnd)} の ${previousValue} から ${formatPeriodForAnswer(comparison.current.periodEnd)} の ${currentValue} へ${change}。`;
+  });
+
+  return {
+    answer: [
+      `直近の ${filing.formType}（対象期間 ${formatPeriodForAnswer(filing.periodOfReport)}）と、直前の同じ様式の ${formatPeriodForAnswer(priorFiling.periodOfReport)} の提出資料を比べました。`,
+      "大きく変わった順では、",
+      ...changeSentences,
+      "各数値は、この2つの提出資料に記録された対象期間値どうしの比較です。"
+    ].join(" "),
+    sources
+  };
+}
+
+function formatPeriodForAnswer(period: string): string {
+  const match = period.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return period;
+  }
+  return `${match[1]}年${Number(match[2])}月${Number(match[3])}日`;
+}
+
+function hasPlausibleImmediatePriorSpan(
+  currentFiling: FilingCacheRecord,
+  priorFiling: FilingCacheRecord
+): boolean {
+  if (currentFiling.formType !== "10-Q") {
+    return true;
+  }
+  const currentPeriod = Date.parse(currentFiling.periodOfReport);
+  const priorPeriod = Date.parse(priorFiling.periodOfReport);
+  if (!Number.isFinite(currentPeriod) || !Number.isFinite(priorPeriod) || priorPeriod >= currentPeriod) {
+    return false;
+  }
+  const spanDays = (currentPeriod - priorPeriod) / (24 * 60 * 60 * 1000);
+  // Adjacent 10-Q filings are normally one quarter apart, or roughly two
+  // quarters apart across the intervening 10-K. A year-old same-quarter
+  // trend artifact must not satisfy a request for the previous filing.
+  return spanDays <= MAX_IMMEDIATE_PRIOR_QUARTER_SPAN_DAYS;
+}
+
+function areHistoricalMetricsCompatible(
+  currentFiling: FilingCacheRecord,
+  current: MetricSnapshot,
+  priorFiling: FilingCacheRecord,
+  previous: MetricSnapshot
+): boolean {
+  if (current.unit !== previous.unit) {
+    return false;
+  }
+  const currentKind = resolveTypedMetricPeriodKind(currentFiling, current);
+  const previousKind = resolveTypedMetricPeriodKind(priorFiling, previous);
+  if (currentKind === "unknown" || previousKind === "unknown" || currentKind !== previousKind) {
+    return false;
+  }
+  const currentDurationDays = metricDurationDays(current);
+  const previousDurationDays = metricDurationDays(previous);
+  if ((currentDurationDays === null) !== (previousDurationDays === null)) {
+    return false;
+  }
+  if (
+    currentDurationDays !== null
+    && previousDurationDays !== null
+    && Math.abs(currentDurationDays - previousDurationDays) > 45
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function resolveTypedMetricPeriodKind(
+  filing: FilingCacheRecord,
+  metric: MetricSnapshot
+): NonNullable<MetricSnapshot["periodKind"]> {
+  if (metric.periodKind && metric.periodKind !== "unknown") {
+    return metric.periodKind;
+  }
+  const durationDays = metricDurationDays(metric);
+  if (durationDays !== null) {
+    if (durationDays <= 120) return "quarter";
+    if (durationDays >= 320) return "annual";
+    return "year_to_date";
+  }
+  return filing.formType === "10-K" ? "annual" : "unknown";
+}
+
+function metricDurationDays(metric: MetricSnapshot): number | null {
+  if (!metric.periodStart) {
+    return null;
+  }
+  const start = Date.parse(metric.periodStart);
+  const end = Date.parse(metric.periodEnd);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return null;
+  }
+  return Math.round((end - start) / (24 * 60 * 60 * 1000));
+}
+
+function yearFromIsoDate(value: string): number | null {
+  const match = value.match(/^(\d{4})-/);
+  return match ? Number(match[1]) : null;
+}
+
+function formatImmediatePriorDelta(
+  percentChange: number | null,
+  currentValue: number,
+  previousValue: number,
+  signCrossing: boolean
+): string {
+  if (signCrossing) {
+    return currentValue >= 0
+      ? "増加し、マイナスからプラスに転じました"
+      : "減少し、プラスからマイナスに転じました";
+  }
+  if (percentChange === null) {
+    if (currentValue > previousValue) return "増加しました";
+    if (currentValue < previousValue) return "減少しました";
+    return "変わっていません";
+  }
+  if (Math.abs(percentChange) < 0.05) {
+    return "ほぼ横ばいです";
+  }
+  const direction = percentChange > 0 ? "増加しました" : "減少しました";
+  return `、前回比 ${Math.abs(percentChange).toFixed(1)}% ${direction}`;
+}
+
+function buildMetricHistorySummary(
+  points: TypedHistoricalMetricPoint[]
+): { text: string; sources: HistoricalSource[] } | null {
+  if (points.length < 2) {
+    return null;
+  }
+
+  const latest = points[0]!;
+  const earliest = points[points.length - 1]!;
+  const direction = latest.metric.value > earliest.metric.value
+    ? "増えています"
+    : latest.metric.value < earliest.metric.value
+      ? "減っています"
+      : "ほぼ横ばいです";
+  const text = `${metricLabel(latest.metric.logicalName)}は ${formatPeriodForAnswer(earliest.metric.periodEnd)} の ${formatMetricValue(earliest.metric.value, earliest.metric.unit)} から ${formatPeriodForAnswer(latest.metric.periodEnd)} の ${formatMetricValue(latest.metric.value, latest.metric.unit)} へ ${direction}。`;
 
   return {
     text,
-    sources: [buildHistoricalMetricSource(latest), buildHistoricalMetricSource(earliest)]
+    sources: [
+      buildTypedHistoricalMetricSource(latest.filing, latest.metric, "current"),
+      buildTypedHistoricalMetricSource(earliest.filing, earliest.metric, "comparison")
+    ]
   };
 }
 
 function buildMarginHistorySummary(
-  groups: Map<MetricSnapshot["logicalName"], HistoricalMetricRow[]>
+  groups: Map<MetricSnapshot["logicalName"], TypedHistoricalMetricPoint[]>
 ): { text: string; sources: HistoricalSource[] } | null {
   const revenueRows = groups.get("revenue") ?? [];
   const operatingRows = groups.get("operatingIncome") ?? [];
@@ -824,23 +1153,23 @@ function buildMarginHistorySummary(
 
   const latestRevenue = revenueRows[0]!;
   const earliestRevenue = revenueRows[revenueRows.length - 1]!;
-  const latestOperating = findRowByPeriod(operatingRows, latestRevenue.periodEnd);
-  const earliestOperating = findRowByPeriod(operatingRows, earliestRevenue.periodEnd);
-  if (!latestOperating || !earliestOperating || latestRevenue.value === 0 || earliestRevenue.value === 0) {
+  const latestOperating = findTypedPointByPeriod(operatingRows, latestRevenue.metric.periodEnd);
+  const earliestOperating = findTypedPointByPeriod(operatingRows, earliestRevenue.metric.periodEnd);
+  if (!latestOperating || !earliestOperating || latestRevenue.metric.value === 0 || earliestRevenue.metric.value === 0) {
     return null;
   }
 
-  const latestMargin = latestOperating.value / latestRevenue.value;
-  const earliestMargin = earliestOperating.value / earliestRevenue.value;
+  const latestMargin = latestOperating.metric.value / latestRevenue.metric.value;
+  const earliestMargin = earliestOperating.metric.value / earliestRevenue.metric.value;
   const direction = latestMargin > earliestMargin ? "改善しています" : latestMargin < earliestMargin ? "低下しています" : "大きな変化はありません";
 
   return {
-    text: `営業利益率は ${earliestRevenue.periodEnd} の ${(earliestMargin * 100).toFixed(1)}% から ${latestRevenue.periodEnd} の ${(latestMargin * 100).toFixed(1)}% へ ${direction}。`,
+    text: `営業利益率は ${formatPeriodForAnswer(earliestRevenue.metric.periodEnd)} の ${(earliestMargin * 100).toFixed(1)}% から ${formatPeriodForAnswer(latestRevenue.metric.periodEnd)} の ${(latestMargin * 100).toFixed(1)}% へ ${direction}。`,
     sources: [
-      buildHistoricalMetricSource(latestRevenue),
-      buildHistoricalMetricSource(latestOperating),
-      buildHistoricalMetricSource(earliestRevenue),
-      buildHistoricalMetricSource(earliestOperating)
+      buildTypedHistoricalMetricSource(latestRevenue.filing, latestRevenue.metric, "current"),
+      buildTypedHistoricalMetricSource(latestOperating.filing, latestOperating.metric, "current"),
+      buildTypedHistoricalMetricSource(earliestRevenue.filing, earliestRevenue.metric, "comparison"),
+      buildTypedHistoricalMetricSource(earliestOperating.filing, earliestOperating.metric, "comparison")
     ]
   };
 }
@@ -876,6 +1205,41 @@ function buildHistoricalMetricSource(row: HistoricalMetricRow): HistoricalSource
   };
 }
 
+function buildTypedHistoricalMetricSource(
+  filing: FilingCacheRecord,
+  metric: MetricSnapshot,
+  role: Extract<HistoricalFinancialFactEvidence["role"], "current" | "comparison">
+): HistoricalSource {
+  const source = filing.sourceChunks.find(
+    (chunk) => chunk.sectionType === "xbrl_metric" && chunk.tagName === metric.tagUsed
+  );
+  const sourceId = source?.sourceId ?? `metric:${metric.logicalName}`;
+  const periodKind = resolveTypedMetricPeriodKind(filing, metric);
+  return {
+    sourceId: `${filing.filingKey}:${sourceId}`,
+    sourceKind: "historical_filing",
+    sourceStrength: "filing_primary",
+    sectionType: "historical_metric",
+    sourceLabel: `${filing.formType} filed ${filing.filedAt} · period ${metric.periodEnd}`,
+    excerpt: `${metricLabel(metric.logicalName)}: ${formatMetricValue(metric.value, metric.unit)} (${metric.periodEnd})`,
+    sourceUrl: filing.primaryDocumentUrl,
+    [HISTORICAL_FINANCIAL_FACT]: {
+      filingKey: filing.filingKey,
+      formType: filing.formType,
+      logicalName: metric.logicalName,
+      tagUsed: metric.tagUsed,
+      value: metric.value,
+      unit: metric.unit,
+      periodStart: metric.periodStart ?? null,
+      periodEnd: metric.periodEnd,
+      periodKind,
+      fiscalYear: metric.fiscalYear ?? yearFromIsoDate(metric.periodEnd),
+      fiscalQuarter: metric.fiscalQuarter ?? (periodKind === "annual" ? "FY" : null),
+      role
+    }
+  };
+}
+
 function buildSegmentSource(row: SegmentHighlightRow): HistoricalSource {
   return {
     sourceId: `${row.filingKey}:${row.sourceId ?? `${row.dimension}:${row.label}`}`,
@@ -888,8 +1252,11 @@ function buildSegmentSource(row: SegmentHighlightRow): HistoricalSource {
   };
 }
 
-function findRowByPeriod(rows: HistoricalMetricRow[], periodEnd: string): HistoricalMetricRow | undefined {
-  return rows.find((row) => row.periodEnd === periodEnd);
+function findTypedPointByPeriod(
+  points: TypedHistoricalMetricPoint[],
+  periodEnd: string
+): TypedHistoricalMetricPoint | undefined {
+  return points.find((point) => point.metric.periodEnd === periodEnd);
 }
 
 function dedupeSources(sources: HistoricalSource[]): HistoricalSource[] {
@@ -920,6 +1287,60 @@ function selectDistinctPeriodRows(rows: HistoricalMetricRow[], count: number): H
   }
 
   return selected;
+}
+
+function selectDistinctTypedPeriodPoints(
+  points: TypedHistoricalMetricPoint[],
+  count: number
+): TypedHistoricalMetricPoint[] {
+  const selected: TypedHistoricalMetricPoint[] = [];
+  const seenPeriods = new Set<string>();
+  const ordered = [...points].sort((left, right) => right.metric.periodEnd.localeCompare(left.metric.periodEnd));
+  for (const point of ordered) {
+    if (seenPeriods.has(point.metric.periodEnd)) {
+      continue;
+    }
+    selected.push(point);
+    seenPeriods.add(point.metric.periodEnd);
+    if (selected.length >= count) {
+      break;
+    }
+  }
+  return selected;
+}
+
+function selectComparableTypedQuarterPoints(
+  points: TypedHistoricalMetricPoint[],
+  currentPeriodEnd: string
+): TypedHistoricalMetricPoint[] {
+  const remaining = selectDistinctTypedPeriodPoints(points, points.length);
+  const selected: TypedHistoricalMetricPoint[] = [];
+  for (let yearOffset = 0; yearOffset < HISTORY_YEARS; yearOffset += 1) {
+    const targetDate = subtractYearsIsoDate(currentPeriodEnd, yearOffset);
+    const bestIndex = findClosestTypedHistoricalPointIndex(remaining, targetDate);
+    if (bestIndex === -1) {
+      continue;
+    }
+    selected.push(remaining.splice(bestIndex, 1)[0]!);
+  }
+  return selected;
+}
+
+function findClosestTypedHistoricalPointIndex(
+  points: TypedHistoricalMetricPoint[],
+  targetDate: string
+): number {
+  const targetMs = Date.parse(targetDate);
+  let bestIndex = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < points.length; index += 1) {
+    const distanceDays = Math.abs(Date.parse(points[index]!.metric.periodEnd) - targetMs) / (24 * 60 * 60 * 1000);
+    if (distanceDays <= SAME_QUARTER_MATCH_WINDOW_DAYS && distanceDays < bestDistance) {
+      bestDistance = distanceDays;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
 }
 
 function selectComparableQuarterRows(rows: HistoricalMetricRow[], currentPeriodEnd: string): HistoricalMetricRow[] {

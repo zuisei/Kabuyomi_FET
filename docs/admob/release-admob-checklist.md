@@ -1,6 +1,6 @@
 # Rewarded AdMob Credits Release Checklist
 
-This checklist is for the installed TestFlight / App Store build. DEBUG smoke mode is a developer diagnostic path only and is not part of release readiness. For the current RC App Review path, rewarded-credit UI is hidden until real Google AdMob SSV grant evidence is recorded in the repository.
+This checklist is for the installed TestFlight / App Store build. DEBUG smoke mode is a developer diagnostic path only and is not part of release readiness. Rewarded-credit visibility is controlled by the exact uploaded build plus a fresh trusted full production capability response. If real Google AdMob SSV grant evidence is not recorded, the submission config must explicitly disable the action and App Review copy must not advertise it.
 
 ## Pre-upload
 
@@ -10,7 +10,7 @@ This checklist is for the installed TestFlight / App Store build. DEBUG smoke mo
 - Release build does not expose SSV smoke mode controls.
 - Release build does not expose test device ID controls.
 - Release build does not use the Google demo rewarded ad unit.
-- Rewarded-ad credit feature is not visible in the normal RC App Review Release credit screen.
+- Record whether the exact Release/TestFlight build shows the rewarded-credit action. Visibility requires explicit compatible `adsEnabled`, `rewardedCreditEnabled`, and `rewardedSsvReady` values; missing or partial deployed config must hide it.
 - Reward amount remains `+2 credits` in infrastructure.
 - Rewarded grants remain capped at 3 valid grants / +6 ad credits per user per JST day when the UI is enabled.
 - Rewarded ad credits expire 30 days after grant when granted.
@@ -54,16 +54,16 @@ This checklist is for the installed TestFlight / App Store build. DEBUG smoke mo
 - IPA export: pass with App Store Connect export options and Xcode-managed distribution signing.
 - App Store Connect upload: blocked unless App Store Connect upload credentials or an authenticated Xcode account with an associated provider are available.
 - Export options template: `ios/ExportOptions.appstore.template.plist`.
-- Production ad config scan: pass when the Release archive contains the production API, hides rewarded-credit UI, and does not expose demo/test/debug setup strings.
+- Production ad config scan: pass when the Release archive contains the production API, does not expose demo/test/debug setup strings, and its rewarded-credit visibility matches the recorded trusted capability response.
 
 ## App Review Notes
 
-For the current RC App Review path, notes must not claim that rewarded ads or ad credits are visible. Paid IAP and subscriptions remain available according to the RC release truth.
+Reviewer notes must match the exact uploaded build. If the rewarded-credit action is hidden, do not claim rewarded ads or ad credits. If it is visible, say it is optional, explain that only Worker-verified Google AdMob SSV grants credit, and attach real production/TestFlight SSV evidence. Paid IAP and subscriptions are described only when their explicit billing capabilities are enabled and StoreKit returns them.
 
 ## Manual Rewarded-Credit Verification Before Re-Enable
 
 1. Install the TestFlight or Release build.
-2. Use a dedicated smoke build or future re-enable branch where the rewarded-credit UI is intentionally visible.
+2. Use a dedicated smoke build or a Release candidate whose fresh trusted full config explicitly enables the rewarded-credit capability.
 3. Open the credit/settings screen.
 4. Tap the rewarded-ad button.
 5. Confirm the ad loads and completes.
@@ -84,7 +84,7 @@ For the current RC App Review path, notes must not claim that rewarded ads or ad
 - Confirm the build is available in App Store Connect / TestFlight.
 - Install the build from TestFlight / App Store, not from Xcode DEBUG.
 - Confirm developer-only controls are absent.
-- Confirm the rewarded-ad credit button remains hidden in the current RC build.
+- Confirm the rewarded-ad credit button is visible only when the complete trusted production capability is enabled, and that missing/partial config or an emergency disable hides it.
 - Confirm the AdMob app is linked to the App Store listing when available.
 - Monitor AdMob app readiness status.
 - Monitor production Worker logs for `/v1/admob/ssv`.
@@ -109,4 +109,4 @@ For the current RC App Review path, notes must not claim that rewarded ads or ad
 - Daily cap is not enforced.
 - Mini consumable purchase grants credits from an unverified client payload.
 - Mini consumable duplicate transaction grants credits more than once.
-- Current RC App Review build exposes rewarded-credit UI before real SSV evidence is recorded.
+- App Review copy claims rewarded credit visible when the uploaded build hides it, or a visible action lacks real SSV evidence.

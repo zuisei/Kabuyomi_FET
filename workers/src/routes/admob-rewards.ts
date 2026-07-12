@@ -52,6 +52,13 @@ export const handleAdMobRewardRoutes: RouteHandler = async ({ request, url, env,
       allowEmptyObject: true
     });
     const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
+    const capability = await buildRewardedCreditCapability(env, config, identity);
+    const requestedAdUnit = request.headers.get("x-kabuyomi-ad-unit-id")?.trim();
+    const requestedEnvironment = request.headers.get("x-kabuyomi-ad-environment")?.trim().toLowerCase();
+    if (!capability.enabled || requestedAdUnit !== env.ADMOB_REWARDED_AD_UNIT_ID?.trim() ||
+        requestedEnvironment !== capability.environment) {
+      throw new AppError(503, "Rewarded credits are unavailable");
+    }
     const dateKey = buildQuotaDateJST();
     const grantedToday = await countGrantedRewards(env, identity.quotaSubject, dateKey);
     if (grantedToday >= DAILY_REWARD_CAP) {
@@ -148,7 +155,49 @@ export const handleAdMobRewardRoutes: RouteHandler = async ({ request, url, env,
   return null;
 };
 
+export async function buildRewardedCreditCapability(
+  env: Env,
+  config: RemoteConfig,
+  identity: QuotaIdentity
+) {
+  const environment = (env.KABUYOMI_ENV ?? env.ENVIRONMENT ?? "unknown").trim().toLowerCase();
+  // The verifier has Google's documented public-key URL as a built-in
+  // default. Requiring an override URL here would incorrectly hide the
+  // already-shipping rewarded flow in production.
+  const ssvConfigured = Boolean(env.ADMOB_REWARDED_AD_UNIT_ID?.trim());
+  const emergencyDisabled = truthy(env.EMERGENCY_DISABLE_ADS) || truthy(env.EMERGENCY_DISABLE_REWARDS);
+  const enabled = config.adsEnabled && config.rewardedCreditEnabled && config.rewardedSsvReady && ssvConfigured && !emergencyDisabled;
+  const grantedToday = await countGrantedRewards(env, identity.quotaSubject, buildQuotaDateJST()).catch(() => DAILY_REWARD_CAP);
+  const reasonCode = enabled
+    ? undefined
+    : emergencyDisabled
+      ? "emergency_disabled"
+      : !config.adsEnabled
+        ? "ads_disabled"
+        : !config.rewardedCreditEnabled
+          ? "rewarded_credit_disabled"
+          : !config.rewardedSsvReady || !ssvConfigured
+            ? "ssv_not_ready"
+            : "environment_unavailable";
+  return {
+    enabled,
+    rewardedCreditEnabled: config.rewardedCreditEnabled,
+    ssvReady: config.rewardedSsvReady && ssvConfigured,
+    environment,
+    dailyCap: DAILY_REWARD_CAP,
+    dailyRemaining: Math.max(0, DAILY_REWARD_CAP - grantedToday),
+    rewardCredits: REWARD_CREDITS,
+    expiryDays: 30,
+    reasonCode,
+    configVersion: config.configVersion,
+    emergencyDisabled
+  };
+}
+
 async function processSsvGrant(url: URL, env: Env, config: RemoteConfig) {
+  if (!(config.adsEnabled && config.rewardedCreditEnabled && config.rewardedSsvReady) || truthy(env.EMERGENCY_DISABLE_REWARDS)) {
+    throw new AppError(503, "Rewarded credits are unavailable");
+  }
   const customData = requiredAnyParam(url, ["custom_data", "customData"], "rewarded_ad_ssv_missing_custom_data");
   const expectedAdUnit = env.ADMOB_REWARDED_AD_UNIT_ID?.trim();
   if (!expectedAdUnit) {
@@ -502,7 +551,7 @@ function effectiveIntentStatus(intent: RewardIntentRow): RewardIntentRow["status
   return intent.status;
 }
 
-async function countGrantedRewards(env: Env, userId: string, dateKey: string): Promise<number> {
+export async function countGrantedRewards(env: Env, userId: string, dateKey: string): Promise<number> {
   const row = await env.DB.prepare(
     `SELECT COUNT(*) AS count
     FROM admob_reward_intents
@@ -613,4 +662,8 @@ function identityFromQuotaSubject(quotaSubject: string): QuotaIdentity {
     plan,
     identityKind: "device_key"
   };
+}
+
+function truthy(value: string | undefined): boolean {
+  return /^(1|true|yes|on)$/iu.test(value?.trim() ?? "");
 }

@@ -20,6 +20,13 @@ interface CreditLedgerRepairPayload {
     rewardedAdExpiresAt?: string;
     purchasedBalanceAfter: number;
     originalOperationId?: string;
+    purchaseRefundDebtAfter?: number;
+    purchaseDebtOffset?: number;
+    refundAvailableRemoved?: number;
+    refundDebtCreated?: number;
+    refundDebtReleased?: number;
+    refundDebtSettledRestored?: number;
+    refundCreditsRestored?: number;
     referenceType?: string;
     referenceId?: string;
     createdAt: string;
@@ -50,6 +57,7 @@ export interface AdMobRewardTransactionRepairPayload {
 
 interface PurchaseTransactionMarkRepairPayload {
   transactionId: string;
+  debtOffsetApplied?: number;
 }
 
 type CreditAuditRepairPayload =
@@ -252,6 +260,13 @@ async function repairCreditLedger(env: Env, payload: CreditLedgerRepairPayload):
         originalOperationId: operation.originalOperationId ?? null,
         rewardedAdBalanceAfter: operation.rewardedAdBalanceAfter ?? null,
         rewardedAdExpiresAt: operation.rewardedAdExpiresAt ?? null,
+        purchaseRefundDebtAfter: operation.purchaseRefundDebtAfter ?? null,
+        purchaseDebtOffset: operation.purchaseDebtOffset ?? null,
+        refundAvailableRemoved: operation.refundAvailableRemoved ?? null,
+        refundDebtCreated: operation.refundDebtCreated ?? null,
+        refundDebtReleased: operation.refundDebtReleased ?? null,
+        refundDebtSettledRestored: operation.refundDebtSettledRestored ?? null,
+        refundCreditsRestored: operation.refundCreditsRestored ?? null,
         creditSource: operation.type === "admob_rewarded_grant" ? "admob_rewarded" : null
       }),
       operation.createdAt
@@ -327,10 +342,10 @@ async function repairAdMobRewardTransaction(env: Env, payload: AdMobRewardTransa
 async function repairPurchaseTransactionMark(env: Env, payload: PurchaseTransactionMarkRepairPayload): Promise<void> {
   await env.DB.prepare(
     `UPDATE purchase_transactions
-    SET status = ?, updated_at = ?
-    WHERE transaction_id = ?`
+    SET status = ?, debt_offset_applied = ?, updated_at = ?
+    WHERE transaction_id = ? AND status = 'pending'`
   )
-    .bind("granted", new Date().toISOString(), payload.transactionId)
+    .bind("granted", payload.debtOffsetApplied ?? 0, new Date().toISOString(), payload.transactionId)
     .run();
 }
 

@@ -36,6 +36,10 @@ describe("chat question intent and context packing", () => {
     expect(context.sourceChunks.slice(0, 3).map((chunk) => chunk.sourceId)).toEqual(["S9", "S10", "S11"]);
   });
 
+  it("classifies the Q07 exact previous-filing template as historical comparison", () => {
+    expect(classifyQuestionIntent("前回決算と比べて大きく変わった点は？")).toBe("historical_comparison");
+  });
+
   it("classifies short cause and durability follow-ups as MD&A-style context requests", () => {
     const filing = makeIntentFiling();
 
@@ -56,6 +60,7 @@ describe("chat question intent and context packing", () => {
   it("classifies liquidity/debt concern questions before generic risk wording", () => {
     expect(classifyQuestionIntent("資金繰りや負債に懸念はある？")).toBe("liquidity_debt");
     expect(classifyQuestionIntent("借入の満期や流動性に不安はある？")).toBe("liquidity_debt");
+    expect(classifyQuestionIntent("営業CFと現金、負債を踏まえて資金繰りは？")).toBe("liquidity_debt");
   });
 
   it("classifies plain revenue-source questions as business overview", () => {

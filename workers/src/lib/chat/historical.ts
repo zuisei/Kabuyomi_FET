@@ -2,7 +2,8 @@ import type { Env, FilingCacheRecord, FilingReference, MetricSnapshot } from "..
 import { fetchSubmissions, fetchSubmissionsWithHistory, listSupportedFilings, lookupTicker, pickComparisonFiling } from "../../clients/sec";
 import { ensureHistoricalFilingStored } from "../filings/history-persistence";
 import { selectHistoricalAutohydrationCandidates } from "../history-autohydration";
-import { hasHistoricalBindings, isHistoricalQuestion, maybeBuildHistoricalChatResponse } from "../history-store";
+import { classifyHistoricalComparisonMode, type HistoricalComparisonMode } from "../history-question";
+import { hasHistoricalBindings, maybeBuildHistoricalChatResponse } from "../history-store";
 import { logErrorEvent, logEvent, logWarnEvent } from "../logging";
 import { formatMetricValue, formatYoYDelta, metricLabel } from "../metrics";
 import type { RemoteConfig } from "../remote-config";
@@ -41,7 +42,8 @@ export async function maybeBuildHistoricalChatResponseWithHydration(
   config: RemoteConfig,
   options: HistoricalHydrationOptions = {}
 ): Promise<ChatResponsePayload | null> {
-  if (!isHistoricalQuestion(question)) {
+  const comparisonMode = classifyHistoricalComparisonMode(question);
+  if (!comparisonMode) {
     return null;
   }
 
@@ -51,7 +53,7 @@ export async function maybeBuildHistoricalChatResponseWithHydration(
       ticker: filing.ticker,
       reason: "bindings_unavailable"
     });
-    return buildHistoricalDegradeResponse(filing, question, "履歴ストレージがまだ使えないため");
+    return buildHistoricalDegradeResponse(filing, question, "履歴ストレージがまだ使えないため", comparisonMode);
   }
 
   let initial: ChatResponsePayload | null = null;
@@ -64,7 +66,7 @@ export async function maybeBuildHistoricalChatResponseWithHydration(
       ticker: filing.ticker,
       reason
     });
-    return buildHistoricalDegradeResponse(filing, question, "履歴比較の読み込みが一時的に失敗したため");
+    return buildHistoricalDegradeResponse(filing, question, "履歴比較の読み込みが一時的に失敗したため", comparisonMode);
   }
 
   if (initial) {
@@ -76,10 +78,10 @@ export async function maybeBuildHistoricalChatResponseWithHydration(
     return initial;
   }
 
-  const contentMode = resolveHistoricalHydrationContentMode(question);
+  const contentMode = resolveHistoricalHydrationContentMode(question, comparisonMode);
   let preparation: HistoricalHydrationPreparation;
   try {
-    preparation = await prepareHistoricalHydration(filing, env);
+    preparation = await prepareHistoricalHydration(filing, env, comparisonMode);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     logErrorEvent("chat_historical_hydration_prepare_failed", {
@@ -87,7 +89,7 @@ export async function maybeBuildHistoricalChatResponseWithHydration(
       ticker: filing.ticker,
       reason
     });
-    return buildHistoricalDegradeResponse(filing, question, "履歴補完の準備が一時的に失敗したため");
+    return buildHistoricalDegradeResponse(filing, question, "履歴補完の準備が一時的に失敗したため", comparisonMode);
   }
   if (preparation.status === "skipped") {
     return buildInsufficientHistoricalResponse(filing, {
@@ -96,17 +98,18 @@ export async function maybeBuildHistoricalChatResponseWithHydration(
       hydratedCount: 0,
       status: "skipped",
       reason: preparation.reason
-    });
+    }, comparisonMode);
   }
 
-  if (options.executionContext) {
-    enqueueHistoricalHydration(filing, env, config, options.executionContext, contentMode, preparation);
-    return buildHistoricalDegradeResponse(filing, question, "履歴比較をバックグラウンドで準備中のため");
+  if (options.executionContext && comparisonMode !== "immediate_prior") {
+    enqueueHistoricalHydration(filing, env, config, options.executionContext, contentMode, preparation, comparisonMode);
+    return buildHistoricalDegradeResponse(filing, question, "履歴比較をバックグラウンドで準備中のため", comparisonMode);
   }
 
   const hydration = await hydrateHistoricalCoverageForChat(filing, env, config, {
     contentMode,
-    preparation
+    preparation,
+    comparisonMode
   });
   if (hydration.hydratedCount > 0) {
     try {
@@ -128,7 +131,7 @@ export async function maybeBuildHistoricalChatResponseWithHydration(
         reason,
         stage: "post_hydration_retry"
       });
-      return buildHistoricalDegradeResponse(filing, question, "履歴比較の再読込が一時的に失敗したため");
+      return buildHistoricalDegradeResponse(filing, question, "履歴比較の再読込が一時的に失敗したため", comparisonMode);
     }
   }
 
@@ -146,11 +149,12 @@ export async function maybeBuildHistoricalChatResponseWithHydration(
     return buildHistoricalDegradeResponse(
       filing,
       question,
-      hydration.status === "timed_out" ? "履歴補完が一定時間で終わらなかったため" : "履歴補完が一時的に失敗したため"
+      hydration.status === "timed_out" ? "履歴補完が一定時間で終わらなかったため" : "履歴補完が一時的に失敗したため",
+      comparisonMode
     );
   }
 
-  return buildInsufficientHistoricalResponse(filing, hydration);
+  return buildInsufficientHistoricalResponse(filing, hydration, comparisonMode);
 }
 
 async function hydrateHistoricalCoverageForChat(
@@ -160,10 +164,12 @@ async function hydrateHistoricalCoverageForChat(
   options: {
     contentMode?: "full" | "metrics_only";
     preparation?: Extract<HistoricalHydrationPreparation, { status: "ready" }>;
+    comparisonMode?: HistoricalComparisonMode;
   } = {}
 ): Promise<HydrationAttempt> {
   try {
-    const preparation = options.preparation ?? (await prepareHistoricalHydration(filing, env));
+    const comparisonMode = options.comparisonMode ?? "multi_period_trend";
+    const preparation = options.preparation ?? (await prepareHistoricalHydration(filing, env, comparisonMode));
     if (preparation.status === "skipped") {
       return {
         attempted: false,
@@ -226,7 +232,8 @@ async function hydrateHistoricalCoverageForChat(
 
 async function prepareHistoricalHydration(
   filing: FilingCacheRecord,
-  env: Env
+  env: Env,
+  comparisonMode: HistoricalComparisonMode
 ): Promise<HistoricalHydrationPreparation> {
   const tickerRecord = await lookupTicker(filing.ticker, env);
   if (!tickerRecord) {
@@ -248,7 +255,8 @@ async function prepareHistoricalHydration(
       accessionNumber: filing.filingKey.split(":")[2] ?? filing.filingKey,
       periodOfReport: filing.periodOfReport
     },
-    listSupportedFilings(tickerRecord, submissions)
+    listSupportedFilings(tickerRecord, submissions),
+    comparisonMode
   );
 
   if (candidates.length === 0) {
@@ -277,7 +285,8 @@ function enqueueHistoricalHydration(
   config: RemoteConfig,
   executionContext: Pick<ExecutionContext, "waitUntil">,
   contentMode: "full" | "metrics_only",
-  preparation: Extract<HistoricalHydrationPreparation, { status: "ready" }>
+  preparation: Extract<HistoricalHydrationPreparation, { status: "ready" }>,
+  comparisonMode: HistoricalComparisonMode
 ): void {
   executionContext.waitUntil(
     (async () => {
@@ -291,7 +300,8 @@ function enqueueHistoricalHydration(
 
       const hydration = await hydrateHistoricalCoverageForChat(filing, env, config, {
         contentMode,
-        preparation
+        preparation,
+        comparisonMode
       });
 
       if (hydration.hydratedCount > 0) {
@@ -319,7 +329,13 @@ function enqueueHistoricalHydration(
   );
 }
 
-function resolveHistoricalHydrationContentMode(question: string): "full" | "metrics_only" {
+function resolveHistoricalHydrationContentMode(
+  question: string,
+  comparisonMode: HistoricalComparisonMode
+): "full" | "metrics_only" {
+  if (comparisonMode === "immediate_prior") {
+    return "full";
+  }
   const normalized = question.replace(/\s+/g, "").toLowerCase();
   return /(地域|事業|セグメント|支え|牽引|ドライバ|driver|要因|原因|理由|背景|segment)/.test(normalized)
     ? "full"
@@ -329,8 +345,21 @@ function resolveHistoricalHydrationContentMode(question: string): "full" | "metr
 function buildHistoricalDegradeResponse(
   filing: FilingCacheRecord,
   question: string,
-  reasonCopy: string
+  reasonCopy: string,
+  comparisonMode: HistoricalComparisonMode
 ): ChatResponsePayload {
+  if (comparisonMode === "immediate_prior") {
+    const source =
+      filing.sourceChunks.find((chunk) => chunk.sectionType === "xbrl_metric") ??
+      filing.sourceChunks.find((chunk) => chunk.sectionType === "md_a") ??
+      filing.sourceChunks[0];
+    return {
+      answer: `${reasonCopy}、今回は直前の同じ様式の ${filing.formType} との比較を完了できません。直近と直前の2つの提出資料が揃うまでは、最新資料内の別基準の比較値で代用しません。少し時間を置いてから、もう一度お試しください。`,
+      sources: source ? [buildSecFilingSource(source)] : [],
+      chargeable: false
+    };
+  }
+
   const latestSnapshot = buildLatestFilingFallback(filing, question);
   const answerParts = [`${reasonCopy}、今回は3年比較を完了できません。`, latestSnapshot.answer];
   answerParts.push("比較が必要なら少し時間を置いてから、もう一度お試しください。");
@@ -344,7 +373,8 @@ function buildHistoricalDegradeResponse(
 
 function buildInsufficientHistoricalResponse(
   filing: FilingCacheRecord,
-  hydration: HydrationAttempt
+  hydration: HydrationAttempt,
+  comparisonMode: HistoricalComparisonMode
 ): ChatResponsePayload {
   const source =
     filing.sourceChunks.find((chunk) => chunk.sectionType === "xbrl_metric") ??
@@ -354,10 +384,21 @@ function buildInsufficientHistoricalResponse(
   if (!source) {
     return {
       answer:
-        filing.formType === "10-Q"
-          ? "この3年比較は同四半期の 10-Q を並べる必要がありますが、まだ比較に足る履歴を用意できていません。"
-          : "この3年比較は年次の 10-K を並べる必要がありますが、まだ比較に足る履歴を用意できていません。",
-      sources: []
+        comparisonMode === "immediate_prior"
+          ? `直前の同じ様式の ${filing.formType} がまだ揃っていないため、前回決算との比較はできません。最新資料内の別基準の比較値では代用しません。`
+          : filing.formType === "10-Q"
+            ? "この3年比較は同四半期の 10-Q を並べる必要がありますが、まだ比較に足る履歴を用意できていません。"
+            : "この3年比較は年次の 10-K を並べる必要がありますが、まだ比較に足る履歴を用意できていません。",
+      sources: [],
+      chargeable: false
+    };
+  }
+
+  if (comparisonMode === "immediate_prior") {
+    return {
+      answer: `直前の同じ様式の ${filing.formType} がまだ揃っていないため、対象期間 ${filing.periodOfReport} と前回決算を比較できません。最新資料内の別基準の比較値では代用しません。${describeHydrationReason(hydration)}`.trim(),
+      sources: [buildSecFilingSource(source)],
+      chargeable: false
     };
   }
 
@@ -374,7 +415,8 @@ function buildInsufficientHistoricalResponse(
 
   return {
     answer: `${requirementCopy} ${hydrationCopy} いま確実に確認できるのは最新の決算資料の内容までです。`,
-    sources: [buildSecFilingSource(source)]
+    sources: [buildSecFilingSource(source)],
+    chargeable: false
   };
 }
 

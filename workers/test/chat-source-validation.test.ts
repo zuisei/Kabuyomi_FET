@@ -137,6 +137,7 @@ function makeContextPack(sourceChunks: SourceChunkRecord[]): ChatContextPack {
     questionIntent: "mda_summary",
     contentMode: "full",
     metrics: [],
+    verifiedFacts: [],
     sourceChunks,
     contextTokenBudget: 6_000,
     selectedSourceCount: sourceChunks.length,

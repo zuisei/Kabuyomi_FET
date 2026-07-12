@@ -1,10 +1,13 @@
 import type { Env } from "../env";
 import {
-  isSubscriptionProductId,
   resolveCreditPackCredits,
-  resolveSubscriptionPlan,
-  type SubscriptionPlan
+  resolvePlanFromBilling,
+  type AccessPlan
 } from "./billing-catalog";
+import {
+  verifyAppleTransactionSignedData,
+  type VerifiedAppleEnvironment
+} from "./apple-signed-data";
 import { AppError } from "./errors";
 import { logEvent, logWarnEvent, suffixForLog } from "./logging";
 
@@ -13,6 +16,7 @@ interface CreditPurchaseVerificationRequest {
   transactionId: string;
   originalTransactionId?: string;
   signedTransactionInfo?: string;
+  appAccountToken?: string;
 }
 
 interface SubscriptionVerificationRequest {
@@ -35,12 +39,13 @@ interface ParsedTransactionPayload {
   revocationDate?: number;
   purchaseDate?: number | string;
   expiresDate?: number | string;
+  signedDate?: number;
+  environment?: string;
+  appAccountToken?: string;
 }
 
-type AppStoreServerEnvironment = "production" | "sandbox" | "auto";
-
 interface AppleVerificationAttempt {
-  environment: AppStoreServerEnvironment;
+  environment: VerifiedAppleEnvironment;
   status: number;
   errorCode?: number | string;
   errorName?: string;
@@ -73,18 +78,30 @@ const SANDBOX_TRANSACTION_URL = "https://api.storekit-sandbox.itunes.apple.com/i
 export async function verifyCreditPurchaseWithApple(
   env: Env,
   request: CreditPurchaseVerificationRequest
-): Promise<{ transactionId: string; originalTransactionId?: string }> {
+): Promise<{
+  transactionId: string;
+  originalTransactionId?: string;
+  appAccountToken?: string;
+  verificationEnvironment: VerifiedAppleEnvironment;
+  verificationVersion: string;
+  payloadDigest: string;
+}> {
   if (!resolveCreditPackCredits(request.productId)) {
     throw new AppError(400, "Unsupported credit product");
   }
 
   if (request.signedTransactionInfo) {
-    const clientPayload = parseUnverifiedJWSPayload(request.signedTransactionInfo);
-    ensureTransactionMatches("client", request, clientPayload, env.APPLE_BUNDLE_ID);
+    const clientVerification = await verifyAppleTransactionSignedData(env, request.signedTransactionInfo);
+    ensureTransactionMatches("client", request, clientVerification.payload, env.APPLE_BUNDLE_ID);
   }
 
-  const signedTransactionInfo = await fetchSignedTransactionInfo(env, request.transactionId);
-  const applePayload = parseAppleServerJWSPayload(signedTransactionInfo);
+  const fetched = await fetchSignedTransactionInfo(env, request.transactionId);
+  const appleVerification = await verifyAppleTransactionSignedData(
+    env,
+    fetched.signedTransactionInfo,
+    fetched.environment
+  );
+  const applePayload = appleVerification.payload;
   ensureTransactionMatches("apple", request, applePayload, env.APPLE_BUNDLE_ID);
 
   if (applePayload.revocationDate) {
@@ -93,7 +110,11 @@ export async function verifyCreditPurchaseWithApple(
 
   return {
     transactionId: applePayload.transactionId ?? request.transactionId,
-    originalTransactionId: applePayload.originalTransactionId ?? request.originalTransactionId
+    originalTransactionId: applePayload.originalTransactionId ?? request.originalTransactionId,
+    appAccountToken: applePayload.appAccountToken,
+    verificationEnvironment: appleVerification.environment,
+    verificationVersion: appleVerification.verificationVersion,
+    payloadDigest: appleVerification.payloadDigest
   };
 }
 
@@ -104,39 +125,28 @@ export async function verifySubscriptionWithApple(
   originalTransactionId: string;
   transactionId: string | null;
   productId: string | null;
-  plan: SubscriptionPlan | null;
+  plan: Exclude<AccessPlan, "free"> | null;
   active: boolean;
   periodStart: string | null;
   periodEnd: string | null;
   expiresAt: string | null;
+  revokedAt: string | null;
+  status: "active" | "expired" | "revoked";
+  verificationEnvironment: VerifiedAppleEnvironment;
+  verificationVersion: string;
+  payloadDigest: string;
+  signedDate: string | null;
 }> {
-  if (!request.active) {
-    return {
-      originalTransactionId: request.originalTransactionId,
-      transactionId: request.transactionId ?? null,
-      productId: request.productId ?? null,
-      plan: resolveSubscriptionPlan(request.productId),
-      active: false,
-      periodStart: null,
-      periodEnd: null,
-      expiresAt: null
-    };
-  }
-
-  if (!isSubscriptionProductId(request.productId)) {
-    throw new AppError(400, "Unsupported subscription product");
-  }
-
   let transactionId = request.transactionId?.trim();
   if (request.signedTransactionInfo) {
-    const clientPayload = parseUnverifiedJWSPayload(request.signedTransactionInfo);
+    const clientVerification = await verifyAppleTransactionSignedData(env, request.signedTransactionInfo);
+    const clientPayload = clientVerification.payload;
     ensureTransactionMatches(
       "client",
       { ...request, transactionId: transactionId ?? clientPayload.transactionId ?? "" },
       clientPayload,
       env.APPLE_BUNDLE_ID
     );
-    ensureSubscriptionIsActive(clientPayload);
     transactionId = transactionId || clientPayload.transactionId;
   }
 
@@ -144,29 +154,52 @@ export async function verifySubscriptionWithApple(
     throw new AppError(400, "Subscription transaction id is required");
   }
 
-  const signedTransactionInfo = await fetchSignedTransactionInfo(env, transactionId);
-  const applePayload = parseAppleServerJWSPayload(signedTransactionInfo);
+  const fetched = await fetchSignedTransactionInfo(env, transactionId);
+  const appleVerification = await verifyAppleTransactionSignedData(
+    env,
+    fetched.signedTransactionInfo,
+    fetched.environment
+  );
+  const applePayload = appleVerification.payload;
   ensureTransactionMatches("apple", { ...request, transactionId }, applePayload, env.APPLE_BUNDLE_ID);
-  ensureSubscriptionIsActive(applePayload);
+  const productId = applePayload.productId ?? request.productId ?? null;
+  const resolvedPlan = resolvePlanFromBilling(productId, true);
+  if (resolvedPlan === "free") {
+    throw new AppError(400, "Unsupported subscription product");
+  }
+  const plan: Exclude<AccessPlan, "free"> = resolvedPlan;
+  const expiresAt = normalizeAppleDateToIso(applePayload.expiresDate);
+  const revokedAt = normalizeAppleDateToIso(applePayload.revocationDate);
+  const expired = !expiresAt || Date.parse(expiresAt) <= Date.now();
+  const status = revokedAt ? "revoked" : expired ? "expired" : "active";
 
   return {
     originalTransactionId: applePayload.originalTransactionId ?? request.originalTransactionId,
     transactionId: applePayload.transactionId ?? transactionId,
-    productId: applePayload.productId ?? request.productId ?? null,
-    plan: resolveSubscriptionPlan(applePayload.productId ?? request.productId),
-    active: true,
+    productId,
+    plan,
+    active: status === "active",
     periodStart: normalizeAppleDateToIso(applePayload.purchaseDate),
-    periodEnd: normalizeAppleDateToIso(applePayload.expiresDate),
-    expiresAt: normalizeAppleDateToIso(applePayload.expiresDate)
+    periodEnd: expiresAt,
+    expiresAt,
+    revokedAt,
+    status,
+    verificationEnvironment: appleVerification.environment,
+    verificationVersion: appleVerification.verificationVersion,
+    payloadDigest: appleVerification.payloadDigest,
+    signedDate: normalizeAppleDateToIso(applePayload.signedDate)
   };
 }
 
-async function fetchSignedTransactionInfo(env: Env, transactionId: string): Promise<string> {
+async function fetchSignedTransactionInfo(
+  env: Env,
+  transactionId: string
+): Promise<{ signedTransactionInfo: string; environment: VerifiedAppleEnvironment }> {
   const { token, debugInfo } = await buildAppStoreServerTokenWithDebug(env);
   const environments = resolveVerificationEnvironments(env.APPLE_APP_STORE_SERVER_ENVIRONMENT);
   let lastStatus = 0;
   let lastError = "Apple transaction verification failed";
-  let lastEnvironment: AppStoreServerEnvironment | null = null;
+  let lastEnvironment: VerifiedAppleEnvironment | null = null;
   let lastErrorDetails: AppleErrorDetails = { reason: lastError };
   const attempts: AppleVerificationAttempt[] = [];
 
@@ -185,12 +218,15 @@ async function fetchSignedTransactionInfo(env: Env, transactionId: string): Prom
       if (!payload.signedTransactionInfo) {
         throw new AppError(502, "Apple transaction verification failed", "Missing signedTransactionInfo");
       }
-      logEvent("apple_transaction_verified", {
+      logEvent("apple_transaction_fetched_for_verification", {
         transactionIdSuffix: suffixForLog(transactionId),
         environment,
         attempts
       });
-      return payload.signedTransactionInfo;
+      return {
+        signedTransactionInfo: payload.signedTransactionInfo,
+        environment
+      };
     }
 
     lastStatus = response.status;
@@ -318,10 +354,10 @@ function ensureTransactionMatches(
   payload: ParsedTransactionPayload,
   expectedBundleId?: string
 ): void {
-  if (payload.transactionId !== request.transactionId) {
+  if (!payload.transactionId || payload.transactionId !== request.transactionId) {
     throw new AppError(400, "Purchase transaction mismatch", `${source} transactionId mismatch`);
   }
-  if (payload.productId !== request.productId) {
+  if (request.productId && payload.productId !== request.productId) {
     throw new AppError(400, "Purchase transaction product mismatch", `${source} productId mismatch`);
   }
   if (request.originalTransactionId && payload.originalTransactionId !== request.originalTransactionId) {
@@ -330,17 +366,12 @@ function ensureTransactionMatches(
   if (expectedBundleId?.trim() && payload.bundleId !== expectedBundleId.trim()) {
     throw new AppError(400, "Purchase transaction bundle mismatch", `${source} bundleId mismatch`);
   }
-}
-
-function ensureSubscriptionIsActive(payload: ParsedTransactionPayload): void {
-  if (payload.revocationDate) {
-    throw new AppError(409, "Subscription transaction has been revoked");
-  }
-
-  const expiresAt =
-    typeof payload.expiresDate === "string" ? Number.parseInt(payload.expiresDate, 10) : payload.expiresDate;
-  if (expiresAt !== undefined && Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
-    throw new AppError(409, "Subscription transaction has expired");
+  if (
+    "appAccountToken" in request
+    && request.appAccountToken
+    && payload.appAccountToken?.toLowerCase() !== request.appAccountToken.toLowerCase()
+  ) {
+    throw new AppError(409, "Purchase account mismatch", `${source} appAccountToken mismatch`);
   }
 }
 
@@ -358,34 +389,7 @@ function normalizeAppleDateToIso(value: number | string | undefined): string | n
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
-// This parser intentionally does not verify the JWS signature. Client-provided
-// payloads are only an early consistency check; credit grants must still use
-// the server-fetched Apple transaction payload below.
-function parseUnverifiedJWSPayload(jws: string): ParsedTransactionPayload {
-  return parseJWSPayload(jws);
-}
-
-// The payload is fetched from Apple's App Store Server API using our server
-// credentials. Local JWS chain verification is still a future hardening step,
-// so keep this type as parsed payload rather than "verified" payload.
-function parseAppleServerJWSPayload(jws: string): ParsedTransactionPayload {
-  return parseJWSPayload(jws);
-}
-
-function parseJWSPayload(jws: string): ParsedTransactionPayload {
-  const parts = jws.split(".");
-  if (parts.length !== 3 || !parts[1]) {
-    throw new AppError(400, "Invalid signed transaction info");
-  }
-
-  try {
-    return JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[1]))) as ParsedTransactionPayload;
-  } catch (error) {
-    throw new AppError(400, "Invalid signed transaction info", error instanceof Error ? error.message : String(error));
-  }
-}
-
-function resolveVerificationEnvironments(rawValue: string | undefined): AppStoreServerEnvironment[] {
+function resolveVerificationEnvironments(rawValue: string | undefined): VerifiedAppleEnvironment[] {
   const normalized = rawValue?.trim().toLowerCase();
   if (normalized === "production") {
     return ["production"];
@@ -397,8 +401,8 @@ function resolveVerificationEnvironments(rawValue: string | undefined): AppStore
 }
 
 function shouldTryNextAppleEnvironment(
-  environment: AppStoreServerEnvironment,
-  environments: AppStoreServerEnvironment[],
+  environment: VerifiedAppleEnvironment,
+  environments: VerifiedAppleEnvironment[],
   status: number,
   errorDetails: AppleErrorDetails
 ): boolean {

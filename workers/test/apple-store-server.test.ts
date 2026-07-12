@@ -1,12 +1,29 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Environment } from "@apple/app-store-server-library";
 import {
   buildAppStoreServerToken,
   verifyCreditPurchaseWithApple,
   verifySubscriptionWithApple
 } from "../src/lib/apple-store-server";
+import { setAppleSignedDataVerifierFactoryForTests } from "../src/lib/apple-signed-data";
 
 describe("apple store server verification", () => {
+  beforeEach(() => {
+    setAppleSignedDataVerifierFactoryForTests((_env, environment) => ({
+      verifyAndDecodeTransaction: async (value) => ({
+        ...decodeFakeJws(value),
+        environment: environment === "production" ? Environment.PRODUCTION : Environment.SANDBOX
+      }),
+      verifyAndDecodeNotification: async (value) => decodeFakeJws(value),
+      verifyAndDecodeRenewalInfo: async (value) => ({
+        ...decodeFakeJws(value),
+        environment: environment === "production" ? Environment.PRODUCTION : Environment.SANDBOX
+      })
+    }));
+  });
+
   afterEach(() => {
+    setAppleSignedDataVerifierFactoryForTests(undefined);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -38,9 +55,11 @@ describe("apple store server verification", () => {
       }
     );
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       transactionId: "tx-100",
-      originalTransactionId: "orig-tx-100"
+      originalTransactionId: "orig-tx-100",
+      verificationEnvironment: "sandbox",
+      verificationVersion: "apple-node-library-3.1.0"
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(fetch.mock.calls[0][0])).toContain("api.storekit-sandbox.itunes.apple.com/inApps/v1/transactions/tx-100");
@@ -77,12 +96,39 @@ describe("apple store server verification", () => {
           signedTransactionInfo
         }
       )
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       transactionId: "tx-100",
-      originalTransactionId: "orig-tx-100"
+      originalTransactionId: "orig-tx-100",
+      verificationEnvironment: "production"
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(fetch.mock.calls[0][0])).toContain("api.storekit.itunes.apple.com/inApps/v1/transactions/tx-100");
+  });
+
+  it("rejects a verified consumable transaction whose appAccountToken belongs to another account", async () => {
+    const privateKey = await testPrivateKeyPem();
+    const signedTransactionInfo = fakeJws({
+      transactionId: "tx-account-mismatch",
+      originalTransactionId: "orig-account-mismatch",
+      productId: "kabuyomi.credits.100",
+      bundleId: "app.kabuyomi.ios",
+      appAccountToken: "11111111-1111-4111-8111-111111111111"
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(successResponse(signedTransactionInfo)));
+
+    await expect(verifyCreditPurchaseWithApple({
+      APPLE_APP_STORE_ISSUER_ID: "33b3d98d-ad68-4d93-874a-b9bc38db405d",
+      APPLE_APP_STORE_KEY_ID: "QT2X2QH4G6",
+      APPLE_APP_STORE_PRIVATE_KEY: privateKey,
+      APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+      APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
+    } as never, {
+      productId: "kabuyomi.credits.100",
+      transactionId: "tx-account-mismatch",
+      originalTransactionId: "orig-account-mismatch",
+      signedTransactionInfo,
+      appAccountToken: "22222222-2222-4222-8222-222222222222"
+    })).rejects.toMatchObject({ status: 409, publicMessage: "Purchase account mismatch" });
   });
 
   it("redacts transaction ids in Apple verification logs", async () => {
@@ -146,9 +192,10 @@ describe("apple store server verification", () => {
           signedTransactionInfo
         }
       )
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       transactionId: "tx-100",
-      originalTransactionId: "orig-tx-100"
+      originalTransactionId: "orig-tx-100",
+      verificationEnvironment: "production"
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(fetch.mock.calls[0][0])).toContain("api.storekit.itunes.apple.com/inApps/v1/transactions/tx-100");
@@ -184,9 +231,10 @@ describe("apple store server verification", () => {
           signedTransactionInfo
         }
       )
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       transactionId: "tx-100",
-      originalTransactionId: "orig-tx-100"
+      originalTransactionId: "orig-tx-100",
+      verificationEnvironment: "sandbox"
     });
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(String(fetch.mock.calls[0][0])).toContain("api.storekit.itunes.apple.com/inApps/v1/transactions/tx-100");
@@ -223,9 +271,10 @@ describe("apple store server verification", () => {
           signedTransactionInfo
         }
       )
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       transactionId: "tx-100",
-      originalTransactionId: "orig-tx-100"
+      originalTransactionId: "orig-tx-100",
+      verificationEnvironment: "sandbox"
     });
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(String(fetch.mock.calls[1][0])).toContain("api.storekit-sandbox.itunes.apple.com/inApps/v1/transactions/tx-100");
@@ -357,7 +406,8 @@ describe("apple store server verification", () => {
           APPLE_APP_STORE_ISSUER_ID: "issuer-id",
           APPLE_APP_STORE_KEY_ID: "key-id",
           APPLE_APP_STORE_PRIVATE_KEY: privateKey,
-          APPLE_BUNDLE_ID: "app.kabuyomi.ios"
+          APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+          APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
         } as never,
         {
           productId: "kabuyomi.credits.100",
@@ -502,21 +552,25 @@ describe("apple store server verification", () => {
       }
     );
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       originalTransactionId: "orig-sub-tx-100",
       transactionId: "sub-tx-100",
       productId: "kabuyomi.sub.max.monthly",
-      plan: "max",
+      plan: "pro_max",
       active: true,
+      status: "active",
+      verificationEnvironment: "sandbox",
+      verificationVersion: "apple-node-library-3.1.0",
       periodStart: null,
       periodEnd: expect.any(String),
-      expiresAt: expect.any(String)
+      expiresAt: expect.any(String),
+      revokedAt: null
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(fetch.mock.calls[0][0])).toContain("api.storekit-sandbox.itunes.apple.com/inApps/v1/transactions/sub-tx-100");
   });
 
-  it("rejects expired subscription transactions without granting", async () => {
+  it("returns a verified expired subscription snapshot without granting", async () => {
     const privateKey = await testPrivateKeyPem();
     const signedTransactionInfo = fakeJws({
       transactionId: "sub-tx-expired",
@@ -528,8 +582,7 @@ describe("apple store server verification", () => {
     const fetch = vi.fn().mockResolvedValueOnce(successResponse(signedTransactionInfo));
     vi.stubGlobal("fetch", fetch);
 
-    await expect(
-      verifySubscriptionWithApple(
+    const result = await verifySubscriptionWithApple(
         {
           APPLE_APP_STORE_ISSUER_ID: "issuer-id",
           APPLE_APP_STORE_KEY_ID: "key-id",
@@ -544,14 +597,17 @@ describe("apple store server verification", () => {
           active: true,
           signedTransactionInfo
         }
-      )
-    ).rejects.toMatchObject({
-      status: 409,
-      publicMessage: "Subscription transaction has expired"
+      );
+    expect(result).toMatchObject({
+      active: false,
+      status: "expired",
+      originalTransactionId: "orig-sub-expired",
+      productId: "kabuyomi.sub.lite.monthly",
+      verificationEnvironment: "sandbox"
     });
   });
 
-  it("rejects revoked subscription transactions without granting", async () => {
+  it("returns a verified revoked subscription snapshot without granting", async () => {
     const privateKey = await testPrivateKeyPem();
     const signedTransactionInfo = fakeJws({
       transactionId: "sub-tx-revoked",
@@ -564,8 +620,7 @@ describe("apple store server verification", () => {
     const fetch = vi.fn().mockResolvedValueOnce(successResponse(signedTransactionInfo));
     vi.stubGlobal("fetch", fetch);
 
-    await expect(
-      verifySubscriptionWithApple(
+    const result = await verifySubscriptionWithApple(
         {
           APPLE_APP_STORE_ISSUER_ID: "issuer-id",
           APPLE_APP_STORE_KEY_ID: "key-id",
@@ -580,10 +635,14 @@ describe("apple store server verification", () => {
           active: true,
           signedTransactionInfo
         }
-      )
-    ).rejects.toMatchObject({
-      status: 409,
-      publicMessage: "Subscription transaction has been revoked"
+      );
+    expect(result).toMatchObject({
+      active: false,
+      status: "revoked",
+      originalTransactionId: "orig-sub-revoked",
+      productId: "kabuyomi.sub.pro.monthly",
+      revokedAt: expect.any(String),
+      verificationEnvironment: "sandbox"
     });
   });
 
@@ -633,6 +692,14 @@ async function testPrivateKeyPem(): Promise<string> {
 
 function fakeJws(payload: Record<string, unknown>): string {
   return `${base64UrlEncodeJSON({ alg: "ES256", kid: "apple" })}.${base64UrlEncodeJSON(payload)}.signature`;
+}
+
+function decodeFakeJws(value: string): Record<string, unknown> {
+  const parts = value.split(".");
+  if (parts.length !== 3 || !parts[1]) {
+    throw new Error("invalid_test_jws");
+  }
+  return JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[1]))) as Record<string, unknown>;
 }
 
 function successResponse(signedTransactionInfo: string): Response {

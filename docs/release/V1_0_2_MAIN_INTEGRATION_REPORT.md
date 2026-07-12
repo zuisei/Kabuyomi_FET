@@ -1,5 +1,7 @@
 # V1.0.2 Main Integration Report
 
+> **Historical release evidence — not current shipping authority.** This point-in-time report preserves prior findings and may describe deployments, capabilities, or release decisions that have since changed. Use `CURRENT_SHIPPING_TRUTH.md`, `FEATURE_PARITY_COMPATIBILITY_REPORT.md`, `RELEASE_GATE_STATE.json`, and `FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md` for current decisions.
+
 ## 1. Conclusion
 
 The completed v1.0.2 release candidate from `v1.0.2-subscription-rewarded-credits` was committed on the release branch and merged into local `main` with a no-ff merge.

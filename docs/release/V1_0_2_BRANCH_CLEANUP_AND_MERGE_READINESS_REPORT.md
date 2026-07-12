@@ -1,5 +1,7 @@
 # Kabuyomi v1.0.2 Branch Cleanup And Merge Readiness Report
 
+> **Historical release evidence — not current shipping authority.** This point-in-time report preserves prior findings and may describe deployments, capabilities, or release decisions that have since changed. Use `CURRENT_SHIPPING_TRUTH.md`, `FEATURE_PARITY_COMPATIBILITY_REPORT.md`, `RELEASE_GATE_STATE.json`, and `FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md` for current decisions.
+
 Date: 2026-05-10 JST
 
 Superseded note: the current RC decision changed again after this report. Rewarded-credit UI is hidden for Release/App Review until real Google AdMob SSV grant evidence is recorded in-repo. Older release-visible statements in this report are retained only as history and are superseded by `docs/release/RELEASE_TRUTH.md`.

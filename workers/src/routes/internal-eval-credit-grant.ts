@@ -3,7 +3,7 @@ import { AppError } from "../lib/errors";
 import { isAuthorizedEvalRequest } from "../lib/internal-auth";
 import { grantEvalCredits, readQuotaIdentity } from "../lib/quota";
 import { parseJsonBody } from "../lib/request";
-import { json } from "../lib/response";
+import { json, unavailable } from "../lib/response";
 import type { RouteHandler } from "./types";
 
 const EVAL_CREDIT_GRANT_PAYLOAD_MAX_BYTES = 2_048;
@@ -16,6 +16,10 @@ export const handleInternalEvalCreditGrantRoute: RouteHandler = async ({ request
 
   if (!isAuthorizedEvalRequest(request, env)) {
     return json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (config.emergencyPaidGrantsDisabled) {
+    return unavailable("Eval credit grants are temporarily unavailable");
   }
 
   const payload = await parseJsonBody(request, EvalCreditGrantRequestSchema, {

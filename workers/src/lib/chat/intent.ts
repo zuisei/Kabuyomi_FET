@@ -1,3 +1,5 @@
+import { classifyHistoricalComparisonMode } from "../history-question";
+
 export type QuestionIntent =
   | "business_overview"
   | "revenue_breakdown"
@@ -16,11 +18,7 @@ export type QuestionIntent =
 export function classifyQuestionIntent(question: string): QuestionIntent {
   const normalized = question.replace(/\s+/g, "").toLowerCase();
 
-  if (
-    /(この3年|過去|履歴|推移|トレンド|前回決算との違い|前回との違い|historical|history|trend|compare|comparison)/.test(
-      normalized
-    )
-  ) {
+  if (classifyHistoricalComparisonMode(question)) {
     return "historical_comparison";
   }
 
@@ -72,12 +70,12 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
     return "mda_summary";
   }
 
-  if (/(営業cf|フリーcf|キャッシュフロー|operatingcashflow|freecashflow|cashflow|cash flow|現金|お金.*稼|稼げてる)/.test(normalized)) {
-    return "cash_flow";
-  }
-
   if (/(資金繰り|負債|債務|借入|返済|満期|流動性|信用枠|debt|liquidity|maturity|borrowings?|creditfacility)/.test(normalized)) {
     return "liquidity_debt";
+  }
+
+  if (/(営業cf|フリーcf|キャッシュフロー|operatingcashflow|freecashflow|cashflow|cash flow|現金|お金.*稼|稼げてる)/.test(normalized)) {
+    return "cash_flow";
   }
 
   if (/(リスク|懸念|逆風|不確実|不透明|risk|uncertain|uncertainty|macro|関税|tariff)/.test(normalized)) {

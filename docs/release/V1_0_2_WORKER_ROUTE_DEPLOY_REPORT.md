@@ -1,5 +1,7 @@
 # Kabuyomi v1.0.2 Worker Route Deploy Report
 
+> **Historical release evidence — not current shipping authority.** This point-in-time report preserves prior findings and may describe deployments, capabilities, or release decisions that have since changed. Use `CURRENT_SHIPPING_TRUTH.md`, `FEATURE_PARITY_COMPATIBILITY_REPORT.md`, `RELEASE_GATE_STATE.json`, and `FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md` for current decisions.
+
 ## 1. Conclusion
 
 The v1.0.2 backend route availability issue was confirmed as a stale deployed Worker problem for the test environment.

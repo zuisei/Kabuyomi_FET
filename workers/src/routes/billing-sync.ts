@@ -20,6 +20,10 @@ export const handleBillingSyncRoute: RouteHandler = async ({ request, url, env, 
     return null;
   }
 
+  if (!config.creditBillingEnabled || config.emergencyPaidGrantsDisabled) {
+    return json({ error: "Subscription billing is temporarily unavailable" }, { status: 503 });
+  }
+
   let body;
   try {
     body = await parseJsonBody(request, BillingSyncRequestSchema, {
@@ -37,8 +41,8 @@ export const handleBillingSyncRoute: RouteHandler = async ({ request, url, env, 
   let deviceBindingHash;
   let boundQuotaSubject;
   try {
-    deviceBindingHash = await resolveDeviceBindingHashFromRequest(request);
-    boundQuotaSubject = await resolveDeviceQuotaSubjectFromRequest(request);
+    deviceBindingHash = await resolveDeviceBindingHashFromRequest(request, env);
+    boundQuotaSubject = await resolveDeviceQuotaSubjectFromRequest(request, env);
   } catch (error) {
     if (!isAppError(error)) {
       throw error;

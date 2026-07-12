@@ -431,6 +431,7 @@ function makeContextPack(): ChatContextPack {
     questionIntent: "mda_summary",
     contentMode: "full",
     metrics: [],
+    verifiedFacts: [],
     sourceChunks: [
       {
         sourceId: "S1",

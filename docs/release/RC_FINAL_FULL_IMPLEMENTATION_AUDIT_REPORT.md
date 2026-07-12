@@ -1,5 +1,7 @@
 # Kabuyomi RC Final Full Implementation Audit Report
 
+> **Historical release evidence — not current shipping authority.** This point-in-time report preserves prior findings and may describe deployments, capabilities, or release decisions that have since changed. Use `CURRENT_SHIPPING_TRUTH.md`, `FEATURE_PARITY_COMPATIBILITY_REPORT.md`, `RELEASE_GATE_STATE.json`, and `FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md` for current decisions.
+
 Date: 2026-05-11
 
 ## 1. Executive summary
@@ -251,7 +253,7 @@ Test Worker smoke passed. Production Worker smoke passed. Legal Pages smoke pass
 
 - Minimal Core 60 still has 11 honest fallback rows and 18.3% quality fallback rate.
 - Full human benchmark review was not completed; the automated summary shows no hard source/infrastructure blockers.
-- Real Google AdMob SSV grant was not executed; rewarded-credit UI remains hidden until that evidence exists.
+- Real Google AdMob SSV grant was not executed for this candidate; the released rewarded-credit surface remains intact, and production SSV validation is still required before submission.
 - Real StoreKit sandbox/TestFlight purchases, restores, subscription upgrade/downgrade, cancellation/renewal state, and App Store Connect metadata must still be manually checked.
 - Production Worker was deployed from `8d598ca`; this report commit is documentation/evidence only and does not change Worker runtime.
 

@@ -1,10 +1,65 @@
-import type { DurableObjectState } from "@cloudflare/workers-types";
+import type {
+  DurableObjectState,
+  DurableObjectStorage,
+  DurableObjectTransaction
+} from "@cloudflare/workers-types";
+import type { z } from "zod";
 import type { AccessPlan } from "../lib/billing-catalog";
-import { QuotaRequestSchema } from "../lib/contracts";
-import { isAppError } from "../lib/errors";
+import {
+  PurchaseCreditAdjustmentRequestSchema,
+  QuotaRequestSchema,
+  RequestExecutionRequestSchema
+} from "../lib/contracts";
+import { AppError, isAppError } from "../lib/errors";
+import { hashForLog, logEvent, suffixForLog } from "../lib/logging";
 import { parseJsonBody } from "../lib/request";
 
 const QUOTA_PAYLOAD_MAX_BYTES = 8_192;
+const REQUEST_EXECUTION_PAYLOAD_MAX_BYTES = 128 * 1_024;
+const REQUEST_EXECUTION_PENDING_TTL_MS = 5 * 60 * 1_000;
+const REQUEST_EXECUTION_RESULT_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+// Terminal execution records move with the balance so exact retries keep their
+// replay/failure semantics after the principal changes. This endpoint is only
+// reached over the internal Durable Object binding, not from a public request.
+const PRINCIPAL_MIGRATION_PAYLOAD_MAX_BYTES = 8 * 1_024 * 1_024;
+const PRINCIPAL_MIGRATION_MARKER_KEY = "principal_migration:applied";
+const PRINCIPAL_MIGRATION_TOMBSTONE_KEY = "principal_migration:tombstone";
+const PRINCIPAL_MIGRATION_LOCK_KEY = "principal_migration:lock";
+
+type RequestExecutionRequest = z.infer<typeof RequestExecutionRequestSchema>;
+type RequestExecutionRoute = RequestExecutionRequest["route"];
+type RequestExecutionDetails = Record<string, string | number | boolean | null>;
+type RequestExecutionReservationIntent = Extract<RequestExecutionRequest, { action: "begin" }>["reservation"];
+type RequestExecutionStorage = Pick<
+  DurableObjectStorage | DurableObjectTransaction,
+  "get" | "put" | "delete" | "list" | "getAlarm" | "setAlarm" | "deleteAlarm"
+>;
+
+interface RequestExecutionRecord {
+  operationId: string;
+  requestHash: string;
+  route: RequestExecutionRoute;
+  status: "pending" | "completed" | "failed";
+  executionPolicyVersion: string;
+  configSnapshot: RequestExecutionDetails;
+  createdAt: string;
+  pendingExpiresAt: string;
+  completedAt?: string;
+  resultExpiresAt?: string;
+  resultBody?: Record<string, unknown>;
+  resultMetadata?: RequestExecutionDetails;
+  failedAt?: string;
+  failureCode?: string;
+  failureStatus?: number;
+  failureDetails?: RequestExecutionDetails;
+  stateVersion?: 1 | 2;
+  reservationId?: string;
+}
+
+interface RequestExecutionMutationResult {
+  status: number;
+  payload: Record<string, unknown>;
+}
 
 interface QuotaRecord {
   plan: AccessPlan;
@@ -31,13 +86,77 @@ interface CreditStateRecord {
   monthlyLimit: number;
   rewardedAdRemaining?: number;
   rewardedAdExpiresAt?: string;
+  rewardedAdLots?: RewardedAdCreditLot[];
+  welcomeRemaining?: number;
+  welcomeGrantedAt?: string;
+  welcomeGrantOperationId?: string;
+  welcomeMigrationVersion?: 1;
   purchasedRemaining: number;
+  purchasedRefundDebt?: number;
   updatedAt: string;
+}
+
+interface RewardedAdCreditLot {
+  lotId: string;
+  remaining: number;
+  expiresAt: string | null;
+}
+
+interface CreditReservationAllocations {
+  monthly?: {
+    credits: number;
+    periodStart: string;
+    periodEnd: string;
+  };
+  rewardedAd: Array<{
+    lotId: string;
+    credits: number;
+    expiresAt: string | null;
+  }>;
+  welcome?: { credits: number };
+  purchased?: {
+    credits: number;
+  };
+  legacyChat?: {
+    slots: 1;
+    dateJST: string;
+    dailyKey: string;
+  };
+}
+
+interface CreditReservationRecord {
+  reservationId: string;
+  operationId: string;
+  requestHash: string;
+  route: RequestExecutionRoute;
+  mode: "credits" | "legacy_chat" | "unmetered";
+  credits: number;
+  legacyChatSlots: 0 | 1;
+  allocations: CreditReservationAllocations;
+  referenceType?: string;
+  referenceId?: string;
+  monthlyGrant?: MonthlyGrantRecord;
+  status: "reserved" | "committed" | "released" | "expired";
+  createdAt: string;
+  expiresAt: string;
+  dueIndexKey: string;
+  committedAt?: string;
+  releasedAt?: string;
+  expiredAt?: string;
+  releaseReason?: string;
 }
 
 interface CreditOperationRecord {
   operationId: string;
-  type: "consume" | "refund" | "monthly_grant" | "purchase_grant" | "eval_grant" | "admob_rewarded_grant";
+  type:
+    | "consume"
+    | "refund"
+    | "monthly_grant"
+    | "purchase_grant"
+    | "purchase_refund"
+    | "purchase_refund_reversal"
+    | "eval_grant"
+    | "admob_rewarded_grant";
   status: "applied" | "insufficient" | "noop";
   delta: number;
   balanceAfter: number;
@@ -48,10 +167,25 @@ interface CreditOperationRecord {
   creditsRequired?: number;
   consumedMonthly?: number;
   consumedRewardedAd?: number;
+  consumedWelcome?: number;
   consumedPurchased?: number;
+  consumedMonthlyPeriodStart?: string;
+  consumedMonthlyPeriodEnd?: string;
+  consumedRewardedAdLots?: Array<{
+    lotId: string;
+    credits: number;
+    expiresAt: string | null;
+  }>;
   originalOperationId?: string;
   referenceType?: string;
   referenceId?: string;
+  purchaseRefundDebtAfter?: number;
+  purchaseDebtOffset?: number;
+  refundAvailableRemoved?: number;
+  refundDebtCreated?: number;
+  refundDebtReleased?: number;
+  refundDebtSettledRestored?: number;
+  refundCreditsRestored?: number;
   createdAt: string;
   refundedBy?: string;
   refundedAt?: string;
@@ -65,6 +199,25 @@ interface PurchaseGrantRecord {
   originalTransactionId?: string;
   purchasedAt?: string;
   createdAt: string;
+  refund?: {
+    state: "refunded" | "reinstated";
+    availableRemoved: number;
+    debtCreated: number;
+    debtOutstanding: number;
+    notificationId: string;
+    refundedAt: string;
+    operation: CreditOperationRecord;
+    reversedAt?: string;
+    reversalNotificationId?: string;
+    reversalOperation?: CreditOperationRecord;
+  };
+}
+
+interface PurchaseCreditAdjustmentResult {
+  outcome: "unclaimed" | "refunded" | "reinstated" | "already_reinstated" | "not_refunded";
+  didMutate: boolean;
+  purchaseState: "unclaimed" | "granted" | "refunded" | "reinstated";
+  operation?: CreditOperationRecord;
 }
 
 interface MonthlyGrantRecord {
@@ -77,6 +230,35 @@ interface MonthlyGrantRecord {
   monthlyBalanceAfter: number;
   purchasedBalanceAfter: number;
   createdAt: string;
+}
+
+interface PrincipalMigrationSnapshot {
+  version: 1;
+  creditState: CreditStateRecord | null;
+  purchaseRecords: Array<[string, unknown]>;
+  monthlyGrantRecords: Array<[string, unknown]>;
+  creditOperationRecords: Array<[string, unknown]>;
+  requestExecutionRecords?: Array<[string, unknown]>;
+  creditReservationRecords?: Array<[string, unknown]>;
+  exportedAt: string;
+}
+
+interface PrincipalMigrationMarker {
+  migrationId: string;
+  sourceSnapshotDigest: string;
+  sourceQuotaSubjectHash: string;
+  appliedAt: string;
+}
+
+interface PrincipalMigrationLock {
+  migrationId: string;
+  lockedAt: string;
+  sourceSnapshotDigest: string;
+}
+
+interface PrincipalMigrationTombstone extends PrincipalMigrationLock {
+  targetPrincipal: string;
+  migratedAt: string;
 }
 
 interface ChatRefundRecord {
@@ -101,14 +283,28 @@ const MONTHLY_GRANT_PREFIX = "monthly_grant:";
 const PURCHASE_TRANSACTION_PREFIX = "purchase_transaction:";
 const CHAT_REFUND_PREFIX = "chat_refund:";
 const REWARDED_AD_DAILY_CAP_PREFIX = "rewarded_ad_daily_cap:";
+const REQUEST_EXECUTION_PREFIX = "request_execution:";
+const CREDIT_RESERVATION_PREFIX = "credit_reservation:";
+const CREDIT_RESERVATION_DUE_PREFIX = "credit_reservation_due:";
 const CREDIT_OPERATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DAILY_KEY_PREFIX = "daily:";
 const LEGACY_DAILY_KEY_LIMIT = 30;
+const WELCOME_CREDIT_AMOUNT = 50;
 
 export class UserQuotaDO {
   constructor(private readonly state: DurableObjectState) {}
 
   async fetch(request: Request): Promise<Response> {
+    if (new URL(request.url).pathname === "/request-execution") {
+      return this.handleRequestExecution(request);
+    }
+    if (new URL(request.url).pathname === "/principal-migration") {
+      return this.handlePrincipalMigration(request);
+    }
+    if (new URL(request.url).pathname === "/purchase-adjustment") {
+      return this.handlePurchaseCreditAdjustment(request);
+    }
+
     let body;
     try {
       body = await parseJsonBody(request, QuotaRequestSchema, {
@@ -124,6 +320,29 @@ export class UserQuotaDO {
     }
 
     const result = await this.state.blockConcurrencyWhile(async () => {
+      const [tombstone, migrationLock] = await Promise.all([
+        this.state.storage.get<PrincipalMigrationTombstone>(PRINCIPAL_MIGRATION_TOMBSTONE_KEY),
+        this.state.storage.get<PrincipalMigrationLock>(PRINCIPAL_MIGRATION_LOCK_KEY)
+      ]);
+      if (tombstone) {
+        return {
+          status: 409,
+          payload: {
+            error: "quota_principal_migrated",
+            targetPrincipal: tombstone.targetPrincipal,
+            migrationId: tombstone.migrationId
+          }
+        };
+      }
+      if (migrationLock) {
+        return {
+          status: 423,
+          payload: {
+            error: "quota_principal_migration_locked",
+            migrationId: migrationLock.migrationId
+          }
+        };
+      }
       const [dailyRecord, savedTickerRecord] = await Promise.all([
         this.loadDailyRecord(body.dateJST, body.plan, body.chatLimit),
         this.loadSavedTickerRecord(body.plan, body.stockLimit)
@@ -135,7 +354,8 @@ export class UserQuotaDO {
         {
           periodStart: body.monthlyCreditPeriodStart,
           periodEnd: body.monthlyCreditPeriodEnd,
-          monthlyGrantOperationId: body.monthlyGrantOperationId
+          monthlyGrantOperationId: body.monthlyGrantOperationId,
+          welcomeEligible: body.accessMode === "verified_installation"
         }
       );
       const creditState = creditStateResult.creditState;
@@ -228,15 +448,24 @@ export class UserQuotaDO {
           };
         }
 
-        const creditResult = await this.grantPurchasedCredit({
-          creditState,
-          operationId,
-          productId,
-          transactionId,
-          originalTransactionId: body.originalTransactionId,
-          purchasedAt: body.purchasedAt,
-          purchaseCredits
-        });
+        let creditResult;
+        try {
+          creditResult = await this.grantPurchasedCredit({
+            creditState,
+            operationId,
+            productId,
+            transactionId,
+            originalTransactionId: body.originalTransactionId,
+            purchasedAt: body.purchasedAt,
+            purchaseCredits
+          });
+        } catch (error) {
+          if (!isAppError(error)) throw error;
+          return {
+            status: error.status,
+            payload: { error: error.publicMessage, usage: currentUsage(), didMutate: false }
+          };
+        }
         if (monthlyGrant) {
           await this.saveMonthlyGrant(monthlyGrant);
         }
@@ -477,9 +706,987 @@ export class UserQuotaDO {
     return this.reply(result.payload, result.status);
   }
 
-  private async loadDailyRecord(dateJST: string, plan: AccessPlan, chatLimit: number): Promise<QuotaRecord> {
+  private async handlePurchaseCreditAdjustment(request: Request): Promise<Response> {
+    if (request.method !== "POST") {
+      return this.reply({ error: "Method not allowed" }, 405);
+    }
+
+    let body;
+    try {
+      body = await parseJsonBody(request, PurchaseCreditAdjustmentRequestSchema, {
+        invalidMessage: "Invalid purchase adjustment payload",
+        maxBytes: QUOTA_PAYLOAD_MAX_BYTES,
+        tooLargeMessage: "Purchase adjustment payload is too large"
+      });
+    } catch (error) {
+      if (!isAppError(error)) throw error;
+      return this.reply({ error: error.publicMessage }, error.status);
+    }
+
+    return this.state.blockConcurrencyWhile(() =>
+      this.withStorageTransaction(async (storage) => {
+        const [tombstone, migrationLock] = await Promise.all([
+          storage.get<PrincipalMigrationTombstone>(PRINCIPAL_MIGRATION_TOMBSTONE_KEY),
+          storage.get<PrincipalMigrationLock>(PRINCIPAL_MIGRATION_LOCK_KEY)
+        ]);
+        if (tombstone) {
+          return this.reply({
+            error: "quota_principal_migrated",
+            targetPrincipal: tombstone.targetPrincipal,
+            migrationId: tombstone.migrationId
+          }, 409);
+        }
+        if (migrationLock) {
+          return this.reply({
+            error: "quota_principal_migration_locked",
+            migrationId: migrationLock.migrationId
+          }, 423);
+        }
+
+        const storedGrant = await this.loadPurchaseGrant(body.transactionId, storage);
+        if (!storedGrant) {
+          const result: PurchaseCreditAdjustmentResult = {
+            outcome: "unclaimed",
+            didMutate: false,
+            purchaseState: "unclaimed"
+          };
+          return this.reply(result, 200);
+        }
+        if (
+          storedGrant.productId !== body.productId ||
+          storedGrant.creditsGranted !== body.creditsGranted
+        ) {
+          return this.reply({ error: "purchase_authority_mismatch" }, 409);
+        }
+
+        const storedCreditState = await storage.get<CreditStateRecord>(CREDIT_STATE_KEY);
+        if (!storedCreditState) {
+          return this.reply({ error: "purchase_credit_state_missing" }, 409);
+        }
+        const creditState = structuredClone(storedCreditState);
+        const grant = structuredClone(storedGrant);
+        const invariantError = await this.purchaseRefundInvariantError(creditState, storage);
+        if (invariantError) {
+          return this.reply({ error: invariantError }, 409);
+        }
+
+        const result = body.action === "refund"
+          ? await this.refundPurchasedCredit({
+              storage,
+              creditState,
+              grant,
+              notificationId: body.notificationId
+            })
+          : await this.reversePurchasedCreditRefund({
+              storage,
+              creditState,
+              grant,
+              notificationId: body.notificationId
+            });
+        return this.reply(result, 200);
+      })
+    );
+  }
+
+  private async handlePrincipalMigration(request: Request): Promise<Response> {
+    if (request.method !== "POST") {
+      return this.reply({ error: "Method not allowed" }, 405);
+    }
+    let raw: unknown;
+    try {
+      const text = await request.text();
+      if (new TextEncoder().encode(text).byteLength > PRINCIPAL_MIGRATION_PAYLOAD_MAX_BYTES) {
+        return this.reply({ error: "Principal migration payload is too large" }, 413);
+      }
+      raw = JSON.parse(text);
+    } catch {
+      return this.reply({ error: "Invalid principal migration payload" }, 400);
+    }
+    const body = raw as Record<string, unknown>;
+    const action = body.action;
+    const migrationId = typeof body.migrationId === "string" ? body.migrationId.trim() : "";
+    if (!migrationId || !/^[a-zA-Z0-9:_-]{1,128}$/u.test(migrationId)) {
+      return this.reply({ error: "Invalid principal migration payload" }, 400);
+    }
+
+    return this.state.blockConcurrencyWhile(() =>
+      this.withStorageTransaction(async (storage) => {
+        const [tombstone, existingLock] = await Promise.all([
+          storage.get<PrincipalMigrationTombstone>(PRINCIPAL_MIGRATION_TOMBSTONE_KEY),
+          storage.get<PrincipalMigrationLock>(PRINCIPAL_MIGRATION_LOCK_KEY)
+        ]);
+
+        if (action === "export") {
+          if (tombstone) {
+            return tombstone.migrationId === migrationId
+              ? this.reply({
+                  status: "already_tombstoned",
+                  sourceSnapshotDigest: tombstone.sourceSnapshotDigest,
+                  tombstone
+                }, 200)
+              : this.reply({ error: "Principal already migrated" }, 409);
+          }
+          if (existingLock && existingLock.migrationId !== migrationId) {
+            return this.reply({ error: "Principal migration already locked" }, 423);
+          }
+          const migrationLock: PrincipalMigrationLock = existingLock ?? {
+            migrationId,
+            lockedAt: new Date().toISOString(),
+            sourceSnapshotDigest: ""
+          };
+          if (!existingLock) await storage.put(PRINCIPAL_MIGRATION_LOCK_KEY, migrationLock);
+          await this.quiescePrincipalForMigration(storage, migrationId);
+          const snapshot = canonicalJsonValue<PrincipalMigrationSnapshot>({
+            version: 1,
+            creditState: await storage.get<CreditStateRecord>(CREDIT_STATE_KEY) ?? null,
+            purchaseRecords: [...(await storage.list({ prefix: PURCHASE_TRANSACTION_PREFIX })).entries()],
+            monthlyGrantRecords: [...(await storage.list({ prefix: MONTHLY_GRANT_PREFIX })).entries()],
+            creditOperationRecords: [...(await storage.list({ prefix: CREDIT_OPERATION_PREFIX })).entries()],
+            requestExecutionRecords: [...(await storage.list({ prefix: REQUEST_EXECUTION_PREFIX })).entries()],
+            creditReservationRecords: [...(await storage.list({ prefix: CREDIT_RESERVATION_PREFIX })).entries()],
+            exportedAt: migrationLock.lockedAt
+          });
+          const sourceSnapshotDigest = await sha256Hex(stableJson(snapshot));
+          migrationLock.sourceSnapshotDigest = sourceSnapshotDigest;
+          await storage.put(PRINCIPAL_MIGRATION_LOCK_KEY, migrationLock);
+          return this.reply({
+            migrationId,
+            status: "locked",
+            sourceSnapshotDigest,
+            snapshot,
+            counts: {
+              purchaseRecords: snapshot.purchaseRecords.length,
+              monthlyGrantRecords: snapshot.monthlyGrantRecords.length,
+              requestExecutionRecords: snapshot.requestExecutionRecords?.length ?? 0,
+              creditReservationRecords: snapshot.creditReservationRecords?.length ?? 0
+            }
+          }, 200);
+        }
+
+        if (action === "apply") {
+          const sourceSnapshotDigest = typeof body.sourceSnapshotDigest === "string" ? body.sourceSnapshotDigest : "";
+          const sourceQuotaSubjectHash = typeof body.sourceQuotaSubjectHash === "string" ? body.sourceQuotaSubjectHash : "";
+          const snapshot = body.snapshot;
+          if (!isPrincipalMigrationSnapshot(snapshot) || !/^[a-f0-9]{64}$/u.test(sourceSnapshotDigest) ||
+              !/^[a-f0-9]{64}$/u.test(sourceQuotaSubjectHash)) {
+            return this.reply({ error: "Invalid principal migration payload" }, 400);
+          }
+          if (await sha256Hex(stableJson(snapshot)) !== sourceSnapshotDigest) {
+            return this.reply({ error: "Principal migration snapshot mismatch" }, 409);
+          }
+          const existingMarker = await storage.get<PrincipalMigrationMarker>(PRINCIPAL_MIGRATION_MARKER_KEY);
+          if (existingMarker) {
+            return existingMarker.migrationId === migrationId && existingMarker.sourceSnapshotDigest === sourceSnapshotDigest
+              ? this.reply({ status: "already_applied", marker: existingMarker }, 200)
+              : this.reply({ error: "Principal migration conflict" }, 409);
+          }
+          if (tombstone || existingLock) {
+            return this.reply({ error: "Target principal is not writable" }, 409);
+          }
+          const [existingState, existingExecutions, existingReservations] = await Promise.all([
+            storage.get<CreditStateRecord>(CREDIT_STATE_KEY),
+            storage.list({ prefix: REQUEST_EXECUTION_PREFIX }),
+            storage.list({ prefix: CREDIT_RESERVATION_PREFIX })
+          ]);
+          if (existingState || existingExecutions.size > 0 || existingReservations.size > 0) {
+            return this.reply({ error: "Target principal already has quota state" }, 409);
+          }
+          const marker: PrincipalMigrationMarker = {
+            migrationId,
+            sourceSnapshotDigest,
+            sourceQuotaSubjectHash,
+            appliedAt: new Date().toISOString()
+          };
+          if (snapshot.creditState) await storage.put(CREDIT_STATE_KEY, snapshot.creditState);
+          for (const [key, value] of principalMigrationSnapshotEntries(snapshot)) {
+            await storage.put(key, value);
+          }
+          await storage.put(PRINCIPAL_MIGRATION_MARKER_KEY, marker);
+          logEvent("principal_migration_applied", {
+            sourceQuotaSubjectHash,
+            purchasedRemaining: snapshot.creditState?.purchasedRemaining ?? 0,
+            monthlyRemaining: snapshot.creditState?.monthlyRemaining ?? 0,
+            purchaseRecordCount: snapshot.purchaseRecords.length,
+            requestExecutionRecordCount: snapshot.requestExecutionRecords?.length ?? 0
+          });
+          return this.reply({ status: "applied", marker }, 200);
+        }
+
+        if (action === "tombstone") {
+          const targetPrincipal = typeof body.targetPrincipal === "string" ? body.targetPrincipal.trim() : "";
+          const sourceSnapshotDigest = typeof body.sourceSnapshotDigest === "string" ? body.sourceSnapshotDigest : "";
+          if (!targetPrincipal || targetPrincipal.length > 256 || !/^[a-f0-9]{64}$/u.test(sourceSnapshotDigest)) {
+            return this.reply({ error: "Invalid principal migration payload" }, 400);
+          }
+          if (tombstone) {
+            return tombstone.migrationId === migrationId && tombstone.sourceSnapshotDigest === sourceSnapshotDigest &&
+              tombstone.targetPrincipal === targetPrincipal
+              ? this.reply({ status: "already_tombstoned", tombstone }, 200)
+              : this.reply({ error: "Principal migration tombstone conflict" }, 409);
+          }
+          if (!existingLock || existingLock.migrationId !== migrationId ||
+              existingLock.sourceSnapshotDigest !== sourceSnapshotDigest) {
+            return this.reply({ error: "Principal migration lock mismatch" }, 409);
+          }
+          const migratedAt = new Date().toISOString();
+          const nextTombstone: PrincipalMigrationTombstone = {
+            ...existingLock,
+            targetPrincipal,
+            migratedAt
+          };
+          await storage.put(PRINCIPAL_MIGRATION_TOMBSTONE_KEY, nextTombstone);
+          await storage.delete(PRINCIPAL_MIGRATION_LOCK_KEY);
+          return this.reply({ status: "tombstoned", tombstone: nextTombstone }, 200);
+        }
+
+        if (action === "unlock") {
+          const sourceSnapshotDigest = typeof body.sourceSnapshotDigest === "string" ? body.sourceSnapshotDigest : "";
+          if (tombstone) return this.reply({ error: "Principal is already migrated" }, 409);
+          if (!existingLock) return this.reply({ status: "already_unlocked" }, 200);
+          if (existingLock.migrationId !== migrationId || existingLock.sourceSnapshotDigest !== sourceSnapshotDigest) {
+            return this.reply({ error: "Principal migration lock mismatch" }, 409);
+          }
+          await storage.delete(PRINCIPAL_MIGRATION_LOCK_KEY);
+          return this.reply({ status: "unlocked" }, 200);
+        }
+
+        return this.reply({ error: "Invalid principal migration payload" }, 400);
+      })
+    );
+  }
+
+  async alarm(): Promise<void> {
+    try {
+      await this.state.blockConcurrencyWhile(() =>
+        this.withStorageTransaction((storage) => this.expireDueReservations(storage, Date.now(), "alarm"))
+      );
+    } catch (error) {
+      try {
+        await this.state.storage.setAlarm(Date.now() + 60_000);
+      } catch {
+        // Cloudflare will still retry the failed alarm delivery when possible.
+      }
+      throw error;
+    }
+  }
+
+  private async quiescePrincipalForMigration(
+    storage: RequestExecutionStorage,
+    migrationId: string
+  ): Promise<void> {
+    const nowMs = Date.now();
+    const reservations = await storage.list<CreditReservationRecord>({ prefix: CREDIT_RESERVATION_PREFIX });
+    for (const reservation of reservations.values()) {
+      if (reservation.status === "reserved") {
+        await this.expireReservation(reservation, storage, nowMs, "migration");
+      }
+    }
+    const executions = await storage.list<RequestExecutionRecord>({ prefix: REQUEST_EXECUTION_PREFIX });
+    for (const [key, execution] of executions) {
+      if (execution.status === "pending") {
+        execution.status = "failed";
+        execution.failedAt = new Date(nowMs).toISOString();
+        execution.failureCode = "principal_migration_locked";
+        execution.failureStatus = 409;
+        execution.failureDetails = { migrationId };
+        await storage.put(key, execution);
+        continue;
+      }
+      const resultExpiresAtMs = Date.parse(execution.resultExpiresAt ?? "");
+      if (execution.status === "completed" && (!Number.isFinite(resultExpiresAtMs) || resultExpiresAtMs <= nowMs)) {
+        delete execution.resultBody;
+        delete execution.resultMetadata;
+        execution.configSnapshot = {};
+        await storage.put(key, execution);
+      }
+    }
+    await this.rescheduleReservationAlarm(storage);
+  }
+
+  private async handleRequestExecution(request: Request): Promise<Response> {
+    if (request.method !== "POST") {
+      return this.reply({ error: "Method not allowed" }, 405, { allow: "POST" });
+    }
+
+    let body: RequestExecutionRequest;
+    try {
+      body = await parseJsonBody(request, RequestExecutionRequestSchema, {
+        invalidMessage: "Invalid request execution payload",
+        maxBytes: REQUEST_EXECUTION_PAYLOAD_MAX_BYTES,
+        tooLargeMessage: "Request execution payload is too large"
+      });
+    } catch (error) {
+      if (!isAppError(error)) {
+        throw error;
+      }
+      return this.reply({ error: error.publicMessage }, error.status);
+    }
+
+    const result = await this.state.blockConcurrencyWhile(() =>
+      this.withStorageTransaction(async (storage) => {
+        const [tombstone, migrationLock] = await Promise.all([
+          storage.get<PrincipalMigrationTombstone>(PRINCIPAL_MIGRATION_TOMBSTONE_KEY),
+          storage.get<PrincipalMigrationLock>(PRINCIPAL_MIGRATION_LOCK_KEY)
+        ]);
+        if (tombstone || migrationLock) {
+          const existing = await this.loadRequestExecution(body.operationId, storage);
+          if (!existing || existing.status === "pending") {
+            return {
+              status: 409,
+              payload: {
+                outcome: "failed",
+                failureCode: tombstone ? "quota_principal_migrated" : "principal_migration_locked",
+                failureStatus: 409,
+                ...(tombstone ? { targetPrincipal: tombstone.targetPrincipal } : {})
+              }
+            };
+          }
+        }
+        await this.expireDueReservations(storage, Date.now(), "lazy");
+        if (body.action === "begin") {
+          return this.beginRequestExecution(body, storage);
+        }
+        if (body.action === "complete") {
+          return this.completeRequestExecution(body, storage);
+        }
+        return this.failRequestExecution(body, storage);
+      })
+    );
+
+    const retryAfterSeconds = result.payload.retryAfterSeconds;
+    return this.reply(
+      result.payload,
+      result.status,
+      result.status === 202 && typeof retryAfterSeconds === "number"
+        ? { "retry-after": String(retryAfterSeconds) }
+        : undefined
+    );
+  }
+
+  private async beginRequestExecution(
+    body: Extract<RequestExecutionRequest, { action: "begin" }>,
+    storage: RequestExecutionStorage
+  ): Promise<RequestExecutionMutationResult> {
+    const existing = await this.loadRequestExecution(body.operationId, storage);
+    if (!existing) {
+      if (!body.allowCreate) {
+        return { status: 200, payload: { outcome: "not_started" } };
+      }
+      if (body.reservation.mode === "legacy_chat") {
+        return {
+          status: 409,
+          payload: {
+            outcome: "failed",
+            failureCode: "legacy_chat_creation_disabled",
+            failureStatus: 409,
+            didMutate: false
+          }
+        };
+      }
+      return this.reserveNewRequestExecution(body, storage);
+    }
+
+    if (existing.requestHash !== body.requestHash || existing.route !== body.route) {
+      return {
+        status: 409,
+        payload: {
+          outcome: "payload_mismatch",
+          error: "operation_id_payload_mismatch"
+        }
+      };
+    }
+
+    if (existing.status === "pending") {
+      const nowMs = Date.now();
+      const pendingExpiresMs = Date.parse(existing.pendingExpiresAt);
+      if (!Number.isFinite(pendingExpiresMs) || pendingExpiresMs <= nowMs) {
+        const failedAt = new Date(nowMs).toISOString();
+        existing.status = "failed";
+        existing.failedAt = failedAt;
+        existing.failureCode = "execution_pending_expired";
+        existing.failureStatus = 504;
+        existing.failureDetails = {
+          pendingExpiresAt: existing.pendingExpiresAt
+        };
+        await this.saveRequestExecution(existing, storage);
+        return {
+          status: 504,
+          payload: this.failedExecutionPayload(existing, true)
+        };
+      }
+
+      return {
+        status: 202,
+        payload: {
+          outcome: "pending",
+          retryAfterSeconds: Math.max(1, Math.ceil((pendingExpiresMs - nowMs) / 1_000))
+        }
+      };
+    }
+
+    if (existing.status === "failed") {
+      return {
+        status: existing.failureStatus ?? 409,
+        payload: this.failedExecutionPayload(existing, false)
+      };
+    }
+
+    const resultExpiresMs = Date.parse(existing.resultExpiresAt ?? "");
+    if (!existing.resultBody || !Number.isFinite(resultExpiresMs) || resultExpiresMs <= Date.now()) {
+      if (existing.resultBody) {
+        delete existing.resultBody;
+        await this.saveRequestExecution(existing, storage);
+      }
+      return {
+        status: 410,
+        payload: {
+          outcome: "result_expired",
+          error: "operation_result_expired"
+        }
+      };
+    }
+
+    return {
+      status: 200,
+      payload: {
+        outcome: "replay",
+        result: existing.resultBody,
+        resultMetadata: existing.resultMetadata ?? {}
+      }
+    };
+  }
+
+  private async completeRequestExecution(
+    body: Extract<RequestExecutionRequest, { action: "complete" }>,
+    storage: RequestExecutionStorage
+  ): Promise<RequestExecutionMutationResult> {
+    const existing = await this.loadRequestExecution(body.operationId, storage);
+    if (!existing) {
+      return {
+        status: 409,
+        payload: { error: "request_execution_not_found" }
+      };
+    }
+    if (existing.requestHash !== body.requestHash || existing.route !== body.route) {
+      return {
+        status: 409,
+        payload: {
+          outcome: "payload_mismatch",
+          error: "operation_id_payload_mismatch"
+        }
+      };
+    }
+    if (existing.status === "completed") {
+      return this.completedExecutionPayload(existing, storage, false);
+    }
+    if (existing.status === "failed") {
+      return {
+        status: 409,
+        payload: {
+          ...this.failedExecutionPayload(existing, false),
+          error: "request_execution_already_failed"
+        }
+      };
+    }
+
+    if (!existing.reservationId) {
+      return {
+        status: 409,
+        payload: { error: "request_execution_reservation_required" }
+      };
+    }
+    const reservation = await this.loadCreditReservation(existing.operationId, storage);
+    if (!reservation || reservation.reservationId !== existing.reservationId) {
+      return {
+        status: 409,
+        payload: { error: "request_execution_reservation_missing" }
+      };
+    }
+    if (reservation.status !== "reserved") {
+      return {
+        status: 409,
+        payload: { error: `credit_reservation_${reservation.status}` }
+      };
+    }
+
+    const nowMs = Date.now();
+    if (Date.parse(reservation.expiresAt) <= nowMs) {
+      await this.expireReservation(reservation, storage, nowMs, "lazy");
+      return {
+        status: 409,
+        payload: { error: "credit_reservation_expired" }
+      };
+    }
+
+    let creditOperation: CreditOperationRecord | undefined;
+    let creditsCharged = 0;
+    if (body.chargeable) {
+      reservation.status = "committed";
+      reservation.committedAt = new Date(nowMs).toISOString();
+      if (reservation.mode === "credits") {
+        const creditState = await storage.get<CreditStateRecord>(CREDIT_STATE_KEY);
+        if (!creditState) {
+          throw new Error("credit_state_missing_for_reservation_commit");
+        }
+        normalizeRewardedAdLots(creditState, new Date(nowMs).toISOString());
+        creditOperation = buildCreditOperation({
+          operationId: reservation.operationId,
+          type: "consume",
+          status: "applied",
+          delta: -reservation.credits,
+          creditState,
+          creditsRequired: reservation.credits,
+          consumedMonthly: reservation.allocations.monthly?.credits ?? 0,
+          consumedRewardedAd: reservation.allocations.rewardedAd.reduce((sum, item) => sum + item.credits, 0),
+          consumedWelcome: reservation.allocations.welcome?.credits ?? 0,
+          consumedPurchased: reservation.allocations.purchased?.credits ?? 0,
+          consumedMonthlyPeriodStart: reservation.allocations.monthly?.periodStart,
+          consumedMonthlyPeriodEnd: reservation.allocations.monthly?.periodEnd,
+          consumedRewardedAdLots: reservation.allocations.rewardedAd,
+          referenceType: reservation.referenceType,
+          referenceId: reservation.referenceId,
+          createdAt: reservation.committedAt
+        });
+        await storage.put(buildCreditOperationKey(reservation.operationId), creditOperation);
+        creditsCharged = reservation.credits;
+      }
+    } else {
+      await this.restoreReservationAllocations(reservation, storage, nowMs);
+      reservation.status = "released";
+      reservation.releasedAt = new Date(nowMs).toISOString();
+      reservation.releaseReason = "non_chargeable";
+    }
+
+    const completedAt = new Date(nowMs).toISOString();
+    existing.status = "completed";
+    existing.completedAt = completedAt;
+    existing.resultExpiresAt = new Date(nowMs + REQUEST_EXECUTION_RESULT_TTL_MS).toISOString();
+    existing.resultBody = { ...body.resultBody, creditsCharged };
+    existing.resultMetadata = { ...body.resultMetadata, creditsCharged };
+    await storage.put(buildCreditReservationKey(reservation.operationId), reservation);
+    await storage.delete(reservation.dueIndexKey);
+    await this.saveRequestExecution(existing, storage);
+    await this.rescheduleReservationAlarm(storage);
+    this.logReservationEvent(
+      body.chargeable ? "credit_reservation_committed" : "credit_reservation_released",
+      reservation
+    );
+    return {
+      status: 200,
+      payload: {
+        outcome: "completed",
+        didMutate: true,
+        reservationStatus: reservation.status,
+        creditsCharged,
+        completedAt: existing.completedAt,
+        resultExpiresAt: existing.resultExpiresAt,
+        creditOperation,
+        monthlyGrant: reservation.monthlyGrant
+      }
+    };
+  }
+
+  private async failRequestExecution(
+    body: Extract<RequestExecutionRequest, { action: "fail" }>,
+    storage: RequestExecutionStorage
+  ): Promise<RequestExecutionMutationResult> {
+    const existing = await this.loadRequestExecution(body.operationId, storage);
+    if (!existing) {
+      return {
+        status: 409,
+        payload: { error: "request_execution_not_found" }
+      };
+    }
+    if (existing.requestHash !== body.requestHash || existing.route !== body.route) {
+      return {
+        status: 409,
+        payload: {
+          outcome: "payload_mismatch",
+          error: "operation_id_payload_mismatch"
+        }
+      };
+    }
+    if (existing.status === "completed") {
+      const completed = await this.completedExecutionPayload(existing, storage, false);
+      return {
+        ...completed,
+        payload: {
+          ...completed.payload,
+          outcome: "completed"
+        }
+      };
+    }
+    if (existing.status === "failed") {
+      return {
+        status: 200,
+        payload: this.failedExecutionPayload(existing, false)
+      };
+    }
+
+    let reservationStatus: CreditReservationRecord["status"] | "none" = "none";
+    const reservation = existing.reservationId
+      ? await this.loadCreditReservation(existing.operationId, storage)
+      : undefined;
+    if (reservation?.status === "reserved") {
+      await this.restoreReservationAllocations(reservation, storage, Date.now());
+      reservation.status = "released";
+      reservation.releasedAt = new Date().toISOString();
+      reservation.releaseReason = body.failureCode;
+      await storage.put(buildCreditReservationKey(reservation.operationId), reservation);
+      await storage.delete(reservation.dueIndexKey);
+      await this.rescheduleReservationAlarm(storage);
+      this.logReservationEvent("credit_reservation_released", reservation);
+    }
+    reservationStatus = reservation?.status ?? "none";
+    existing.status = "failed";
+    existing.failedAt = new Date().toISOString();
+    existing.failureCode = body.failureCode;
+    existing.failureStatus = body.failureStatus;
+    existing.failureDetails = body.failureDetails;
+    await this.saveRequestExecution(existing, storage);
+    return {
+      status: 200,
+      payload: {
+        ...this.failedExecutionPayload(existing, true),
+        reservationStatus
+      }
+    };
+  }
+
+  private async reserveNewRequestExecution(
+    body: Extract<RequestExecutionRequest, { action: "begin" }>,
+    storage: RequestExecutionStorage
+  ): Promise<RequestExecutionMutationResult> {
+    const nowMs = Date.now();
+    const createdAt = new Date(nowMs).toISOString();
+    const expiresAt = new Date(nowMs + REQUEST_EXECUTION_PENDING_TTL_MS).toISOString();
+    const record: RequestExecutionRecord = {
+      operationId: body.operationId,
+      requestHash: body.requestHash,
+      route: body.route,
+      status: "pending",
+      executionPolicyVersion: body.executionPolicyVersion,
+      configSnapshot: body.configSnapshot,
+      createdAt,
+      pendingExpiresAt: expiresAt,
+      stateVersion: 2
+    };
+
+    const allocations: CreditReservationAllocations = { rewardedAd: [] };
+    let monthlyGrant: MonthlyGrantRecord | undefined;
+    let credits = 0;
+    let legacyChatSlots: 0 | 1 = 0;
+    if (body.reservation.mode === "credits") {
+      const quota = body.reservation.quota;
+      const creditStateResult = await this.loadCreditState(
+        quota.dateJST,
+        quota.plan,
+        quota.monthlyCreditLimit,
+        {
+          periodStart: quota.monthlyCreditPeriodStart,
+          periodEnd: quota.monthlyCreditPeriodEnd,
+          monthlyGrantOperationId: quota.monthlyGrantOperationId,
+          welcomeEligible: quota.accessMode === "verified_installation"
+        },
+        storage
+      );
+      const creditState = creditStateResult.creditState;
+      monthlyGrant = creditStateResult.monthlyGrant;
+      if (totalCreditRemaining(creditState) < body.reservation.creditsRequired) {
+        record.status = "failed";
+        record.failedAt = createdAt;
+        record.failureCode = "insufficient_credits";
+        record.failureStatus = 402;
+        record.failureDetails = {
+          creditsRequired: body.reservation.creditsRequired,
+          creditsRemaining: totalCreditRemaining(creditState)
+        };
+        await storage.put(CREDIT_STATE_KEY, creditState);
+        if (monthlyGrant) {
+          await this.saveMonthlyGrant(monthlyGrant, storage);
+        }
+        await this.saveRequestExecution(record, storage);
+        return {
+          status: 402,
+          payload: {
+            ...this.failedExecutionPayload(record, true),
+            monthlyGrant
+          }
+        };
+      }
+      credits = body.reservation.creditsRequired;
+      Object.assign(allocations, allocateCreditReservation(creditState, credits));
+      creditState.updatedAt = createdAt;
+      await storage.put(CREDIT_STATE_KEY, creditState);
+      if (monthlyGrant) {
+        await this.saveMonthlyGrant(monthlyGrant, storage);
+      }
+    } else if (body.reservation.mode === "legacy_chat") {
+      const quota = body.reservation.quota;
+      const dailyRecord = await this.loadDailyRecord(quota.dateJST, quota.plan, quota.chatLimit, storage);
+      if (dailyRecord.chatsUsed >= dailyRecord.chatLimit) {
+        record.status = "failed";
+        record.failedAt = createdAt;
+        record.failureCode = "daily_chat_quota_exceeded";
+        record.failureStatus = 429;
+        record.failureDetails = {
+          chatsUsed: dailyRecord.chatsUsed,
+          chatLimit: dailyRecord.chatLimit
+        };
+        await this.saveRequestExecution(record, storage);
+        return { status: 429, payload: this.failedExecutionPayload(record, true) };
+      }
+      dailyRecord.chatsUsed += 1;
+      dailyRecord.updatedAt = createdAt;
+      await storage.put(buildDailyKey(quota.dateJST), dailyRecord);
+      legacyChatSlots = 1;
+      allocations.legacyChat = {
+        slots: 1,
+        dateJST: quota.dateJST,
+        dailyKey: buildDailyKey(quota.dateJST)
+      };
+    }
+
+    const reservationId = `reservation:${body.operationId}`;
+    const dueIndexKey = buildCreditReservationDueKey(nowMs + REQUEST_EXECUTION_PENDING_TTL_MS, body.operationId);
+    const reservation: CreditReservationRecord = {
+      reservationId,
+      operationId: body.operationId,
+      requestHash: body.requestHash,
+      route: body.route,
+      mode: body.reservation.mode,
+      credits,
+      legacyChatSlots,
+      allocations,
+      referenceType: body.reservation.mode === "credits" ? body.reservation.referenceType : undefined,
+      referenceId: body.reservation.mode === "credits" ? body.reservation.referenceId : undefined,
+      monthlyGrant,
+      status: "reserved",
+      createdAt,
+      expiresAt,
+      dueIndexKey
+    };
+    record.reservationId = reservationId;
+    await storage.put(buildCreditReservationKey(body.operationId), reservation);
+    await storage.put(dueIndexKey, reservationId);
+    await this.saveRequestExecution(record, storage);
+    await this.scheduleReservationAlarm(storage, nowMs + REQUEST_EXECUTION_PENDING_TTL_MS);
+    this.logReservationEvent("credit_reservation_created", reservation);
+    return {
+      status: 200,
+      payload: {
+        outcome: "leader",
+        executionPolicyVersion: record.executionPolicyVersion,
+        createdAt: record.createdAt,
+        reservationId,
+        reservationMode: reservation.mode,
+        reservationExpiresAt: reservation.expiresAt,
+        creditsReserved: reservation.credits,
+        monthlyGrant
+      }
+    };
+  }
+
+  private async completedExecutionPayload(
+    execution: RequestExecutionRecord,
+    storage: RequestExecutionStorage,
+    didMutate: boolean
+  ): Promise<RequestExecutionMutationResult> {
+    const reservation = execution.reservationId
+      ? await this.loadCreditReservation(execution.operationId, storage)
+      : undefined;
+    const creditOperation = reservation?.status === "committed" && reservation.mode === "credits"
+      ? await this.loadCreditOperation(execution.operationId, storage)
+      : undefined;
+    return {
+      status: 200,
+      payload: {
+        outcome: "completed",
+        didMutate,
+        reservationStatus: reservation?.status ?? "none",
+        creditsCharged: reservation?.status === "committed" ? reservation.credits : 0,
+        completedAt: execution.completedAt,
+        resultExpiresAt: execution.resultExpiresAt,
+        creditOperation,
+        monthlyGrant: reservation?.monthlyGrant
+      }
+    };
+  }
+
+  private async withStorageTransaction<T>(
+    callback: (storage: RequestExecutionStorage) => Promise<T>
+  ): Promise<T> {
+    const storage = this.state.storage as DurableObjectStorage;
+    if (typeof storage.transaction === "function") {
+      return storage.transaction((transaction) => callback(transaction));
+    }
+    return callback(storage);
+  }
+
+  private async expireDueReservations(
+    storage: RequestExecutionStorage,
+    nowMs: number,
+    source: "alarm" | "lazy"
+  ): Promise<void> {
+    const dueEntries = await storage.list<string>({ prefix: CREDIT_RESERVATION_DUE_PREFIX });
+    for (const [dueIndexKey] of dueEntries) {
+      const expiresAtMs = parseCreditReservationDueKey(dueIndexKey);
+      if (!Number.isFinite(expiresAtMs)) {
+        await storage.delete(dueIndexKey);
+        continue;
+      }
+      if (expiresAtMs > nowMs) {
+        break;
+      }
+      const operationId = operationIdFromCreditReservationDueKey(dueIndexKey);
+      const reservation = operationId
+        ? await this.loadCreditReservation(operationId, storage)
+        : undefined;
+      if (!reservation || reservation.status !== "reserved") {
+        await storage.delete(dueIndexKey);
+        continue;
+      }
+      await this.expireReservation(reservation, storage, nowMs, source);
+    }
+    await this.rescheduleReservationAlarm(storage);
+  }
+
+  private async expireReservation(
+    reservation: CreditReservationRecord,
+    storage: RequestExecutionStorage,
+    nowMs: number,
+    source: "alarm" | "lazy" | "migration"
+  ): Promise<void> {
+    if (reservation.status !== "reserved") {
+      return;
+    }
+    await this.restoreReservationAllocations(reservation, storage, nowMs);
+    const expiredAt = new Date(nowMs).toISOString();
+    reservation.status = "expired";
+    reservation.expiredAt = expiredAt;
+    reservation.releaseReason = `ttl_${source}`;
+    await storage.put(buildCreditReservationKey(reservation.operationId), reservation);
+    await storage.delete(reservation.dueIndexKey);
+
+    const execution = await this.loadRequestExecution(reservation.operationId, storage);
+    if (execution?.status === "pending" && execution.requestHash === reservation.requestHash) {
+      execution.status = "failed";
+      execution.failedAt = expiredAt;
+      execution.failureCode = source === "migration" ? "principal_migration_locked" : "credit_reservation_expired";
+      execution.failureStatus = source === "migration" ? 409 : 504;
+      execution.failureDetails = source === "migration"
+        ? { migrationLockedAt: expiredAt }
+        : { reservationExpiredAt: expiredAt };
+      await this.saveRequestExecution(execution, storage);
+    }
+    this.logReservationEvent("credit_reservation_expired", reservation);
+  }
+
+  private async restoreReservationAllocations(
+    reservation: CreditReservationRecord,
+    storage: RequestExecutionStorage,
+    nowMs: number
+  ): Promise<void> {
+    if (reservation.mode === "credits") {
+      const creditState = await storage.get<CreditStateRecord>(CREDIT_STATE_KEY);
+      if (!creditState) {
+        throw new Error("credit_state_missing_for_reservation_release");
+      }
+      const nowIso = new Date(nowMs).toISOString();
+      normalizeRewardedAdLots(creditState, nowIso);
+      const monthly = reservation.allocations.monthly;
+      if (
+        monthly &&
+        creditState.periodStart === monthly.periodStart &&
+        creditState.periodEnd === monthly.periodEnd &&
+        Date.parse(monthly.periodEnd) > nowMs
+      ) {
+        const nextMonthly = creditState.monthlyRemaining + monthly.credits;
+        if (nextMonthly > creditState.monthlyLimit) {
+          throw new Error("credit_reservation_monthly_restore_overflow");
+        }
+        creditState.monthlyRemaining = nextMonthly;
+      }
+      for (const allocation of reservation.allocations.rewardedAd) {
+        const expiryMs = allocation.expiresAt === null ? Number.POSITIVE_INFINITY : Date.parse(allocation.expiresAt);
+        if (!Number.isFinite(expiryMs) && allocation.expiresAt !== null) {
+          continue;
+        }
+        if (expiryMs <= nowMs) {
+          continue;
+        }
+        restoreRewardedAdLot(creditState, allocation);
+      }
+      creditState.purchasedRemaining += reservation.allocations.purchased?.credits ?? 0;
+      creditState.welcomeRemaining = (creditState.welcomeRemaining ?? 0) + (reservation.allocations.welcome?.credits ?? 0);
+      creditState.updatedAt = nowIso;
+      syncRewardedAdAggregate(creditState);
+      await storage.put(CREDIT_STATE_KEY, creditState);
+      return;
+    }
+
+    if (reservation.mode === "legacy_chat" && reservation.allocations.legacyChat) {
+      const allocation = reservation.allocations.legacyChat;
+      const dailyRecord = await storage.get<QuotaRecord>(allocation.dailyKey);
+      if (!dailyRecord || dailyRecord.dateJST !== allocation.dateJST || dailyRecord.chatsUsed < allocation.slots) {
+        throw new Error("legacy_chat_reservation_restore_invariant_failed");
+      }
+      dailyRecord.chatsUsed -= allocation.slots;
+      dailyRecord.updatedAt = new Date(nowMs).toISOString();
+      await storage.put(allocation.dailyKey, dailyRecord);
+    }
+  }
+
+  private async scheduleReservationAlarm(storage: RequestExecutionStorage, expiresAtMs: number): Promise<void> {
+    const currentAlarm = await storage.getAlarm();
+    if (currentAlarm === null || expiresAtMs < currentAlarm) {
+      await storage.setAlarm(expiresAtMs);
+    }
+  }
+
+  private async rescheduleReservationAlarm(storage: RequestExecutionStorage): Promise<void> {
+    const dueEntries = await storage.list<string>({ prefix: CREDIT_RESERVATION_DUE_PREFIX });
+    for (const dueIndexKey of dueEntries.keys()) {
+      const nextAlarmMs = parseCreditReservationDueKey(dueIndexKey);
+      if (Number.isFinite(nextAlarmMs)) {
+        await storage.setAlarm(nextAlarmMs);
+        return;
+      }
+      await storage.delete(dueIndexKey);
+    }
+    await storage.deleteAlarm();
+  }
+
+  private logReservationEvent(event: string, reservation: CreditReservationRecord): void {
+    logEvent(event, {
+      quotaSubjectHash: hashForLog(this.state.id?.name),
+      operationIdSuffix: suffixForLog(reservation.operationId),
+      reservationIdSuffix: suffixForLog(reservation.reservationId),
+      route: reservation.route,
+      mode: reservation.mode,
+      credits: reservation.credits,
+      status: reservation.status
+    });
+  }
+
+  private failedExecutionPayload(record: RequestExecutionRecord, didMutate: boolean): Record<string, unknown> {
+    return {
+      outcome: "failed",
+      failureCode: record.failureCode ?? "operation_execution_failed",
+      failureStatus: record.failureStatus ?? 409,
+      failureDetails: record.failureDetails,
+      didMutate
+    };
+  }
+
+  private async loadDailyRecord(
+    dateJST: string,
+    plan: AccessPlan,
+    chatLimit: number,
+    storage: RequestExecutionStorage = this.state.storage
+  ): Promise<QuotaRecord> {
     const current =
-      ((await this.state.storage.get<QuotaRecord>(buildDailyKey(dateJST))) as QuotaRecord | undefined) ?? {
+      ((await storage.get<QuotaRecord>(buildDailyKey(dateJST))) as QuotaRecord | undefined) ?? {
         plan,
         dateJST,
         chatsUsed: 0,
@@ -523,16 +1730,22 @@ export class UserQuotaDO {
       periodStart?: string;
       periodEnd?: string;
       monthlyGrantOperationId?: string;
-    } = {}
+      welcomeEligible?: boolean;
+    } = {},
+    storage: RequestExecutionStorage = this.state.storage
   ): Promise<{ creditState: CreditStateRecord; monthlyGrant?: MonthlyGrantRecord; monthlyAdjustment?: CreditOperationRecord }> {
     const period = buildCreditPeriod(dateJST, options);
     const now = new Date().toISOString();
-    const existing = (await this.state.storage.get<CreditStateRecord>(CREDIT_STATE_KEY)) as
+    const existing = (await storage.get<CreditStateRecord>(CREDIT_STATE_KEY)) as
       | CreditStateRecord
       | undefined;
 
     if (!existing || existing.periodStart !== period.periodStart || existing.periodEnd !== period.periodEnd) {
-      const creditState = {
+      if (existing) {
+        normalizeRewardedAdLots(existing, now);
+        migrateOrGrantWelcomeCredits(existing, plan, options.welcomeEligible === true, now);
+      }
+      const creditState: CreditStateRecord = {
         plan,
         periodStart: period.periodStart,
         periodEnd: period.periodEnd,
@@ -540,7 +1753,13 @@ export class UserQuotaDO {
         monthlyLimit: monthlyCreditLimit,
         rewardedAdRemaining: nonExpiredRewardedAdRemaining(existing, now),
         rewardedAdExpiresAt: nonExpiredRewardedAdExpiresAt(existing, now),
+        rewardedAdLots: existing?.rewardedAdLots ? structuredClone(existing.rewardedAdLots) : [],
+        welcomeRemaining: existing?.welcomeRemaining ?? (options.welcomeEligible ? WELCOME_CREDIT_AMOUNT : 0),
+        welcomeGrantedAt: existing?.welcomeGrantedAt ?? (options.welcomeEligible ? now : undefined),
+        welcomeGrantOperationId: existing?.welcomeGrantOperationId ?? (options.welcomeEligible ? "welcome-grant:v1" : undefined),
+        welcomeMigrationVersion: existing?.welcomeMigrationVersion ?? 1,
         purchasedRemaining: existing?.purchasedRemaining ?? 0,
+        purchasedRefundDebt: existing?.purchasedRefundDebt ?? 0,
         updatedAt: now
       };
       return {
@@ -549,11 +1768,14 @@ export class UserQuotaDO {
           creditState,
           monthlyCreditLimit,
           now,
-          options.monthlyGrantOperationId
+          options.monthlyGrantOperationId,
+          storage
         )
       };
     }
 
+    normalizeRewardedAdLots(existing, now);
+    migrateOrGrantWelcomeCredits(existing, plan, options.welcomeEligible === true, now);
     const previousMonthlyLimit = existing.monthlyLimit;
     const limitDelta = monthlyCreditLimit - previousMonthlyLimit;
     existing.plan = plan;
@@ -566,11 +1788,12 @@ export class UserQuotaDO {
       existing.monthlyLimit = Math.max(previousMonthlyLimit, existing.monthlyRemaining);
       existing.monthlyRemaining = Math.max(0, existing.monthlyRemaining);
       monthlyAdjustment = await this.buildMonthlyNoClawbackOperationIfNeeded(
-        existing,
-        previousMonthlyLimit,
-        monthlyCreditLimit,
-        now,
-        options.monthlyGrantOperationId
+      existing,
+      previousMonthlyLimit,
+      monthlyCreditLimit,
+      now,
+      options.monthlyGrantOperationId,
+      storage
       );
     } else {
       existing.monthlyLimit = monthlyCreditLimit;
@@ -581,7 +1804,7 @@ export class UserQuotaDO {
       creditState: existing,
       monthlyGrant:
         limitDelta > 0
-          ? await this.buildMonthlyGrantIfNeeded(existing, limitDelta, now, options.monthlyGrantOperationId)
+          ? await this.buildMonthlyGrantIfNeeded(existing, limitDelta, now, options.monthlyGrantOperationId, storage)
           : undefined,
       monthlyAdjustment
     };
@@ -633,13 +1856,11 @@ export class UserQuotaDO {
       };
     }
 
-    const consumedMonthly = Math.min(creditState.monthlyRemaining, creditsRequired);
-    const remainingAfterMonthly = creditsRequired - consumedMonthly;
-    const consumedRewardedAd = Math.min(creditState.rewardedAdRemaining ?? 0, remainingAfterMonthly);
-    const consumedPurchased = remainingAfterMonthly - consumedRewardedAd;
-    creditState.monthlyRemaining -= consumedMonthly;
-    creditState.rewardedAdRemaining = Math.max(0, (creditState.rewardedAdRemaining ?? 0) - consumedRewardedAd);
-    creditState.purchasedRemaining -= consumedPurchased;
+    const allocations = allocateCreditReservation(creditState, creditsRequired);
+    const consumedMonthly = allocations.monthly?.credits ?? 0;
+    const consumedRewardedAd = allocations.rewardedAd.reduce((sum, allocation) => sum + allocation.credits, 0);
+    const consumedWelcome = allocations.welcome?.credits ?? 0;
+    const consumedPurchased = allocations.purchased?.credits ?? 0;
     creditState.updatedAt = now;
     const operation = buildCreditOperation({
       operationId,
@@ -650,7 +1871,11 @@ export class UserQuotaDO {
       creditsRequired,
       consumedMonthly,
       consumedRewardedAd,
+      consumedWelcome,
       consumedPurchased,
+      consumedMonthlyPeriodStart: allocations.monthly?.periodStart,
+      consumedMonthlyPeriodEnd: allocations.monthly?.periodEnd,
+      consumedRewardedAdLots: allocations.rewardedAd,
       referenceType,
       referenceId,
       createdAt: now
@@ -703,11 +1928,51 @@ export class UserQuotaDO {
     }
 
     const refundable = Math.min(credits, original.creditsRequired ?? 0);
-    const monthlyRefund = Math.min(original.consumedMonthly ?? 0, refundable);
-    const rewardedAdRefund = Math.min(original.consumedRewardedAd ?? 0, refundable - monthlyRefund);
-    const purchasedRefund = Math.min(original.consumedPurchased ?? 0, refundable - monthlyRefund - rewardedAdRefund);
-    creditState.monthlyRemaining = Math.min(creditState.monthlyLimit, creditState.monthlyRemaining + monthlyRefund);
-    creditState.rewardedAdRemaining = (creditState.rewardedAdRemaining ?? 0) + rewardedAdRefund;
+    let remainingRefund = refundable;
+    const requestedMonthlyRefund = Math.min(original.consumedMonthly ?? 0, remainingRefund);
+    remainingRefund -= requestedMonthlyRefund;
+    const requestedRewardedAdRefund = Math.min(original.consumedRewardedAd ?? 0, remainingRefund);
+    remainingRefund -= requestedRewardedAdRefund;
+    const welcomeRefund = Math.min(original.consumedWelcome ?? 0, remainingRefund);
+    remainingRefund -= welcomeRefund;
+    const purchasedRefund = Math.min(original.consumedPurchased ?? 0, remainingRefund);
+    const nowMs = Date.now();
+    const monthlyPeriodStillActive =
+      (!original.consumedMonthlyPeriodStart || original.consumedMonthlyPeriodStart === creditState.periodStart) &&
+      (!original.consumedMonthlyPeriodEnd ||
+        original.consumedMonthlyPeriodEnd === creditState.periodEnd);
+    const monthlyRefund = monthlyPeriodStillActive ? requestedMonthlyRefund : 0;
+    if (creditState.monthlyRemaining + monthlyRefund > creditState.monthlyLimit) {
+      throw new Error("credit_refund_monthly_restore_overflow");
+    }
+    creditState.monthlyRemaining += monthlyRefund;
+    normalizeRewardedAdLots(creditState, now);
+    let rewardedAdRefund = 0;
+    const rewardedAllocations = original.consumedRewardedAdLots ?? (
+      requestedRewardedAdRefund > 0
+        ? [{
+            lotId: buildRewardedAdLotId(original.rewardedAdExpiresAt ?? null),
+            credits: requestedRewardedAdRefund,
+            expiresAt: original.rewardedAdExpiresAt ?? null
+          }]
+        : []
+    );
+    let rewardedRemaining = requestedRewardedAdRefund;
+    for (const allocation of rewardedAllocations) {
+      if (rewardedRemaining <= 0) {
+        break;
+      }
+      const amount = Math.min(allocation.credits, rewardedRemaining);
+      rewardedRemaining -= amount;
+      const expiresMs = allocation.expiresAt === null ? Number.POSITIVE_INFINITY : Date.parse(allocation.expiresAt);
+      if (expiresMs <= nowMs || (!Number.isFinite(expiresMs) && allocation.expiresAt !== null)) {
+        continue;
+      }
+      restoreRewardedAdLot(creditState, { ...allocation, credits: amount });
+      rewardedAdRefund += amount;
+    }
+    syncRewardedAdAggregate(creditState);
+    creditState.welcomeRemaining = (creditState.welcomeRemaining ?? 0) + welcomeRefund;
     creditState.purchasedRemaining += purchasedRefund;
     creditState.updatedAt = now;
     original.refundedBy = refundOperationId;
@@ -716,7 +1981,7 @@ export class UserQuotaDO {
       operationId: refundOperationId,
       type: "refund",
       status: "applied",
-      delta: monthlyRefund + rewardedAdRefund + purchasedRefund,
+      delta: monthlyRefund + rewardedAdRefund + welcomeRefund + purchasedRefund,
       creditState,
       originalOperationId,
       referenceType,
@@ -749,40 +2014,199 @@ export class UserQuotaDO {
     purchasedAt?: string;
     purchaseCredits: number;
   }): Promise<{ didMutate: boolean; operation: CreditOperationRecord }> {
-    const existing = await this.loadPurchaseGrant(transactionId);
-    if (existing) {
-      return { didMutate: false, operation: existing.operation };
+    const result = await this.withStorageTransaction(async (storage) => {
+      const existing = await this.loadPurchaseGrant(transactionId, storage);
+      if (existing) {
+        if (existing.productId !== productId || existing.creditsGranted !== purchaseCredits) {
+          throw new AppError(409, "Purchase transaction authority mismatch");
+        }
+        if (existing.refund?.state === "refunded") {
+          throw new AppError(409, "Purchase transaction has been refunded");
+        }
+        return { didMutate: false, operation: existing.operation, creditState: null };
+      }
+
+      const nextCreditState = structuredClone(creditState);
+      const invariantError = await this.purchaseRefundInvariantError(nextCreditState, storage);
+      if (invariantError) {
+        throw new AppError(409, invariantError);
+      }
+
+      const now = new Date().toISOString();
+      const debtBefore = nextCreditState.purchasedRefundDebt ?? 0;
+      const debtOffset = Math.min(debtBefore, purchaseCredits);
+      if (debtOffset > 0) {
+        await this.applyPurchaseDebtOffset(storage, debtOffset);
+      }
+      nextCreditState.purchasedRefundDebt = debtBefore - debtOffset;
+      const availableGrant = purchaseCredits - debtOffset;
+      nextCreditState.purchasedRemaining += availableGrant;
+      nextCreditState.updatedAt = now;
+      const operation = buildCreditOperation({
+        operationId,
+        type: "purchase_grant",
+        status: "applied",
+        delta: availableGrant,
+        creditState: nextCreditState,
+        purchaseDebtOffset: debtOffset,
+        referenceType: "purchase",
+        referenceId: transactionId,
+        createdAt: now
+      });
+      const grant: PurchaseGrantRecord = {
+        transactionId,
+        operation,
+        productId,
+        creditsGranted: purchaseCredits,
+        originalTransactionId,
+        purchasedAt,
+        createdAt: now
+      };
+      await Promise.all([
+        storage.put(CREDIT_STATE_KEY, nextCreditState),
+        this.saveCreditOperation(operation, storage),
+        this.savePurchaseGrant(grant, storage)
+      ]);
+      return { didMutate: true, operation, creditState: nextCreditState };
+    });
+    if (result.creditState) {
+      Object.assign(creditState, result.creditState);
+    }
+    const now = new Date().toISOString();
+    await this.pruneOldCreditOperations(now);
+    return { didMutate: result.didMutate, operation: result.operation };
+  }
+
+  private async refundPurchasedCredit({
+    storage,
+    creditState,
+    grant,
+    notificationId
+  }: {
+    storage: RequestExecutionStorage;
+    creditState: CreditStateRecord;
+    grant: PurchaseGrantRecord;
+    notificationId: string;
+  }): Promise<PurchaseCreditAdjustmentResult> {
+    if (grant.refund?.state === "refunded") {
+      return {
+        outcome: "refunded",
+        didMutate: false,
+        purchaseState: "refunded",
+        operation: grant.refund.operation
+      };
+    }
+    if (grant.refund?.state === "reinstated") {
+      return {
+        outcome: "already_reinstated",
+        didMutate: false,
+        purchaseState: "reinstated",
+        operation: grant.refund.reversalOperation
+      };
     }
 
     const now = new Date().toISOString();
-    creditState.purchasedRemaining += purchaseCredits;
+    const availableRemoved = Math.min(creditState.purchasedRemaining, grant.creditsGranted);
+    const debtCreated = grant.creditsGranted - availableRemoved;
+    creditState.purchasedRemaining -= availableRemoved;
+    creditState.purchasedRefundDebt = (creditState.purchasedRefundDebt ?? 0) + debtCreated;
     creditState.updatedAt = now;
     const operation = buildCreditOperation({
-      operationId,
-      type: "purchase_grant",
+      operationId: buildPurchaseRefundOperationId(grant.transactionId),
+      type: "purchase_refund",
       status: "applied",
-      delta: purchaseCredits,
+      delta: -availableRemoved,
       creditState,
-      referenceType: "purchase",
-      referenceId: transactionId,
+      refundAvailableRemoved: availableRemoved,
+      refundDebtCreated: debtCreated,
+      referenceType: "purchase_refund",
+      referenceId: grant.transactionId,
       createdAt: now
     });
-    const grant: PurchaseGrantRecord = {
-      transactionId,
-      operation,
-      productId,
-      creditsGranted: purchaseCredits,
-      originalTransactionId,
-      purchasedAt,
-      createdAt: now
+    grant.refund = {
+      state: "refunded",
+      availableRemoved,
+      debtCreated,
+      debtOutstanding: debtCreated,
+      notificationId,
+      refundedAt: now,
+      operation
     };
     await Promise.all([
-      this.state.storage.put(CREDIT_STATE_KEY, creditState),
-      this.saveCreditOperation(operation),
-      this.savePurchaseGrant(grant)
+      storage.put(CREDIT_STATE_KEY, creditState),
+      this.saveCreditOperation(operation, storage),
+      this.savePurchaseGrant(grant, storage)
     ]);
-    await this.pruneOldCreditOperations(now);
-    return { didMutate: true, operation };
+    return { outcome: "refunded", didMutate: true, purchaseState: "refunded", operation };
+  }
+
+  private async reversePurchasedCreditRefund({
+    storage,
+    creditState,
+    grant,
+    notificationId
+  }: {
+    storage: RequestExecutionStorage;
+    creditState: CreditStateRecord;
+    grant: PurchaseGrantRecord;
+    notificationId: string;
+  }): Promise<PurchaseCreditAdjustmentResult> {
+    if (!grant.refund) {
+      return {
+        outcome: "not_refunded",
+        didMutate: false,
+        purchaseState: "granted"
+      };
+    }
+    if (grant.refund.state === "reinstated") {
+      return {
+        outcome: "reinstated",
+        didMutate: false,
+        purchaseState: "reinstated",
+        operation: grant.refund.reversalOperation
+      };
+    }
+
+    const now = new Date().toISOString();
+    const debtReleased = grant.refund.debtOutstanding;
+    const debtSettledRestored = grant.refund.debtCreated - grant.refund.debtOutstanding;
+    const creditsRestored = grant.refund.availableRemoved + debtSettledRestored;
+    const aggregateDebt = creditState.purchasedRefundDebt ?? 0;
+    if (debtReleased > aggregateDebt) {
+      throw new AppError(409, "purchase_refund_debt_invariant_failed");
+    }
+    creditState.purchasedRefundDebt = aggregateDebt - debtReleased;
+    // Reversal reinstates the unspent A credits removed by the refund and any
+    // later purchase value already consumed while settling A's refund debt.
+    // The originally spent portion of A remains spent.
+    creditState.purchasedRemaining += creditsRestored;
+    creditState.updatedAt = now;
+    const operation = buildCreditOperation({
+      operationId: buildPurchaseRefundReversalOperationId(grant.transactionId),
+      type: "purchase_refund_reversal",
+      status: "applied",
+      delta: creditsRestored,
+      creditState,
+      refundAvailableRemoved: grant.refund.availableRemoved,
+      refundDebtCreated: grant.refund.debtCreated,
+      refundDebtReleased: debtReleased,
+      refundDebtSettledRestored: debtSettledRestored,
+      refundCreditsRestored: creditsRestored,
+      referenceType: "purchase_refund_reversal",
+      referenceId: grant.transactionId,
+      createdAt: now
+    });
+    grant.refund.state = "reinstated";
+    grant.refund.debtOutstanding = 0;
+    grant.refund.reversedAt = now;
+    grant.refund.reversalNotificationId = notificationId;
+    grant.refund.reversalOperation = operation;
+    await Promise.all([
+      storage.put(CREDIT_STATE_KEY, creditState),
+      this.saveCreditOperation(operation, storage),
+      this.savePurchaseGrant(grant, storage)
+    ]);
+    return { outcome: "reinstated", didMutate: true, purchaseState: "reinstated", operation };
   }
 
   private async grantEvalCredit({
@@ -884,8 +2308,13 @@ export class UserQuotaDO {
       };
     }
 
-    creditState.rewardedAdRemaining = (creditState.rewardedAdRemaining ?? 0) + credits;
-    creditState.rewardedAdExpiresAt = promoExpiresAt;
+    normalizeRewardedAdLots(creditState, now);
+    restoreRewardedAdLot(creditState, {
+      lotId: buildRewardedAdLotId(promoExpiresAt),
+      credits,
+      expiresAt: promoExpiresAt
+    });
+    syncRewardedAdAggregate(creditState);
     creditState.updatedAt = now;
     dailyCap.count += 1;
     dailyCap.transactionIds = [...new Set([...dailyCap.transactionIds, transactionId])];
@@ -915,31 +2344,125 @@ export class UserQuotaDO {
     };
   }
 
-  private async loadCreditOperation(operationId: string): Promise<CreditOperationRecord | undefined> {
-    return (await this.state.storage.get<CreditOperationRecord>(buildCreditOperationKey(operationId))) as
+  private async loadCreditOperation(
+    operationId: string,
+    storage: RequestExecutionStorage = this.state.storage
+  ): Promise<CreditOperationRecord | undefined> {
+    return (await storage.get<CreditOperationRecord>(buildCreditOperationKey(operationId))) as
       | CreditOperationRecord
       | undefined;
   }
 
-  private async saveCreditOperation(operation: CreditOperationRecord): Promise<void> {
-    await this.state.storage.put(buildCreditOperationKey(operation.operationId), operation);
+  private async saveCreditOperation(
+    operation: CreditOperationRecord,
+    storage: RequestExecutionStorage = this.state.storage
+  ): Promise<void> {
+    await storage.put(buildCreditOperationKey(operation.operationId), operation);
   }
 
-  private async loadPurchaseGrant(transactionId: string): Promise<PurchaseGrantRecord | undefined> {
-    return (await this.state.storage.get<PurchaseGrantRecord>(buildPurchaseTransactionKey(transactionId))) as
+  private async loadRequestExecution(
+    operationId: string,
+    storage: RequestExecutionStorage = this.state.storage
+  ): Promise<RequestExecutionRecord | undefined> {
+    return (await storage.get<RequestExecutionRecord>(buildRequestExecutionKey(operationId))) as
+      | RequestExecutionRecord
+      | undefined;
+  }
+
+  private async saveRequestExecution(
+    record: RequestExecutionRecord,
+    storage: RequestExecutionStorage = this.state.storage
+  ): Promise<void> {
+    await storage.put(buildRequestExecutionKey(record.operationId), record);
+  }
+
+  private async loadCreditReservation(
+    operationId: string,
+    storage: RequestExecutionStorage = this.state.storage
+  ): Promise<CreditReservationRecord | undefined> {
+    return (await storage.get<CreditReservationRecord>(buildCreditReservationKey(operationId))) as
+      | CreditReservationRecord
+      | undefined;
+  }
+
+  private async loadPurchaseGrant(
+    transactionId: string,
+    storage: RequestExecutionStorage = this.state.storage
+  ): Promise<PurchaseGrantRecord | undefined> {
+    return (await storage.get<PurchaseGrantRecord>(buildPurchaseTransactionKey(transactionId))) as
       | PurchaseGrantRecord
       | undefined;
   }
 
-  private async savePurchaseGrant(grant: PurchaseGrantRecord): Promise<void> {
-    await this.state.storage.put(buildPurchaseTransactionKey(grant.transactionId), grant);
+  private async savePurchaseGrant(
+    grant: PurchaseGrantRecord,
+    storage: RequestExecutionStorage = this.state.storage
+  ): Promise<void> {
+    await storage.put(buildPurchaseTransactionKey(grant.transactionId), grant);
+  }
+
+  private async purchaseRefundInvariantError(
+    creditState: CreditStateRecord,
+    storage: RequestExecutionStorage
+  ): Promise<string | null> {
+    if (
+      !Number.isSafeInteger(creditState.purchasedRemaining) ||
+      creditState.purchasedRemaining < 0 ||
+      !Number.isSafeInteger(creditState.purchasedRefundDebt ?? 0) ||
+      (creditState.purchasedRefundDebt ?? 0) < 0
+    ) {
+      return "purchase_credit_balance_invariant_failed";
+    }
+    const grants = await storage.list<PurchaseGrantRecord>({ prefix: PURCHASE_TRANSACTION_PREFIX });
+    let outstandingDebt = 0;
+    for (const grant of grants.values()) {
+      if (!grant.refund || grant.refund.state !== "refunded") continue;
+      if (
+        !Number.isSafeInteger(grant.refund.debtOutstanding) ||
+        grant.refund.debtOutstanding < 0 ||
+        grant.refund.debtOutstanding > grant.refund.debtCreated
+      ) {
+        return "purchase_refund_record_invariant_failed";
+      }
+      outstandingDebt += grant.refund.debtOutstanding;
+    }
+    return outstandingDebt === (creditState.purchasedRefundDebt ?? 0)
+      ? null
+      : "purchase_refund_debt_invariant_failed";
+  }
+
+  private async applyPurchaseDebtOffset(
+    storage: RequestExecutionStorage,
+    debtOffset: number
+  ): Promise<void> {
+    const grants = await storage.list<PurchaseGrantRecord>({ prefix: PURCHASE_TRANSACTION_PREFIX });
+    const refundable = [...grants.values()]
+      .filter((grant) => grant.refund?.state === "refunded" && grant.refund.debtOutstanding > 0)
+      .sort((left, right) => {
+        const dateOrder = (left.refund?.refundedAt ?? "").localeCompare(right.refund?.refundedAt ?? "");
+        return dateOrder !== 0 ? dateOrder : left.transactionId.localeCompare(right.transactionId);
+      });
+    let remaining = debtOffset;
+    for (const storedGrant of refundable) {
+      if (remaining <= 0) break;
+      const grant = structuredClone(storedGrant);
+      if (!grant.refund || grant.refund.state !== "refunded") continue;
+      const applied = Math.min(grant.refund.debtOutstanding, remaining);
+      grant.refund.debtOutstanding -= applied;
+      remaining -= applied;
+      await this.savePurchaseGrant(grant, storage);
+    }
+    if (remaining !== 0) {
+      throw new AppError(409, "purchase_refund_debt_invariant_failed");
+    }
   }
 
   private async buildMonthlyGrantIfNeeded(
     creditState: CreditStateRecord,
     creditsGranted: number,
     createdAt: string,
-    operationIdOverride?: string
+    operationIdOverride?: string,
+    storage: RequestExecutionStorage = this.state.storage
   ): Promise<MonthlyGrantRecord | undefined> {
     if (creditsGranted <= 0) {
       return undefined;
@@ -947,7 +2470,7 @@ export class UserQuotaDO {
 
     const operationId =
       operationIdOverride ?? buildMonthlyGrantOperationId(creditState.plan, creditState.periodStart, creditState.periodEnd);
-    const existing = (await this.state.storage.get<MonthlyGrantRecord>(buildMonthlyGrantKey(operationId))) as
+    const existing = (await storage.get<MonthlyGrantRecord>(buildMonthlyGrantKey(operationId))) as
       | MonthlyGrantRecord
       | undefined;
     if (existing) {
@@ -967,8 +2490,11 @@ export class UserQuotaDO {
     };
   }
 
-  private async saveMonthlyGrant(grant: MonthlyGrantRecord): Promise<void> {
-    await this.state.storage.put(buildMonthlyGrantKey(grant.operationId), grant);
+  private async saveMonthlyGrant(
+    grant: MonthlyGrantRecord,
+    storage: RequestExecutionStorage = this.state.storage
+  ): Promise<void> {
+    await storage.put(buildMonthlyGrantKey(grant.operationId), grant);
   }
 
   private async buildMonthlyNoClawbackOperationIfNeeded(
@@ -976,7 +2502,8 @@ export class UserQuotaDO {
     previousMonthlyLimit: number,
     requestedMonthlyLimit: number,
     createdAt: string,
-    _operationIdOverride?: string
+    _operationIdOverride?: string,
+    storage: RequestExecutionStorage = this.state.storage
   ): Promise<CreditOperationRecord | undefined> {
     const operationId = buildMonthlyDowngradeNoClawbackOperationId(
       creditState.plan,
@@ -985,7 +2512,7 @@ export class UserQuotaDO {
       creditState.periodStart,
       creditState.periodEnd
     );
-    const existing = await this.loadCreditOperation(operationId);
+    const existing = await this.loadCreditOperation(operationId, storage);
     if (existing) {
       return undefined;
     }
@@ -1000,7 +2527,7 @@ export class UserQuotaDO {
       referenceId: `${creditState.plan}:${previousMonthlyLimit}->${requestedMonthlyLimit}:${creditState.periodStart}:${creditState.periodEnd}`,
       createdAt
     });
-    await this.saveCreditOperation(operation);
+    await storage.put(buildCreditOperationKey(operation.operationId), operation);
     return operation;
   }
 
@@ -1067,14 +2594,14 @@ export class UserQuotaDO {
     return [];
   }
 
-  private reply(payload: unknown, status: number): Response {
+  private reply(payload: unknown, status: number, extraHeaders: HeadersInit = {}): Response {
+    const headers = new Headers(extraHeaders);
+    headers.set("content-type", "application/json; charset=utf-8");
+    headers.set("cache-control", "no-store");
+    headers.set("x-content-type-options", "nosniff");
     return new Response(JSON.stringify(payload), {
       status,
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-        "cache-control": "no-store",
-        "x-content-type-options": "nosniff"
-      }
+      headers
     });
   }
 }
@@ -1106,28 +2633,191 @@ function creditUsagePayload(creditState: CreditStateRecord) {
     monthlyLimit: creditState.monthlyLimit,
     rewardedAdRemaining: creditState.rewardedAdRemaining ?? 0,
     rewardedAdExpiresAt: creditState.rewardedAdExpiresAt ?? null,
+    welcomeRemaining: creditState.welcomeRemaining ?? 0,
     purchasedRemaining: creditState.purchasedRemaining,
+    purchasedRefundDebt: creditState.purchasedRefundDebt ?? 0,
     totalRemaining,
     resetsAt: creditState.periodEnd
   };
 }
 
 function totalCreditRemaining(creditState: CreditStateRecord): number {
-  return creditState.monthlyRemaining + (creditState.rewardedAdRemaining ?? 0) + creditState.purchasedRemaining;
+  return creditState.monthlyRemaining + (creditState.rewardedAdRemaining ?? 0) +
+    (creditState.welcomeRemaining ?? 0) + creditState.purchasedRemaining;
+}
+
+function allocateCreditReservation(
+  creditState: CreditStateRecord,
+  creditsRequired: number
+): CreditReservationAllocations {
+  normalizeRewardedAdLots(creditState, new Date().toISOString());
+  let remaining = creditsRequired;
+  let consumedMonthly = 0;
+  const rewardedAd: CreditReservationAllocations["rewardedAd"] = [];
+  const expiringBuckets: Array<
+    | { kind: "monthly"; expiresAt: string }
+    | { kind: "rewarded"; expiresAt: string | null; lot: RewardedAdCreditLot }
+  > = [
+    ...(creditState.monthlyRemaining > 0 ? [{ kind: "monthly" as const, expiresAt: creditState.periodEnd }] : []),
+    ...(creditState.rewardedAdLots ?? []).map((lot) => ({ kind: "rewarded" as const, expiresAt: lot.expiresAt, lot }))
+  ].sort((left, right) => (left.expiresAt ?? "9999").localeCompare(right.expiresAt ?? "9999"));
+  for (const bucket of expiringBuckets) {
+    if (remaining <= 0) {
+      break;
+    }
+    if (bucket.kind === "monthly") {
+      const consumed = Math.min(creditState.monthlyRemaining, remaining);
+      creditState.monthlyRemaining -= consumed;
+      consumedMonthly += consumed;
+      remaining -= consumed;
+      continue;
+    }
+    const consumed = Math.min(bucket.lot.remaining, remaining);
+    if (consumed <= 0) {
+      continue;
+    }
+    bucket.lot.remaining -= consumed;
+    remaining -= consumed;
+    rewardedAd.push({ lotId: bucket.lot.lotId, credits: consumed, expiresAt: bucket.lot.expiresAt });
+  }
+  creditState.rewardedAdLots = (creditState.rewardedAdLots ?? []).filter((lot) => lot.remaining > 0);
+  syncRewardedAdAggregate(creditState);
+
+  const consumedWelcome = Math.min(creditState.welcomeRemaining ?? 0, remaining);
+  creditState.welcomeRemaining = (creditState.welcomeRemaining ?? 0) - consumedWelcome;
+  remaining -= consumedWelcome;
+
+  const consumedPurchased = Math.min(creditState.purchasedRemaining, remaining);
+  creditState.purchasedRemaining -= consumedPurchased;
+  remaining -= consumedPurchased;
+  if (remaining !== 0) {
+    throw new Error("credit_reservation_allocation_invariant_failed");
+  }
+
+  return {
+    monthly: consumedMonthly > 0
+      ? {
+          credits: consumedMonthly,
+          periodStart: creditState.periodStart,
+          periodEnd: creditState.periodEnd
+        }
+      : undefined,
+    rewardedAd,
+    welcome: consumedWelcome > 0 ? { credits: consumedWelcome } : undefined,
+    purchased: consumedPurchased > 0 ? { credits: consumedPurchased } : undefined
+  };
+}
+
+function migrateOrGrantWelcomeCredits(
+  state: CreditStateRecord,
+  plan: AccessPlan,
+  welcomeEligible: boolean,
+  now: string
+): void {
+  if (state.welcomeMigrationVersion !== 1) {
+    if (plan === "free" && state.monthlyLimit > 0) {
+      state.welcomeRemaining = Math.max(state.welcomeRemaining ?? 0, state.monthlyRemaining);
+      state.welcomeGrantedAt ??= now;
+      state.welcomeGrantOperationId ??= "welcome-migration:v1";
+      state.monthlyRemaining = 0;
+      state.monthlyLimit = 0;
+    }
+    state.welcomeMigrationVersion = 1;
+  }
+  if (welcomeEligible && !state.welcomeGrantOperationId) {
+    state.welcomeRemaining = WELCOME_CREDIT_AMOUNT;
+    state.welcomeGrantedAt = now;
+    state.welcomeGrantOperationId = "welcome-grant:v1";
+  }
+}
+
+function normalizeRewardedAdLots(creditState: CreditStateRecord, nowIso: string): void {
+  if (!creditState.rewardedAdLots) {
+    const existingRemaining = Math.max(0, creditState.rewardedAdRemaining ?? 0);
+    creditState.rewardedAdLots = existingRemaining > 0
+      ? [{
+          lotId: buildRewardedAdLotId(creditState.rewardedAdExpiresAt ?? null),
+          remaining: existingRemaining,
+          expiresAt: creditState.rewardedAdExpiresAt ?? null
+        }]
+      : [];
+  }
+
+  const nowMs = Date.parse(nowIso);
+  const merged = new Map<string, RewardedAdCreditLot>();
+  for (const lot of creditState.rewardedAdLots) {
+    if (!Number.isFinite(lot.remaining) || lot.remaining <= 0) {
+      continue;
+    }
+    const expiresMs = lot.expiresAt === null ? Number.POSITIVE_INFINITY : Date.parse(lot.expiresAt);
+    if ((lot.expiresAt !== null && !Number.isFinite(expiresMs)) || expiresMs <= nowMs) {
+      continue;
+    }
+    const existing = merged.get(lot.lotId);
+    if (existing && existing.expiresAt !== lot.expiresAt) {
+      throw new Error("rewarded_ad_lot_expiry_mismatch");
+    }
+    if (existing) {
+      existing.remaining += lot.remaining;
+    } else {
+      merged.set(lot.lotId, { ...lot });
+    }
+  }
+  creditState.rewardedAdLots = [...merged.values()].sort(compareRewardedAdLots);
+  syncRewardedAdAggregate(creditState);
+}
+
+function restoreRewardedAdLot(
+  creditState: CreditStateRecord,
+  allocation: { lotId: string; credits: number; expiresAt: string | null }
+): void {
+  const lots = creditState.rewardedAdLots ?? [];
+  const existing = lots.find((lot) => lot.lotId === allocation.lotId);
+  if (existing) {
+    if (existing.expiresAt !== allocation.expiresAt) {
+      throw new Error("rewarded_ad_lot_restore_expiry_mismatch");
+    }
+    existing.remaining += allocation.credits;
+  } else {
+    lots.push({
+      lotId: allocation.lotId,
+      remaining: allocation.credits,
+      expiresAt: allocation.expiresAt
+    });
+  }
+  creditState.rewardedAdLots = lots.sort(compareRewardedAdLots);
+  syncRewardedAdAggregate(creditState);
+}
+
+function syncRewardedAdAggregate(creditState: CreditStateRecord): void {
+  const lots = (creditState.rewardedAdLots ?? []).filter((lot) => lot.remaining > 0).sort(compareRewardedAdLots);
+  creditState.rewardedAdLots = lots;
+  creditState.rewardedAdRemaining = lots.reduce((sum, lot) => sum + lot.remaining, 0);
+  creditState.rewardedAdExpiresAt = lots
+    .map((lot) => lot.expiresAt)
+    .filter((expiresAt): expiresAt is string => expiresAt !== null)
+    .sort()[0];
+}
+
+function compareRewardedAdLots(left: RewardedAdCreditLot, right: RewardedAdCreditLot): number {
+  if (left.expiresAt === right.expiresAt) {
+    return left.lotId.localeCompare(right.lotId);
+  }
+  if (left.expiresAt === null) {
+    return 1;
+  }
+  if (right.expiresAt === null) {
+    return -1;
+  }
+  return left.expiresAt.localeCompare(right.expiresAt);
+}
+
+function buildRewardedAdLotId(expiresAt: string | null): string {
+  return `rewarded-ad:${expiresAt ?? "legacy-undated"}`;
 }
 
 function expireRewardedAdCreditsIfNeeded(creditState: CreditStateRecord, nowIso: string): void {
-  const expiresAt = creditState.rewardedAdExpiresAt;
-  if (!expiresAt || (creditState.rewardedAdRemaining ?? 0) <= 0) {
-    creditState.rewardedAdRemaining = Math.max(0, creditState.rewardedAdRemaining ?? 0);
-    return;
-  }
-  const expiresMs = Date.parse(expiresAt);
-  const nowMs = Date.parse(nowIso);
-  if (Number.isFinite(expiresMs) && Number.isFinite(nowMs) && expiresMs <= nowMs) {
-    creditState.rewardedAdRemaining = 0;
-    creditState.rewardedAdExpiresAt = undefined;
-  }
+  normalizeRewardedAdLots(creditState, nowIso);
 }
 
 function nonExpiredRewardedAdRemaining(existing: CreditStateRecord | undefined, nowIso: string): number {
@@ -1183,12 +2873,45 @@ function buildCreditOperationKey(operationId: string): string {
   return `${CREDIT_OPERATION_PREFIX}${operationId}`;
 }
 
+function buildRequestExecutionKey(operationId: string): string {
+  return `${REQUEST_EXECUTION_PREFIX}${operationId}`;
+}
+
+function buildCreditReservationKey(operationId: string): string {
+  return `${CREDIT_RESERVATION_PREFIX}${operationId}`;
+}
+
+function buildCreditReservationDueKey(expiresAtMs: number, operationId: string): string {
+  return `${CREDIT_RESERVATION_DUE_PREFIX}${Math.floor(expiresAtMs).toString().padStart(13, "0")}:${operationId}`;
+}
+
+function parseCreditReservationDueKey(key: string): number {
+  if (!key.startsWith(CREDIT_RESERVATION_DUE_PREFIX)) {
+    return Number.NaN;
+  }
+  const start = CREDIT_RESERVATION_DUE_PREFIX.length;
+  return Number.parseInt(key.slice(start, start + 13), 10);
+}
+
+function operationIdFromCreditReservationDueKey(key: string): string | null {
+  const start = CREDIT_RESERVATION_DUE_PREFIX.length + 14;
+  return key.length > start ? key.slice(start) : null;
+}
+
 function buildMonthlyGrantKey(operationId: string): string {
   return `${MONTHLY_GRANT_PREFIX}${operationId}`;
 }
 
 function buildPurchaseTransactionKey(transactionId: string): string {
   return `${PURCHASE_TRANSACTION_PREFIX}${transactionId}`;
+}
+
+function buildPurchaseRefundOperationId(transactionId: string): string {
+  return `purchase-refund:${transactionId}`;
+}
+
+function buildPurchaseRefundReversalOperationId(transactionId: string): string {
+  return `purchase-refund-reversal:${transactionId}`;
 }
 
 function buildChatRefundKey(operationId: string): string {
@@ -1250,22 +2973,46 @@ function buildCreditOperation({
   creditsRequired,
   consumedMonthly,
   consumedRewardedAd,
+  consumedWelcome,
   consumedPurchased,
+  consumedMonthlyPeriodStart,
+  consumedMonthlyPeriodEnd,
+  consumedRewardedAdLots,
   originalOperationId,
+  purchaseDebtOffset,
+  refundAvailableRemoved,
+  refundDebtCreated,
+  refundDebtReleased,
+  refundDebtSettledRestored,
+  refundCreditsRestored,
   referenceType,
   referenceId,
   createdAt
 }: {
   operationId: string;
-  type: "consume" | "refund" | "monthly_grant" | "purchase_grant" | "eval_grant" | "admob_rewarded_grant";
+  type: CreditOperationRecord["type"];
   status: "applied" | "insufficient" | "noop";
   delta: number;
   creditState: CreditStateRecord;
   creditsRequired?: number;
   consumedMonthly?: number;
   consumedRewardedAd?: number;
+  consumedWelcome?: number;
   consumedPurchased?: number;
+  consumedMonthlyPeriodStart?: string;
+  consumedMonthlyPeriodEnd?: string;
+  consumedRewardedAdLots?: Array<{
+    lotId: string;
+    credits: number;
+    expiresAt: string | null;
+  }>;
   originalOperationId?: string;
+  purchaseDebtOffset?: number;
+  refundAvailableRemoved?: number;
+  refundDebtCreated?: number;
+  refundDebtReleased?: number;
+  refundDebtSettledRestored?: number;
+  refundCreditsRestored?: number;
   referenceType?: string;
   referenceId?: string;
   createdAt: string;
@@ -1283,10 +3030,76 @@ function buildCreditOperation({
     creditsRequired,
     consumedMonthly,
     consumedRewardedAd,
+    consumedWelcome,
     consumedPurchased,
+    consumedMonthlyPeriodStart,
+    consumedMonthlyPeriodEnd,
+    consumedRewardedAdLots,
     originalOperationId,
+    purchaseRefundDebtAfter: creditState.purchasedRefundDebt ?? 0,
+    purchaseDebtOffset,
+    refundAvailableRemoved,
+    refundDebtCreated,
+    refundDebtReleased,
+    refundDebtSettledRestored,
+    refundCreditsRestored,
     referenceType,
     referenceId,
     createdAt
   };
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function isPrincipalMigrationSnapshot(value: unknown): value is PrincipalMigrationSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const snapshot = value as Partial<PrincipalMigrationSnapshot>;
+  if (snapshot.version !== 1 || typeof snapshot.exportedAt !== "string" || snapshot.exportedAt.length > 128) return false;
+  if (snapshot.creditState !== null && (typeof snapshot.creditState !== "object" || Array.isArray(snapshot.creditState))) return false;
+  return isMigrationRecordEntries(snapshot.purchaseRecords, PURCHASE_TRANSACTION_PREFIX) &&
+    isMigrationRecordEntries(snapshot.monthlyGrantRecords, MONTHLY_GRANT_PREFIX) &&
+    isMigrationRecordEntries(snapshot.creditOperationRecords, CREDIT_OPERATION_PREFIX) &&
+    isMigrationRecordEntries(snapshot.requestExecutionRecords ?? [], REQUEST_EXECUTION_PREFIX) &&
+    isMigrationRecordEntries(snapshot.creditReservationRecords ?? [], CREDIT_RESERVATION_PREFIX);
+}
+
+function isMigrationRecordEntries(value: unknown, prefix: string): value is Array<[string, unknown]> {
+  if (!Array.isArray(value) || value.length > 2_000) return false;
+  const keys = new Set<string>();
+  for (const entry of value) {
+    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string" ||
+        !entry[0].startsWith(prefix) || entry[0].length > 512 || keys.has(entry[0])) {
+      return false;
+    }
+    keys.add(entry[0]);
+  }
+  return true;
+}
+
+function principalMigrationSnapshotEntries(snapshot: PrincipalMigrationSnapshot): Array<[string, unknown]> {
+  return [
+    ...snapshot.purchaseRecords,
+    ...snapshot.monthlyGrantRecords,
+    ...snapshot.creditOperationRecords,
+    ...(snapshot.requestExecutionRecords ?? []),
+    ...(snapshot.creditReservationRecords ?? [])
+  ];
+}
+
+function canonicalJsonValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

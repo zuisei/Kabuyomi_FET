@@ -1,4 +1,5 @@
 import { generateSummary } from "../../clients/gemini";
+import { resolveLlmProvider } from "../../clients/llm/provider";
 import type { Env, FilingCacheRecord } from "../../env";
 import { buildArchiveObjectKey } from "../history-store";
 import { logLlmUsage } from "../llm-usage";
@@ -11,7 +12,12 @@ export function enqueueSummaryUpgrade(
   env: Env,
   executionContext?: Pick<ExecutionContext, "waitUntil">
 ): void {
-  if (!executionContext || !env.GEMINI_API_KEY || record.summaryProvider !== "fallback" || record.contentMode === "metrics_only") {
+  if (
+    !executionContext ||
+    !isFilingSummaryUpgradeAvailable(env) ||
+    record.summaryProvider !== "fallback" ||
+    record.contentMode === "metrics_only"
+  ) {
     return;
   }
 
@@ -24,6 +30,10 @@ export function enqueueSummaryUpgrade(
       });
     })
   );
+}
+
+export function isFilingSummaryUpgradeAvailable(env: Env): boolean {
+  return resolveLlmProvider(env) === "gemini-legacy" && Boolean(env.GEMINI_API_KEY?.trim());
 }
 
 async function upgradeSummary(record: FilingCacheRecord, env: Env): Promise<void> {

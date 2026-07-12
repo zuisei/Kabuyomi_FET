@@ -1,4 +1,5 @@
 import type { SourceChunkRecord } from "../../env";
+import type { NumericAlignmentClaimBinding } from "./numeric-alignment";
 import { AppError } from "../errors";
 
 export type ChatSourceKind = "sec_filing" | "historical_filing" | "web_supplement";
@@ -31,6 +32,7 @@ export type FallbackUserReason =
   | "wrong_sector_wording"
   | "raw_english_detected"
   | "malformed_currency_detected"
+  | "numeric_alignment_failed"
   | "invalid_sources"
   | "company_not_resolved";
 
@@ -53,6 +55,7 @@ export interface ChatResponsePayload {
 }
 
 export interface ChatResponseDebug {
+  releaseCandidateId?: string | null;
   questionIntent?: string;
   rewrittenQuestion?: string;
   responsePath?: ChatResponsePath;
@@ -164,6 +167,23 @@ export interface ChatResponseDebug {
   originalAnswerBeforeLanguageGuardLength?: number | null;
   originalAnswerBeforeLanguageGuardSample?: string | null;
   sourceRepairLabels?: string[];
+  semanticQualityLabels?: string[];
+  numericAlignmentChecked?: boolean;
+  numericAlignmentInitialStatus?: "not_applicable" | "passed" | "repaired" | "blocked";
+  numericAlignmentStatus?: "not_applicable" | "passed" | "repaired" | "blocked";
+  numericAlignmentClaimCount?: number;
+  numericAlignmentVerifiedClaimCount?: number;
+  numericAlignmentRepairedClaimCount?: number;
+  numericAlignmentBlockedClaimCount?: number;
+  numericAlignmentLabels?: string[];
+  numericAlignmentMatchedFactIds?: string[];
+  numericAlignmentClaimBindings?: NumericAlignmentClaimBinding[];
+  numericAlignmentFinalSurfaceChecked?: boolean;
+  numericAlignmentFinalSurfaceStatus?: "not_applicable" | "passed" | "blocked";
+  numericAlignmentFinalSurfaceClaimCount?: number;
+  numericAlignmentFinalSurfaceVerifiedClaimCount?: number;
+  numericAlignmentFinalSurfaceBlockedClaimCount?: number;
+  numericAlignmentFinalSurfaceAnswerHash?: string;
   contextTokenBudget?: number | null;
   selectedSourceCount?: number | null;
   selectedSourceCharCount?: number | null;
@@ -210,7 +230,8 @@ export function buildSecFilingSource(source: SourceChunkRecord): ChatEvidenceSou
     sourceStrength: "filing_primary",
     sectionType: source.sectionType,
     sourceLabel: source.sourceLabel,
-    excerpt: source.text.slice(0, 220)
+    excerpt: source.text.slice(0, 220),
+    ...(source.sourceUrl ? { sourceUrl: source.sourceUrl } : {})
   };
 }
 

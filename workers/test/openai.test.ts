@@ -34,6 +34,14 @@ describe("OpenAI provider config", () => {
     expect(resolveLlmProvider({ LLM_PROVIDER: "gemini-legacy" } as never)).toBe("gemini-legacy");
   });
 
+  it("fails closed for an unsupported non-empty provider", () => {
+    expect(resolveLlmProvider({ LLM_PROVIDER: "anthropic" } as never)).toBe("disabled");
+    expect(isQuoteTranslationAvailable({
+      LLM_PROVIDER: "anthropic",
+      GEMINI_API_KEY: "must-not-be-used"
+    } as never)).toBe(false);
+  });
+
   it("selects OpenAI and resolves gpt-5-nano by default", () => {
     expect(resolveLlmProvider({ LLM_PROVIDER: "openai" } as never)).toBe("openai");
     expect(resolveOpenAIChatModel({} as never)).toBe(DEFAULT_OPENAI_CHAT_MODEL);
@@ -306,6 +314,8 @@ describe("OpenAI chat provider", () => {
       expect(body.prompt.variables.question_intent).toBe("mda_summary");
       expect(body.prompt.variables.filing_metadata_json).toContain("Test Corp");
       expect(body.prompt.variables.sources_json).toContain("S1");
+      expect(body.prompt.variables.verified_financial_facts_json).toBeUndefined();
+      expect(JSON.parse(body.prompt.variables.factual_pack_json)).toHaveProperty("verifiedFinancialFacts");
       expect(body.text.format.name).toBe("kabuyomi_chat_answer");
       expect(body.reasoning.effort).toBe("none");
       return new Response(
@@ -486,25 +496,28 @@ describe("OpenAI chat provider", () => {
     expect(response.geminiApiError?.geminiApiErrorKind).toBe("rate_limit");
   });
 
-  it("disabled provider does not call external APIs and returns a safe fallback", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+  it.each(["disabled", "unsupported-provider"])(
+    "%s provider does not call external APIs and returns a safe fallback",
+    async (provider) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
 
-    const response = await generateModelChatAnswer(
-      { LLM_PROVIDER: "disabled" } as never,
-      {
-        filing: makeFiling(),
-        question: "売上成長の要因は？",
-        questionIntent: "mda_summary"
-      }
-    );
+      const response = await generateModelChatAnswer(
+        { LLM_PROVIDER: provider } as never,
+        {
+          filing: makeFiling(),
+          question: "売上成長の要因は？",
+          questionIntent: "mda_summary"
+        }
+      );
 
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(response.modelProvider).toBe("disabled");
-    expect(response.usedRemoteModel).toBe(false);
-    expect(response.answer.length).toBeGreaterThan(0);
-    expect(response.geminiCalled).toBe(false);
-  });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(response.modelProvider).toBe("disabled");
+      expect(response.usedRemoteModel).toBe(false);
+      expect(response.answer.length).toBeGreaterThan(0);
+      expect(response.geminiCalled).toBe(false);
+    }
+  );
 });
 
 describe("OpenAI quote translation provider", () => {

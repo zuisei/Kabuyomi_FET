@@ -24,6 +24,7 @@ export async function ingestFiling(
   let primaryDocumentUrl: string;
   let companyWebsiteUrl: string | undefined;
   let html = "";
+  let supplementalEvidenceText = "";
   let extractedText = "";
   let extractedTokenCount = 0;
   let extractionDiagnostics = {
@@ -59,6 +60,7 @@ export async function ingestFiling(
     const fetched = prepared ? null : await fetchFilingAssets(filing, comparisonFiling, env);
     html = fetched?.html ?? "";
     primaryDocumentUrl = prepared?.primaryDocumentUrl ?? fetched!.primaryDocumentUrl;
+    supplementalEvidenceText = prepared?.supplementalEvidenceText ?? "";
     if (fetched) {
       companyWebsiteUrl = extractCompanyWebsiteUrl(html, {
         companyName: filing.companyName,
@@ -116,8 +118,11 @@ export async function ingestFiling(
 
   const filingKey = `${config.extractorVersion}:${filing.cik}:${filing.accessionNumber.replaceAll("-", "")}`;
   const sourceChunks = buildSourceChunks(filing, extractedText, metrics, {
-    revenueDriverSearchText: html ? normalizeFilingText(html) : extractedText,
-    marginDriverSearchText: html ? normalizeFilingText(html) : extractedText
+    revenueDriverSearchText: html
+      ? normalizeFilingText(html)
+      : [extractedText, supplementalEvidenceText].filter(Boolean).join("\n\n"),
+    marginDriverSearchText: html ? normalizeFilingText(html) : extractedText,
+    primaryDocumentUrl
   });
   const summaryEnv = summaryMode === "fallback_only" ? ({ ...env, GEMINI_API_KEY: undefined } as Env) : env;
   const summaryStartedAt = Date.now();
@@ -196,17 +201,40 @@ export function buildSourceChunks(
   filing: FilingReference,
   mdaText: string,
   metrics: MetricSnapshot[],
-  options: { revenueDriverSearchText?: string; marginDriverSearchText?: string } = {}
+  options: {
+    revenueDriverSearchText?: string;
+    marginDriverSearchText?: string;
+    primaryDocumentUrl?: string;
+  } = {}
 ): SourceChunkRecord[] {
   const chunks: SourceChunkRecord[] = [];
   const mdParagraphs = splitMdaParagraphs(mdaText);
   const revenueSearchText = options.revenueDriverSearchText ?? mdaText;
   const marginSearchText = options.marginDriverSearchText ?? revenueSearchText;
+  const segmentRevenueComparison = buildEnergySegmentRevenueComparison(revenueSearchText);
   const revenueDriverParagraphs = selectRevenueDriverParagraphs(revenueSearchText);
   const marginDriverParagraphs = selectMarginDriverParagraphs(marginSearchText);
+  const currentSourceUrl = options.primaryDocumentUrl ?? buildPrimaryDocumentUrl(filing);
 
   let mdOffset = 0;
   let sourceIndex = 1;
+
+  if (segmentRevenueComparison) {
+    chunks.push({
+      sourceId: `S${sourceIndex}`,
+      sectionType: "md_a",
+      sectionTitle: "Segment revenue comparison",
+      sourceLabel: `${filing.formType} Segment revenue comparison, filed ${filing.filedAt}`,
+      text: segmentRevenueComparison,
+      startOffset: 0,
+      endOffset: segmentRevenueComparison.length,
+      sourceUrl: currentSourceUrl,
+      filingAccessionNumber: filing.accessionNumber,
+      periodEnd: filing.periodOfReport,
+      sortOrder: sourceIndex
+    });
+    sourceIndex += 1;
+  }
 
   for (const paragraph of revenueDriverParagraphs) {
     const excerpt = paragraph.slice(0, 1_100);
@@ -289,6 +317,14 @@ export function buildSourceChunks(
   }
 
   for (const metric of metrics) {
+    const hasDistinctComparisonSource = metric.comparisonValue !== undefined && (
+      (Boolean(metric.comparisonSourceUrl) && metric.comparisonSourceUrl !== currentSourceUrl)
+      || (Boolean(metric.comparisonTagUsed) && metric.comparisonTagUsed !== metric.tagUsed)
+      || (
+        Boolean(metric.comparisonAccessionNumber)
+        && metric.comparisonAccessionNumber !== filing.accessionNumber
+      )
+    );
     chunks.push({
       sourceId: `S${sourceIndex}`,
       sectionType: "xbrl_metric",
@@ -296,17 +332,50 @@ export function buildSourceChunks(
       sourceLabel: `XBRL ${metricLabel(metric.logicalName)} (${metric.tagUsed})`,
       text: [
         `${metricLabel(metric.logicalName)}: ${metric.value} ${metric.unit}`,
-        metric.comparisonValue !== undefined ? `比較値: ${metric.comparisonValue}` : null,
-        metric.yoyPercent !== undefined ? `YoY: ${metric.yoyPercent.toFixed(1)}%` : null
+        !hasDistinctComparisonSource && metric.comparisonValue !== undefined
+          ? `比較値: ${metric.comparisonValue}`
+          : null,
+        !hasDistinctComparisonSource && metric.yoyPercent !== undefined
+          ? `YoY: ${metric.yoyPercent.toFixed(1)}%`
+          : null
       ]
         .filter(Boolean)
         .join(" / "),
       startOffset: 0,
       endOffset: 0,
       tagName: metric.tagUsed,
+      sourceUrl: currentSourceUrl,
+      filingAccessionNumber: filing.accessionNumber,
+      metricRole: "current",
+      periodEnd: metric.periodEnd,
       sortOrder: sourceIndex
     });
     sourceIndex += 1;
+
+    if (hasDistinctComparisonSource) {
+      const comparisonTag = metric.comparisonTagUsed ?? metric.tagUsed;
+      chunks.push({
+        sourceId: `S${sourceIndex}`,
+        sectionType: "xbrl_metric",
+        sectionTitle: `${metricLabel(metric.logicalName)}（比較期）`,
+        sourceLabel: `XBRL ${metricLabel(metric.logicalName)} comparison (${comparisonTag})`,
+        text: [
+          `${metricLabel(metric.logicalName)}（比較期）: ${metric.comparisonValue} ${metric.unit}`,
+          metric.comparisonPeriodEnd ? `period end: ${metric.comparisonPeriodEnd}` : null
+        ]
+          .filter(Boolean)
+          .join(" / "),
+        startOffset: 0,
+        endOffset: 0,
+        tagName: comparisonTag,
+        sourceUrl: metric.comparisonSourceUrl,
+        filingAccessionNumber: metric.comparisonAccessionNumber,
+        metricRole: "comparison",
+        periodEnd: metric.comparisonPeriodEnd,
+        sortOrder: sourceIndex
+      });
+      sourceIndex += 1;
+    }
   }
 
   return chunks;
@@ -331,16 +400,20 @@ export function hasPeriodSpecificRevenueDriverText(text: string): boolean {
   const hasRevenueMovement =
     /(total net revenue|net revenue|net sales|sales and revenues|sales|revenue|comparable sales).{0,220}(up|down|increase|decrease|growth|decline|higher|lower|compared|%)/i.test(normalized) ||
     /(up|down|increase|decrease|growth|decline|higher|lower).{0,220}(total net revenue|net revenue|net sales|sales and revenues|sales|revenue|comparable sales)/i.test(normalized);
-  const hasCausalLanguage = /(driven by|due to|primarily due to|reflecting|reflected|attributable to|resulted from|resulting in|because of|partially offset|offset by|as a result)/i.test(normalized);
+  const hasCausalLanguage = /(driven by|due to|primarily due to|reflect(?:ing|ed|s)|attributable to|resulted from|resulting in|because of|partially offset|offset by|as a result)/i.test(normalized);
   const hasSectorDriver =
     /(net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|card services|commodity prices?|crude demand|natural gas prices?|production volumes?|refining margins?|chemical margins?|upstream|downstream|vehicle deliveries|deliveries|automotive revenues?|automotive sales|vehicle pricing|average selling price|energy generation|energy storage|services and other|sales volume|price realization|backlog|dealer inventory|equipment to end users|end-market demand|comparable sales|traffic|average ticket|transactions?|ecommerce|e-commerce|membership|unit volumes|iphone|product launches?|geographic segments?|services net sales|services revenue|product net sales|product revenue)/i.test(normalized);
   const hasCurrentPeriodCue = /(202[0-9]|fiscal|year ended|three months ended|quarter|current year|compared with|compared to|前年比|前年同期比|%)/i.test(normalized);
+  const hasCategoryMovementTable =
+    /(?:products and services performance|sales by category|net sales by category)/i.test(normalized) &&
+    /(?:net sales|revenue)/i.test(normalized) &&
+    (normalized.match(/\$?\d[\d,.%]*/g)?.length ?? 0) >= 6;
   if (hasEnergyRevenueDriverTerm(normalized) && !hasCurrentPeriodEnergyResultContext(normalized)) {
     return false;
   }
 
   const hasStrongDriverExplanation = hasRevenueMovement && hasCausalLanguage && hasSectorDriver;
-  return (hasCurrentPeriodCue || hasStrongDriverExplanation) && ((hasRevenueMovement && (hasCausalLanguage || hasSectorDriver)) || (hasCausalLanguage && hasSectorDriver)) &&
+  return (hasCategoryMovementTable || ((hasCurrentPeriodCue || hasStrongDriverExplanation) && ((hasRevenueMovement && (hasCausalLanguage || hasSectorDriver)) || (hasCausalLanguage && hasSectorDriver)))) &&
     !/item 2\. properties|headquarters|office building|square footage|opened our first|began our first international|store footprint|corporate website|available information/i.test(lower);
 }
 
@@ -361,6 +434,85 @@ function selectRevenueDriverParagraphs(text: string): string[] {
     }
   }
   return selected;
+}
+
+function buildEnergySegmentRevenueComparison(text: string): string | null {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  const noteStart = collapsed.search(/Note\s+\d+\.\s+Disclosures about Segments and Related Information/i);
+  if (noteStart < 0) {
+    return null;
+  }
+
+  const segmentSection = collapsed.slice(noteStart, noteStart + 40_000);
+  if (!/Upstream\s+Energy Products\s+Chemical Products\s+Specialty Products/i.test(segmentSection)) {
+    return null;
+  }
+
+  const rows = [...segmentSection.matchAll(
+    /Three Months Ended\s+([A-Za-z]+\s+\d{1,2},\s+20\d{2})\s+Revenues and other income\s+Sales and other operating revenue\s+((?:\(?[\d,]+\)?\s+){8}\(?[\d,]+\)?)(?=\s|$)/gi
+  )]
+    .map((match) => ({
+      period: match[1] ?? "",
+      values: parseSegmentRevenueRow(match[2] ?? "")
+    }))
+    .filter((row): row is { period: string; values: number[] } => row.values !== null);
+  if (rows.length < 2) {
+    return null;
+  }
+
+  const ordered = rows
+    .map((row) => ({ ...row, year: Number(row.period.match(/20\d{2}/)?.[0] ?? 0) }))
+    .filter((row) => row.year > 0)
+    .sort((left, right) => right.year - left.year);
+  const current = ordered[0];
+  const comparison = ordered.find((row) => row.year < (current?.year ?? 0));
+  if (!current || !comparison) {
+    return null;
+  }
+
+  const segmentLabels = ["Upstream", "Energy Products", "Chemical Products", "Specialty Products"];
+  const changes = segmentLabels.map((label, index) => {
+    const currentValue = current.values[index * 2]! + current.values[index * 2 + 1]!;
+    const comparisonValue = comparison.values[index * 2]! + comparison.values[index * 2 + 1]!;
+    return {
+      label,
+      currentValue,
+      comparisonValue,
+      change: currentValue - comparisonValue
+    };
+  });
+  const largestIncrease = [...changes].sort((left, right) => right.change - left.change)[0];
+  const largestOffset = [...changes].sort((left, right) => left.change - right.change)[0];
+  if (!largestIncrease || largestIncrease.change <= 0 || !largestOffset || largestOffset.change >= 0) {
+    return null;
+  }
+
+  const otherSignals = changes
+    .filter((entry) => entry.label !== largestIncrease.label && entry.label !== largestOffset.label)
+    .map((entry) => {
+      const comparisonMagnitude = Math.max(1, Math.abs(entry.comparisonValue));
+      if (Math.abs(entry.change) / comparisonMagnitude < 0.001) {
+        return `${entry.label} was essentially flat`;
+      }
+      return `${entry.label} ${entry.change > 0 ? "increased" : "decreased"}`;
+    });
+
+  return [
+    `Reportable-segment sales and other operating revenue comparison for the three months ended ${current.period} versus ${comparison.period}:`,
+    `${largestIncrease.label} increased and was the largest positive segment change;`,
+    `${largestOffset.label} decreased and was the largest offset;`,
+    `${otherSignals.join("; ")}.`,
+    "This observed segment sales bridge does not establish price, production-volume, commodity-market, foreign-exchange, cost, or earnings causality."
+  ].join(" ");
+}
+
+function parseSegmentRevenueRow(raw: string): number[] | null {
+  const values = raw.trim().split(/\s+/).map((token) => {
+    const negative = /^\([\d,]+\)$/.test(token);
+    const parsed = Number(token.replace(/[(),]/g, ""));
+    return negative ? -parsed : parsed;
+  });
+  return values.length === 9 && values.every(Number.isFinite) ? values : null;
 }
 
 function splitRevenueSearchParagraphs(text: string): string[] {

@@ -241,6 +241,97 @@ describe("chat Q3-lite factual packs", () => {
     expect(prompt).toContain("Productivity and Business Processes");
     expect(prompt).toContain("Return valid sourceIds from the provided Sources list only.");
   });
+
+  it("keeps every required liquidity metric and typed fact ahead of a crowded narrative set", () => {
+    const filing = makeFactualPackFiling({
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      text: "Liquidity and capital resources remained adequate during the period."
+    }) as any;
+    const metricDefinitions = [
+      ["operatingCashFlow", "NetCashProvidedByUsedInOperatingActivities", 82_627_000_000],
+      ["cashAndCashEquivalents", "CashAndCashEquivalentsAtCarryingValue", 30_299_000_000],
+      ["currentDebt", "LongTermDebtCurrent", 12_000_000_000],
+      ["longTermDebt", "LongTermDebtNoncurrent", 78_000_000_000]
+    ] as const;
+    filing.metrics = metricDefinitions.map(([logicalName, tagUsed, value]) => ({
+      logicalName,
+      tagUsed,
+      value,
+      unit: "USD",
+      periodStart: logicalName === "operatingCashFlow" ? "2025-09-28" : undefined,
+      periodEnd: "2026-03-28",
+      periodKind: logicalName === "operatingCashFlow" ? "year_to_date" : "instant",
+      fiscalYear: 2026,
+      fiscalQuarter: "Q2",
+      comparisonValue: value * 0.9,
+      comparisonTagUsed: tagUsed,
+      comparisonPeriodStart: logicalName === "operatingCashFlow" ? "2024-09-29" : undefined,
+      comparisonPeriodEnd: "2025-03-29",
+      comparisonPeriodKind: logicalName === "operatingCashFlow" ? "year_to_date" : "instant",
+      comparisonFiscalYear: 2025,
+      comparisonFiscalQuarter: "Q2",
+      comparisonSourceUrl: "https://example.com/prior-filing",
+      comparisonAccessionNumber: "prior-accession"
+    }));
+    const metricSources = metricDefinitions.flatMap(([logicalName, tagUsed, value], index) => [
+      {
+        sourceId: `L${index + 1}C`,
+        sectionType: "xbrl_metric",
+        sectionTitle: logicalName,
+        sourceLabel: `XBRL ${logicalName}`,
+        text: `${logicalName}: ${value} USD`,
+        startOffset: 0,
+        endOffset: 0,
+        tagName: tagUsed,
+        metricRole: "current",
+        sourceUrl: filing.primaryDocumentUrl,
+        sortOrder: index * 2 + 1
+      },
+      {
+        sourceId: `L${index + 1}P`,
+        sectionType: "xbrl_metric",
+        sectionTitle: `${logicalName} comparison`,
+        sourceLabel: `XBRL ${logicalName} comparison`,
+        text: `${logicalName} comparison: ${value * 0.9} USD`,
+        startOffset: 0,
+        endOffset: 0,
+        tagName: tagUsed,
+        metricRole: "comparison",
+        sourceUrl: "https://example.com/prior-filing",
+        sortOrder: index * 2 + 2
+      }
+    ]);
+    const narratives = Array.from({ length: 8 }, (_, index) => ({
+      sourceId: `N${index + 1}`,
+      sectionType: "md_a",
+      sectionTitle: "Liquidity and Capital Resources",
+      sourceLabel: `10-Q liquidity discussion ${index + 1}`,
+      text: `Liquidity discussion ${index + 1}: cash, debt maturities, operating cash flow, and working capital remained material to funding requirements during 2026.`,
+      startOffset: 0,
+      endOffset: 150,
+      sortOrder: 20 + index
+    }));
+    filing.sourceChunks = [...metricSources, ...narratives];
+    filing.mdaText = narratives.map((source) => source.text).join("\n\n");
+
+    const contextPack = buildChatContextPack(filing, "liquidity_debt");
+    const selectedTags = contextPack.sourceChunks
+      .filter((source) => source.sectionType === "xbrl_metric")
+      .map((source) => source.tagName);
+    const factLabels = contextPack.verifiedFacts.map((fact) => fact.semanticLabel);
+
+    expect(selectedTags).toEqual(expect.arrayContaining(metricDefinitions.map(([, tag]) => tag)));
+    expect(contextPack.sourceChunks.filter((source) => source.sectionType === "xbrl_metric")).toHaveLength(8);
+    expect(contextPack.sourceChunks.filter((source) => source.sectionType === "md_a").length).toBeGreaterThanOrEqual(4);
+    expect(factLabels).toEqual(expect.arrayContaining(metricDefinitions.map(([label]) => label)));
+
+    const compactPack = buildChatContextPack(filing, "liquidity_debt", { mode: "compact" });
+    expect(compactPack.sourceChunks.filter((source) => source.sectionType === "xbrl_metric")).toHaveLength(8);
+    expect(compactPack.verifiedFacts.filter((fact) => fact.role === "current")).toEqual(
+      expect.arrayContaining(metricDefinitions.map(([semanticLabel]) => expect.objectContaining({ semanticLabel })))
+    );
+  });
 });
 
 function makeFactualPackFiling({

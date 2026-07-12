@@ -1,0 +1,15 @@
+{
+  "version": "quality-gate-v2",
+  "fixed": {
+    "minimalCore60": { "rows": 60, "description": "six templates across ten fixed multisector companies" },
+    "standardRelease150": { "rows": 150, "description": "fifteen companies across ten release templates" },
+    "regression": { "source": "regression/failed-cases.jsonl" },
+    "oracleContext": { "retrieval": "gold_source_snapshot" }
+  },
+  "rotating": {
+    "sectorRotation": true,
+    "unseenTickerRequired": true,
+    "supportedFormsOnly": ["10-K", "10-Q"]
+  },
+  "judge": { "version": "claim-source-judge-v1", "temperature": 0, "externalKnowledge": false }
+}

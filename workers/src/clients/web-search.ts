@@ -1,5 +1,5 @@
 import type { Env, FilingCacheRecord } from "../env";
-import { logEvent } from "../lib/logging";
+import { hashForLog, logEvent } from "../lib/logging";
 
 const SEARCH_TIMEOUT_MS = 6_000;
 const SEARCH_USER_AGENT =
@@ -42,7 +42,10 @@ export async function findTrustedWebSupplement(
       .slice(0, 4);
 
     if (candidates.length === 0) {
-      logEvent("web_supplement_empty", { query });
+      logEvent("web_supplement_empty", {
+        queryHash: hashForLog(query),
+        queryLength: query.length
+      });
       continue;
     }
 
@@ -50,7 +53,8 @@ export async function findTrustedWebSupplement(
       const enriched = await enrichResult(candidate, env);
       if (enriched.snippet) {
         logEvent("web_supplement_found", {
-          query,
+          queryHash: hashForLog(query),
+          queryLength: query.length,
           publisher: enriched.publisher,
           hostname: safeHostname(enriched.url)
         });
@@ -215,14 +219,23 @@ async function fetchText(url: string, env: Env, eventName: string): Promise<stri
     });
 
     if (!response.ok) {
-      logEvent(eventName, { url, status: response.status, outcome: "http_error" });
+      logEvent(eventName, {
+        hostname: safeHostname(url),
+        status: response.status,
+        outcome: "http_error"
+      });
       return null;
     }
 
     return await response.text();
   } catch (error) {
     const reason = error instanceof Error ? error.name : "unknown";
-    logEvent(eventName, { url, outcome: "failed", reason, hasGemini: Boolean(env.GEMINI_API_KEY) });
+    logEvent(eventName, {
+      hostname: safeHostname(url),
+      outcome: "failed",
+      reason,
+      hasGemini: Boolean(env.GEMINI_API_KEY)
+    });
     return null;
   } finally {
     clearTimeout(timeout);

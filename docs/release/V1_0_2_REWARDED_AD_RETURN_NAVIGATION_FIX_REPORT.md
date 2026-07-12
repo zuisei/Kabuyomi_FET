@@ -1,5 +1,7 @@
 # v1.0.2 Rewarded Ad Return Navigation Fix Report
 
+> **Historical release evidence — not current shipping authority.** This point-in-time report preserves prior findings and may describe deployments, capabilities, or release decisions that have since changed. Use `CURRENT_SHIPPING_TRUTH.md`, `FEATURE_PARITY_COMPATIBILITY_REPORT.md`, `RELEASE_GATE_STATE.json`, and `FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md` for current decisions.
+
 ## 1. Executive summary
 
 This change fixes the rewarded-ad smoke issue where a release build could return to the Home / company root surface after an ad creative opened an App Store product page scene, even though the reward grant itself succeeded.

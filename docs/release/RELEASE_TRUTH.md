@@ -1,4 +1,8 @@
-# Kabuyomi v1 Release Truth
+# Kabuyomi v1 Release Truth (Historical)
+
+> **Historical release evidence — not current shipping authority.** This point-in-time report preserves prior findings and may describe deployments, capabilities, or release decisions that have since changed. Use `CURRENT_SHIPPING_TRUTH.md`, `FEATURE_PARITY_COMPATIBILITY_REPORT.md`, `RELEASE_GATE_STATE.json`, and `FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md` for current decisions.
+
+> Superseded. Do not use this file for current shipping decisions. See `CURRENT_SHIPPING_TRUTH.md` and `shared/product-catalog.json`.
 
 Last updated: 2026-05-10 JST
 

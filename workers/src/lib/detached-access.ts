@@ -1,4 +1,5 @@
 import type { Env } from "../env";
+import { isDedicatedTestEnvironment } from "./test-automation-access";
 
 export type DetachedAccessMode = "dev_unlimited";
 
@@ -14,6 +15,11 @@ const DEV_UNLIMITED_MODE: DetachedAccessMode = "dev_unlimited";
 const DETACHED_ACCESS_LIMIT = Number.MAX_SAFE_INTEGER;
 
 export async function loadDetachedAccessFromRequest(request: Request, env: Env): Promise<DetachedAccessGrant | null> {
+  // Legacy detached access is retained for local/test compatibility only. A
+  // production deployment must never be able to enable it with configuration.
+  if (!isDedicatedTestEnvironment(env)) {
+    return null;
+  }
   const requestedMode = request.headers.get(DETACHED_ACCESS_HEADER)?.trim().toLowerCase();
   if (requestedMode !== DEV_UNLIMITED_MODE) {
     return null;

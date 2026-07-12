@@ -6,9 +6,8 @@ export function isFragmentaryEvidenceText(text: string): boolean {
   return (
     normalized.length < 30 ||
     /\.{3}|…/.test(normalized) ||
-    /^[a-z][a-z]?[;,:]\s*•/.test(normalized) ||
-    /^\W*[a-z]{1,3}\b/.test(normalized) ||
-    /•\s*[A-Za-z]/.test(normalized)
+    /^[a-z][a-z]?[;,:]\s*•/i.test(normalized) ||
+    /^\W*[a-z]{1,3}[;,:](?:\s|$)/i.test(normalized)
   );
 }
 
@@ -72,6 +71,10 @@ export function isDriverLikeEvidence(
     return strongMarginCausalEvidence || strongDriverCausalEvidence;
   }
 
+  if (intent === "revenue_driver" || intent === "driver_durability_followup") {
+    return isRevenueDriverEvidence(normalized, intent);
+  }
+
   const sectorTopic = sectorPattern(sector).test(normalized);
 
   if ((causal.test(normalized) && financialTopic.test(normalized)) || (sectorTopic && causal.test(normalized))) {
@@ -82,6 +85,31 @@ export function isDriverLikeEvidence(
   // A complete MD&A paragraph with sector KPI + revenue/margin topic is useful
   // context even when the causal verb is in an adjacent sentence.
   return sectorTopic && normalized.length >= 80;
+}
+
+function isRevenueDriverEvidence(text: string, intent: HardFinancialIntent): boolean {
+  const normalized = normalize(text);
+  const causal = /(?:primarily due to|driven by|attributable to|resulted from|because|reflect(?:ed|ing|s)|as a result of|increased due to|decreased due to|positively contributed|partially offset|resulting in)/i;
+  const revenueTopic = /(?:total net revenue|total revenues?|net sales|sales and other operating revenue|segment revenue|product revenue|services? revenue|cloud revenue|subscription(?:s)? revenue|comparable sales|unit case volume|net interest income|\bnii\b|noninterest (?:income|revenue)|\bnir\b|markets revenue|sales volume|price realization|average selling prices?|bit shipments?|customer usage|unit sales)/i;
+  const sectorTopic = /(commodity|crude oil|natural gas|production volume|upstream|refining|sales volume|price realization|orders|backlog|comparable sales|traffic|ticket|ecommerce|membership|deliveries|automotive|cloud|subscription|revenue per user|seats?|copilot|unit case|demand|google services|google cloud|youtube|aws)/i;
+  const relationship = revenueTopic.test(normalized) && causal.test(normalized);
+  const bankRevenueBridge =
+    /(?:net interest income|\bnii\b|noninterest (?:income|revenue)|\bnir\b)[\s\S]{0,180}(?:up|increased|higher)[\s\S]{0,220}(?:driven by|reflecting|primarily due to)/i.test(normalized);
+  const revenueContribution =
+    /(?:increase in|growth in)[\s\S]{0,120}(?:Google Services|Google Cloud|subscriptions?|paid subscriptions?|advertising|AWS|North America)[\s\S]{0,100}(?:revenue|sales)|(?:ecommerce|e-commerce) net sales positively contributed/i.test(normalized);
+  const categoryMovementTable =
+    /Products and Services Performance[\s\S]{0,220}net sales by category[\s\S]{0,300}\biPhone\b/i.test(normalized);
+  const durabilityBridge = intent === "driver_durability_followup" &&
+    revenueTopic.test(normalized) &&
+    /(?:continue|continued|recurring|long-term|customer usage|unit sales|average selling prices?|bit shipments?|membership|member engagement|paid subscriptions?|installed base|lower rates?|revolving balances?|deposit balances?|foreign exchange)/i.test(normalized);
+  const nonRevenueCause =
+    /(?:cash (?:provided|used) by operating activities|operating cash flows?|technology and infrastructure costs?|fulfillment costs?|cost of revenues?|operating expenses?|depreciation|amortization|net income|earnings driver analysis|increased earnings|decreased earnings)[\s\S]{0,220}(?:primarily due to|driven by|reflecting)/i.test(normalized);
+
+  if (nonRevenueCause && !relationship && !bankRevenueBridge && !revenueContribution) {
+    return false;
+  }
+  return relationship || bankRevenueBridge || revenueContribution || categoryMovementTable || durabilityBridge ||
+    (sectorTopic.test(normalized) && normalized.length >= 80);
 }
 
 export function isUnsafeDriverEvidence(

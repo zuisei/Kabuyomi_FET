@@ -3,39 +3,57 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "node ./scripts/deploy-worker.mjs production",
+    "deploy:check": "node ./scripts/deploy-worker.mjs production --check-only",
+    "dryrun": "node ./scripts/deploy-worker.mjs production --dry-run",
+    "release:candidate": "node ./scripts/release-candidate.mjs",
     "check:test-config": "node ./scripts/assert-test-config-ready.mjs",
-    "deploy:test": "npm run check:test-config && wrangler deploy --config wrangler.test.toml",
-    "dryrun:test": "npm run check:test-config && wrangler deploy --config wrangler.test.toml --dry-run",
+    "deploy:test": "npm run check:test-config && node ./scripts/deploy-worker.mjs test",
+    "deploy:test:check": "npm run check:test-config && node ./scripts/deploy-worker.mjs test --check-only",
+    "dryrun:test": "npm run check:test-config && node ./scripts/deploy-worker.mjs test --dry-run",
     "d1:migrate:test": "npm run check:test-config && wrangler d1 migrations apply DB --config wrangler.test.toml --remote",
     "secrets:test:setup": "node ./scripts/setup-test-secrets.mjs",
     "testbench:live-full-smoke": "node ./scripts/run-test-full-smoke.mjs",
     "smoke:test": "KABUYOMI_SMOKE_BASE_URL=${KABUYOMI_TEST_BASE_URL:-https://kabuyomi-api-test.dznqjmctk7.workers.dev} node ./smoke/staging-worker.js",
+    "smoke:test:identity": "KABUYOMI_SMOKE_BASE_URL=${KABUYOMI_TEST_BASE_URL:-https://kabuyomi-api-test.dznqjmctk7.workers.dev} node ./smoke/test-worker-identity.mjs",
+    "smoke:test:release": "KABUYOMI_SMOKE_BASE_URL=${KABUYOMI_TEST_BASE_URL:-https://kabuyomi-api-test.dznqjmctk7.workers.dev} node ./smoke/test-worker-release.mjs",
+    "smoke:production:release": "KABUYOMI_SMOKE_BASE_URL=${KABUYOMI_PRODUCTION_BASE_URL:-https://kabuyomi-api.dznqjmctk7.workers.dev} node ./smoke/production-worker-release.mjs",
     "cleanup:filings": "node ./scripts/cleanup-filings.mjs",
     "eval:chat:pilot": "node ./scripts/run-chat-eval-pilot.mjs",
     "eval:chat:validate": "node ./scripts/validate-chat-eval.mjs",
     "eval:chat:validate-run": "node ./scripts/validate-chat-run.mjs",
     "report:paid-credit-liability": "node ./scripts/paid-credit-liability.mjs",
+    "remote-config:inspect": "node ./scripts/remote-config-lifecycle.mjs inspect",
+    "remote-config:refresh-reviewed": "node ./scripts/remote-config-lifecycle.mjs refresh-reviewed",
+    "migrations:validate": "node ./scripts/validate-d1-migrations.mjs",
     "testbench:validate": "node ./testbench/scripts/validate-testbench.mjs",
     "testbench:run": "npm run testbench:validate && node ./testbench/scripts/run-benchmark.mjs",
     "testbench:summarize": "node ./testbench/scripts/summarize-runs.mjs",
     "testbench:diff": "node ./testbench/scripts/diff-runs.mjs",
     "testbench:gate": "node ./testbench/scripts/quality-gate.mjs",
+    "testbench:review-packet": "node ./testbench/scripts/human-review-packet.mjs",
+    "testbench:review-gate": "node ./testbench/scripts/human-review-gate.mjs",
+    "testbench:review-seal": "node ./testbench/scripts/human-review-gate.mjs --seal",
     "testbench:full-smoke": "node ./testbench/scripts/run-full-smoke.mjs",
     "smoke:staging": "node ./smoke/staging-worker.js",
+    "test:quality-gate": "vitest run test/benchmark-quality.test.ts test/human-review-gate.test.ts test/testbench-report.test.ts test/testbench-run-metadata.test.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@apple/app-store-server-library": "3.1.0",
     "linkedom": "^0.18.12",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260405.0",
+    "@cloudflare/workers-types": "^5.20260711.1",
     "typescript": "^5.8.3",
-    "vitest": "^3.2.4",
-    "wrangler": "^4.12.0"
+    "vitest": "^3.2.7",
+    "wrangler": "^4.110.0"
   }
 }

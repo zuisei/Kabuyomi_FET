@@ -193,7 +193,7 @@ export function buildJapaneseLanguageGuardRepair({
   }
 
   const signalText = durabilitySignals.length > 0
-    ? `提出資料には ${joinItems(durabilitySignals.slice(0, 3))} も示されていますが、これだけで継続性は断定しません。`
+    ? `提出資料には ${joinItems(durabilitySignals.slice(0, 3))} も示されていますが、これだけで継続性は断定できません。`
     : "ただし、提出資料だけでは継続性は断定できません。";
   const indicatorText = nextIndicators.length > 0
     ? `次に見るべき指標は、${joinItems(nextIndicators.slice(0, 4))} です。`
@@ -287,6 +287,7 @@ function hasBadHybridEnglish(maskedAnswer: string): boolean {
     /higher [a-z]/i,
     /higher\s+[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]+(?:\s+[a-z]+)?/iu,
     /partially offset/i,
+    /\balso\b/i,
     /unfavorable/i,
     /favorable/i,
     /comparable sales discussion/i,
@@ -390,9 +391,12 @@ function inferDriverLabels(text: string): string[] {
     }
   };
 
-  add("決済ボリューム", /payments volume|processed transactions|cross-border volume|決済/);
-  add("Advisory・その他サービス", /advisory|other services/);
-  add("販売数量", /\bsales\s+volume|production volumes?|unit volume|(?<!payments )\bvolume\b|数量/);
+  add("決済額・処理件数・国際取引量", /payments volume|processed transactions|cross-border volume|決済/);
+  add("アドバイザリー・付加価値サービス", /advisory|other services/);
+  add("検索量", /search volume/);
+  add("ユーザー単価", /revenue per user/);
+  add("利用席数", /seats? (?:grew|growth|increased)|seat growth/);
+  add("販売数量", /\bsales\s+volume|production volumes?|unit volumes?|数量/);
   add("価格実現", /price realization|pricing|price\/mix|price mix|価格/);
   add("平均販売価格", /average selling prices?|asp\b/);
   add("出荷量", /bit shipments?|shipments?/);
@@ -401,24 +405,44 @@ function inferDriverLabels(text: string): string[] {
   add("DRAM・NAND需要", /dram|nand/);
   add("需要", /demand|需要/);
   add("エンドユーザー向け機械販売", /equipment to end users?|end users?|machine sales/);
-  add("backlog", /backlog/);
-  add("dealer inventory", /dealer inventory|dealer inventories/);
-  add("net interest income", /net interest income|nii/);
-  add("noninterest income", /noninterest income|investment banking|markets revenue|card services/);
+  add("受注残", /backlog/);
+  add("販売店在庫", /dealer inventory|dealer inventories/);
+  add("純利息収入", /net interest income|\bnii\b/);
+  add("非利息収入・投資銀行・市場業務", /noninterest (?:income|revenue)|investment banking|markets revenue|card services/);
   add("比較可能売上", /comparable sales|comp sales|same-store sales/);
-  add("traffic", /traffic/);
-  add("ticket", /ticket/);
-  add("eCommerce", /ecommerce|e-commerce/);
-  add("membership", /membership/);
-  add("commodity price", /commodity prices?|crude|oil price|natural gas/);
-  add("production volume", /production volumes?|liquids production|gas production/);
-  add("refining margin", /refin(?:ing|ery) margins?|downstream margins?/);
-  add("services revenue", /services revenue|recurring revenue|installed base/);
-  add("energy revenue", /energy generation|energy storage|energy revenue/);
-  add("deliveries", /deliveries|vehicle deliveries/);
-  add("automotive gross margin", /automotive gross margin/);
+  add("客数", /\btraffic\b(?!\s+acquisition)/);
+  add("客単価", /average ticket|\bticket\b/);
+  add("EC売上", /ecommerce|e-commerce/);
+  add("会員エンゲージメント", /membership|member engagement/);
+  add("資源価格", /commodity prices?|crude|oil price|natural gas/);
+  add("生産量", /production volumes?|liquids production|gas production/);
+  add("サービス売上", /services revenue|recurring revenue|installed base/);
+  add("エネルギー売上", /energy generation|energy storage|energy revenue/);
+  add("納車台数", /deliveries|vehicle deliveries/);
+  add("自動車粗利益率", /automotive gross margin/);
+  add("データセンター向けAI製品", /data center products|accelerated computing|ai solutions/);
+  add("Blackwell製品", /blackwell/);
+  add("Googleサービス", /google services/);
+  add("Google Cloud", /google cloud/);
+  add("検索広告", /google search|search advertising/);
+  add("YouTube広告", /youtube ads/);
+  add("為替影響", /foreign exchange|foreign currency/);
+  add("AWS顧客利用量", /aws[\s\S]{0,160}customer usage|customer usage/);
+  add("中古車・整備・充電・保険サービス", /used vehicle sales|maintenance services|supercharging|automotive insurance/);
+  add("Mounjaro・Zepbound需要", /mounjaro|zepbound/);
+  add("実現価格低下による相殺", /lower realized prices/);
+  add("旅客運賃・幅広い需要", /higher pricing|passenger revenue|broad based demand/);
+  add("アジア太平洋の飲料販売数量", /unit case volume in asia pacific/);
 
-  return [...new Set(labels)];
+  const unique = [...new Set(labels)];
+  if (
+    unique.includes("決済額・処理件数・国際取引量") ||
+    unique.includes("純利息収入") ||
+    unique.includes("非利息収入・投資銀行・市場業務")
+  ) {
+    return unique.filter((label) => label !== "販売数量");
+  }
+  return unique;
 }
 
 function inferDurabilitySignals(text: string): string[] {
@@ -431,12 +455,12 @@ function inferDurabilitySignals(text: string): string[] {
   };
 
   add("次期の販売数量や価格実現への見通し", /\bexpect(?:s|ed)?\b.*\b(?:sales|revenues?|volume|price realization)|stronger sales and revenues/);
-  add("backlogや受注の確認材料", /backlog|orders?/);
-  add("dealer inventoryの変化", /dealer inventory|dealer inventories/);
-  add("recurring revenueやサービス需要", /recurring revenue|services revenue|installed base/);
-  add("membershipやeCommerceの継続性", /membership|ecommerce|e-commerce/);
+  add("受注残や受注の確認材料", /\bbacklog\b|\borders?\b/);
+  add("販売店在庫の変化", /dealer inventory|dealer inventories/);
+  add("継続収益やサービス需要", /recurring revenue|services revenue|installed base/);
+  add("会員事業やECの継続性", /membership|ecommerce|e-commerce/);
   add("金利や預金環境への感応度", /interest rate|deposit|net interest income|nii/);
-  add("commodity priceやmarginへの感応度", /commodity prices?|crude|natural gas|refin(?:ing|ery) margins?/);
+  add("資源価格への感応度", /commodity prices?|crude|natural gas/);
 
   return [...new Set(signals)];
 }
@@ -444,16 +468,19 @@ function inferDurabilitySignals(text: string): string[] {
 function inferNextIndicators(text: string, driverLabels: string[]): string[] {
   const lower = text.toLowerCase();
   const indicators = [...driverLabels];
+  const financialOrPaymentDrivers = driverLabels.some((label) =>
+    /決済額・処理件数・国際取引量|純利息収入|非利息収入・投資銀行・市場業務|アドバイザリー・付加価値サービス/u.test(label)
+  );
   if (/dealer inventory|dealer inventories/.test(lower)) {
-    indicators.push("dealer inventory");
+    indicators.push("販売店在庫");
   }
   if (/backlog/.test(lower)) {
-    indicators.push("backlog");
+    indicators.push("受注残");
   }
   if (/price realization|pricing/.test(lower)) {
     indicators.push("価格実現");
   }
-  if (/sales volume|production volume|volume/.test(lower)) {
+  if (!financialOrPaymentDrivers && /sales volume|production volume|volume/.test(lower)) {
     indicators.push("販売数量");
   }
   return [...new Set(indicators)];

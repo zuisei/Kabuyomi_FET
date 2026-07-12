@@ -19,8 +19,15 @@ export function selectIntentMetrics(metrics: MetricSnapshot[], questionIntent: Q
       break;
     case "cash_flow":
       logicalNames.add("operatingCashFlow");
+      logicalNames.add("cashAndCashEquivalents");
       logicalNames.add("revenue");
       logicalNames.add("netIncome");
+      break;
+    case "liquidity_debt":
+      logicalNames.add("cashAndCashEquivalents");
+      logicalNames.add("currentDebt");
+      logicalNames.add("longTermDebt");
+      logicalNames.add("operatingCashFlow");
       break;
     case "risk_factors":
       break;
@@ -41,6 +48,15 @@ export function selectIntentMetrics(metrics: MetricSnapshot[], questionIntent: Q
 }
 
 export function findMetricSourceChunk(sourceChunks: SourceChunkRecord[], metric: MetricSnapshot): SourceChunkRecord | undefined {
-  return sourceChunks.find((chunk) => chunk.sectionType === "xbrl_metric" && chunk.tagName === metric.tagUsed);
+  return findMetricSourceChunks(sourceChunks, metric)[0];
 }
 
+export function findMetricSourceChunks(sourceChunks: SourceChunkRecord[], metric: MetricSnapshot): SourceChunkRecord[] {
+  return sourceChunks.filter((chunk) => {
+    if (chunk.sectionType !== "xbrl_metric") return false;
+    if (chunk.metricRole === "comparison") {
+      return chunk.tagName === (metric.comparisonTagUsed ?? metric.tagUsed);
+    }
+    return chunk.tagName === metric.tagUsed;
+  });
+}

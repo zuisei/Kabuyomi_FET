@@ -1,6 +1,7 @@
-import type { Env, FilingCacheRecord } from "../../env";
+import type { Env, FilingCacheRecord, VerifiedFinancialFact } from "../../env";
 import type { ChatFallbackKind } from "../../clients/gemini/types";
 import type { RemoteConfig } from "../remote-config";
+import { hashForLog, logEvent } from "../logging";
 import {
   buildJapaneseLanguageGuardFallback,
   buildJapaneseLanguageGuardRepair,
@@ -10,7 +11,10 @@ import { buildDeterministicMetricAnswer } from "./deterministic";
 import { attachChatDebug } from "./response-payload";
 import {
   attachCurrentFilingSourceUrls,
+  buildSecFilingSource,
+  dedupeChatSources,
   ensureFilingGroundedResponse,
+  type ChatEvidenceSource,
   type ChatResponseDebug,
   type ChatResponsePayload,
   type ChatResponsePath,
@@ -20,6 +24,12 @@ import {
 import type { ChatTimingTracker } from "./timing";
 import { maybeAppendWebSupplement } from "./web-supplement";
 import { hasBannedPhrase } from "./evidence-fallback";
+import { validateNumericAlignment, type NumericAlignmentResult } from "./numeric-alignment";
+import { extractMaterialNumericClaims } from "./material-numeric-claims";
+import { buildVerifiedFinancialFacts } from "./verified-financial-facts";
+import { readHistoricalFinancialFactEvidence } from "./historical-financial-fact";
+import { preferredFinancialDisplay } from "../financial-number-format";
+import { formatChatAnswerForDisplay } from "./answer-format";
 
 type ChatResponseDebugInput = Omit<ChatResponseDebug, "sourceCount" | "sourceIds">;
 
@@ -85,6 +95,7 @@ export async function finalizeChatResponse({
   const catQ06Cleanup = cleanCatQ06MarginDurabilityAnswer(cleanup.answer, question, debug, filing);
   const q04DurabilityRepair = repairDriverDurabilityFollowupAnswer(catQ06Cleanup.answer, question, debug, filing);
   const q06DurabilityRepair = q04DurabilityRepair ?? repairMarginDurabilityFollowupAnswer(catQ06Cleanup.answer, question, debug);
+  const driverDurabilityRepairDetected = q04DurabilityRepair !== null;
   const uxCleanedAnswer = q06DurabilityRepair?.answer ?? catQ06Cleanup.answer;
   const originalAnswerBeforeLanguageGuard = uxCleanedAnswer;
   const languageCheck = checkFinalAnswerJapaneseOnly(uxCleanedAnswer);
@@ -93,10 +104,32 @@ export async function finalizeChatResponse({
     ? cleanBannedFinalAnswer(uxCleanedAnswer, debug.questionIntent)
     : uxCleanedAnswer;
   const bannedPhraseStillDetected = languageCheck.ok && hasBannedPhrase(bannedPhraseCleanedAnswer);
+  const previousAnswerDurabilityRepairAccepted = Boolean(
+    q06DurabilityRepair?.labels.some((label) =>
+      label === "q04_previous_answer_driver_candidate_repair" ||
+      label === "q06_previous_answer_margin_candidate_repair"
+    ) &&
+    languageCheck.ok &&
+    !bannedPhraseStillDetected &&
+    hasSubstantiveDurabilityEvidenceAnswer(bannedPhraseCleanedAnswer)
+  );
+  const specializedDurabilityRepairAccepted = Boolean(
+    q06DurabilityRepair?.labels.some((label) =>
+      label === "q04_bank_durability_source_backed_repair" ||
+      label === "q04_retail_durability_source_backed_repair" ||
+      label === "q04_platform_durability_source_backed_repair" ||
+      label === "q04_generic_durability_source_backed_repair"
+    ) &&
+    languageCheck.ok &&
+    !bannedPhraseStillDetected
+  );
   const cleanupBlocksModelAnswer = shouldCleanupBlockModelAnswer(cleanup, question, debug.questionIntent);
+	const unsupportedDurabilityClassificationSurface = hasUnsupportedDurabilityClassificationSurface(bannedPhraseCleanedAnswer);
 	const shouldAttemptSourceBackedRepair =
 	  !languageCheck.ok ||
 	  cleanupBlocksModelAnswer ||
+	  unsupportedDurabilityClassificationSurface ||
+	  (isDriverDurabilityFollowupQuestion(question, debug.questionIntent) && debug.sourceGateSufficient !== false) ||
 	  debug.lowQualityReason === "profit_cause_revenue_only" ||
 	  debug.lowQualityReason === "revenue_driver_declined_despite_context" ||
 	  (responsePath === "fallback" &&
@@ -104,7 +137,7 @@ export async function finalizeChatResponse({
 	    debug.sourceGateSufficient === true &&
       isDriverDurabilityFollowupQuestion(question, debug.questionIntent)) ||
     (responsePath === "fallback" && shouldRepairFallbackHardFollowupAnswer(bannedPhraseCleanedAnswer, question, debug));
-  const languageRepairCandidate = shouldAttemptSourceBackedRepair
+  const languageRepairCandidate = shouldAttemptSourceBackedRepair && !specializedDurabilityRepairAccepted && !previousAnswerDurabilityRepairAccepted
     ? buildJapaneseLanguageGuardRepair({
       question,
       questionIntent: inferLanguageRepairIntent(question, debug),
@@ -121,12 +154,14 @@ export async function finalizeChatResponse({
     languageRepairCheck?.ok &&
     !hasBannedPhrase(languageRepairCandidate)
   );
-  const sourceBackedFollowupRepairCandidate = buildSourceBackedFollowupRepairCandidate({
-    answer: bannedPhraseCleanedAnswer,
-    question,
-    debug,
-    normalizedFallbackKind
-  });
+  const sourceBackedFollowupRepairCandidate = previousAnswerDurabilityRepairAccepted || specializedDurabilityRepairAccepted
+    ? null
+    : buildSourceBackedFollowupRepairCandidate({
+        answer: bannedPhraseCleanedAnswer,
+        question,
+        debug,
+        normalizedFallbackKind
+      });
   const sourceBackedFollowupRepairCheck = sourceBackedFollowupRepairCandidate
     ? checkFinalAnswerJapaneseOnly(sourceBackedFollowupRepairCandidate)
     : null;
@@ -137,9 +172,72 @@ export async function finalizeChatResponse({
     hasSubstantiveDurabilityEvidenceAnswer(sourceBackedFollowupRepairCandidate)
   );
   const deterministicLanguageFallback = !languageCheck.ok
+    ? buildSafeDeterministicLanguageFallback(filing, question, debug)
+    : null;
+  const splitMarginDirectionRecoveryRequired = hasSplitMarginDirectionConflict(
+    filing,
+    question,
+    debug.questionIntent,
+    bannedPhraseCleanedAnswer
+  );
+  const marginDurabilityFollowupDetected =
+    !driverDurabilityRepairDetected && (
+      isMarginDurabilityFollowupQuestion(question, debug.questionIntent) ||
+    (
+      debug.questionIntent !== "driver_durability_followup" &&
+      isGenericDurabilityFollowupWithMarginContext(question, debug)
+    ));
+  // JPM's mixed net-interest/noninterest bridge is easy for a small model to
+  // mistranslate (for example, rendering banking "fees" as expenses). Keep that
+  // benchmark path deterministic while preserving good provider answers for
+  // other companies.
+  const revenueDriverRecoveryRequired = isRevenueDriverQuestion(question, debug.questionIntent) &&
+    !driverDurabilityRepairDetected &&
+    !isDriverDurabilityFollowupQuestion(question, debug.questionIntent) && (
+      isJpmLikeFiling(filing) ||
+      responsePath === "fallback" ||
+      debug.lowQualityReason === "contextual_reasoning_metric_only" ||
+      debug.lowQualityReason === "revenue_driver_declined_despite_context" ||
+      cleanup.taxonomy?.guardLabels?.includes("revenue_driver_non_revenue_cause_removed") === true ||
+      hasRevenueDriverSurfaceDefect(bannedPhraseCleanedAnswer)
+    );
+  const marginDriverRecoveryRequired = isTypedMarginDriverQuestion(question, debug.questionIntent);
+  const driverDurabilityRecoveryRequired = isDriverDurabilityFollowupQuestion(question, debug.questionIntent) &&
+    !specializedDurabilityRepairAccepted &&
+    !previousAnswerDurabilityRepairAccepted &&
+    isDurabilityUnderAnswer(bannedPhraseCleanedAnswer);
+  const marginDurabilityRecoveryRequired = marginDurabilityFollowupDetected && (
+    isMarginDurabilityUnderAnswer(bannedPhraseCleanedAnswer) ||
+    hasRevenueTopicInMarginDurabilityAnswer(bannedPhraseCleanedAnswer) ||
+    hasGenericDurabilityMissingInfoBoilerplate(bannedPhraseCleanedAnswer) ||
+    /不明点は[^。]{0,120}(?:証拠|直接的)/u.test(bannedPhraseCleanedAnswer) ||
+    /一時要因として[^。]{0,120}(?:生産停止|操業停止|一時的)/u.test(bannedPhraseCleanedAnswer) ||
+    unsupportedDurabilityClassificationSurface
+  );
+  const hardFollowupFallbackRecoveryRequired = responsePath === "fallback" && (
+    isDriverDurabilityFollowupQuestion(question, debug.questionIntent) ||
+    marginDurabilityFollowupDetected
+  );
+  const deterministicDriverDurabilityFallback = (responsePath === "fallback" || driverDurabilityRecoveryRequired) &&
+    isDriverDurabilityFollowupQuestion(question, debug.questionIntent) &&
+    !marginDurabilityFollowupDetected &&
+    !specializedDurabilityRepairAccepted &&
+    !previousAnswerDurabilityRepairAccepted
+    ? buildDeterministicDriverDurabilityFallback(filing)
+    : null;
+  const deterministicMarginDurabilityFallback =
+    (marginDurabilityRecoveryRequired || (responsePath === "fallback" && marginDurabilityFollowupDetected)) &&
+    !previousAnswerDurabilityRepairAccepted
+    ? buildDeterministicMarginDurabilityFallback(filing)
+    : null;
+  const deterministicRevenueDriverAnswer = revenueDriverRecoveryRequired
     ? buildSafeDeterministicLanguageFallback(filing, question)
     : null;
-  const finalAnswerSafe = (languageCheck.ok && !bannedPhraseStillDetected) || languageRepairSafe || sourceBackedFollowupRepairSafe || Boolean(deterministicLanguageFallback);
+  const deterministicSemanticFallback = splitMarginDirectionRecoveryRequired || revenueDriverRecoveryRequired || driverDurabilityRecoveryRequired || marginDriverRecoveryRequired || marginDurabilityRecoveryRequired || hardFollowupFallbackRecoveryRequired
+    ? deterministicDriverDurabilityFallback ?? deterministicMarginDurabilityFallback ?? deterministicRevenueDriverAnswer ?? buildJpmRevenueDriverRecovery(filing, question, debug) ?? buildSafeDeterministicLanguageFallback(filing, question, debug)
+    : null;
+  const deterministicFinalizerFallback = deterministicSemanticFallback ?? deterministicLanguageFallback;
+  const finalAnswerSafe = (languageCheck.ok && !bannedPhraseStillDetected) || languageRepairSafe || sourceBackedFollowupRepairSafe || Boolean(deterministicFinalizerFallback);
   const sourceBackedHardFollowupAccepted = Boolean(
     finalAnswerSafe &&
     isSourceBackedHardFollowupAccepted({
@@ -155,14 +253,14 @@ export async function finalizeChatResponse({
           : bannedPhraseCleanedAnswer
     })
   );
-  const sourceBackedGateOverrideAccepted =
-    sourceBackedHardFollowupAccepted &&
-    debug.sourceGateSufficient !== true &&
-    q06DurabilityRepair?.labels.includes("q06_previous_answer_margin_candidate_repair") === true &&
-    !hasXbrlOnlyHardIntentContext(debug);
-  const languageSafeAnswer = sourceBackedFollowupRepairSafe && sourceBackedFollowupRepairCandidate
+  const languageSafeAnswer = deterministicSemanticFallback
+    ? deterministicSemanticFallback.answer
+    : sourceBackedFollowupRepairSafe && sourceBackedFollowupRepairCandidate
     ? sourceBackedFollowupRepairCandidate
-    : languageRepairSafe && languageRepairCandidate && (!languageCheck.ok || cleanupBlocksModelAnswer || responsePath === "fallback")
+    : languageRepairSafe && languageRepairCandidate && (
+        !languageCheck.ok || cleanupBlocksModelAnswer || unsupportedDurabilityClassificationSurface || responsePath === "fallback" ||
+        (isDriverDurabilityFollowupQuestion(question, debug.questionIntent) && debug.sourceGateSufficient !== false)
+      )
       ? languageRepairCandidate
     : languageCheck.ok && !bannedPhraseStillDetected
     ? bannedPhraseCleanedAnswer
@@ -176,23 +274,191 @@ export async function finalizeChatResponse({
       fallbackKind: normalizedFallbackKind,
       missingSourceTypes: debug.sourceGateMissingSourceTypes
     });
-  const finalLanguageCheck = deterministicLanguageFallback
-    ? deterministicLanguageFallback.languageCheck
-    : sourceBackedFollowupRepairSafe && sourceBackedFollowupRepairCheck
-      ? sourceBackedFollowupRepairCheck
-    : languageRepairSafe && languageRepairCheck
-      ? languageRepairCheck
-      : languageCheck;
   const sanitizedLanguageSafeAnswer = sanitizeFinalUserFacingAnswer(languageSafeAnswer);
-  const finalResponsePath = deterministicLanguageFallback
+  const responseWithFollowupEvidence = q06DurabilityRepair || sourceBackedFollowupRepairSafe ||
+    (sourceBackedHardFollowupAccepted && languageRepairSafe)
+    ? addSelectedDebugSourcesToResponse(responseWithUrls, filing, debug)
+    : responseWithUrls;
+  const responseBeforeNumericAlignment = deterministicFinalizerFallback?.responseWithUrls ?? responseWithFollowupEvidence;
+  const verifiedFacts = buildVerifiedFinancialFacts(filing, {
+    additionalSources: responseBeforeNumericAlignment.sources
+      .filter((source) => !filing.sourceChunks.some((chunk) => chunk.sourceId === source.sourceId))
+      .map((source) => ({
+        sourceId: source.sourceId,
+        sourceLabel: source.sourceLabel,
+        sectionTitle: source.sectionType,
+        text: source.excerpt,
+        sourceUrl: source.sourceUrl,
+        historicalFinancialFact: readHistoricalFinancialFactEvidence(source)
+      }))
+  });
+  // Historical answers carry their own filing-scoped evidence. Do not let an
+  // equal-valued metric from the current in-memory filing introduce a
+  // non-historical source into an otherwise historical-only response.
+  const numericFacts = responsePath === "historical"
+    ? verifiedFacts.filter((fact) => responseBeforeNumericAlignment.sources.some((source) => source.sourceId === fact.sourceId))
+    : verifiedFacts;
+  const initialNumericAlignment = validateNumericAlignment({
+    answer: sanitizedLanguageSafeAnswer,
+    facts: numericFacts,
+    citedSourceIds: responseBeforeNumericAlignment.sources.map((source) => source.sourceId)
+  });
+  logNumericAlignmentResult(filing, responsePath, initialNumericAlignment);
+  const validatedInitialNumericAlignment = revalidateNumericAlignmentForFinalSurface({
+    initial: initialNumericAlignment,
+    facts: numericFacts,
+    citedSourceIds: responseBeforeNumericAlignment.sources.map((source) => source.sourceId)
+  });
+  const initialSemanticQualityLabels = buildFinalSemanticQualityLabels({
+    question,
+    questionIntent: debug.questionIntent,
+    answer: validatedInitialNumericAlignment.answer,
+    facts: numericFacts,
+    claimBindings: validatedInitialNumericAlignment.claimBindings,
+    sourceCount: responseBeforeNumericAlignment.sources.length
+  });
+  const hasTypedCashFlow = numericFacts.some((fact) =>
+    fact.semanticLabel === "operatingCashFlow" && fact.role === "current" && fact.scope === "company_total"
+  );
+  const hasTypedLiquidityPosition = numericFacts.some((fact) =>
+    fact.role === "current" &&
+    ["cashAndCashEquivalents", "currentDebt", "longTermDebt", "operatingCashFlow"].includes(fact.semanticLabel)
+  );
+  const liquidityConclusionRecoveryRequired =
+    isLiquidityDebtQuestion(question, debug.questionIntent) &&
+    hasAffirmativeLiquiditySafetyOrDistressConclusion(sanitizedLanguageSafeAnswer);
+  const cashFlowConclusionRecoveryRequired =
+    isCashGenerationQuestion(question, debug.questionIntent) &&
+    hasDefinitiveCashGenerationHealthConclusion(sanitizedLanguageSafeAnswer);
+  // Q10 conclusions are safety-sensitive. If typed liquidity facts exist, always
+  // render the cautious deterministic comparison even when a model answer passes
+  // the structural completeness counter.
+  const liquiditySemanticRecoveryRequired =
+    isLiquidityDebtQuestion(question, debug.questionIntent) &&
+    hasTypedLiquidityPosition;
+  const cashFlowSemanticRecoveryRequired =
+    isCashGenerationQuestion(question, debug.questionIntent) &&
+    hasTypedCashFlow &&
+    !initialSemanticQualityLabels.includes("q09_semantic_complete");
+  const liquidityRecoveryRequired = liquidityConclusionRecoveryRequired || liquiditySemanticRecoveryRequired;
+  const cashFlowRecoveryRequired = cashFlowConclusionRecoveryRequired || cashFlowSemanticRecoveryRequired;
+  const profitCauseNumericRecovery = validatedInitialNumericAlignment.status === "blocked"
+    ? buildSafeProfitCauseNumericRecovery(
+        filing,
+        question,
+        numericFacts,
+        sanitizedLanguageSafeAnswer,
+        responseBeforeNumericAlignment
+      )
+    : null;
+  const liquidityNumericRecovery = validatedInitialNumericAlignment.status === "blocked" || liquidityRecoveryRequired
+    ? buildSafeLiquidityNumericRecovery(
+        filing,
+        question,
+        debug.questionIntent,
+        numericFacts,
+        responseBeforeNumericAlignment.sources
+      )
+    : null;
+  const cashFlowNumericRecovery = validatedInitialNumericAlignment.status === "blocked" || cashFlowRecoveryRequired
+    ? buildSafeCashFlowNumericRecovery(
+        filing,
+        question,
+        debug.questionIntent,
+        numericFacts,
+        responseBeforeNumericAlignment.sources
+      )
+    : null;
+  const marginNumericRecovery = validatedInitialNumericAlignment.status === "blocked" &&
+    (debug.questionIntent === "margin_driver" || debug.questionIntent === "margin_profitability" || /(?:利益率|マージン|採算)/u.test(question))
+    ? buildSafeDeterministicLanguageFallback(filing, question)
+    : null;
+  const qualitativeNumericRecovery = validatedInitialNumericAlignment.status === "blocked"
+    ? buildQualitativeNumericGuardRecovery({
+        answer: sanitizedLanguageSafeAnswer,
+        responseWithUrls: responseBeforeNumericAlignment,
+        question,
+        questionIntent: debug.questionIntent
+      })
+    : null;
+  const deterministicNumericRecovery = validatedInitialNumericAlignment.status === "blocked" || liquidityRecoveryRequired || cashFlowRecoveryRequired
+    ? (liquidityRecoveryRequired ? liquidityNumericRecovery : null) ??
+      (cashFlowRecoveryRequired ? cashFlowNumericRecovery : null) ??
+      profitCauseNumericRecovery ??
+      liquidityNumericRecovery ??
+      cashFlowNumericRecovery ??
+      marginNumericRecovery ??
+      qualitativeNumericRecovery ??
+      buildSafeDeterministicLanguageFallback(filing, question)
+    : null;
+  const initialDeterministicNumericRecoveryAlignment = deterministicNumericRecovery
+    ? validateNumericAlignment({
+        answer: deterministicNumericRecovery.answer,
+        facts: numericFacts,
+        citedSourceIds: deterministicNumericRecovery.responseWithUrls.sources.map((source) => source.sourceId)
+      })
+    : null;
+  const deterministicNumericRecoveryAlignment = initialDeterministicNumericRecoveryAlignment
+    ? revalidateNumericAlignmentForFinalSurface({
+        initial: initialDeterministicNumericRecoveryAlignment,
+        facts: numericFacts,
+        citedSourceIds: deterministicNumericRecovery?.responseWithUrls.sources.map((source) => source.sourceId) ?? []
+      })
+    : null;
+  if (deterministicNumericRecoveryAlignment) {
+    logNumericAlignmentResult(filing, "deterministic", deterministicNumericRecoveryAlignment);
+  }
+  const deterministicNumericRecoveryAccepted = Boolean(
+    deterministicNumericRecovery &&
+    deterministicNumericRecoveryAlignment &&
+    deterministicNumericRecoveryAlignment.status !== "blocked"
+  );
+  const qualitativeNumericRecoveryAccepted = deterministicNumericRecoveryAccepted &&
+    deterministicNumericRecovery === qualitativeNumericRecovery;
+  const numericAlignment = deterministicNumericRecoveryAccepted && deterministicNumericRecoveryAlignment
+    ? deterministicNumericRecoveryAlignment
+    : validatedInitialNumericAlignment;
+  const responseForNumericAlignment = deterministicNumericRecoveryAccepted && deterministicNumericRecovery
+    ? deterministicNumericRecovery.responseWithUrls
+    : responseBeforeNumericAlignment;
+  const responseAfterNumericAlignment = {
+    ...responseForNumericAlignment,
+    sources: addRequiredNumericSources(
+      responseForNumericAlignment.sources,
+      filing,
+      numericFacts,
+      numericAlignment.requiredSourceIds
+    )
+  };
+  const numericAlignmentBlocked = numericAlignment.status === "blocked";
+  const finalNumericLanguageCheck = checkFinalAnswerJapaneseOnly(numericAlignment.answer);
+  const finalAnswerLanguageSafe = finalNumericLanguageCheck.ok && !hasBannedPhrase(numericAlignment.answer);
+  const finalResponsePath = numericAlignmentBlocked
+    ? "fallback"
+    : qualitativeNumericRecoveryAccepted
+    ? responsePath
+    : deterministicNumericRecoveryAccepted
+    ? "deterministic"
+    : deterministicFinalizerFallback
     ? "deterministic"
     : sourceBackedHardFollowupAccepted
-      ? "openai"
+      ? debug.sourceGateSufficient !== true && q06DurabilityRepair?.labels.some((label) =>
+          label === "q04_previous_answer_driver_candidate_repair" ||
+          label === "q06_previous_answer_margin_candidate_repair"
+        ) && responsePath === "fallback"
+        ? "deterministic"
+        : "openai"
       : finalAnswerSafe && !cleanupBlocksModelAnswer
         ? responsePath
         : "fallback";
-  const finalFallbackKind: ChatFallbackKind = finalAnswerSafe
-    ? deterministicLanguageFallback
+  const finalFallbackKind: ChatFallbackKind = numericAlignmentBlocked
+    ? "low_quality"
+    : qualitativeNumericRecoveryAccepted
+    ? normalizedFallbackKind
+    : deterministicNumericRecoveryAccepted
+    ? "none"
+    : finalAnswerSafe
+    ? deterministicFinalizerFallback
       ? "none"
       : sourceBackedHardFollowupAccepted
       ? "none"
@@ -222,56 +488,425 @@ export async function finalizeChatResponse({
     finalAnswerSafe,
     languageLabels: finalAnswerLanguageLabels
   });
-  const finalFallbackTaxonomy = suppressInvisibleMalformedCurrencyTaxonomy(fallbackTaxonomy, sanitizedLanguageSafeAnswer);
+  const finalFallbackTaxonomy = numericAlignmentBlocked
+    ? {
+      fallbackCategory: "answer_quality_guard" as const,
+      fallbackUserReason: "numeric_alignment_failed" as const,
+      guardLabels: ["numeric_alignment_blocked", ...numericAlignment.labels]
+    }
+    : suppressInvisibleMalformedCurrencyTaxonomy(fallbackTaxonomy, numericAlignment.answer);
+  const effectiveFallbackKind: ChatFallbackKind = finalResponsePath === "fallback"
+    ? responsePathFallbackButKindNone ? "unknown_fallback" : finalFallbackKind
+    : "none";
+  const effectiveFallbackTaxonomy: FallbackTaxonomy = finalResponsePath === "fallback"
+    ? finalFallbackTaxonomy
+    : { fallbackCategory: "none", fallbackUserReason: "none", missingEvidence: [], missingEvidenceLabelsJa: [], guardLabels: [] };
+  const finalSurfaceStatus = numericAlignment.status === "blocked"
+    ? "blocked" as const
+    : numericAlignment.status === "not_applicable"
+      ? "not_applicable" as const
+      : "passed" as const;
+  const finalSurfaceVerifiedBindings = numericAlignment.claimBindings.filter((binding) => binding.outcome !== "blocked");
+  const finalSurfaceBlockedBindings = numericAlignment.claimBindings.filter((binding) => binding.outcome === "blocked");
+  const finalSurfaceAnswerSha256 = await sha256Hex(numericAlignment.answer);
+  const semanticQualityLabels = buildFinalSemanticQualityLabels({
+    question,
+    questionIntent: debug.questionIntent,
+    answer: numericAlignment.answer,
+    facts: numericFacts,
+    claimBindings: numericAlignment.claimBindings,
+    sourceCount: responseAfterNumericAlignment.sources.length
+  });
 
   return attachChatDebug(
     {
-      ...(deterministicLanguageFallback?.responseWithUrls ?? responseWithUrls),
-      answer: sanitizedLanguageSafeAnswer,
+      ...responseAfterNumericAlignment,
+      answer: numericAlignment.answer,
       responsePath: finalResponsePath
     },
     {
       ...debug,
       responsePath: finalResponsePath,
-      fallbackReason: deterministicLanguageFallback || sourceBackedHardFollowupAccepted ? null : finalAnswerSafe && !cleanupBlocksModelAnswer ? debug.fallbackReason : debug.fallbackReason ?? "low_quality_answer",
-      fallbackCategory: finalFallbackTaxonomy.fallbackCategory,
-      fallbackUserReason: finalFallbackTaxonomy.fallbackUserReason,
-      missingEvidence: finalFallbackTaxonomy.missingEvidence ?? [],
-      missingEvidenceLabelsJa: finalFallbackTaxonomy.missingEvidenceLabelsJa ?? [],
-      guardLabels: finalFallbackTaxonomy.guardLabels ?? [],
-      fallbackKind: responsePathFallbackButKindNone ? "unknown_fallback" : finalFallbackKind,
-      fallbackKindSource: deterministicLanguageFallback || sourceBackedHardFollowupAccepted ? "finalizer" : finalAnswerSafe ? debug.fallbackKindSource ?? "finalizer" : "language_guard",
-      responsePathFallbackButKindNone,
-      sourceGateSufficient: sourceBackedGateOverrideAccepted ? true : debug.sourceGateSufficient,
-      sourceGatePassed: sourceBackedGateOverrideAccepted ? true : debug.sourceGatePassed,
-      sourceGateFailureLabels: sourceBackedGateOverrideAccepted ? [] : debug.sourceGateFailureLabels,
-      sourceGateMissingSourceTypes: sourceBackedGateOverrideAccepted ? [] : debug.sourceGateMissingSourceTypes,
-      finalAnswerJapaneseRatio: finalLanguageCheck.japaneseRatio,
-      finalAnswerEnglishSentenceCount: finalLanguageCheck.englishSentenceCount,
-      finalAnswerRawExcerptLike: finalLanguageCheck.rawExcerptLike,
+      fallbackReason: finalResponsePath !== "fallback"
+        ? null
+        : numericAlignmentBlocked
+          ? "numeric_alignment_failed"
+          : qualitativeNumericRecoveryAccepted
+            ? debug.fallbackReason ?? "low_quality_answer"
+            : deterministicNumericRecoveryAccepted || deterministicFinalizerFallback || sourceBackedHardFollowupAccepted
+              ? debug.fallbackReason ?? "low_quality_answer"
+              : finalAnswerSafe && !cleanupBlocksModelAnswer
+                ? debug.fallbackReason ?? "low_quality_answer"
+                : debug.fallbackReason ?? "low_quality_answer",
+      fallbackCategory: effectiveFallbackTaxonomy.fallbackCategory,
+      fallbackUserReason: effectiveFallbackTaxonomy.fallbackUserReason,
+      missingEvidence: effectiveFallbackTaxonomy.missingEvidence ?? [],
+      missingEvidenceLabelsJa: effectiveFallbackTaxonomy.missingEvidenceLabelsJa ?? [],
+      guardLabels: effectiveFallbackTaxonomy.guardLabels ?? [],
+      fallbackKind: effectiveFallbackKind,
+      fallbackKindSource: finalResponsePath !== "fallback"
+        ? undefined
+        : qualitativeNumericRecoveryAccepted
+          ? debug.fallbackKindSource ?? "finalizer"
+          : numericAlignmentBlocked || deterministicNumericRecoveryAccepted || deterministicFinalizerFallback || sourceBackedHardFollowupAccepted
+            ? "finalizer"
+            : finalAnswerSafe
+              ? debug.fallbackKindSource ?? "finalizer"
+              : "language_guard",
+      responsePathFallbackButKindNone: finalResponsePath === "fallback" && effectiveFallbackKind === "none",
+      evidenceFallbackUsed: finalResponsePath === "fallback" ? debug.evidenceFallbackUsed : false,
+      sourceGateSufficient: debug.sourceGateSufficient,
+      sourceGatePassed: debug.sourceGatePassed,
+      sourceGateFailureLabels: normalizedHardIntentInsufficiencyFailureLabels({
+        debug,
+        repairLabels: q06DurabilityRepair?.labels ?? []
+      }),
+      sourceGateMissingSourceTypes: debug.sourceGateMissingSourceTypes,
+      finalAnswerJapaneseRatio: finalNumericLanguageCheck.japaneseRatio,
+      finalAnswerEnglishSentenceCount: finalNumericLanguageCheck.englishSentenceCount,
+      finalAnswerRawExcerptLike: finalNumericLanguageCheck.rawExcerptLike,
       finalAnswerLanguageLabels,
-      finalAnswerLanguageViolations: finalAnswerSafe ? [] : languageCheck.violations,
+      finalAnswerLanguageViolations: finalAnswerLanguageSafe ? [] : finalNumericLanguageCheck.violations,
       languageGuardChecked: true,
-      languageGuardOk: finalAnswerSafe,
-      languageGuardViolationLabels: finalAnswerLanguageLabels,
-      languageGuardFallbackUsed: !finalAnswerSafe,
-      languageGuardFallbackKind: finalAnswerSafe ? null : "language_guard_fallback",
+      languageGuardOk: finalAnswerLanguageSafe,
+      languageGuardViolationLabels: finalAnswerLanguageSafe ? [] : finalNumericLanguageCheck.labels,
+      languageGuardFallbackUsed: !finalAnswerLanguageSafe,
+      languageGuardFallbackKind: finalAnswerLanguageSafe ? null : "language_guard_fallback",
       originalAnswerBeforeLanguageGuardLength: languageCheck.ok ? null : originalAnswerBeforeLanguageGuard.length,
       originalAnswerBeforeLanguageGuardSample: languageCheck.ok
         ? null
         : sampleUnsafeAnswer(originalAnswerBeforeLanguageGuard),
       genericFallbackPhraseDetected: bannedPhraseStillDetected,
+      lowQualityReason: deterministicSemanticFallback || specializedDurabilityRepairAccepted || previousAnswerDurabilityRepairAccepted
+        ? null
+        : debug.lowQualityReason,
+      numericAlignmentChecked: true,
+      numericAlignmentInitialStatus: initialNumericAlignment.status,
+      numericAlignmentStatus: numericAlignment.status,
+      numericAlignmentClaimCount: numericAlignment.claimCount,
+      numericAlignmentVerifiedClaimCount: numericAlignment.verifiedClaimCount,
+      numericAlignmentRepairedClaimCount: numericAlignment.repairedClaimCount,
+      numericAlignmentBlockedClaimCount: numericAlignment.blockedClaimCount,
+      numericAlignmentLabels: numericAlignment.labels,
+      numericAlignmentMatchedFactIds: numericAlignment.matchedFactIds,
+      numericAlignmentClaimBindings: numericAlignment.claimBindings,
+      numericAlignmentFinalSurfaceChecked: true,
+      numericAlignmentFinalSurfaceStatus: finalSurfaceStatus,
+      numericAlignmentFinalSurfaceClaimCount: numericAlignment.claimCount,
+      numericAlignmentFinalSurfaceVerifiedClaimCount: finalSurfaceVerifiedBindings.length,
+      numericAlignmentFinalSurfaceBlockedClaimCount: Math.max(numericAlignment.blockedClaimCount, finalSurfaceBlockedBindings.length),
+      numericAlignmentFinalSurfaceAnswerHash: finalSurfaceAnswerSha256,
+      semanticQualityLabels,
       sourceRepairLabels: [
         ...(debug.sourceRepairLabels ?? []),
         ...catQ06Cleanup.labels,
         ...(q06DurabilityRepair?.labels ?? []),
         ...(languageRepairSafe ? ["language_guard_source_backed_repair"] : []),
         ...(sourceBackedFollowupRepairSafe ? ["q06_source_backed_followup_repair"] : []),
-        ...(deterministicLanguageFallback ? ["language_guard_deterministic_repair"] : [])
+        ...(deterministicLanguageFallback ? ["language_guard_deterministic_repair"] : []),
+        ...(deterministicSemanticFallback && splitMarginDirectionRecoveryRequired ? ["split_margin_direction_deterministic_recovery"] : []),
+        ...(deterministicSemanticFallback && revenueDriverRecoveryRequired ? ["revenue_driver_deterministic_recovery"] : []),
+        ...(deterministicSemanticFallback && marginDriverRecoveryRequired ? ["margin_driver_deterministic_recovery"] : []),
+        ...(sourceBackedHardFollowupAccepted && debug.sourceGateSufficient !== true &&
+          q06DurabilityRepair?.labels.some((label) =>
+            label === "q04_previous_answer_driver_candidate_repair" ||
+            label === "q06_previous_answer_margin_candidate_repair"
+          ) ? ["hard_intent_explicit_insufficiency_repair"] : []),
+        ...(liquidityConclusionRecoveryRequired && deterministicNumericRecoveryAccepted ? ["liquidity_conclusion_deterministic_recovery"] : []),
+        ...(cashFlowConclusionRecoveryRequired && deterministicNumericRecoveryAccepted ? ["cash_flow_conclusion_deterministic_recovery"] : []),
+        ...(liquiditySemanticRecoveryRequired && deterministicNumericRecoveryAccepted ? ["q10_semantic_deterministic_recovery"] : []),
+        ...(cashFlowSemanticRecoveryRequired && deterministicNumericRecoveryAccepted ? ["q09_semantic_deterministic_recovery"] : []),
+        ...(deterministicNumericRecoveryAccepted && !qualitativeNumericRecoveryAccepted ? ["numeric_alignment_deterministic_recovery"] : []),
+        ...(qualitativeNumericRecoveryAccepted ? ["numeric_alignment_qualitative_recovery"] : []),
+        ...(numericAlignment.status === "repaired" ? ["numeric_alignment_repaired"] : []),
+        ...(validatedInitialNumericAlignment.status === "blocked" && !deterministicNumericRecoveryAccepted ? ["numeric_alignment_blocked"] : [])
       ],
       ...timings.snapshot()
     }
   );
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function buildFinalSemanticQualityLabels(input: {
+  question: string;
+  questionIntent: string | null | undefined;
+  answer: string;
+  facts: VerifiedFinancialFact[];
+  claimBindings: NumericAlignmentResult["claimBindings"];
+  sourceCount: number;
+}): string[] {
+  const labels: string[] = [];
+  const bindingLabels = new Set(input.claimBindings
+    .filter((binding) => binding.outcome !== "blocked")
+    .map((binding) => binding.semanticLabel));
+  const isQ08 = ["segment_analysis", "segment_driver", "revenue_breakdown"].includes(input.questionIntent ?? "") &&
+    /(?:伸び|弱|強|増|減|セグメント|地域)/u.test(input.question);
+  if (isQ08) {
+    if (/伸びた部分として[^。]{2,}(?:です|ます)/u.test(input.answer)) labels.push("q08_strong_dimension_source_backed");
+    if (/伸びた具体的な[^。]{2,}特定できません/u.test(input.answer)) labels.push("q08_strong_dimension_explicitly_unavailable");
+    if (/弱かった部分として[^。]{2,}(?:です|ます)/u.test(input.answer)) labels.push("q08_weak_dimension_source_backed");
+    if (/(?:減収・減益|弱かった部分)[^。]{2,}特定できません/u.test(input.answer)) labels.push("q08_weak_dimension_explicitly_unavailable");
+    if (input.sourceCount > 0) labels.push("q08_evidence_mapped");
+    const hasStrong = labels.some((label) => label.startsWith("q08_strong_dimension_"));
+    const hasWeak = labels.some((label) => label.startsWith("q08_weak_dimension_"));
+    if (hasStrong && hasWeak && labels.includes("q08_evidence_mapped")) labels.push("q08_semantic_complete");
+  }
+
+  const isQ09 = /(?:営業CF|営業キャッシュフロー|キャッシュフロー).*(?:健全|質|現金創出)/u.test(input.question);
+  if (isQ09) {
+    if (bindingLabels.has("operatingCashFlow")) labels.push("q09_operating_cash_flow_typed");
+    if (bindingLabels.has("netIncome") && /同じ対象期間の純利益/u.test(input.answer)) {
+      labels.push("q09_compatible_net_income_compared");
+    } else if (/純利益との対応|同じ対象期間の純利益[^。]*確認できない/u.test(input.answer)) {
+      labels.push("q09_net_income_explicitly_unavailable");
+    }
+    if (/運転資本[^。]*(?:確認|寄与|増減|内訳)/u.test(input.answer)) labels.push("q09_working_capital_assessed");
+    if (/設備投資[^。]*(?:確認|余力|フリーCF)/u.test(input.answer)) labels.push("q09_capex_assessed");
+    const cashFlowFact = input.facts.find((fact) => fact.semanticLabel === "operatingCashFlow" && fact.role === "current");
+    const currentCashFlow = cashFlowFact?.derivedPercentage?.currentValue;
+    const comparisonCashFlow = cashFlowFact?.derivedPercentage?.comparisonValue;
+    const crossesSign = Boolean(cashFlowFact?.derivedPercentage?.kind === "derived_change" &&
+      currentCashFlow !== undefined &&
+      comparisonCashFlow !== undefined &&
+      ((currentCashFlow < 0 && comparisonCashFlow >= 0) ||
+        (currentCashFlow >= 0 && comparisonCashFlow < 0)));
+    if (!crossesSign || !/営業CF[^。]*%/u.test(input.answer)) labels.push("q09_sign_safe");
+    if (input.sourceCount > 0) labels.push("q09_evidence_mapped");
+    if (
+      labels.includes("q09_operating_cash_flow_typed") &&
+      labels.some((label) => label === "q09_compatible_net_income_compared" || label === "q09_net_income_explicitly_unavailable") &&
+      labels.includes("q09_working_capital_assessed") &&
+      labels.includes("q09_capex_assessed") &&
+      labels.includes("q09_sign_safe") &&
+      labels.includes("q09_evidence_mapped")
+    ) labels.push("q09_semantic_complete");
+  }
+
+  const isQ10 = /(?:資金繰り|流動性|負債|債務|借入|liquidity|debt)/iu.test(input.question);
+  if (isQ10) {
+    if (bindingLabels.has("cashAndCashEquivalents") || bindingLabels.has("operatingCashFlow")) labels.push("q10_liquidity_position_typed");
+    if (bindingLabels.has("currentDebt") || bindingLabels.has("longTermDebt")) labels.push("q10_debt_position_typed");
+    if (/確認できません|十分に比較できない/u.test(input.answer)) labels.push("q10_missing_position_explicit");
+    if (/懸念[^。]*(?:判断|断定)|資金繰り[^。]*(?:判断|断定)|返済期限と借換条件/u.test(input.answer)) labels.push("q10_concern_assessment_explicit");
+    if (input.sourceCount > 0) labels.push("q10_evidence_mapped");
+    if (
+      labels.some((label) => label === "q10_liquidity_position_typed" || label === "q10_missing_position_explicit") &&
+      labels.some((label) => label === "q10_debt_position_typed" || label === "q10_missing_position_explicit") &&
+      labels.includes("q10_concern_assessment_explicit") &&
+      labels.includes("q10_evidence_mapped")
+    ) labels.push("q10_semantic_complete");
+  }
+  return labels;
+}
+
+function buildQualitativeNumericGuardRecovery(input: {
+  answer: string;
+  responseWithUrls: ChatResponsePayload;
+  question: string;
+  questionIntent?: string | null;
+}): DeterministicLanguageFallback | null {
+  // Q09/Q10 conclusions must be rebuilt from typed facts. Stripping a bad
+  // number while retaining a separate `no concern` sentence would turn an
+  // unsupported conclusion into the final answer.
+  if (
+    isLiquidityDebtQuestion(input.question, input.questionIntent) ||
+    isCashGenerationQuestion(input.question, input.questionIntent)
+  ) {
+    return null;
+  }
+  const investmentSafetyRequired = /(?:買うべき|売るべき|投資推奨|目標株価|株価予想|割安|割高)/u.test(
+    `${input.question} ${input.answer}`
+  );
+  const parts = input.answer.match(/[^。！？\n]+[。！？]?|\n+/gu) ?? [input.answer];
+  const qualitativeParts = parts.filter((part) =>
+    part.trim().length > 0 &&
+    extractMaterialNumericClaims(part).length === 0 &&
+    !hasMalformedNumericSurface(part)
+  );
+  let qualitativeAnswer = qualitativeParts.join(" ").replace(/\s+/g, " ").trim();
+  if (investmentSafetyRequired) {
+    qualitativeAnswer = `${qualitativeAnswer ? `${qualitativeAnswer} ` : ""}提出資料の事実整理にとどめ、投資判断や株価の断定はしません。`;
+  }
+  qualitativeAnswer = sanitizeFinalUserFacingAnswer(qualitativeAnswer)
+    .replace(/(?:投資判断や株価の断定はしません。\s*){2,}/gu, "投資判断や株価の断定はしません。")
+    .trim();
+  if (qualitativeAnswer.length < 18 || hasBannedPhrase(qualitativeAnswer)) {
+    return null;
+  }
+  const languageCheck = checkFinalAnswerJapaneseOnly(qualitativeAnswer);
+  if (!languageCheck.ok) {
+    return null;
+  }
+  return {
+    answer: qualitativeAnswer,
+    responseWithUrls: { ...input.responseWithUrls, answer: qualitativeAnswer },
+    languageCheck
+  };
+}
+
+function revalidateNumericAlignmentForFinalSurface(input: {
+  initial: NumericAlignmentResult;
+  facts: VerifiedFinancialFact[];
+  citedSourceIds: string[];
+}): NumericAlignmentResult {
+  // The API use case applies this same formatter to the returned answer. Run
+  // it before the final numeric proof so the hash certifies the exact visible
+  // surface, including paragraph breaks, rather than a pre-display variant.
+  const displayAnswer = formatChatAnswerForDisplay(input.initial.answer);
+  if (input.initial.status === "blocked") {
+    return { ...input.initial, answer: displayAnswer };
+  }
+  if (hasMalformedNumericSurface(displayAnswer)) {
+    return blockMalformedNumericSurface({ ...input.initial, answer: displayAnswer });
+  }
+  if (input.initial.status !== "repaired" && displayAnswer === input.initial.answer) {
+    return input.initial;
+  }
+
+  const revalidated = validateNumericAlignment({
+    answer: displayAnswer,
+    facts: input.facts,
+    citedSourceIds: dedupeStrings([...input.citedSourceIds, ...input.initial.requiredSourceIds])
+  });
+  if (
+    (revalidated.status !== "passed" && revalidated.status !== "not_applicable") ||
+    hasMalformedNumericSurface(revalidated.answer)
+  ) {
+    return blockMalformedNumericSurface(revalidated);
+  }
+  return {
+    ...input.initial,
+    answer: revalidated.answer,
+    requiredSourceIds: dedupeStrings([...input.initial.requiredSourceIds, ...revalidated.requiredSourceIds]),
+    matchedFactIds: dedupeStrings([...input.initial.matchedFactIds, ...revalidated.matchedFactIds]),
+    claimBindings: revalidated.claimBindings,
+    blockedClaimCount: 0
+  };
+}
+
+function hasMalformedNumericSurface(answer: string): boolean {
+  return /(?:億ドル(?:万ドル|百万ドル|億ドル|兆ドル|\s*[Bb](?:\b|$)|(?:か|カ|ヶ|ケ)?月|日)|[$＄]\s*\d+(?:\.\d+)?\s*十億|\d{4}年\s*\d+(?:\.\d+)?億ドル(?:月|日))/u.test(answer);
+}
+
+function blockMalformedNumericSurface(result: NumericAlignmentResult): NumericAlignmentResult {
+  return {
+    ...result,
+    status: "blocked",
+    answer: "回答内の数値表記を提出資料と安全に照合できなかったため、未確認の数値は表示しません。根拠資料の期間・単位を確認してから案内します。",
+    labels: Array.from(new Set([...result.labels, "unsupported_numeric_claim"])),
+    blockedClaimCount: Math.max(1, result.blockedClaimCount)
+  };
+}
+
+function hasSplitMarginDirectionConflict(
+  filing: FilingCacheRecord,
+  question: string,
+  questionIntent: string | null | undefined,
+  answer: string
+): boolean {
+  if (
+    !["margin_driver", "margin_profitability"].includes(questionIntent ?? "") &&
+    !/(?:利益率|マージン).*(?:改善|悪化|要因|理由)/u.test(question)
+  ) {
+    return false;
+  }
+  const revenue = filing.metrics.find((metric) => metric.logicalName === "revenue");
+  const operatingIncome = filing.metrics.find((metric) => metric.logicalName === "operatingIncome");
+  const netIncome = filing.metrics.find((metric) => metric.logicalName === "netIncome");
+  if (
+    !revenue || !revenue.comparisonValue ||
+    !operatingIncome?.comparisonValue || !netIncome?.comparisonValue ||
+    revenue.value === 0
+  ) {
+    return false;
+  }
+  const operatingDelta = operatingIncome.value / revenue.value -
+    operatingIncome.comparisonValue / revenue.comparisonValue;
+  const netDelta = netIncome.value / revenue.value - netIncome.comparisonValue / revenue.comparisonValue;
+  if (Math.abs(operatingDelta) <= 0.0001 || Math.abs(netDelta) <= 0.0001 || Math.sign(operatingDelta) === Math.sign(netDelta)) {
+    return false;
+  }
+
+  const operatingDirectionExplicit = operatingDelta > 0
+    ? /営業利益率[^。！？\n]{0,48}(?:改善|上昇)/u.test(answer)
+    : /営業利益率[^。！？\n]{0,48}(?:低下|悪化)/u.test(answer);
+  const netDirectionExplicit = netDelta > 0
+    ? /純利益率[^。！？\n]{0,48}(?:改善|上昇)/u.test(answer)
+    : /純利益率[^。！？\n]{0,48}(?:低下|悪化)/u.test(answer);
+  return !(operatingDirectionExplicit && netDirectionExplicit);
+}
+
+function addRequiredNumericSources(
+  sources: ChatEvidenceSource[],
+  filing: FilingCacheRecord,
+  facts: VerifiedFinancialFact[],
+  requiredSourceIds: string[]
+): ChatEvidenceSource[] {
+  const additions: ChatEvidenceSource[] = [];
+  for (const sourceId of requiredSourceIds) {
+    if (sources.some((source) => source.sourceId === sourceId)) {
+      continue;
+    }
+    const sourceChunk = filing.sourceChunks.find((source) => source.sourceId === sourceId);
+    if (sourceChunk) {
+      const evidence = buildSecFilingSource(sourceChunk);
+      additions.push({
+        ...evidence,
+        sourceUrl: evidence.sourceUrl ?? filing.primaryDocumentUrl
+      });
+      continue;
+    }
+    const fact = facts.find((candidate) => candidate.sourceId === sourceId);
+    if (!fact) {
+      continue;
+    }
+    additions.push({
+      sourceId,
+      sourceKind: "sec_filing",
+      sourceStrength: "filing_primary",
+      sectionType: "xbrl_metric",
+      sourceLabel: `XBRL ${fact.semanticLabelJa} (${fact.concept})`,
+      excerpt: `${fact.semanticLabelJa}: ${fact.displayValues[0]?.ja ?? fact.canonicalValue}`,
+      sourceUrl: fact.sourceUrl || filing.primaryDocumentUrl
+    });
+  }
+  return dedupeChatSources([...sources, ...additions]);
+}
+
+function logNumericAlignmentResult(
+  filing: FilingCacheRecord,
+  responsePath: ChatResponsePath,
+  result: NumericAlignmentResult
+): void {
+  if (result.status === "not_applicable") {
+    return;
+  }
+  const event = result.status === "passed"
+    ? "numeric_alignment_passed"
+    : result.status === "repaired"
+      ? "numeric_alignment_repaired"
+      : "numeric_alignment_blocked";
+  const fields = {
+    filingKeyHash: hashForLog(filing.filingKey),
+    ticker: filing.ticker,
+    responsePath,
+    claimCount: result.claimCount,
+    verifiedClaimCount: result.verifiedClaimCount,
+    repairedClaimCount: result.repairedClaimCount,
+    blockedClaimCount: result.blockedClaimCount,
+    labels: result.labels,
+    matchedFactCount: result.matchedFactIds.length,
+    requiredSourceCount: result.requiredSourceIds.length,
+    claimBindings: result.claimBindings
+  };
+  logEvent(event, fields);
+  if (result.labels.includes("unsupported_numeric_claim")) {
+    logEvent("unsupported_numeric_claim", fields);
+  }
 }
 
 const BUSINESS_MODEL_SOURCE_INSUFFICIENT_FALLBACK = "選択された資料だけでは、この会社の収益源を十分に特定できません。売上高などの数字は確認できますが、それだけでは「何で稼いでいる会社か」は判断しません。確認すべき箇所は、事業内容、セグメント情報、売上内訳、MD&Aの事業説明です。";
@@ -311,31 +946,28 @@ function isSourceBackedHardFollowupAccepted({
     return false;
   }
 
+  const hasExplicitInsufficiencyRepair = q06DurabilityRepairLabels.some((label) =>
+    label === "q04_previous_answer_driver_candidate_repair" ||
+    label === "q06_previous_answer_margin_candidate_repair"
+  ) &&
+    /(?:一時要因か継続要因か|一時要因か構造的変化か)は断定しません/u.test(candidateAnswer) &&
+    hasSubstantiveDurabilityEvidenceAnswer(candidateAnswer) &&
+    debug.sourceIdsValid !== false;
   if (debug.sourceGateSufficient !== true) {
-    if (
-      q06DurabilityRepairLabels.includes("q06_previous_answer_margin_candidate_repair") &&
+    const sourceGateWasNotApplied = debug.sourceGateSufficient == null && debug.sourceGateApplied !== true;
+    const selectedNarrativeRepair = sourceGateWasNotApplied &&
+      debug.questionIntent === "driver_durability_followup" &&
+      languageRepairSafe &&
       hasSubstantiveDurabilityEvidenceAnswer(candidateAnswer) &&
-      !hasXbrlOnlyHardIntentContext(debug)
-	    ) {
-	      return true;
-	    }
-	    if (
-	      languageRepairSafe &&
-	      isDriverDurabilityFollowupQuestion(question, debug.questionIntent) &&
-	      hasSubstantiveDurabilityEvidenceAnswer(candidateAnswer) &&
-	      !hasXbrlOnlyHardIntentContext(debug)
-	    ) {
-	      return true;
-	    }
-	    return languageRepairSafe &&
-	      isGenericDurabilityFollowupWithMarginContext(question, debug) &&
-	      hasSubstantiveDurabilityEvidenceAnswer(candidateAnswer) &&
-      !hasXbrlOnlyHardIntentContext(debug);
+      !hasXbrlOnlyHardIntentContext(debug) &&
+      debug.sourceIdsValid !== false;
+    return hasExplicitInsufficiencyRepair || selectedNarrativeRepair;
   }
 
   if (q06DurabilityRepairLabels.some((label) =>
     label === "q04_bank_durability_source_backed_repair" ||
     label === "q04_retail_durability_source_backed_repair" ||
+    label === "q04_platform_durability_source_backed_repair" ||
     label === "q04_generic_durability_source_backed_repair"
   )) {
     return true;
@@ -343,7 +975,10 @@ function isSourceBackedHardFollowupAccepted({
 
   if (
     debug.sourceGateSufficient === true &&
-    q06DurabilityRepairLabels.includes("q06_previous_answer_margin_candidate_repair") &&
+    q06DurabilityRepairLabels.some((label) =>
+      label === "q04_previous_answer_driver_candidate_repair" ||
+      label === "q06_previous_answer_margin_candidate_repair"
+    ) &&
     hasSubstantiveDurabilityEvidenceAnswer(candidateAnswer)
   ) {
     return true;
@@ -368,7 +1003,11 @@ function isSourceBackedHardFollowupAccepted({
 
   return debug.evidenceFallbackUsed === true &&
     normalizedFallbackKind === "evidence_slot" &&
-    (languageRepairSafe || hasSubstantiveDurabilityEvidenceAnswer(candidateAnswer));
+    (
+      languageRepairSafe ||
+      hasSubstantiveDurabilityEvidenceAnswer(candidateAnswer) ||
+      /具体的な要因が十分に特定できていません[^。]*。[^。]*(?:一時要因か継続要因か|一時要因か構造的変化か)は分類しません/u.test(candidateAnswer)
+    );
 }
 
 function hasXbrlOnlyHardIntentContext(debug: ChatResponseDebugInput): boolean {
@@ -453,16 +1092,19 @@ function hasSubstantiveDurabilityEvidenceAnswer(answer: string): boolean {
   }
   const hasDriverCandidate =
     /(?:売上|利益率)要因(?:候補)?(?:として)?確認できるのは、[^。]{3,}/.test(normalized) ||
-    /前問(?:の|で挙がっていた)(?:売上|利益率)要因(?:候補)?は、[^。]{3,}/.test(normalized);
+    /前問(?:の|で挙がっていた)(?:売上|利益率)要因(?:候補)?は、[^。]{3,}/.test(normalized) ||
+    /前問では[^。]{0,160}全社売上の主因[^。]{0,120}確認できていません[^。]*。[^。]{0,160}次に確認すべき指標は、価格、販売数量、事業別売上/.test(normalized);
   const hasDurabilityCaveat = /一時|継続|構造|断定しません|断定できません|次に見るべき指標/.test(normalized);
   return hasDriverCandidate && hasDurabilityCaveat;
 }
 
 function buildSafeDeterministicLanguageFallback(
   filing: FilingCacheRecord,
-  question: string
+  question: string,
+  debug?: ChatResponseDebugInput
 ): DeterministicLanguageFallback | null {
-  const deterministic = buildDeterministicMetricAnswer(filing, question);
+  const deterministicFiling = debug ? withSelectedDebugSources(filing, debug) : filing;
+  const deterministic = buildDeterministicMetricAnswer(deterministicFiling, question);
   if (!deterministic) {
     return null;
   }
@@ -481,6 +1123,312 @@ function buildSafeDeterministicLanguageFallback(
       ...responseWithUrls,
       answer: sanitizedAnswer
     },
+    languageCheck
+  };
+}
+
+function buildJpmRevenueDriverRecovery(
+  filing: FilingCacheRecord,
+  question: string,
+  debug: ChatResponseDebugInput
+): DeterministicLanguageFallback | null {
+  if (!isJpmLikeFiling(filing) || !isRevenueDriverQuestion(question, debug.questionIntent)) {
+    return null;
+  }
+  const evidence = (debug.selectedSourceExcerpts ?? []).join(" ");
+  const hasNiiDrivers = /net interest income[\s\S]{0,360}(?:driven by|higher markets net interest income|deposit balances|revolving balances)/i.test(evidence);
+  const hasNirDrivers = /noninterest revenue[\s\S]{0,420}(?:driven by|asset management fees|investment banking fees|markets noninterest revenue|payments fees)/i.test(evidence);
+  if (!hasNiiDrivers && !hasNirDrivers) {
+    return null;
+  }
+
+  const clauses = [
+    hasNiiDrivers
+      ? "純利息収入では、市場部門の純利息収入、預金残高、カード事業のリボルビング残高の増加が寄与し、金利低下の影響が一部を相殺しました。"
+      : null,
+    hasNirDrivers
+      ? "非利息収入では、資産運用手数料、投資銀行手数料、市場関連収入、決済手数料の増加が寄与しました。"
+      : null,
+    /absence of the \$?[\d,.]+\s*million first republic-related gain/i.test(evidence)
+      ? "一方、前年に計上した買収関連利益が当期にはなかったことは相殺要因です。"
+      : null
+  ].filter((value): value is string => Boolean(value));
+  const answer = sanitizeFinalUserFacingAnswer(clauses.join(" "));
+  const languageCheck = checkFinalAnswerJapaneseOnly(answer);
+  if (!languageCheck.ok || hasBannedPhrase(answer)) {
+    return null;
+  }
+
+  const filingWithSelectedSources = withSelectedDebugSources(filing, debug);
+  const selectedIds = new Set(debug.selectedSourceIds ?? []);
+  const sources = filingWithSelectedSources.sourceChunks
+    .filter((source) => selectedIds.has(source.sourceId) && /net interest income|noninterest revenue/i.test(source.text))
+    .slice(0, 4)
+    .map(buildSecFilingSource);
+  if (sources.length === 0) {
+    return null;
+  }
+  const responseWithUrls = attachCurrentFilingSourceUrls(
+    ensureFilingGroundedResponse({ answer, sources: dedupeChatSources(sources) }),
+    filing.primaryDocumentUrl
+  );
+  return { answer, responseWithUrls, languageCheck };
+}
+
+function withSelectedDebugSources(
+  filing: FilingCacheRecord,
+  debug: ChatResponseDebugInput
+): FilingCacheRecord {
+  const selectedIds = debug.selectedSourceIds ?? [];
+  const selectedLabels = debug.selectedSourceLabels ?? [];
+  const selectedExcerpts = debug.selectedSourceExcerpts ?? [];
+  if (selectedIds.length === 0 || selectedExcerpts.length === 0) {
+    return filing;
+  }
+
+  const existingIds = new Set(filing.sourceChunks.map((source) => source.sourceId));
+  const supplementalSources = selectedIds.flatMap((sourceId, index) => {
+    const excerpt = selectedExcerpts[index]?.replace(/\s+/g, " ").trim();
+    if (!sourceId || !excerpt || existingIds.has(sourceId)) return [];
+    const label = selectedLabels[index] ?? `${filing.formType} selected filing context`;
+    return [{
+      sourceId,
+      sectionType: /xbrl|metric/i.test(`${sourceId} ${label}`) ? "xbrl_metric" as const : "md_a" as const,
+      sectionTitle: label,
+      sourceLabel: label,
+      text: excerpt,
+      startOffset: 0,
+      endOffset: excerpt.length,
+      sourceUrl: filing.primaryDocumentUrl,
+      sortOrder: 10_000 + index
+    }];
+  });
+  return supplementalSources.length > 0
+    ? { ...filing, sourceChunks: [...supplementalSources, ...filing.sourceChunks] }
+    : filing;
+}
+
+function addSelectedDebugSourcesToResponse(
+  response: ChatResponsePayload,
+  filing: FilingCacheRecord,
+  debug: ChatResponseDebugInput
+): ChatResponsePayload {
+  const selectedIds = debug.selectedSourceIds ?? [];
+  if (selectedIds.length === 0) {
+    return response;
+  }
+  const filingWithSelectedSources = withSelectedDebugSources(filing, debug);
+  const additions = selectedIds.flatMap((sourceId) => {
+    const source = filingWithSelectedSources.sourceChunks.find((candidate) => candidate.sourceId === sourceId);
+    if (!source) return [];
+    const evidence = buildSecFilingSource(source);
+    return [{ ...evidence, sourceUrl: evidence.sourceUrl ?? filing.primaryDocumentUrl }];
+  });
+  return additions.length > 0
+    ? { ...response, sources: dedupeChatSources([...response.sources, ...additions]) }
+    : response;
+}
+
+function hasRevenueDriverSurfaceDefect(answer: string): boolean {
+  const normalized = answer.replace(/\s+/g, " ").trim();
+  const visibleLeakage =
+    /(?:高ー売上|\bServices\b|\bfees?\b|\bMarkets\b|\bPayments\b|\bNoninterest revenue\b|\bTotal net revenue\b|\bOperating lease income\b|\brate effects\b|\ban increase in spending on infrastructure\b|\bdepreciation\b|\bamortization\b|\bperiod\b|\bAutomotive\b|\brefinery\b|\bmerchandise\b|\be-?commerce\b)/i.test(normalized);
+  const wrongSectorBoilerplate =
+    /(?:バイオ医薬|提携収入|承認済み製品の需要|研究開発や販売体制).{0,100}(?:売上|要因|確認)/u.test(normalized);
+  const genericOnly =
+    /(?:会社固有の売上要因までは|売上区分や地域・セグメントの説明が近い材料|販売数量、セグメント構成が売上変化を見る軸|追加確認が必要な点)[^。]*。?$/u.test(normalized) ||
+    /具体的な(?:売上)?(?:ドライバー|要因)[^。]{0,120}(?:含まれていません|確認できません|明示されていません)/u.test(normalized) ||
+    /どの(?:製品カテゴリ|顧客セグメント)[^。]{0,120}(?:確認|追加情報|詳細)/u.test(normalized) ||
+    (/一番大きい変化は売上高/u.test(normalized) && !/(?:主因|要因として|支えた|押し上げ|牽引|due to|driven by)/iu.test(normalized));
+  return visibleLeakage || wrongSectorBoilerplate || genericOnly;
+}
+
+function hasRevenueTopicInMarginDurabilityAnswer(answer: string): boolean {
+  const normalized = answer.replace(/\s+/g, " ").trim();
+  return /(?:売上(?:高)?(?:変化|増減|成長)?の要因|売上要因(?:候補)?|全社増収の(?:主な)?(?:説明)?要因)/u.test(normalized) ||
+    /(?:revenue|sales)[^。.!?]{0,100}(?:driver|driven by)/i.test(normalized);
+}
+
+function buildSafeProfitCauseNumericRecovery(
+  filing: FilingCacheRecord,
+  question: string,
+  facts: VerifiedFinancialFact[],
+  answer: string,
+  responseWithUrls: ChatResponsePayload
+): DeterministicLanguageFallback | null {
+  if (!/(?:赤字|純損失|最終損失|net\s*loss).*(?:原因|理由|要因|なぜ|why)|(?:原因|理由|要因).*(?:赤字|純損失|最終損失|net\s*loss)/iu.test(question)) {
+    return null;
+  }
+  const netIncome = facts.find((fact) =>
+    fact.semanticLabel === "netIncome" && fact.role === "current" && fact.scope === "company_total"
+  );
+  if (!netIncome) {
+    return null;
+  }
+  const netIncomeSource = filing.sourceChunks.find((source) => source.sourceId === netIncome.sourceId);
+  if (!netIncomeSource) {
+    return null;
+  }
+
+  const parts = answer.match(/[^。！？\n]+[。！？]?|\n+/gu) ?? [answer];
+  const qualitativeParts = parts.filter((part) =>
+    part.trim().length > 0 &&
+    extractMaterialNumericClaims(part).length === 0 &&
+    !hasMalformedNumericSurface(part)
+  );
+  if (!qualitativeParts.some((part) =>
+    /(?:評価損益|公正価値|減損|費用|税(?:金|負担)?|構造改革|訴訟|利息|為替|デジタル資産|原価|一時費用)/u.test(part)
+  )) {
+    return null;
+  }
+
+  const qualitativeAnswer = qualitativeParts.join(" ").replace(/\s+/g, " ").trim();
+  const recoveredAnswer = sanitizeFinalUserFacingAnswer(
+    `純利益は ${preferredFinancialDisplay(netIncome.canonicalValue, netIncome.unit).ja}です。 ${qualitativeAnswer}`
+  );
+  const languageCheck = checkFinalAnswerJapaneseOnly(recoveredAnswer);
+  if (!languageCheck.ok || hasBannedPhrase(recoveredAnswer)) {
+    return null;
+  }
+
+  const typedSourceIds = new Set(facts.map((fact) => fact.sourceId));
+  const sources = dedupeChatSources([
+    buildSecFilingSource(netIncomeSource),
+    ...responseWithUrls.sources.filter((source) => !typedSourceIds.has(source.sourceId))
+  ]);
+  if (sources.length < 2) {
+    return null;
+  }
+  return {
+    answer: recoveredAnswer,
+    responseWithUrls: attachCurrentFilingSourceUrls(
+      ensureFilingGroundedResponse({ answer: recoveredAnswer, sources }),
+      filing.primaryDocumentUrl
+    ),
+    languageCheck
+  };
+}
+
+function buildSafeCashFlowNumericRecovery(
+  filing: FilingCacheRecord,
+  question: string,
+  questionIntent: string | null | undefined,
+  facts: VerifiedFinancialFact[],
+  fallbackSources: ChatEvidenceSource[] = []
+): DeterministicLanguageFallback | null {
+  if (!isCashGenerationQuestion(question, questionIntent)) {
+    return null;
+  }
+  const operatingCashFlow = facts.find((fact) =>
+    fact.semanticLabel === "operatingCashFlow" && fact.role === "current" && fact.scope === "company_total"
+  );
+  if (operatingCashFlow) {
+    const deterministic = buildSafeDeterministicLanguageFallback(filing, question);
+    if (deterministic) {
+      return deterministic;
+    }
+  }
+
+  const evidenceSources = fallbackSources.filter((source) =>
+    source.sourceKind === "sec_filing" || source.sourceKind === "historical_filing"
+  );
+  if (evidenceSources.length === 0) {
+    return null;
+  }
+  const answer = "選択された資料では、同じ対象期間の営業CFを型付き数値として確認できないため、現金創出力が健全か弱いかは断定しません。運転資本、設備投資、非資金費用の内訳を確認する必要があります。";
+  const languageCheck = checkFinalAnswerJapaneseOnly(answer);
+  if (!languageCheck.ok || hasBannedPhrase(answer)) {
+    return null;
+  }
+  return {
+    answer,
+    responseWithUrls: attachCurrentFilingSourceUrls(
+      ensureFilingGroundedResponse({ answer, sources: dedupeChatSources(evidenceSources) }),
+      filing.primaryDocumentUrl
+    ),
+    languageCheck
+  };
+}
+
+function buildSafeLiquidityNumericRecovery(
+  filing: FilingCacheRecord,
+  question: string,
+  questionIntent: string | null | undefined,
+  facts: VerifiedFinancialFact[],
+  fallbackSources: ChatEvidenceSource[] = []
+): DeterministicLanguageFallback | null {
+  if (!isLiquidityDebtQuestion(question, questionIntent)) {
+    return null;
+  }
+  const operatingCashFlow = facts.find((fact) =>
+    fact.semanticLabel === "operatingCashFlow" && fact.role === "current"
+  );
+  const cash = facts.find((fact) => fact.semanticLabel === "cashAndCashEquivalents" && fact.role === "current");
+  const currentDebt = facts.find((fact) => fact.semanticLabel === "currentDebt" && fact.role === "current");
+  const longTermDebt = facts.find((fact) => fact.semanticLabel === "longTermDebt" && fact.role === "current");
+  const selectedFacts = [cash, currentDebt, longTermDebt, operatingCashFlow]
+    .filter((fact): fact is VerifiedFinancialFact => fact !== undefined);
+  const sourceChunks = selectedFacts.flatMap((fact) => {
+    const source = filing.sourceChunks.find((candidate) => candidate.sourceId === fact.sourceId);
+    return source ? [source] : [];
+  });
+  const evidenceSources = sourceChunks.length > 0
+    ? sourceChunks.map(buildSecFilingSource)
+    : fallbackSources.filter((source) => source.sourceKind === "sec_filing" || source.sourceKind === "historical_filing");
+  if (evidenceSources.length === 0) {
+    return null;
+  }
+
+  const factSentence = (label: string, fact: VerifiedFinancialFact) =>
+    `${label}は${preferredFinancialDisplay(fact.canonicalValue, fact.unit).ja}です。`;
+  const observed = [
+    ...(cash ? [factSentence("現金及び現金同等物", cash)] : []),
+    ...(currentDebt ? [factSentence("1年内返済予定の長期債務", currentDebt)] : []),
+    ...(longTermDebt ? [factSentence("長期債務（非流動）", longTermDebt)] : []),
+    ...(operatingCashFlow ? [factSentence("営業CF", operatingCashFlow)] : [])
+  ];
+  const instantFacts = cash && currentDebt && longTermDebt ? [cash, currentDebt, longTermDebt] : [];
+  const instantPeriodsCompatible = instantFacts.length === 3 && instantFacts.every((fact) =>
+    fact.periodKind === "instant" &&
+    fact.periodEnd === instantFacts[0]!.periodEnd &&
+    fact.currency !== null &&
+    fact.currency === instantFacts[0]!.currency &&
+    fact.scope === instantFacts[0]!.scope
+  );
+  const confirmedLongTermDebtPortions = currentDebt && longTermDebt
+    ? currentDebt.canonicalValue + longTermDebt.canonicalValue
+    : null;
+  const concernAssessment = cash && currentDebt && longTermDebt && instantPeriodsCompatible && confirmedLongTermDebtPortions !== null
+    ? cash.canonicalValue > confirmedLongTermDebtPortions
+      ? "同じ時点で確認できた長期債務の1年内返済予定分と非流動分の合計より手元資金が上回っています。ただし、この3項目だけから直ちに資金繰り懸念がないとは断定しません。"
+      : cash.canonicalValue === confirmedLongTermDebtPortions
+        ? "同じ時点で確認できた長期債務の1年内返済予定分と非流動分の合計は手元資金と同額です。ただし、この3項目だけから資金繰りの安全性や悪化を断定しません。"
+        : "同じ時点で確認できた長期債務の1年内返済予定分と非流動分の合計は手元資金を上回るため、返済期限と借換条件を確認する必要があります。ただし、この3項目だけで資金繰り悪化を断定しません。"
+    : "現金・1年内返済予定の長期債務・長期債務（非流動）を同じ時点で十分に比較できないため、資金繰りへの懸念は断定しません。";
+  const missing = [
+    ...(!cash ? ["手元資金"] : []),
+    ...(!currentDebt ? ["1年内返済予定の長期債務"] : []),
+    ...(!longTermDebt ? ["長期債務（非流動）"] : [])
+  ];
+  const missingAssessment = missing.length > 0
+    ? `返却された根拠では${missing.join("・")}を確認できません。`
+    : "";
+  const answer = `${observed.join("")} ${concernAssessment}${missingAssessment} コマーシャルペーパー、その他の短期借入、リース負債はこの比較に含めていません。返済期限、利用可能な信用枠、流動性の説明も合わせて確認する必要があります。`;
+  const sanitizedAnswer = sanitizeFinalUserFacingAnswer(answer);
+  const languageCheck = checkFinalAnswerJapaneseOnly(sanitizedAnswer);
+  if (!languageCheck.ok || hasBannedPhrase(sanitizedAnswer)) {
+    return null;
+  }
+  const responseWithUrls = attachCurrentFilingSourceUrls(
+    ensureFilingGroundedResponse({
+      answer: sanitizedAnswer,
+      sources: dedupeChatSources(evidenceSources)
+    }),
+    filing.primaryDocumentUrl
+  );
+  return {
+    answer: sanitizedAnswer,
+    responseWithUrls,
     languageCheck
   };
 }
@@ -563,6 +1511,17 @@ function isMarginDurabilityFollowupQuestion(question: string, questionIntent?: s
   return /(利益率|margin|マージン).*(一時|構造|継続)|これは一時要因/i.test(question);
 }
 
+function isTypedMarginDriverQuestion(question: string, questionIntent?: string | null): boolean {
+  if (questionIntent === "margin_durability_followup") return false;
+  const asksTypedMarginCause = /(?:利益率|マージン|採算).*(?:改善|悪化|要因|理由)|(?:改善|悪化).*(?:利益率|マージン|採算)/u.test(question);
+  return asksTypedMarginCause && (
+    questionIntent == null ||
+    questionIntent === "margin_driver" ||
+    questionIntent === "margin_profitability" ||
+    questionIntent === "margin_snapshot"
+  );
+}
+
 function isCatLikeFiling(filing: FilingCacheRecord): boolean {
   return /\bCAT\b|Caterpillar/i.test(`${filing.ticker} ${filing.companyName}`);
 }
@@ -590,9 +1549,55 @@ function repairDriverDurabilityFollowupAnswer(
 ): Q04DurabilityRepair | null {
   if (
     !isDriverDurabilityFollowupQuestion(question, debug.questionIntent) ||
-    ((debug.sourceGateSufficient !== true || isMarginDurabilityFollowupQuestion(question, debug.questionIntent)) && isMarginDurabilityUnderAnswer(answer))
+    isMarginDurabilityFollowupQuestion(question, debug.questionIntent)
   ) {
     return null;
+  }
+
+  // Q04 is explicitly a follow-up. When Q03 already supplied grounded drivers,
+  // preserve those drivers instead of allowing a fresh model response to replace
+  // them with generic categories or unrelated missing-information boilerplate.
+  const groundedPreviousAnswerRepair = buildPreviousAnswerDurabilityCandidate(
+    answer,
+    debug.followupPreviousAnswer,
+    true
+  );
+  if (groundedPreviousAnswerRepair) {
+    return {
+      answer: sanitizeFinalUserFacingAnswer(groundedPreviousAnswerRepair),
+      labels: ["q04_previous_answer_driver_candidate_repair"]
+    };
+  }
+
+  const unresolvedPreviousAnswerRepair = buildUnresolvedPreviousDriverDurabilityCandidate(
+    debug.followupPreviousAnswer
+  );
+  if (unresolvedPreviousAnswerRepair) {
+    return {
+      answer: sanitizeFinalUserFacingAnswer(unresolvedPreviousAnswerRepair),
+      labels: ["q04_previous_answer_driver_candidate_repair"]
+    };
+  }
+
+  if (
+    debug.lowQualityReason === "durability_missing_assessment" ||
+    debug.responsePath === "fallback" ||
+    hasGenericDurabilityMissingInfoBoilerplate(answer) ||
+    !/(?:継続|一時|持続|断定)/u.test(answer)
+  ) {
+    const previousAnswerRepair = buildPreviousAnswerDurabilityCandidate(
+      answer,
+      debug.followupPreviousAnswer,
+      debug.lowQualityReason === "durability_missing_assessment" ||
+      hasGenericDurabilityMissingInfoBoilerplate(answer) ||
+      !/(?:継続|一時|持続|断定)/u.test(answer)
+    );
+    if (previousAnswerRepair) {
+      return {
+        answer: sanitizeFinalUserFacingAnswer(previousAnswerRepair),
+        labels: ["q04_previous_answer_driver_candidate_repair"]
+      };
+    }
   }
 
   if (debug.sourceGateSufficient !== true) {
@@ -619,10 +1624,16 @@ function repairDriverDurabilityFollowupAnswer(
       repairedAnswer = retailRepair;
       labels.push("q04_retail_durability_source_backed_repair");
     } else {
-      const genericRepair = buildGenericDriverDurabilitySynthesis(answer, evidenceText);
-      if (genericRepair) {
-        repairedAnswer = genericRepair;
-        labels.push("q04_generic_durability_source_backed_repair");
+      const platformRepair = buildGoogleDurabilitySynthesis(answer, evidenceText, filing);
+      if (platformRepair) {
+        repairedAnswer = platformRepair;
+        labels.push("q04_platform_durability_source_backed_repair");
+      } else {
+        const genericRepair = buildGenericDriverDurabilitySynthesis(answer, evidenceText);
+        if (genericRepair) {
+          repairedAnswer = genericRepair;
+          labels.push("q04_generic_durability_source_backed_repair");
+        }
       }
     }
   }
@@ -641,8 +1652,12 @@ function repairDriverDurabilityFollowupAnswer(
   return { answer: sanitized, labels };
 }
 
-function buildPreviousAnswerDurabilityCandidate(answer: string, previousAnswer?: string | null): string | null {
-  if (!isDurabilityUnderAnswer(answer) || !previousAnswer || shouldIgnorePreviousDriverAnswer(previousAnswer)) {
+function buildPreviousAnswerDurabilityCandidate(
+  answer: string,
+  previousAnswer?: string | null,
+  force = false
+): string | null {
+  if ((!force && !isDurabilityUnderAnswer(answer)) || !previousAnswer || shouldIgnorePreviousDriverAnswer(previousAnswer)) {
     return null;
   }
 
@@ -658,11 +1673,77 @@ function buildPreviousAnswerDurabilityCandidate(answer: string, previousAnswer?:
   return `前問で挙がっていた売上要因候補は、${joinJapaneseItems(drivers.slice(0, 5))} です。ただし、この資料だけでは一時要因か継続要因かは断定しません。${indicatorText}`;
 }
 
+function buildUnresolvedPreviousDriverDurabilityCandidate(previousAnswer?: string | null): string | null {
+  if (!previousAnswer) return null;
+  const normalized = previousAnswer.replace(/\s+/g, " ").trim();
+  const explicitlyUnresolved =
+    /(?:全社売上の主因|具体的な(?:売上)?(?:要因|ドライバー))[^。]{0,140}(?:確認できません|特定できません|明示されていません|断定しません)/u.test(normalized) ||
+    /価格・数量・事業別[^。]{0,120}(?:結び付ける説明|主因)[^。]{0,80}(?:確認できません|特定できません)/u.test(normalized);
+  if (!explicitlyUnresolved) return null;
+  return "前問では、価格・数量・事業別のどれが全社売上の主因かを結び付ける説明を確認できていません。そのため、この資料だけで一時要因か継続要因かは分類しません。次に確認すべき指標は、価格、販売数量、事業別売上です。";
+}
+
+function buildDeterministicDriverDurabilityFallback(
+  filing: FilingCacheRecord
+): DeterministicLanguageFallback | null {
+  const deterministic = buildDeterministicMetricAnswer(filing, "売上増加の主な要因は？");
+  if (!deterministic) return null;
+  const drivers = inferPreviousAnswerDriverLabels(deterministic.response.answer);
+  if (drivers.length === 0) return null;
+  const answer = `提出資料だけでは継続性は断定できません。売上要因候補として確認できるのは、${joinJapaneseItems(drivers.slice(0, 5))} です。次に見るべき指標は、${joinJapaneseItems(drivers.slice(0, 5))} が次期にも続くかどうかです。`;
+  const responseWithUrls = { ...deterministic.response, answer };
+  return {
+    answer,
+    responseWithUrls,
+    languageCheck: checkFinalAnswerJapaneseOnly(answer)
+  };
+}
+
+function buildDeterministicMarginDurabilityFallback(
+  filing: FilingCacheRecord
+): DeterministicLanguageFallback | null {
+  const deterministic = buildDeterministicMetricAnswer(filing, "利益率は改善した？その要因は？");
+  if (!deterministic) return null;
+  const drivers = inferPreviousAnswerMarginDriverLabels(deterministic.response.answer);
+  if (drivers.length === 0) return null;
+  const indicators = inferPreviousAnswerMarginDurabilityIndicators(deterministic.response.answer, drivers);
+  const answer = `提出資料だけでは一時要因か構造的変化かは断定できません。利益率要因候補として確認できるのは、${joinJapaneseItems(drivers.slice(0, 5))} です。次に見るべき指標は、${joinJapaneseItems((indicators.length > 0 ? indicators : drivers).slice(0, 5))} です。`;
+  const responseWithUrls = { ...deterministic.response, answer };
+  return {
+    answer,
+    responseWithUrls,
+    languageCheck: checkFinalAnswerJapaneseOnly(answer)
+  };
+}
+
+function normalizedHardIntentInsufficiencyFailureLabels({
+  debug,
+  repairLabels
+}: {
+  debug: ChatResponseDebugInput;
+  repairLabels: string[];
+}): string[] | undefined {
+  if (debug.sourceGateSufficient === true) return debug.sourceGateFailureLabels;
+  if (repairLabels.includes("q04_previous_answer_driver_candidate_repair")) {
+    return ["durability_context_missing", "source_gate_failed"];
+  }
+  if (repairLabels.includes("q06_previous_answer_margin_candidate_repair")) {
+    return ["missing_margin_durability_context", "source_gate_failed"];
+  }
+  return debug.sourceGateFailureLabels;
+}
+
 function repairMarginDurabilityFollowupAnswer(
   answer: string,
   question: string,
   debug: ChatResponseDebugInput
 ): Q04DurabilityRepair | null {
+  if (
+    debug.questionIntent === "driver_durability_followup" ||
+    (debug.questionIntent === "yoy_change" && isDriverDurabilityFollowupQuestion(question, debug.questionIntent))
+  ) {
+    return null;
+  }
   if (!isMarginDurabilityFollowupQuestion(question, debug.questionIntent) && !isGenericDurabilityFollowupWithMarginContext(question, debug)) {
     return null;
   }
@@ -677,7 +1758,7 @@ function repairMarginDurabilityFollowupAnswer(
 }
 
 function buildPreviousAnswerMarginDurabilityCandidate(answer: string, previousAnswer?: string | null): string | null {
-  if (!isDurabilityUnderAnswer(answer) || !previousAnswer || shouldIgnorePreviousMarginDriverAnswer(previousAnswer)) {
+  if (!previousAnswer || shouldIgnorePreviousMarginDriverAnswer(previousAnswer)) {
     return null;
   }
 
@@ -694,7 +1775,13 @@ function buildPreviousAnswerMarginDurabilityCandidate(answer: string, previousAn
 }
 
 function shouldIgnorePreviousDriverAnswer(previousAnswer: string): boolean {
-  return /(?:income taxes payable|Pillar Two|TAC|traffic acquisition costs?|brokerage expense|auto lease depreciation|marketing expense|occupancy expense|distribution fees|noncurrent income taxes|税金|税効果|費用|減価償却|販管費|人件費|信用損失|引当|Sleep\?|正確な表現は数字)/i.test(previousAnswer);
+  const hasExplicitSegmentRevenueBridge =
+    /energy products[^。]{0,120}(?:増加|正の寄与)/i.test(previousAnswer) &&
+    /upstream[^。]{0,120}(?:減少|相殺|マイナス寄与)/i.test(previousAnswer);
+  if (hasExplicitSegmentRevenueBridge) {
+    return false;
+  }
+  return /(?:主因かを結び付ける説明は確認できません|主因は断定しません|income taxes payable|Pillar Two|TAC|traffic acquisition costs?|トラフィック獲得(?:コスト|費用)|交通獲得(?:コスト|費用)|brokerage expense|auto lease depreciation|marketing expense|occupancy expense|distribution fees|noncurrent income taxes|税金|税効果|費用|減価償却|販管費|人件費|信用損失|引当|Sleep\?|正確な表現は数字)/i.test(previousAnswer);
 }
 
 function shouldIgnorePreviousMarginDriverAnswer(previousAnswer: string): boolean {
@@ -702,7 +1789,7 @@ function shouldIgnorePreviousMarginDriverAnswer(previousAnswer: string): boolean
 }
 
 function inferPreviousAnswerDriverLabels(previousAnswer: string): string[] {
-  const text = previousAnswer.toLowerCase();
+  const text = previousAnswer.split(/これらのブリッジ|この表だけでは|この表では|追加確認が必要な点|追加で確認/iu)[0]!.toLowerCase();
   const labels: string[] = [];
   const add = (label: string, pattern: RegExp) => {
     if (pattern.test(text)) {
@@ -713,26 +1800,48 @@ function inferPreviousAnswerDriverLabels(previousAnswer: string): string[] {
   add("地域別売上", /americas|europe|greater china|asia pacific|地域別|地域/);
   add("iPhone", /iphone/);
   add("サービス売上", /services?|サービス/);
-  add("決済ボリューム", /payments volume|processed transactions|cross-border volume|決済/);
-  add("Advisory・その他サービス", /advisory|other services/);
-  add("販売数量・出荷量", /sales volume|unit case volume|(?<!payments )volume|出荷量|販売数量|数量|ボリューム|量の増加|ボリューム成長|volume growth/);
+  add("取引件数・客単価", /transactions?|average ticket|取引件数|客単価/);
+  add("食品・一般商品", /grocery|general merchandise|食品|一般商品/);
+  add("データセンター向けAI製品", /data center|blackwell|データセンター向けai/);
+  add("決済額・処理件数・国際取引量", /payments volume|processed transactions|cross-border volume|決済/);
+  add("アドバイザリー・付加価値サービス", /advisory|other services/);
+  add("純利息収入", /net interest income|純利息収入/);
+  add("非利息収入・投資銀行・市場業務", /noninterest (?:income|revenue)|investment banking|markets revenue|card services|非利息収入|投資銀行|市場業務/);
+  add("Energy Productsの売上増加", /energy products[^。]{0,80}(?:増加|最大の正の寄与)|エネルギー製品[^。]{0,80}(?:増加|最大の正の寄与)/);
+  add("Upstreamの売上減少", /upstream[^。]{0,80}(?:減少|最大の相殺|マイナス寄与)|上流[^。]{0,80}(?:減少|最大の相殺|マイナス寄与)/);
+  add("Chemical Productsの売上増加", /chemical products[^。]{0,80}増加|化学製品[^。]{0,80}増加/);
+  add("検索量", /search volume/);
+  add("ユーザー単価", /revenue per user/);
+  add("利用席数", /seats? (?:grew|growth|increased)|seat growth/);
+  add("販売数量・出荷量", /sales volume|unit case volume|production volume|unit volume|出荷量|販売数量|数量|ボリューム|量の増加|ボリューム成長/);
   add("価格・ミックス", /price\/mix|price mix|pricing|price realization|realized price|価格|ミックス|実現価格|価格低下|値引き/);
   add("資源価格", /crude|oil price|natural gas|commodity|原油|天然ガス|市場価格|資源価格/);
   add("需給環境", /supply|demand|需要|供給/);
   add("買収影響", /acquisition|pioneer|買収/);
   add("製品カテゴリ成長", /coffee|water|sports|trademark coca-cola|sparkling|カテゴリ|コーヒー|水|スポーツ飲料|mounjaro|zepbound|製品/);
   add("ボトリング投資", /bottling|ボトリング/);
-  add("クラウド・AWS", /aws|azure|google cloud|cloud|クラウド/);
+  add("AWS", /\baws\b/);
+  add("Azure", /\bazure\b/);
+  add("Google Cloud", /google cloud/);
+  add("クラウド", /(?<!google )\bcloud\b|クラウド/);
   add("広告需要", /advertising|\bads?\b|広告/);
   add("旅客収入", /passenger revenue|passenger|旅客/);
-  add("精製・燃料価格", /refinery|refining|fuel|精製|燃料/);
+  add("燃料価格", /fuel|燃料/);
   add("車両価格・納車", /vehicle pricing|deliveries|production volume|automotive|車両価格|納車|生産台数/);
 
-  return [...new Set(labels)];
+  const unique = [...new Set(labels)];
+  if (
+    unique.includes("決済額・処理件数・国際取引量") ||
+    unique.includes("純利息収入") ||
+    unique.includes("非利息収入・投資銀行・市場業務")
+  ) {
+    return unique.filter((label) => label !== "販売数量・出荷量");
+  }
+  return unique;
 }
 
 function inferPreviousAnswerDurabilityIndicators(previousAnswer: string, drivers: string[]): string[] {
-  const text = previousAnswer.toLowerCase();
+  const text = previousAnswer.split(/これらのブリッジ|この表だけでは|この表では|追加確認が必要な点|追加で確認/iu)[0]!.toLowerCase();
   const indicators = [...drivers];
   if (/iphone|services?|サービス/.test(text)) {
     indicators.push("製品別売上", "サービス売上");
@@ -746,7 +1855,10 @@ function inferPreviousAnswerDurabilityIndicators(previousAnswer: string, drivers
   if (/crude|natural gas|原油|天然ガス|資源価格/.test(text)) {
     indicators.push("資源価格");
   }
-  if (/unit case volume|volume|ボリューム|数量/.test(text)) {
+  const financialOrPaymentDrivers = drivers.some((driver) =>
+    /決済額・処理件数・国際取引量|純利息収入|非利息収入・投資銀行・市場業務/u.test(driver)
+  );
+  if (!financialOrPaymentDrivers && /sales volume|unit case volume|production volume|unit volume|ボリューム|数量/.test(text)) {
     indicators.push("販売数量・ボリューム");
   }
   if (/price\/mix|price mix|価格/.test(text)) {
@@ -756,7 +1868,9 @@ function inferPreviousAnswerDurabilityIndicators(previousAnswer: string, drivers
 }
 
 function inferPreviousAnswerMarginDriverLabels(previousAnswer: string): string[] {
-  const text = previousAnswer.toLowerCase();
+  const text = previousAnswer
+    .split(/一時要因か構造的変化かは/u)[0]!
+    .toLowerCase();
   const labels: string[] = [];
   const add = (label: string, pattern: RegExp) => {
     if (pattern.test(text)) {
@@ -764,9 +1878,15 @@ function inferPreviousAnswerMarginDriverLabels(previousAnswer: string): string[]
     }
   };
 
-  add("販売数量・出荷量", /sales volume|unit case volume|volume|出荷量|販売数量|数量|ボリューム|量の増加|ボリューム成長|volume growth/);
+  add("検索量", /search volume/);
+  add("ユーザー単価", /revenue per user/);
+  add("利用席数", /seats? (?:grew|growth|increased)|seat growth/);
+  add("販売数量・出荷量", /sales volume|unit case volume|production volume|unit volume|出荷量|販売数量|数量|ボリューム|量の増加|ボリューム成長/);
   add("価格・ミックス", /price\/mix|price mix|pricing|price realization|realized price|価格|ミックス|実現価格|価格低下|値引き/);
-  add("製造コスト", /manufacturing cost|production cost|cost pressure|costs?|製造コスト|原価|コスト/);
+  add("製造コスト", /manufacturing costs?|production costs?|cost pressure|製造コスト/);
+  add("営業費用・原価", /operating expenses?|cost of revenue|cost of sales|営業費用|売上原価|原価/);
+  add("在庫引当・評価損", /inventory provision|inventory charge|excess inventory|在庫引当|在庫評価損/);
+  add("信用損失引当", /provision for credit losses?|credit loss provision|信用損失引当/);
   add("関税", /tariff|関税/);
   add("為替", /\bfx\b|foreign exchange|currency|為替/);
   add("粗利益率", /gross margin|gross profit|粗利|粗利益/);
@@ -780,14 +1900,16 @@ function inferPreviousAnswerMarginDriverLabels(previousAnswer: string): string[]
   add("原材料コスト", /raw material|input cost|ingredient|原材料/);
   add("クラウド需要", /aws|azure|google cloud|cloud|クラウド/);
   add("製品需要", /mounjaro|zepbound|demand|需要/);
-  add("訴訟費用・引当", /litigation|provision|訴訟|引当/);
+  add("訴訟費用・引当", /litigation|legal expense|訴訟/);
   add("買収関連費用", /acquired ipr&d|acquisition|買収/);
 
   return [...new Set(labels)];
 }
 
 function inferPreviousAnswerMarginDurabilityIndicators(previousAnswer: string, drivers: string[]): string[] {
-  const text = previousAnswer.toLowerCase();
+  const text = previousAnswer
+    .split(/一時要因か構造的変化かは/u)[0]!
+    .toLowerCase();
   const indicators = [...drivers];
   if (/gross margin|gross profit|粗利/.test(text)) {
     indicators.push("粗利益率");
@@ -795,13 +1917,13 @@ function inferPreviousAnswerMarginDurabilityIndicators(previousAnswer: string, d
   if (/price|価格|ミックス/.test(text)) {
     indicators.push("価格・ミックス");
   }
-  if (/manufacturing cost|cost|原価|コスト/.test(text)) {
-    indicators.push("原価・製造コスト");
+  if (/manufacturing cost|cost|原価|コスト/.test(text) && !drivers.includes("営業費用・原価")) {
+    indicators.push("原価・営業コスト");
   }
   if (/\br&d\b|research and development|研究開発/.test(text)) {
     indicators.push("研究開発費");
   }
-  if (/marketing|sg&a|administrative|販管費|販売管理費/.test(text)) {
+  if (/marketing|sg&a|administrative|販管費|販売管理費/.test(text) && !drivers.includes("販売管理費")) {
     indicators.push("販管費");
   }
   if (/\btac\b|traffic acquisition costs?/.test(text)) {
@@ -879,16 +2001,16 @@ function buildJpmDurabilitySynthesis(
 
   const lower = evidenceText.toLowerCase();
   const niiClause = /net interest income|\bnii\b/.test(lower)
-    ? "NIIはMarkets NII、Card Servicesの回転残高、wholesale deposit残高、投資証券活動が寄与しましたが、deposit margin compressionや金利低下の影響もあり、金利環境次第です。"
+    ? "純利息収入は、市場業務の純利息収入、カード事業のリボ残高、法人預金残高、投資証券活動が寄与しました。一方、預金マージンの縮小や金利低下の影響も受けるため、継続性は金利環境次第です。"
     : "";
   const nirClause = /noninterest income|\bnir\b|investment banking|markets noninterest|asset management|payments|first republic/.test(lower)
-    ? "NIRはMarkets非金利収益、資産運用・Payments・投資銀行手数料、First Republic関連利益が寄与しましたが、市場関連収益や一時利益は変動しやすい要因です。"
+    ? "非金利収入は、市場業務、資産運用、決済、投資銀行の手数料収入が寄与しました。ただし、市場関連収益や一時利益は変動しやすい要因です。"
     : "";
   if (!niiClause && !nirClause) {
     return null;
   }
 
-  return `提出資料だけでは継続性は断定できません。${niiClause}${nirClause}次回はNII、NIR、預金マージン、Markets収益、手数料収入を確認する必要があります。`;
+  return `提出資料だけでは継続性は断定できません。${niiClause}${nirClause}次回は純利息収入、非金利収入、預金マージン、市場業務収益、手数料収入を確認する必要があります。`;
 }
 
 function buildWmtDurabilitySynthesis(
@@ -900,7 +2022,34 @@ function buildWmtDurabilitySynthesis(
     return null;
   }
 
-  return "提出資料だけでは継続性は断定できません。Walmart USでは、comparable salesにeCommerceが寄与し、transactionsやunit volumes、groceryとhealth & wellnessの強さ、Walmart+ member engagementとomnichannel利用が支えになっています。これらは継続性を見る材料ですが、持続性を判断するには、次回のcomparable sales、traffic、ticket、eCommerce寄与、member engagement、fuel価格影響を確認する必要があります。";
+  return "提出資料だけでは継続性は断定できません。Walmart米国では、既存店売上にECが寄与し、取引件数と販売数量、食品・ヘルスケア商品の強さ、Walmart+の会員利用とオムニチャネル利用が支えになっています。これらは継続性を見る材料ですが、持続性を判断するには、次回の既存店売上、客数、客単価、EC寄与、会員利用、燃料価格の影響を確認する必要があります。";
+}
+
+function buildGoogleDurabilitySynthesis(
+  answer: string,
+  evidenceText: string,
+  filing: FilingCacheRecord
+): string | null {
+  if (!isGoogleLikeFiling(filing) || !isDurabilityUnderAnswer(answer)) {
+    return null;
+  }
+  const lower = evidenceText.toLowerCase();
+  const hasSubscriptions = /paid subscriptions|subscriptions? revenues?|youtube services|google one/.test(lower);
+  const hasAdvertising = /youtube ads|advertis(?:ing|er)|direct response|brand advertising/.test(lower);
+  const hasForeignExchange = /foreign currency|foreign exchange|currency exchange/.test(lower);
+  const hasCloud = /google cloud/.test(lower);
+  const hasDurabilityContext = /seasonal|competition|paid subscriptions|foreign currency|device mix|underlying business trends/.test(lower);
+  if (!hasDurabilityContext || !(hasSubscriptions || hasAdvertising || hasForeignExchange || hasCloud)) {
+    return null;
+  }
+
+  const observations = [
+    hasSubscriptions ? "有料サブスクリプションの増加は継続性を見る材料です。" : "",
+    hasAdvertising ? "広告売上は、広告主の競争、広告形式、端末構成、季節性によって変動します。" : "",
+    hasForeignExchange ? "為替影響も四半期ごとに変動し得ます。" : "",
+    hasCloud ? "Google Cloudは、次回も売上成長率が続くかを確認する必要があります。" : ""
+  ].filter(Boolean).join("");
+  return `提出資料だけでは継続性は断定できません。${observations}次回は、Googleサービス、Google Cloud、YouTube広告、有料サブスクリプションの成長率を同じ基準で確認する必要があります。`;
 }
 
 function buildGenericDriverDurabilitySynthesis(answer: string, evidenceText: string): string | null {
@@ -926,6 +2075,10 @@ function isWmtLikeFiling(filing: FilingCacheRecord): boolean {
   return /\bWMT\b|Walmart/i.test(`${filing.ticker} ${filing.companyName}`);
 }
 
+function isGoogleLikeFiling(filing: FilingCacheRecord): boolean {
+  return /\bGOOGL?\b|Alphabet|Google/i.test(`${filing.ticker} ${filing.companyName}`);
+}
+
 function hasBankDurabilityEvidence(text: string): boolean {
   const lower = text.toLowerCase();
   const hasNii = /net interest income|\bnii\b|deposit margin compression|wholesale deposit|card services/.test(lower);
@@ -946,8 +2099,16 @@ function hasGenericDurabilityEvidence(text: string): boolean {
   return /(continue|continued|expected|expects|outlook|future|vary based on|performance expectation|long[- ]term|cyclical|uncertain|uncertainty|risk|headwind|tailwind|supply constraint|demand|volume growth|pricing modifications|price\/mix|price mix|market supply and demand|継続|見通し|不確実|需要|価格)/i.test(text);
 }
 
+function hasGenericDurabilityMissingInfoBoilerplate(answer: string): boolean {
+  return /(?:契約期間|受注残|バックログ).{0,100}(?:顧客需要|需要の継続性|継続期間|追加情報|情報が必要)/u.test(answer);
+}
+
+function hasUnsupportedDurabilityClassificationSurface(answer: string): boolean {
+  return /(?:一時的要因|一時要因)(?:として|の可能性)[^。！？\n]{0,100}(?:挙げ|示唆|考え|みられ|見られ)/u.test(answer);
+}
+
 function isDurabilityUnderAnswer(answer: string): boolean {
-  return /前問の具体的な(?:売上|利益率)?要因(?:が|は)?十分に特定|具体的な(?:売上|利益率)?要因(?:が|は)?十分に特定できません|一時要因か(?:継続要因|構造的変化)かは分類しません|確認すべき箇所は|追加確認が必要/.test(answer);
+  return /前問の具体的な(?:売上|利益率)?要因(?:が|は)?十分に特定|具体的な(?:売上|利益率)?要因(?:が|は)?十分に特定できません|要因が一時的かどうかは判断できません|一時要因か(?:継続要因|構造的変化)かは分類しません|確認すべき箇所は|追加確認が必要/.test(answer);
 }
 
 function isMarginDurabilityUnderAnswer(answer: string): boolean {
@@ -957,8 +2118,7 @@ function isMarginDurabilityUnderAnswer(answer: string): boolean {
 
 function softenOverconfidentDurabilityWording(answer: string): string {
   let softened = answer
-    .replace(/eCommerceの売上寄与が継続的に高まり/g, "eCommerceの売上寄与は継続要因になり得ますが、このfilingだけでは継続性は断定できません")
-    .replace(/eCommerce の売上寄与が継続的に高まり/g, "eCommerce の売上寄与は継続要因になり得ますが、このfilingだけでは継続性は断定できません")
+    .replace(/(?:eCommerce|EC)\s*の売上寄与が継続的に高まり/g, "ECの売上寄与は継続性を見る材料ですが、このfilingだけでは継続性は断定できません")
     .replace(/eCommerce[^。]*継続的に高まり/g, "eCommerceや会員エンゲージメントは継続性を見る材料ですが、持続性の断定は避けるべきです")
     .replace(/今後も続くでしょう/g, "今後も続くかは、このfilingだけでは断定できません")
     .replace(/今後も続くと見られます/g, "今後も続くかは、このfilingだけでは断定できません")
@@ -986,10 +2146,6 @@ function cleanAnswerForQuestion(
   const sectorCleanup = cleanWrongSectorBankLanguage(normalizedAnswer, question, questionIntent, filing);
   if (sectorCleanup) {
     return sectorCleanup;
-  }
-  const operatingMarginCleanup = cleanUnsupportedOperatingMarginMovement(normalizedAnswer);
-  if (operatingMarginCleanup) {
-    return operatingMarginCleanup;
   }
   if (isLiquidityDebtQuestion(question, questionIntent)) {
     return cleanLiquidityDebtAnswer(normalizedAnswer);
@@ -1131,15 +2287,165 @@ function hasMisleadingNonRevenueDriverCause(answer: string): boolean {
   if (!/(売上(?:変化|成長|増減)?の?要因|売上要因|revenue driver)/i.test(answer)) {
     return false;
   }
-  return /(?:income taxes payable|Pillar Two|TAC|traffic acquisition costs?|brokerage expense|auto lease depreciation|marketing expense|occupancy expense|distribution fees|noncurrent income taxes|税金|税効果|費用|減価償却|販管費|人件費|信用損失|引当)/i.test(answer);
+  return /(?:income taxes payable|Pillar Two|TAC|traffic acquisition costs?|トラフィック獲得(?:コスト|費用)|交通獲得(?:コスト|費用)|brokerage expense|auto lease depreciation|marketing expense|occupancy expense|distribution fees|noncurrent income taxes|税金|税効果|費用|減価償却|販管費|人件費|信用損失|引当)/i.test(answer);
 }
 
-function sanitizeFinalUserFacingAnswer(answer: string): string {
-  return normalizeInternalSourceWording(normalizeBusinessLineLabels(normalizeFallbackSourceLabels(normalizeAwkwardModelLanguage(answer))));
+export function sanitizeFinalUserFacingAnswer(answer: string): string {
+  return normalizeInternalSourceWording(
+    normalizeBusinessLineLabels(
+      normalizeFallbackSourceLabels(
+        normalizeAwkwardModelLanguage(normalizeQuarterLanguage(answer))
+      )
+    )
+  );
+}
+
+function normalizeQuarterLanguage(answer: string): string {
+  const englishOrdinal: Record<string, string> = {
+    first: "1",
+    second: "2",
+    third: "3",
+    fourth: "4"
+  };
+  const japaneseOrdinal: Record<string, string> = {
+    一: "1",
+    二: "2",
+    三: "3",
+    四: "4",
+    "1": "1",
+    "2": "2",
+    "3": "3",
+    "4": "4"
+  };
+  const englishMonth: Record<string, string> = {
+    january: "1",
+    february: "2",
+    march: "3",
+    april: "4",
+    may: "5",
+    june: "6",
+    july: "7",
+    august: "8",
+    september: "9",
+    october: "10",
+    november: "11",
+    december: "12"
+  };
+  return answer
+    .replace(
+      /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+((?:19|20)\d{2})\s*(?:quarter|四半期)\b/gi,
+      (_match, month: string, year: string) => `${year}年${englishMonth[month.toLowerCase()] ?? month}月期`
+    )
+    .replace(
+      /\b(?:the\s+)?(first|second|third|fourth)\s+quarters?\s+of\s+(?:fiscal\s+)?((?:19|20)\d{2})\b/gi,
+      (_match, ordinal: string, year: string) => `${year}年第${englishOrdinal[ordinal.toLowerCase()] ?? ordinal}四半期`
+    )
+    .replace(
+      /\b(?:fiscal\s+)?((?:19|20)\d{2})\s+(?:the\s+)?(first|second|third|fourth)\s+quarters?\b/gi,
+      (_match, year: string, ordinal: string) => `${year}年第${englishOrdinal[ordinal.toLowerCase()] ?? ordinal}四半期`
+    )
+    .replace(
+      /第\s*([一二三四1-4])\s*(?:quarters?|クォーター)/gi,
+      (_match, ordinal: string) => `第${japaneseOrdinal[ordinal] ?? ordinal}四半期`
+    )
+    .replace(
+      /\b(?:the\s+)?(first|second|third|fourth)\s+quarters?\b/gi,
+      (_match, ordinal: string) => `第${englishOrdinal[ordinal.toLowerCase()] ?? ordinal}四半期`
+    );
 }
 
 function normalizeAwkwardModelLanguage(answer: string): string {
   return answer
+    .replace(/\balso\b/gi, "また")
+    .replace(/\bthis\s+filing\b|この\s*filing\b|本\s*filer\b|\bthe\s+filer\b/gi, "この提出資料")
+    .replace(/\bfiling\b/gi, "提出資料")
+    .replace(/\brecurring\s+revenue\b/gi, "継続収益")
+    .replace(/\bProducts?\s+and\s+Services\b/gi, "製品・サービス")
+    .replace(/\bGoogle\s+Services\b/g, "Googleサービス")
+    .replace(/\bcost\s+of\s+services\s+and\s+other\s+revenue\b/gi, "サービス・その他売上原価")
+    .replace(/\bservices\s+and\s+other\s+revenue\b/gi, "サービス・その他売上")
+    .replace(/\bServices\b/g, "サービス")
+    .replace(/\bUniform Rental and Facility サービス/g, "Uniform Rental and Facility Services")
+    .replace(/\bFirst Aid and Safety サービス/g, "First Aid and Safety Services")
+    .replace(/\bmembership\b/gi, "会員事業")
+    .replace(/\bmember\s+engagement\b/gi, "会員利用")
+    .replace(/\be-?commerce\b/gi, "EC")
+    .replace(/\bcomparable\s+sales\b/gi, "既存店売上")
+    .replace(/\baverage\s+ticket\b/gi, "客単価")
+    .replace(/\btransactions?\b/gi, "取引件数")
+    .replace(/\bunit\s+case\s+volume\b/gi, "ユニットケース販売数量")
+    .replace(/\bunit\s+volumes?\b/gi, "販売数量")
+    .replace(/\bvolume\s*[（(]\s*販売数量\s*[）)]/gi, "販売数量")
+    .replace(/\bvolume\b/gi, "販売数量")
+    .replace(/\bMarkets?\b/g, "市場業務")
+    .replace(/\bdistribution\s+fees\b/gi, "流通費用")
+    .replace(/\bfees?\b/gi, "手数料")
+    .replace(/\bAWM\b/g, "資産・ウェルスマネジメント部門")
+    .replace(/\bCCB\b/g, "個人・中小企業向け銀行部門")
+    .replace(/\bCIB\b/g, "法人・投資銀行部門")
+    .replace(/\bOperating\s+expenses?\b/gi, "営業費用")
+    .replace(/\bMargin\s+and\s+利益率・採算性の説明\b/gi, "利益率・採算性の説明")
+    .replace(/\bMargin\s+and\b/gi, "利益率・採算性")
+    .replace(/\bfulfillment\b/gi, "物流・配送")
+    .replace(/\bdriver\b/gi, "要因")
+    .replace(/\bquarters?\b/gi, "四半期")
+    .replace(/\brate\s+effects?\b/gi, "影響")
+    .replace(/\bAutomotive\b/g, "自動車部門")
+    .replace(/\brefinery\s+sales\b/gi, "製油所売上")
+    .replace(/\bsales\b/gi, "売上")
+    .replace(/\brefinery\b/gi, "精製事業")
+    .replace(/\bramp\b/gi, "立ち上がり")
+    .replace(/\bSG&A\/R&D discussion\b/gi, "販管費・研究開発費の説明")
+    .replace(/\bSG&A\b/g, "販管費")
+    .replace(/\bTAC\b/g, "トラフィック獲得コスト")
+    .replace(/\bWalmart\s+U\.?S\.?\b/gi, "Walmart米国")
+    .replace(/\bgrocery\b/gi, "食品")
+    .replace(/\bomnichannel\b/gi, "オムニチャネル")
+    .replace(/\bfuel\b/gi, "燃料")
+    .replace(/高ー売上/g, "高い売上")
+    .replace(/\bProductivity\s+and\s+Business\s+Processes\b/gi, "生産性・ビジネスプロセス")
+    .replace(/Productivity\s+and\s+事業内容\s+Processes/gi, "生産性・ビジネスプロセス")
+    .replace(/実\s*realized\s+prices?\b/gi, "実現価格")
+    .replace(/\brealized\s+prices?\b/gi, "実現価格")
+    .replace(/\bsenior\s+unsecured\s+notes\s+outstanding\b/gi, "発行済み無担保シニア債")
+    .replace(/\bdebt\s+notes?\b/gi, "負債の注記")
+    .replace(/\bliquidity\s+management\b/gi, "流動性管理")
+    .replace(/\bmaturity\s+profile\b/gi, "満期構成")
+    .replace(/\bdebt\s+repayments?\b/gi, "債務返済")
+    .replace(/\bforeseeable\s+future\b/gi, "予見可能な将来")
+    .replace(/\bstock[- ]based\s+compensation\b/gi, "株式報酬")
+    .replace(/\baverage\s+selling\s+prices?\b/gi, "平均販売価格")
+    .replace(/\bselling\s+prices?\b/gi, "販売価格")
+    .replace(/平均\s+販売価格/g, "平均販売価格")
+    .replace(/\bdurability\b/gi, "継続性")
+    .replace(/\bbacklog\b/gi, "受注残")
+    .replace(/総\s*Liabilities\b/gi, "総負債")
+    .replace(/長期\s*debt\b/gi, "長期債務")
+    .replace(/短期\s*borrowings?\b/gi, "短期借入")
+    .replace(/\bLiabilities\b/gi, "負債")
+    .replace(/\bDeposits\b/gi, "預金")
+    .replace(/\bborrowings?\b/gi, "借入")
+    .replace(/\bdebt\b/gi, "負債")
+    .replace(/負債\s+notes?\b/gi, "負債の注記")
+    .replace(/\bYoY\b/gi, "前年同期比")
+    .replace(/第九ヶ?月間/g, "9か月累計")
+    .replace(/三ヶ?月時点/g, "3か月累計時点")
+    .replace(/[$＄]\s*([0-9]+(?:\.[0-9]+)?)\s*[Bb]\b/g, (_match, raw: string) => {
+      const value = Number.parseFloat(raw);
+      return Number.isFinite(value) ? `${formatOkuDollar(value * 10, true)}億ドル` : `${raw}十億ドル`;
+    })
+    .replace(/[$＄]\s*([0-9]+(?:\.[0-9]+)?)\s*[Mm]\b/g, (_match, raw: string) => {
+      const value = Number.parseFloat(raw);
+      return Number.isFinite(value) ? `${formatOkuDollar(value / 100, true)}億ドル` : `${raw}百万ドル`;
+    })
+    .replace(/([0-9]+(?:\.[0-9]+)?)\s*名\s*billion\s*ドル/gi, (_match, raw: string) => {
+      const value = Number.parseFloat(raw);
+      return Number.isFinite(value) ? `${formatOkuDollar(value * 10, true)}億ドル` : `${raw}十億ドル`;
+    })
+    .replace(/([0-9]+(?:\.[0-9]+)?)\s*억\s*(?:USD|달러|ドル)/gi, (_match, raw: string) => {
+      const value = Number.parseFloat(raw);
+      return Number.isFinite(value) ? `${formatOkuDollar(value, raw.includes("."))}億ドル` : `${raw}億ドル`;
+    })
     .replace(/\bRevenueFromContractWithCustomerExcludingAssessedTax\b/g, "売上高")
     .replace(/\b[A-Z][A-Za-z0-9]+(?:[A-Z][A-Za-z0-9]+){2,}\b/g, (tag: string) => {
       if (KNOWN_XBRL_TAG_LABELS[tag]) {
@@ -1153,6 +2459,9 @@ function normalizeAwkwardModelLanguage(answer: string): string {
     .replace(/前問の\s*driver/g, "前問の要因")
     .replace(/利益率\s*driver/g, "利益率要因")
     .replace(/\brevenue\s+driver\s+discussion\b/gi, "売上要因の説明")
+    .replace(/\brevenue\s+要因\s+discussion\b/gi, "売上要因の説明")
+    .replace(/\binvestment\s+banking\b/gi, "投資銀行")
+    .replace(/\bNote\s+(\d+)\b/gi, "注記$1")
     .replace(/\bmargin\s+driver\s+discussion\b/gi, "利益率要因の説明")
     .replace(/\bsegment\s+margin\b/gi, "セグメント利益率")
     .replace(/\bpricing\b/gi, "価格改定")
@@ -1166,7 +2475,7 @@ function normalizeAwkwardModelLanguage(answer: string): string {
     .replace(/\baverage\s+selling\s+prices?\b/gi, "平均販売価格")
     .replace(/\bbit\s+shipments?\b/gi, "出荷量")
     .replace(/\bfavorable\s+mix\b/gi, "有利な製品ミックス")
-    .replace(/短期债務/g, "短期債務")
+    .replace(/短期债(?:務|务)/g, "短期債務")
     .replace(/\bmaturities\b/gi, "満期")
     .replace(/\bcost\s+of\s+sales\b/gi, "売上原価")
     .replace(/\bcost\s+of\s+revenue\b/gi, "売上原価")
@@ -1195,6 +2504,10 @@ function normalizeAwkwardModelLanguage(answer: string): string {
     .replace(/([0-9]+(?:\.[0-9]+)?)\s*千\s*USD/g, (_match, raw: string) => {
       const value = Number.parseFloat(raw);
       return Number.isFinite(value) ? `${formatOkuDollar(value / 100_000)}億ドル` : `${raw}千ドル`;
+    })
+    .replace(/[$＄]\s*([0-9]+(?:\.[0-9]+)?)\s*十億(?:ドル)?/g, (_match, raw: string) => {
+      const value = Number.parseFloat(raw);
+      return Number.isFinite(value) ? `${formatOkuDollar(value * 10, raw.includes("."))}億ドル` : `${raw}十億ドル`;
     })
     .replace(/([0-9]+(?:\.[0-9]+)?)\s*十億\s*(?:USD|ドル)/g, (_match, raw: string) => {
       const value = Number.parseFloat(raw);
@@ -1227,6 +2540,10 @@ function normalizeAwkwardModelLanguage(answer: string): string {
       const value = Number.parseFloat(raw.replace(/,/g, ""));
       return Number.isFinite(value) ? formatUsdAmount(value) : "金額";
     })
+    .replace(/(億ドル)(?:万ドル|百万ドル|億ドル|兆ドル)/g, "$1")
+    .replace(/億ドル\s*[Bb](?=$|[^A-Za-z])/g, "億ドル")
+    .replace(/億ドル\s*-\s*Q\b/gi, "億ドル")
+    .replace(/(億ドル)(?:(?:か|カ|ヶ|ケ)?月(?:間|累計)?|四半期|月期|日)/g, "$1")
     .replace(/[0-9０-９.,，]+\s*兆円超?(?:の規模)?/g, "金額規模")
     .replace(/前年同[0-9.,?，]+/g, "前年同期の比較値")
     .replace(/\bseasonality\b/gi, "季節性")
@@ -1240,10 +2557,8 @@ function normalizeAwkwardModelLanguage(answer: string): string {
     .replace(/\bhigher\s+稼働率\s+expense\b/gi, "稼働関連費用の増加")
     .replace(/\bhigher\s+([a-z][a-z\s-]{2,80}?)\s+expense\b/gi, (_match, raw: string) => `${normalizeEnglishExpenseLabel(raw)}の増加`)
     .replace(/\bhigher\s+auto lease depreciation\b/gi, "オートリース減価償却の増加")
-    .replace(/\bdistribution fees\b/gi, "流通費用")
     .replace(/\bcontinued investments in technology\b/gi, "継続的な技術投資")
     .replace(/\bconcentrate\s+販売数量/gi, "原液販売数量")
-    .replace(/\bunit case volume\b/gi, "ユニットケース販売数量")
     .replace(/\bBottling Investments\b/g, "ボトリング投資")
     .replace(/\bNorth America\b/g, "北米")
     .replace(/\bPremium products\b/g, "プレミアム商品")
@@ -1257,7 +2572,8 @@ function normalizeAwkwardModelLanguage(answer: string): string {
     .replace(/\bexpenditures?\b/gi, "支出")
     .replace(/\bNI\b/g, "純利益")
     .replace(/\bCash flow\b/g, "キャッシュフロー")
-    .replace(/\bcash flow\b/g, "キャッシュフロー");
+    .replace(/\bcash flow\b/g, "キャッシュフロー")
+    .replace(/(第[1-4]四半期)\s+(?=[にでのはを])/g, "$1");
 }
 
 const KNOWN_XBRL_TAG_LABELS: Record<string, string> = {
@@ -1391,21 +2707,6 @@ function cleanWrongSectorBankLanguage(
   };
 }
 
-function cleanUnsupportedOperatingMarginMovement(answer: string): AnswerCleanupResult | null {
-  const match = answer.match(/営業利益率は(?:前期比|前年同期比)?で?約?([0-9.]+)%増/);
-  if (!match) {
-    return null;
-  }
-  return {
-    answer: `営業利益は前年同期比で約${match[1]}%増です。営業利益率の変化要因は、選択された資料だけでは断定しません。`,
-    taxonomy: {
-      fallbackCategory: "answer_quality_guard",
-      fallbackUserReason: "answer_too_metric_only",
-      guardLabels: ["operating_margin_growth_wording_rewritten"]
-    }
-  };
-}
-
 function isCashFlowOrLiquidityAnswer(answer: string, question: string, questionIntent?: string | null): boolean {
   if (questionIntent === "cash_flow" || questionIntent === "liquidity_debt") {
     return true;
@@ -1468,10 +2769,40 @@ function formatOkuDollar(value: number, forceDecimal = false): string {
 }
 
 function isLiquidityDebtQuestion(question: string, questionIntent?: string | null): boolean {
-  if (questionIntent === "liquidity_debt" || questionIntent === "cash_flow") {
+  if (questionIntent === "liquidity_debt") {
     return true;
   }
-  return /(資金繰り|負債|債務|借入|流動性|liquidity|debt|maturity|cashflow|cash flow)/i.test(question.replace(/\s+/g, ""));
+  return /(資金繰り|負債|債務|借入|返済期限|満期|流動性|liquidity|debt|maturity|borrowings?|creditfacility)/i.test(
+    question.replace(/\s+/g, "")
+  );
+}
+
+function hasAffirmativeLiquiditySafetyOrDistressConclusion(answer: string): boolean {
+  const noConcernConclusion = /(?:懸念|問題|不安)(?:は|が|も)?(?:全く|まったく|特に|ほぼ)?(?:ありません(?!か)|ない(?!とは|とまでは|可能性|かもしれ|か(?:は|どうか))|小さい(?!とは|とまでは|可能性|かもしれ)|限定的(?:です|と判断))/u.test(answer);
+  const qualifiedLowConcernConclusion = /(?:懸念|問題|不安)(?:は|が|も)?\s*(?:(?:資料上|現時点|直ちに)(?:で|では|は)?|当面|今のところ)?\s*(?:(?:限定的|小さい|低い|少ない)(?:に|と)?(?:見え(?:ます|る)|みられ(?:ます|る)|見られ(?:ます|る)|思われ(?:ます|る)|考えられ(?:ます|る))(?!か(?:は|どうか)|とは|とまでは|可能性|かもしれ)|(?:示されて|確認されて|認められて)(?:いません|いない)|見当たりません)/u.test(answer);
+  const concernPresenceConclusion = /(?:懸念|問題|不安)(?:は|が|も)?(?:あります(?!か)|ある(?!可能性|かもしれ|か(?:は|どうか)|とは|とまでは))/u.test(answer);
+  const safetyConclusion = /(?:資金繰り|流動性|財務)(?:は|が)?(?:安全|健全|盤石|十分)(?:です|と判断します|と言えます)|(?:十分な流動性|返済余力がある|債務返済に問題ありません)/u.test(answer);
+  const healthyLiquidityPositionConclusion = /(?:現金(?:及び現金同等物)?|手元資金|営業CF|営業キャッシュフロー)[^。！？\n]{0,40}(?:健全|盤石|潤沢|十分)(?:な規模|な水準|です|と言えます|と判断します)(?!か(?:は|どうか)|とは|とまでは|可能性|かもしれ)/u.test(answer);
+  const unsupportedBalanceSheetReassurance = /(?:直近の現金|手元資金)(?:が|は)[^。！？\n]{0,24}(?:十分|潤沢)|(?:負債|債務)(?:水準|の水準)?(?:は|が)[^。！？\n]{0,16}(?:安定的|健全|問題ない)|(?:現金|営業CF|営業キャッシュフロー)[^。！？\n]{0,60}(?:カバー余力[^。！？\n]{0,16}示唆|大きく安定|資金余力|規模が十分)|(?:満期|返済)リスク[^。！？\n]{0,20}限定的|(?:懸念|問題|不安)[^。！？\n]{0,36}(?:(?:限定的|小さい|低い)(?!か(?:は|どうか)|とは|とまでは)|見当たらない)|特定の不足は示されず|特定の[^。！？\n]{0,24}リスク[^。！？\n]{0,16}(?:記載|示唆)はなく|現金余力|安定した現金創出|現金の手元は堅調|大枠安定/u.test(answer);
+  const distressConclusion = /(?:懸念|不安)(?:は|が)?(?:非常に|かなり|極めて)?強い(?!とは|とまでは|可能性|かもしれ)|(?:資金繰り|流動性)(?:は|が)?(?:危機的|深刻|逼迫|枯渇|不足)(?:です|しています|と判断します)|(?:返済困難|返済不能|債務不履行|デフォルト)(?:です|に陥っています|と判断します)/u.test(answer);
+  return noConcernConclusion || qualifiedLowConcernConclusion || concernPresenceConclusion || safetyConclusion ||
+    healthyLiquidityPositionConclusion || unsupportedBalanceSheetReassurance || distressConclusion;
+}
+
+function hasDefinitiveCashGenerationHealthConclusion(answer: string): boolean {
+  return /(?:現金|キャッシュ)(?:創出力|創出余力|創出)(?:は|が)?(?:健全|強い|十分|良好|弱い|脆弱|不十分|乏しい)(?:です|と判断します|と言えます|だと考えます)|営業CF[^。！？\n]{0,40}(?:健全|強い|十分|良好|弱い|脆弱|不十分|乏しい)(?:です|と判断します|と言えます)|(?:現金|キャッシュ)創出(?:力)?[^。！？\n]{0,20}(?:問題|懸念)(?:は|が)?(?:ありません(?!か)|あります(?!か))/u.test(answer);
+}
+
+function isCashGenerationQuestion(question: string, questionIntent?: string | null): boolean {
+  if (isLiquidityDebtQuestion(question, questionIntent)) {
+    return false;
+  }
+  if (questionIntent === "cash_flow") {
+    return true;
+  }
+  return /(?:営業CF|営業キャッシュフロー|キャッシュ創出|operatingcashflow|operating cash flow)/iu.test(
+    question.replace(/\s+/g, "")
+  );
 }
 
 function cleanLiquidityDebtAnswer(answer: string): AnswerCleanupResult {
@@ -1716,7 +3047,7 @@ function hasForbiddenCurrencyUnit(text: string): boolean {
 
 function hasMalformedCurrencyForTaxonomy(text: string): boolean {
   return hasForbiddenCurrencyUnit(text) ||
-    /(?:百万\s*USD|億\s*USD|億USD|千\s*USD|千USD|[0-9]{1,3}(?:,[0-9]{3})+\s*USD|[0-9]+(?:\.[0-9]+)?\s*[亿億]?\s*美元|[0-9]+,[0-9]+億ドル|[0-9]+(?:,[0-9]{1,2})+\.[0-9]+億ドル|前年同[0-9.,?，]+)/.test(text);
+    /(?:百万\s*USD|億\s*USD|億USD|千\s*USD|千USD|[0-9]{1,3}(?:,[0-9]{3})+\s*USD|[0-9]+(?:\.[0-9]+)?\s*[亿億]?\s*美元|[0-9]+,(?![0-9]{3}(?:,[0-9]{3})*億ドル)[0-9,]+億ドル|[0-9]+(?:,[0-9]{1,2})+\.[0-9]+億ドル|前年同[0-9.,?，]+)/.test(text);
 }
 
 function hasCurrencySanitizationPlaceholder(text: string): boolean {

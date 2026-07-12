@@ -1,0 +1,56 @@
+name: Remote Config Lifecycle Monitor
+
+on:
+  schedule:
+    # 09:00 JST every day.
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remote-config-lifecycle-monitor
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Inspect ${{ matrix.environment }} remote config
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - environment: test
+            wrangler_config: wrangler.test.toml
+          - environment: production
+            wrangler_config: wrangler.toml
+    defaults:
+      run:
+        working-directory: workers
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: workers/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Require Cloudflare monitor credentials
+        run: |
+          test -n "${CLOUDFLARE_API_TOKEN}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID}"
+      - name: Read remote config without logging its payload
+        run: |
+          npx wrangler kv key get remote_config \
+            --binding KABUYOMI_CACHE \
+            --remote \
+            --preview false \
+            --text \
+            --config "${{ matrix.wrangler_config }}" \
+            > "${RUNNER_TEMP}/remote-config-${{ matrix.environment }}.json"
+      - name: Enforce reviewed lifecycle window
+        run: npm run remote-config:inspect -- "${RUNNER_TEMP}/remote-config-${{ matrix.environment }}.json"

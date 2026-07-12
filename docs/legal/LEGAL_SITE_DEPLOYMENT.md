@@ -1,6 +1,6 @@
 # Kabuyomi Static Legal Site Deployment
 
-Last updated: 2026-05-06 JST
+Last updated: 2026-07-11 JST
 
 ## Goal
 
@@ -10,18 +10,18 @@ Kabuyomi v1 legal pages should be served from a static Cloudflare Pages site, in
 
 - Recommended project name: `kabuyomi-legal-site`
 - Current Pages project URL: `https://kabuyomi-legal-site.pages.dev`
-- Latest deployment checked in this pass: `https://f7a0adae.kabuyomi-legal-site.pages.dev`
+- Live production check on 2026-07-11: all four pages were still on their May revisions and hash-different from local `2026-07-11` source
 - Framework preset: None / static
-- Build command: none
+- Build command: `npm run validate`
 - Output directory: `legal-site/public`
 - Source directory in this repo: `legal-site`
 
 The preferred App Store URL for this pass is `https://kabuyomi-legal-site.pages.dev`. A custom domain can replace it later, but do not point App Store metadata at the API Worker.
 
-If Cloudflare requires a build command, use a no-op command such as:
+Run validation as the Pages build command so catalog/iOS/App Review drift blocks publication:
 
 ```bash
-echo "static legal site"
+npm run validate
 ```
 
 ## Suggested Custom Domain
@@ -64,6 +64,15 @@ curl -I https://kabuyomi-legal-site.pages.dev/support/
 curl -I https://kabuyomi-legal-site.pages.dev/tokushoho/
 ```
 
+Then compare each live body to its local source, for example:
+
+```bash
+curl -fsSL https://kabuyomi-legal-site.pages.dev/privacy/ | shasum -a 256
+shasum -a 256 legal-site/public/privacy/index.html
+```
+
+Repeat for Terms, Support, and 特商法. A `200` response alone is not sufficient.
+
 For the path-based strategy, use:
 
 ```bash
@@ -76,6 +85,7 @@ curl -I https://kabuyomi.app/legal/tokushoho
 Expected result:
 
 - HTTP `200`
+- each body hash matches the reviewed local source and displays `最終更新日: 2026-07-11`
 - content type is HTML
 - pages render on mobile
 - no tracking scripts
@@ -98,5 +108,7 @@ Also re-check the iOS Settings legal links after any future domain change.
 
 Release remains blocked if either of these is true:
 
+- any deployed body hash differs from the reviewed local source
+- any deployed page reports a revision older than `2026-07-11`
 - deployed public static pages still contain stale `TODO_FINAL_LEGAL_*` placeholders
 - App Store Connect metadata still points to Worker `/legal/*` URLs

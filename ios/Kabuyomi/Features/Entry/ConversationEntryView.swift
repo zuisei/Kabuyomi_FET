@@ -5,7 +5,7 @@ struct ConversationEntryView: View {
     @AppStorage(AppModel.hasSeenEntryIntroKey) private var hasSeenEntryIntro = false
     @State private var selectedTicker = StarterCompany.defaults.first?.ticker ?? "AAPL"
     @State private var searchPresented = false
-    private let tickerColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
+    private let tickerColumns = [GridItem(.adaptive(minimum: 88), spacing: 8)]
 
     private var starterCompanies: [StarterCompany] {
         Array(appModel.starterCompanies.prefix(5))
@@ -28,7 +28,7 @@ struct ConversationEntryView: View {
 
             if hasSeenEntryIntro {
                 selectionContent
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .transition(.opacity)
             } else {
                 introContent
                     .transition(.opacity)
@@ -71,7 +71,7 @@ struct ConversationEntryView: View {
             VStack(alignment: .leading, spacing: 22) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Kabuyomi")
-                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .font(.system(size: 44, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.ink)
                         .lineLimit(1)
                         .minimumScaleFactor(0.84)
@@ -113,28 +113,22 @@ struct ConversationEntryView: View {
 
                 VStack(spacing: 12) {
                     Button {
-                        withAnimation(.easeOut(duration: 0.22)) {
+                        withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 1)) {
                             hasSeenEntryIntro = true
                         }
                     } label: {
                         Label("銘柄を選んで質問する", systemImage: "arrow.right")
-                            .font(.system(.headline, design: .rounded, weight: .bold))
+                            .font(.headline.weight(.semibold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .frame(minHeight: 54)
                             .background(
-                                Capsule()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [KabuyomiTheme.accentDeep, KabuyomiTheme.accent],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(KabuyomiTheme.accent)
                             )
-                            .shadow(color: KabuyomiTheme.accentDeep.opacity(0.22), radius: 14, x: 0, y: 9)
+                            .shadow(color: KabuyomiTheme.accent.opacity(0.18), radius: 8, x: 0, y: 4)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(KabuyomiPressableButtonStyle())
 
                     Button {
                         hasSeenEntryIntro = true
@@ -147,7 +141,7 @@ struct ConversationEntryView: View {
                             .frame(minHeight: 46)
                             .kabuyomiGlass(radius: 23, tint: Color.white.opacity(0.26), stroke: Color.white.opacity(0.6))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(KabuyomiPressableButtonStyle())
                 }
                 .padding(.bottom, 30)
             }
@@ -276,8 +270,8 @@ struct ConversationEntryView: View {
             )
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
-        .animation(.easeOut(duration: 0.12), value: isSelected)
+        .buttonStyle(KabuyomiPressableButtonStyle())
+        .animation(.interactiveSpring(response: 0.3, dampingFraction: 1), value: isSelected)
     }
 
     private var actionCard: some View {
@@ -331,13 +325,7 @@ struct ConversationEntryView: View {
                 .frame(minHeight: 58)
                 .background(
                     RoundedRectangle(cornerRadius: 19, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [KabuyomiTheme.accentDeep, KabuyomiTheme.accent],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                        .fill(KabuyomiTheme.accent)
                         .overlay(
                             RoundedRectangle(cornerRadius: 19, style: .continuous)
                                 .stroke(Color.white.opacity(0.18), lineWidth: 1)
@@ -345,7 +333,7 @@ struct ConversationEntryView: View {
                 )
                 .shadow(color: KabuyomiTheme.accentDeep.opacity(0.18), radius: 12, x: 0, y: 8)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(KabuyomiPressableButtonStyle())
 
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 7) {
@@ -357,7 +345,7 @@ struct ConversationEntryView: View {
                 .foregroundStyle(KabuyomiTheme.inkMuted)
                 .padding(.bottom, 8)
 
-                HStack(spacing: 9) {
+                VStack(spacing: 8) {
                     ForEach(openingQuestions, id: \.self) { question in
                         openingQuestionRow(question)
                     }
@@ -402,7 +390,7 @@ struct ConversationEntryView: View {
                     )
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(KabuyomiPressableButtonStyle())
     }
 
     private var searchButton: some View {
@@ -439,7 +427,7 @@ struct ConversationEntryView: View {
             .frame(maxWidth: .infinity)
             .kabuyomiGlass(radius: 22, tint: Color.white.opacity(0.22), stroke: Color.white.opacity(0.58))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(KabuyomiPressableButtonStyle())
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("自分の銘柄で始める")

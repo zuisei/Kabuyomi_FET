@@ -16,15 +16,15 @@ describe("billing catalog", () => {
   });
 
   it("resolves monthly credit limits for Free, Lite, Pro, and Pro Max", () => {
-    expect(resolveMonthlyCreditLimit("free", DEFAULT_REMOTE_CONFIG)).toBe(50);
+    expect(resolveMonthlyCreditLimit("free", DEFAULT_REMOTE_CONFIG)).toBe(0);
     expect(resolveMonthlyCreditLimit("lite", DEFAULT_REMOTE_CONFIG)).toBe(400);
     expect(resolveMonthlyCreditLimit("pro", DEFAULT_REMOTE_CONFIG)).toBe(900);
     expect(resolveMonthlyCreditLimit("pro_max", DEFAULT_REMOTE_CONFIG)).toBe(2000);
   });
 
-  it("keeps Lite on free legacy quota limits until credit billing is enabled", () => {
+  it("uses the catalog's 10-question daily fair-use limit for Lite", () => {
     expect(resolvePlanLimits("lite", DEFAULT_REMOTE_CONFIG)).toEqual({
-      chatLimit: DEFAULT_REMOTE_CONFIG.freeDailyChatLimit,
+      chatLimit: 10,
       stockLimit: DEFAULT_REMOTE_CONFIG.freeStockLimit
     });
   });

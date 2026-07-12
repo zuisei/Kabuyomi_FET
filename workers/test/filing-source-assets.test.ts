@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FilingReference, MetricSnapshot } from "../src/env";
 import { buildSourceChunks, hasStrongMarginDriverSource, hasStrongRevenueDriverSource } from "../src/lib/filings/ingest";
 import { deriveSourceSectionFamily } from "../src/lib/chat/source-family";
+import { supplementalEvidenceForPreparedFiling } from "../src/lib/sec-fetcher-service";
 
 describe("revenue driver source assets", () => {
   it("creates a JPM-like revenue driver source from net interest and noninterest revenue discussion", () => {
@@ -78,6 +79,54 @@ describe("revenue driver source assets", () => {
     expect(chunks[0]?.sectionTitle).toBe("Revenue driver discussion");
     expect(chunks[0]?.text).toMatch(/downstream earnings|refining margins|chemical margins/i);
     expect(hasStrongRevenueDriverSource(chunks[0]!)).toBe(true);
+  });
+
+  it("derives the XOM segment sales bridge from the filing table instead of selecting MD&A boilerplate", () => {
+    const primaryDocumentUrl = "https://www.sec.gov/Archives/edgar/data/34088/000003408826000067/xom-20260331.htm";
+    const chunks = buildSourceChunks(filing("XOM", "Exxon Mobil Corporation"), genericMda(), [revenueMetric()], {
+      primaryDocumentUrl,
+      revenueDriverSearchText: [
+        "Note 3. Disclosures about Segments and Related Information",
+        "Our four reportable segments are Upstream, Energy Products, Chemical Products, and Specialty Products.",
+        "Upstream Energy Products Chemical Products Specialty Products Segment Total U.S. Non-U.S. U.S. Non-U.S. U.S. Non-U.S. U.S. Non-U.S.",
+        "Three Months Ended March 31, 2026 Revenues and other income Sales and other operating revenue 7,265 2,813 25,990 37,204 1,970 3,504 1,372 3,018 83,136",
+        "Upstream Energy Products Chemical Products Specialty Products Segment Total U.S. Non-U.S. U.S. Non-U.S. U.S. Non-U.S. U.S. Non-U.S.",
+        "Three Months Ended March 31, 2025 Revenues and other income Sales and other operating revenue 7,318 3,960 23,885 36,077 2,022 3,385 1,367 3,025 81,039"
+      ].join(" ")
+    });
+
+    expect(chunks[0]).toMatchObject({
+      sectionTitle: "Segment revenue comparison",
+      sourceLabel: expect.stringContaining("Segment revenue comparison"),
+      sourceUrl: primaryDocumentUrl
+    });
+    expect(chunks[0]?.text).toContain("Energy Products increased and was the largest positive segment change");
+    expect(chunks[0]?.text).toContain("Upstream decreased and was the largest offset");
+    expect(chunks[0]?.text).toContain("does not establish price, production-volume");
+    expect(hasStrongRevenueDriverSource(chunks[0]!)).toBe(true);
+    expect(deriveSourceSectionFamily(chunks[0]!)).toBe("segment_revenue");
+    expect(sourceIdsAreValid(chunks)).toBe(true);
+  });
+
+  it("carries a bounded XOM Note 3 excerpt through the prepared-filing path", () => {
+    const table = [
+      "Note 3. Disclosures about Segments and Related Information",
+      "Upstream Energy Products Chemical Products Specialty Products",
+      "Sales and other operating revenue",
+      "Three Months Ended March 31, 2026 Revenues and other income Sales and other operating revenue 7,265 2,813 25,990 37,204 1,970 3,504 1,372 3,018 83,136",
+      "Three Months Ended March 31, 2025 Revenues and other income Sales and other operating revenue 7,318 3,960 23,885 36,077 2,022 3,385 1,367 3,025 81,039"
+    ].join(" ");
+    const html = `<html><body><p>Table of contents</p><section>${table}</section><p>${"ignored ".repeat(4_000)}</p></body></html>`;
+
+    const xom = supplementalEvidenceForPreparedFiling("0000034088", html);
+    expect(xom.supplementalEvidenceText).toContain("Note 3. Disclosures about Segments");
+    expect(xom.supplementalEvidenceText?.length).toBeLessThanOrEqual(20_000);
+    expect(supplementalEvidenceForPreparedFiling("0000320193", html)).toEqual({});
+
+    const chunks = buildSourceChunks(filing("XOM", "Exxon Mobil Corporation"), genericMda(), [revenueMetric()], {
+      revenueDriverSearchText: `${genericMda()}\n\n${xom.supplementalEvidenceText}`
+    });
+    expect(chunks[0]?.sectionTitle).toBe("Segment revenue comparison");
   });
 
   it("creates a TSLA-like revenue driver source from deliveries, automotive sales and energy services discussion", () => {

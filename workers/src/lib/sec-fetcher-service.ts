@@ -1,5 +1,5 @@
 import type { Env } from "../env";
-import { extractMDASectionWithDiagnostics } from "../extractors/mda";
+import { extractMDASectionWithDiagnostics, normalizeFilingText } from "../extractors/mda";
 import type { CompanyFactsResponse, ConceptResponse } from "../clients/sec";
 
 const MAX_RESPONSE_CACHE_ENTRIES = 512;
@@ -158,6 +158,7 @@ export function createCloudflareSecFetcherService(env: Env) {
       primaryDocumentUrl: string;
       mdaText: string;
       mdaTokenCount: number;
+      supplementalEvidenceText?: string;
       usedStartPattern: string;
       usedEndPattern: string;
       diagnostics: unknown;
@@ -177,6 +178,7 @@ export function createCloudflareSecFetcherService(env: Env) {
         primaryDocumentUrl: filing.primaryDocumentUrl,
         mdaText: prepared.result.text,
         mdaTokenCount: prepared.result.tokenCount,
+        ...supplementalEvidenceForPreparedFiling(args.cik, filing.html),
         usedStartPattern: prepared.result.usedStartPattern,
         usedEndPattern: prepared.result.usedEndPattern,
         diagnostics: prepared.diagnostics,
@@ -224,6 +226,25 @@ export function createCloudflareSecFetcherService(env: Env) {
       return { concepts, companyFacts };
     }
   };
+}
+
+export function supplementalEvidenceForPreparedFiling(cik: string, html: string): { supplementalEvidenceText?: string } {
+  // ExxonMobil's reportable-segment revenue table is in Note 3, outside the
+  // 10-Q MD&A slice. Return only a bounded primary-evidence excerpt instead
+  // of transporting the full filing HTML to the caller.
+  if (String(cik).replace(/^0+/u, "") !== "34088") return {};
+
+  const normalized = normalizeFilingText(html);
+  const noteStart = normalized.search(/Note\s+\d+\.\s+Disclosures about Segments and Related Information/i);
+  if (noteStart < 0) return {};
+  const evidence = normalized.slice(noteStart, noteStart + 20_000);
+  if (
+    !/Upstream[\s\S]{0,500}Energy Products[\s\S]{0,500}Chemical Products[\s\S]{0,500}Specialty Products/i.test(evidence) ||
+    !/Sales and other operating revenue/i.test(evidence)
+  ) {
+    return {};
+  }
+  return { supplementalEvidenceText: evidence };
 }
 
 function readSecFetcherConfig(env: Env): SecFetcherConfig {

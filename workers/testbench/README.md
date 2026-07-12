@@ -39,8 +39,7 @@ testbench/
 ```bash
 cd workers
 KABUYOMI_TESTBENCH_BASE_URL=https://kabuyomi-api-test.dznqjmctk7.workers.dev \
-KABUYOMI_TESTBENCH_DEVICE_KEY=1e5200e1-9b6e-4970-a232-9ac542bb0827 \
-KABUYOMI_TESTBENCH_DETACHED_ACCESS=dev_unlimited \
+KABUYOMI_TEST_AUTOMATION_SECRET=<matching-protected-test-secret> \
 npm run testbench:run
 ```
 
@@ -68,7 +67,7 @@ npm run testbench:full-smoke -- --check-only
 
 `secrets:test:setup` prompts for an existing `OPENAI_API_KEY` and `CLOUDFLARE_API_TOKEN` without echoing them, writes them to ignored `workers/.dev.vars`, and uploads `OPENAI_API_KEY` to the test Worker secret store. If both variables are already exported in the shell, the command uses those values without prompting.
 
-`testbench:live-full-smoke` loads `workers/.dev.vars`, deploys the test Worker, runs the full-smoke input preflight, and then runs the final live quality gate. Override the run id with `KABUYOMI_TESTBENCH_RUN_ID=...` when needed.
+`testbench:live-full-smoke` loads `workers/.dev.vars`, deploys the test Worker, runs the full-smoke input preflight, applies the automated gate, and writes a pending 150-row human-review packet. This generation phase is never release-complete by itself. Override the run id with `KABUYOMI_TESTBENCH_RUN_ID=...` when needed.
 
 Defaults used by `testbench:full-smoke`:
 
@@ -76,7 +75,7 @@ Defaults used by `testbench:full-smoke`:
 - `KABUYOMI_TESTBENCH_COMPANY_SET=testbench/company-sets/prompt-v2-expanded-multisector.json`
 - `KABUYOMI_TESTBENCH_QUESTIONS=testbench/questions/prompt-v2-smoke-10.jsonl`
 - `KABUYOMI_QUALITY_GATE_REQUIRED_TEMPLATES=Q01,Q02,Q03,Q04,Q05,Q06,Q07,Q08,Q09,Q10`
-- `KABUYOMI_QUALITY_GATE_MIN_COMPANY_TICKERS=10`
+- `KABUYOMI_QUALITY_GATE_MIN_COMPANY_TICKERS=15`
 - `KABUYOMI_QUALITY_GATE_MIN_ROWS=150`
 
 ## Swap Tickers
@@ -104,13 +103,34 @@ This produces a compact summary of response paths, fallback reasons, source coun
 ## Review Workflow
 
 1. Run the benchmark against the test API.
-2. Open the JSONL run file.
-3. Add human-review fields if needed:
-   - `answerRating`
-   - `failureLabelsObserved`
-   - `notes`
-4. Run `testbench:summarize`.
-5. Fix the highest-frequency failure labels first.
+2. Generate the complete review packet. Sampling is not accepted for a release run:
+
+   ```bash
+   npm run testbench:review-packet -- ./testbench/runs/<run-id>.jsonl ./testbench/runs/<run-id>-human-review.json
+   ```
+
+3. Review every row against its question, checklist, filing period, numeric facts, and returned source excerpts. Record the reviewer and timestamp, set `result=pass`, and set all five review dimensions to `true` only when the answer is valid. Keep failure labels and notes on any failed row.
+4. Seal the fully completed packet. Sealing refuses pending/failed rows and binds the exact review content and source-run digest:
+
+   ```bash
+   npm run testbench:review-seal -- ./testbench/runs/<run-id>-human-review.json <reviewer> ./testbench/runs/<run-id>.jsonl
+   ```
+
+5. Validate that the sealed packet is complete and still matches the exact source-run hash:
+
+   ```bash
+   npm run testbench:review-gate -- ./testbench/runs/<run-id>-human-review.json ./testbench/runs/<run-id>.jsonl
+   ```
+
+6. Verify release completion against the existing run and sealed packet:
+
+   ```bash
+   npm run testbench:full-smoke -- --release-verify \
+     --run-path ./testbench/runs/<run-id>.jsonl \
+     --human-review-packet ./testbench/runs/<run-id>-human-review.json
+   ```
+
+7. If any gate fails, run `testbench:summarize`, fix every failed row and systemic pattern, create a new run ID, and repeat. A packet with omitted rows, pending/failed reviews, missing provenance, a failed review dimension, duplicate case IDs, a changed review-content hash, or a source-run hash mismatch is a hard release failure.
 
 The first quality pass should focus on:
 

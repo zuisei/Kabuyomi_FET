@@ -9,6 +9,7 @@ import {
   decorateBenchmarkRow,
   isRateLimitRow
 } from "./benchmark-quality.mjs";
+import { extractBenchmarkProofFields } from "./benchmark-debug-fields.mjs";
 import { buildRunInputMetadata, resolveTickerInput } from "./run-metadata.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -21,10 +22,12 @@ const baseURL = requiredEnv("KABUYOMI_TESTBENCH_BASE_URL");
 const runId = process.env.KABUYOMI_TESTBENCH_RUN_ID?.trim() || buildRunId();
 const deviceKey = process.env.KABUYOMI_TESTBENCH_DEVICE_KEY?.trim() || `testbench-${runId}`;
 const detachedAccess = process.env.KABUYOMI_TESTBENCH_DETACHED_ACCESS?.trim();
+const testAutomationSecret = process.env.KABUYOMI_TEST_AUTOMATION_SECRET?.trim();
 const appVersion = process.env.KABUYOMI_TESTBENCH_APP_VERSION?.trim() || gitRevision();
 const limit = parsePositiveInt(process.env.KABUYOMI_TESTBENCH_LIMIT);
 const benchmarkControls = benchmarkControlsFromEnv(process.env);
 const benchmarkDeviceKeyMode = resolveBenchmarkDeviceKeyMode(process.env.BENCHMARK_DEVICE_KEY_MODE);
+const requestTimeoutMs = parsePositiveInt(process.env.KABUYOMI_TESTBENCH_REQUEST_TIMEOUT_MS) ?? 90_000;
 
 const questionsPath = resolvePath(process.env.KABUYOMI_TESTBENCH_QUESTIONS, join(rootDir, "questions/core-12.jsonl"));
 const companySetPath = resolvePath(process.env.KABUYOMI_TESTBENCH_COMPANY_SET, join(rootDir, "company-sets/minimal-5.json"));
@@ -84,6 +87,7 @@ for (const row of rows) {
     mustAvoid: row.mustAvoid,
     answer: payload.answer ?? "",
     sources: Array.isArray(payload.sources) ? payload.sources : [],
+    releaseCandidateId: payload.debug?.releaseCandidateId ?? null,
     runtimeQuestionIntent: payload.debug?.questionIntent ?? null,
     rewrittenQuestion: payload.debug?.rewrittenQuestion ?? null,
     contextApplied: payload.debug?.contextApplied ?? false,
@@ -124,6 +128,15 @@ for (const row of rows) {
     tokenAttribution: buildTokenAttribution({ row, payload, conversationContext }),
     sourceIdsValid: payload.debug?.sourceIdsValid ?? null,
     answerQualityFlags: payload.debug?.answerQualityFlags ?? [],
+    numericAlignmentChecked: payload.debug?.numericAlignmentChecked ?? false,
+    numericAlignmentStatus: payload.debug?.numericAlignmentStatus ?? null,
+    numericAlignmentClaimCount: payload.debug?.numericAlignmentClaimCount ?? null,
+    numericAlignmentVerifiedClaimCount: payload.debug?.numericAlignmentVerifiedClaimCount ?? null,
+    numericAlignmentRepairedClaimCount: payload.debug?.numericAlignmentRepairedClaimCount ?? null,
+    numericAlignmentBlockedClaimCount: payload.debug?.numericAlignmentBlockedClaimCount ?? null,
+    numericAlignmentLabels: payload.debug?.numericAlignmentLabels ?? [],
+    numericAlignmentMatchedFactIds: payload.debug?.numericAlignmentMatchedFactIds ?? [],
+    ...extractBenchmarkProofFields(payload.debug),
     sourceGateEvidenceSlots: payload.debug?.sourceGateEvidenceSlots ?? {},
     modelRawAnswerPreview: payload.debug?.modelRawAnswerPreview ?? null,
     finalizerGuardLabels: payload.debug?.guardLabels ?? payload.debug?.finalAnswerLanguageLabels ?? [],
@@ -317,19 +330,43 @@ async function resolveFilingKey(ticker) {
     return cached;
   }
 
-  const response = await fetch(`${baseURL}/v1/company/${encodeURIComponent(ticker)}`, {
-    headers: requestHeaders()
-  });
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(`/v1/company/${ticker} failed with ${response.status}: ${JSON.stringify(payload)}`);
-  }
-  if (typeof payload.filingKey !== "string" || payload.filingKey.length === 0) {
-    throw new Error(`/v1/company/${ticker} did not return filingKey`);
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(`${baseURL}/v1/company/${encodeURIComponent(ticker)}`, {
+        headers: requestHeaders(),
+        signal: AbortSignal.timeout(Math.min(requestTimeoutMs, 30_000))
+      });
+      if (isTransientBenchmarkStatus(response.status) && attempt < maxAttempts) {
+        const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
+        await sleep(retryAfterMs ?? 500 * 2 ** (attempt - 1));
+        continue;
+      }
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(`/v1/company/${ticker} failed with ${response.status}: ${JSON.stringify(payload)}`);
+      }
+      if (typeof payload.filingKey !== "string" || payload.filingKey.length === 0) {
+        throw new Error(`/v1/company/${ticker} did not return filingKey`);
+      }
+
+      filingKeyByTicker.set(ticker, payload.filingKey);
+      return payload.filingKey;
+    } catch (error) {
+      if (attempt >= maxAttempts) {
+        throw error;
+      }
+      console.warn(`[testbench] ${ticker} company lookup transport failure; retry ${attempt}/${maxAttempts - 1}`);
+      await sleep(500 * 2 ** (attempt - 1));
+    }
   }
 
-  filingKeyByTicker.set(ticker, payload.filingKey);
-  return payload.filingKey;
+  throw new Error(`/v1/company/${ticker} exhausted lookup retries`);
+}
+
+function isTransientBenchmarkStatus(status) {
+  return status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
 async function postChatWithBenchmarkRetries({ filingKey, question, conversationContext, operationId, deviceKey, controls }) {
@@ -340,7 +377,7 @@ async function postChatWithBenchmarkRetries({ filingKey, question, conversationC
 
   while (true) {
     attemptCount += 1;
-    const attempt = await postChat({
+    const attempt = await postChatWithTransportRetries({
       filingKey,
       question,
       conversationContext,
@@ -380,6 +417,30 @@ async function postChatWithBenchmarkRetries({ filingKey, question, conversationC
   }
 }
 
+async function postChatWithTransportRetries(request) {
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const result = await postChat(request);
+      const transientServerFailure = result.status !== 429 && isTransientBenchmarkStatus(result.status);
+      if (!transientServerFailure || attempt >= maxAttempts) {
+        return result;
+      }
+    } catch (error) {
+      if (attempt >= maxAttempts) {
+        throw error;
+      }
+    }
+
+    console.warn(
+      `[testbench] ${request.operationId} transport/server failure; exact-operation retry ${attempt}/${maxAttempts - 1}`
+    );
+    await sleep(500 * 2 ** (attempt - 1));
+  }
+
+  throw new Error(`${request.operationId} exhausted transport retries`);
+}
+
 async function postChat({ filingKey, question, conversationContext, deviceKey, operationId }) {
   const response = await fetch(`${baseURL}/v1/chat`, {
     method: "POST",
@@ -392,14 +453,15 @@ async function postChat({ filingKey, question, conversationContext, deviceKey, o
       question,
       ...(conversationContext.length > 0 ? { conversationContext } : {}),
       operationId
-    })
+    }),
+    signal: AbortSignal.timeout(requestTimeoutMs)
   });
   const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
   const payload = await safeJson(response);
   if (!response.ok) {
-    return { payload: normalizeHttpErrorPayload(payload, response.status), retryAfterMs };
+    return { payload: normalizeHttpErrorPayload(payload, response.status), retryAfterMs, status: response.status };
   }
-  return { payload, retryAfterMs };
+  return { payload, retryAfterMs, status: response.status };
 }
 
 function buildConversationContext(row, previousResults) {
@@ -430,6 +492,7 @@ function clipChatContextMessage(value) {
 function requestHeaders(overrideDeviceKey = deviceKey) {
   return {
     "x-device-key": overrideDeviceKey,
+    ...(testAutomationSecret ? { "x-kabuyomi-test-authorization": testAutomationSecret } : {}),
     ...(detachedAccess ? { "x-kabuyomi-detached-access": detachedAccess } : {})
   };
 }

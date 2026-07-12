@@ -79,7 +79,11 @@ describe("testbench answer report metadata", () => {
         cwd: process.cwd(),
         encoding: "utf8"
       });
-      const gate = execFileSync(process.execPath, ["./testbench/scripts/quality-gate.mjs", runPath], {
+      const gate = execFileSync(process.execPath, [
+        "./testbench/scripts/quality-gate.mjs",
+        runPath,
+        "--allow-pending-human-review"
+      ], {
         cwd: process.cwd(),
         encoding: "utf8"
       });
@@ -92,6 +96,7 @@ describe("testbench answer report metadata", () => {
       }
       expect(gate).toContain("templates: Q01");
       expect(gate).toContain("observedCompanyTickers: 1");
+      expect(gate).toContain("PENDING_HUMAN_REVIEW");
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

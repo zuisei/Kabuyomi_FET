@@ -121,21 +121,28 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
     ? input.selectedSources.some(hasStrongRevenueDriverSource)
     : false;
   const revenueCoverage = hardIntent === "revenue_driver"
-    ? analyzeRevenueDriverCoverage(input.metrics ?? [], input.selectedSources, drivers.length > 0, hasStrongRevenueDriverEvidence)
+    ? analyzeRevenueDriverCoverage(
+        input.metrics ?? [],
+        input.selectedSources,
+        drivers.length > 0,
+        hasStrongRevenueDriverEvidence,
+        sector
+      )
     : null;
   const priorDriverFound = hasConcretePriorDriver(input.previousAnswer ?? "", hardIntent);
+  const sourceRecoveredTargetBlocked = blocksSourceRecoveredFollowupTarget(input.previousAnswer ?? "");
   const explicitFollowupTargetFound = hasConcreteFollowupTarget(input.question, hardIntent);
+  const driverDurabilityQuality = hardIntent === "driver_durability_followup"
+    ? analyzeDriverDurabilitySourceQuality(input.selectedSources, drivers, sector)
+    : null;
   const followupTargetFound = hardIntent === "revenue_driver"
     ? null
     : hardIntent === "driver_durability_followup"
-      ? priorDriverFound || explicitFollowupTargetFound
+      ? priorDriverFound || explicitFollowupTargetFound || (drivers.length > 0 && !sourceRecoveredTargetBlocked)
       : priorDriverFound || explicitFollowupTargetFound || drivers.length > 0;
   const hasDurabilityContext = hardIntent === "driver_durability_followup" || hardIntent === "margin_durability_followup"
     ? hasDurabilityEvidence(input.selectedSources, sector, hardIntent)
     : false;
-  const driverDurabilityQuality = hardIntent === "driver_durability_followup"
-    ? analyzeDriverDurabilitySourceQuality(input.selectedSources, drivers, sector)
-    : null;
   const marginDurabilityQuality = hardIntent === "margin_durability_followup"
     ? analyzeMarginDurabilitySourceQuality(input.selectedSources, drivers, sector)
     : null;
@@ -214,6 +221,23 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
     : sourceSufficient;
   const finalSourceSufficient = hardIntent === "margin_durability_followup" ? marginSourceSufficient : sourceSufficient;
 
+  const explicitPriorDriverInsufficiency = !finalSourceSufficient && priorDriverFound && (
+    hardIntent === "driver_durability_followup"
+      ? hasRevenueFollowupTargetEvidence(input.selectedSources)
+      : hardIntent === "margin_durability_followup"
+        ? hasMarginFollowupTargetEvidence(input.selectedSources)
+        : false
+  );
+  if (explicitPriorDriverInsufficiency) {
+    failureLabels.clear();
+    if (hardIntent === "margin_durability_followup") {
+      failureLabels.add("missing_margin_durability_context");
+    } else {
+      failureLabels.add("missing_durability_context");
+      failureLabels.add("durability_context_missing");
+    }
+  }
+
   if (!finalSourceSufficient) {
     failureLabels.add("source_gate_failed");
   }
@@ -235,6 +259,32 @@ export function evaluateSourceGate(input: SourceGateInput): SourceGateResult {
       ? "Selected sources include metric movement and company-specific evidence for the hard intent."
       : "Selected sources do not provide enough company-specific evidence for the hard intent."
   };
+}
+
+function blocksSourceRecoveredFollowupTarget(previousAnswer: string): boolean {
+  const text = normalizeText(previousAnswer);
+  return /our ability to leverage|store and club footprint|business description|available information|corporate website|前問の具体的な.*十分に特定|会社固有の売上要因.*特定でき/i.test(text) ||
+    /(?:\.{3}|…|•\s*[A-Za-z]|Item\s+7|Part\s+I\.\s*Item|Risk Factors)/i.test(text);
+}
+
+function hasRevenueFollowupTargetEvidence(sources: SourceChunkRecord[]): boolean {
+  return sources.some((source) => {
+    if (isMetricSource(source)) return false;
+    const text = normalizeText(source.text);
+    const numericTokens = text.match(/\$?\d[\d,.%]*/g)?.length ?? 0;
+    return /(?:products and services performance|sales by category|net sales by category)/i.test(text) &&
+      /(?:net sales|revenue)/i.test(text) &&
+      numericTokens >= 6;
+  });
+}
+
+function hasMarginFollowupTargetEvidence(sources: SourceChunkRecord[]): boolean {
+  return sources.some((source) => {
+    if (isMetricSource(source)) return false;
+    const text = normalizeText(source.text);
+    return /(?:gross margin|operating margin|profit margin|gross profit|operating income)/i.test(text) &&
+      /(?:due to|driven by|reflecting|improved|declined|average selling prices?|favorable mix|manufacturing cost reductions?)/i.test(text);
+  });
 }
 
 export function resolveHardFinancialIntent(
@@ -521,16 +571,28 @@ function analyzeRevenueDriverCoverage(
   metrics: MetricSnapshot[],
   sources: SourceChunkRecord[],
   hasDrivers: boolean,
-  hasStrongRevenueDriverEvidence = false
+  hasStrongRevenueDriverEvidence = false,
+  sector: SourceGateSector = "general"
 ): { hasRevenueMetric: boolean; hasRevenueDiscussion: boolean; hasSegmentRevenueContext: boolean } {
-  const hasRevenueMetric = metrics.some((metric) => metric.logicalName === "revenue") ||
-    sources.some((source) => isMetricSource(source) && /(売上|revenue|sales|net interest income|noninterest income)/i.test(source.text));
   const narrativeSources = sources.filter((source) => !isMetricSource(source) && !isBoilerplateSource(source));
+  const hasBankRevenueMovement = (sector === "bank" || sector === "capital_markets") &&
+    narrativeSources.some((source) => hasPeriodSpecificBankRevenueMovement(source.text));
+  const hasRevenueMetric = metrics.some((metric) => metric.logicalName === "revenue") ||
+    sources.some((source) => isMetricSource(source) && /(売上|revenue|sales|net interest income|noninterest income)/i.test(source.text)) ||
+    hasBankRevenueMovement;
   return {
     hasRevenueMetric,
     hasRevenueDiscussion: hasStrongRevenueDriverEvidence || hasDrivers || narrativeSources.some(hasRevenueDriverSignal),
     hasSegmentRevenueContext: narrativeSources.some(hasSegmentRevenueSignal)
   };
+}
+
+function hasPeriodSpecificBankRevenueMovement(text: string): boolean {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const hasRevenueComponent = /(?:total\s+net\s+revenue|net\s+interest\s+income|noninterest\s+(?:revenue|income)|markets\s+revenue)/i.test(normalized);
+  const hasMovement = /(?:up|down|increase(?:d)?|decrease(?:d)?|grew|declined|compared|\d+(?:\.\d+)?\s*%)/i.test(normalized);
+  const hasPeriod = /(?:20\d{2}|quarter|three\s+months|six\s+months|fiscal|prior\s+year|year-over-year|(?:up|down)\s+\d+(?:\.\d+)?\s*%)/i.test(normalized);
+  return hasRevenueComponent && hasMovement && hasPeriod;
 }
 
 function analyzeBusinessModelCoverage(
@@ -832,15 +894,17 @@ function analyzeMarginDurabilitySourceQuality(
     !hasQ06ConcreteMarginDriverSignal(source.text, sector)
   );
   const revenueOnlySources = narrativeSources.filter((source) => isQ06RevenueOnlyMarginContext(source.text, sector));
+  const hasNonTableSourceBackedMargin =
+    specificMarginDriverSources.length > 0 && specificDurabilitySources.length > 0;
 
   return {
     hasSpecificMarginDriverEvidence: specificMarginDriverSources.length > 0,
     hasSpecificDurabilityEvidence: specificDurabilitySources.length > 0,
     metricOnlyContext: narrativeSources.length === 0,
-    tableHeavyContext: tableHeavyDriverSources.length > 0 || (
+    tableHeavyContext: !hasNonTableSourceBackedMargin && (tableHeavyDriverSources.length > 0 || (
       narrativeSources.length > 0 &&
       narrativeSources.filter(isQ06MetricOrTableHeavySource).length >= Math.ceil(narrativeSources.length / 2)
-    ),
+    )),
     marginEvidenceTooGeneric: genericMarginSources.length > 0 && specificMarginDriverSources.length === 0,
     revenueOnlyContext: revenueOnlySources.length > 0 && specificMarginDriverSources.length === 0,
     genericIndustrialContext: sector === "industrial" &&

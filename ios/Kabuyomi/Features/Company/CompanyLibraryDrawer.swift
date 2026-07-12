@@ -1,24 +1,32 @@
 import SwiftUI
 
+enum ConversationLibraryRecentSectionState: Equatable {
+    case empty
+    case populated
+
+    init(recentCompanies: [WatchlistCard]) {
+        self = recentCompanies.isEmpty ? .empty : .populated
+    }
+}
+
+enum ConversationLibraryRecentEmptyCopy {
+    static let title = "最近見た銘柄はまだありません"
+    static let message = "銘柄を開くと、ここから前回の会話へ戻れます。"
+}
+
 struct ConversationLibraryDrawer: View {
     @Environment(AppModel.self) private var appModel
 
-    @Binding var query: String
     let currentTicker: String
     let savedCompanies: [WatchlistCard]
     let recentCompanies: [WatchlistCard]
     let starterCompanies: [StarterCompany]
-    let searchResults: [SearchItem]
-    let isSearchLoading: Bool
-    let searchErrorMessage: String?
     let pendingTicker: String?
     let pendingCompanyName: String?
     let pendingDetail: String?
     let conversationHistory: [LocalCompanyRecord]
     let selectTicker: (String, String) -> Void
     let selectFiling: (String, String) -> Void
-    let saveSearchResult: (SearchItem) -> Void
-    let openSearchResult: (SearchItem) -> Void
     let openSearch: () -> Void
     let openCredits: () -> Void
     let openSettings: () -> Void
@@ -79,6 +87,7 @@ struct ConversationLibraryDrawer: View {
     @ViewBuilder
     private var contentSections: some View {
         quickActionSection
+        recentSection
         savedSection
         starterSection
     }
@@ -107,6 +116,36 @@ struct ConversationLibraryDrawer: View {
 
     private var activeFilingKey: String? {
         appModel.companyPayload(for: currentTicker)?.filingKey
+    }
+
+    @ViewBuilder
+    private var recentSection: some View {
+        DrawerSection(
+            title: "最近見た銘柄",
+            subtitle: "前回の会話へ戻る",
+            priority: .standard
+        ) {
+            switch ConversationLibraryRecentSectionState(recentCompanies: recentCompanies) {
+            case .empty:
+                DrawerEmptyRecentConversationHint()
+            case .populated:
+                ForEach(recentCompanies) { company in
+                    VStack(alignment: .leading, spacing: 7) {
+                        DrawerCompanyRow(
+                            ticker: company.ticker,
+                            companyName: company.companyName,
+                            subtitle: drawerSubtitle(for: company),
+                            isCurrent: company.ticker == currentTicker,
+                            prominence: .standard,
+                            action: { selectTicker(company.ticker, company.companyName) }
+                        )
+                        if company.ticker == currentTicker {
+                            filingRows(for: company).padding(.leading, 18)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private var visibleConversationHistory: [LocalCompanyRecord] {
@@ -278,60 +317,6 @@ struct ConversationLibraryDrawer: View {
         return "確認中"
     }
 
-    @ViewBuilder
-    private var searchSection: some View {
-        DrawerSection(title: "検索結果", priority: .standard) {
-            if isSearchLoading {
-                HStack(spacing: 10) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("検索中…")
-                        .font(.system(.footnote, design: .rounded))
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .kabuyomiCard(.muted, radius: 18)
-            } else if let searchErrorMessage {
-                DrawerSearchErrorState(message: searchErrorMessage)
-            } else if searchResults.isEmpty {
-                Text("一致する銘柄がありません。")
-                    .font(.system(.footnote, design: .rounded))
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .kabuyomiCard(.muted, radius: 18)
-            } else {
-                ForEach(searchResults) { item in
-                    DrawerSearchRow(
-                        item: item,
-                        saveAction: { saveSearchResult(item) },
-                        openAction: { openSearchResult(item) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-private struct DrawerSearchErrorState: View {
-    let message: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("検索できませんでした", systemImage: "wifi.exclamationmark")
-                .font(.system(.footnote, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.negative)
-
-            Text(message)
-                .font(.system(.caption, design: .rounded, weight: .medium))
-                .foregroundStyle(KabuyomiTheme.inkMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .kabuyomiCard(.muted, radius: 18)
-    }
 }
 
 private struct DrawerCellBackground: View {
@@ -440,6 +425,35 @@ private struct DrawerEmptyWatchlistHint: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .kabuyomiCard(.muted, radius: 18)
+    }
+}
+
+private struct DrawerEmptyRecentConversationHint: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.accentDeep)
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(KabuyomiTheme.accentMist.opacity(0.9)))
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(ConversationLibraryRecentEmptyCopy.title)
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+
+                Text(ConversationLibraryRecentEmptyCopy.message)
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .kabuyomiCard(.muted, radius: 18)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("company.library.recentEmptyState")
     }
 }
 

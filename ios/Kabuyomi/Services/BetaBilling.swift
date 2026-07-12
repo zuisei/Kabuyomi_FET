@@ -34,7 +34,7 @@ enum BillingCatalog {
         title: "無料",
         stockLimit: 3,
         chatLimit: 25,
-        monthlyCredits: 50,
+        monthlyCredits: 0,
         productID: nil
     )
     static let lite = BillingTier(

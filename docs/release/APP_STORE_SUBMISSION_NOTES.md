@@ -1,99 +1,73 @@
-# App Store Submission Notes
+# App Store Submission Notes — Draft, Not Yet Submission-Approved
 
-Last checked: 2026-05-10
+Status: HOLD for App Store submission; core backend release is `GO`. These are a source draft, not text approved for App Store Connect. Refresh every conditional statement from the exact uploaded archive and its live capability response after final TestFlight and external-service evidence is recorded.
 
-## Build
-- Bundle ID: `app.kabuyomi.ios`
-- Version: `1.0.2` in `ios/project.yml`
-- Build: `4` in `ios/project.yml`
-- Archive path: not rechecked in this cleanup pass
+Kabuyomi helps users read supported SEC 10-K and 10-Q filings in Japanese. It provides filing-grounded summaries and question answering. It does not execute trades, connect to brokerage accounts, manage portfolios, recommend buying or selling securities, predict prices, or provide target prices.
 
-## Review Notes
-Kabuyomi is a Japanese reading app for U.S. company SEC filings. It summarizes and explains SEC 10-K and 10-Q filings, shows source references, and lets users ask questions about filing content.
+## Candidate products
 
-Kabuyomi is not an investment advisory service. It does not execute trades, connect to brokerage accounts, manage portfolios, recommend buying or selling securities, predict stock prices, or provide target prices. Answers are based on SEC filings available to the app and should be used as reading support only. Users make their own investment decisions.
+- `kabuyomi.credits.50`: 50 paid credits.
+- `kabuyomi.credits.100`: 100 paid credits; existing compatibility product.
+- Lite: `kabuyomi.sub.lite.monthly`, 400 credits per Apple-verified period.
+- Pro: `kabuyomi.sub.pro.monthly`, 900 credits per verified period.
+- Max: `kabuyomi.sub.max.monthly`, 2,000 credits per verified period.
+- StoreKit localized product data is the price authority.
+- Free recurring monthly credits are zero. A server-verified App Attest installation may receive 50 welcome credits once.
+- A normal question costs 2 credits. Free / Lite / Pro / Max have daily fair-use limits of 25 / 10 / 50 / 50 questions and saved-company limits of 3 / 3 / 20 / 20.
 
-Kabuyomi v1.0.2 uses credit-based monetization. Visible StoreKit products for this branch are:
+Do not put fixed currency amounts in review copy. Verify each product's StoreKit `displayPrice`, duration, availability, and App Store Connect record from the uploaded build.
 
-- `kabuyomi.credits.50`: consumable, ¥100, grants 50 paid credits.
-- `kabuyomi.credits.100`: existing compatibility consumable, remains supported when present and grants 100 paid credits.
-- `kabuyomi.sub.lite.monthly`: auto-renewable subscription in group `Kabuyomi_sus`, ¥640/month, grants 400 subscription credits/month.
-- `kabuyomi.sub.pro.monthly`: auto-renewable subscription in group `Kabuyomi_sus`, ¥1,280/month, grants 900 subscription credits/month.
-- `kabuyomi.sub.max.monthly`: auto-renewable subscription in group `Kabuyomi_sus`, ¥2,560/month, grants 2,000 subscription credits/month.
+The 50- and 100-credit purchase surface is shown only when the Worker explicitly reports both billing and consumable purchasing enabled. While `accountRecoveryReady` is false, Apple-verified, idempotent grants use verified-installation compatibility ownership and no cross-device recovery is claimed. Existing paid balances remain spendable.
 
-Paid credits do not expire. Subscription credits, free/promotional credits, and paid credits are separate server-side buckets in the visible RC. Normal chat cost is 2 credits.
+Rewarded credit is conditional, not an unconditional reviewer promise. Release UI requires a fresh trusted full remote config with explicit `adsEnabled`, `rewardedCreditEnabled`, and `rewardedSsvReady` values, the production ad unit and environment, no emergency disable, and the Worker capability response. Only valid Google AdMob SSV grants 2 credits; the cap is 3 grants per JST day and credits expire after 30 days. Record whether the exact uploaded build shows or hides this action, then make the reviewer note match that observed state. Production SSV evidence remains a submission gate if it is visible.
 
-Rewarded-ad credit UI is visible in this RC/App Review build. Rewarded ads are optional, and credits are granted only after the Worker verifies Google AdMob server-side verification (SSV).
+## Public metadata URLs
 
-Support contact: `kabuyomi.support@gmail.com`
+- Privacy Policy: `https://kabuyomi-legal-site.pages.dev/privacy/`
+- Support: `https://kabuyomi-legal-site.pages.dev/support/`
+- Terms: `https://kabuyomi-legal-site.pages.dev/terms/`
+- 特定商取引法: `https://kabuyomi-legal-site.pages.dev/tokushoho/`
 
-## Public Legal URLs
+Use the static legal site for App Store metadata. Settings opens a bundled readable legal snapshot and points to the public source; both copies must remain semantically identical. This remediation deployed and hash-verified the public pages; verify them again against the exact submitted build.
 
-Preferred public legal source for App Store metadata is the static Cloudflare Pages legal site.
+Live deployment verification on 2026-07-12: index, Privacy, Terms, Support, and 特定商取引法 all report revision `2026-07-11` and match the validated local sources exactly by SHA-256.
 
-Do not use the API Worker `/legal/*` pages as the preferred App Store metadata URLs. They remain legacy API-hosted fallback copies only.
+## Trust and privacy
 
-Use these URLs in App Store Connect:
+- Grants require Apple signed-data verification by the Worker.
+- Production anonymous identity uses a server-issued installation token and App Attest; a caller-chosen device key cannot create a welcome balance.
+- Material financial numbers are matched to verified filing facts before display.
+- Raw IPs/device keys, identity tokens/subjects, signed StoreKit payloads, and App Attest artifacts are not retained in application logs.
+- Local reset clears local content and chat history but retains the Keychain installation credential.
+- Core filing reading and questions work with an anonymous installation and do not require login.
+- Sign in with Apple is a separately gated option for paid-credit recovery and new consumable ownership only; the app requests no name or email scopes.
 
-- Privacy Policy URL: `https://kabuyomi-legal-site.pages.dev/privacy/`
-- Support URL: `https://kabuyomi-legal-site.pages.dev/support/`
-- Terms URL if used in metadata: `https://kabuyomi-legal-site.pages.dev/terms/`
-- 特商法 URL where needed: `https://kabuyomi-legal-site.pages.dev/tokushoho/`
+### App Privacy questionnaire reconciliation
 
-## App Privacy Checklist
-Use this as the App Store Connect privacy questionnaire reference for the current implementation.
+The App Store Connect answers must cover Kabuyomi and bundled third-party SDK behavior shown by the generated archive privacy report. At minimum, reconcile these source-visible categories before submission:
 
-- Device ID / Identifier:
-  - Used: Yes
-  - Purpose: App functionality
-  - Linked to user: Yes, as an app-scoped anonymous device key
-  - Tracking: No for Kabuyomi's own device key
-- Purchase History:
-  - Used: Yes
-  - Purpose: App functionality
-  - Linked to user: Yes
-  - Tracking: No
-- Product Interaction:
-  - Used: Yes
-  - Purpose: App functionality
-  - Linked to user: Yes
-  - Tracking: No
-- Advertising Data / Identifiers:
-  - Used by Google AdMob for free-plan banner ads
-  - Match the App Store Connect answers to the Google AdMob SDK disclosure shown by App Store Connect
+| Data category | Current use | Linked | Tracking |
+|---|---|---:|---:|
+| Device ID / identifier | Anonymous installation, abuse prevention, credit authority | Yes | No for Kabuyomi's own identifier |
+| Purchase history | Grant, entitlement, refund, restore, duplicate prevention | Yes | No |
+| Product interaction | Saved/viewed companies, usage, diagnostics | Yes | No |
+| Search history | Search requests and troubleshooting | Yes | No |
+| Other user content | Questions, translation input, AI response flow | Yes | No for Kabuyomi's own processing |
+| Advertising and SDK diagnostics | Google AdMob delivery and diagnostics | Reconcile with archive report | Reconcile with actual consent/ad configuration |
 
-## In-App Legal Copy
-The app has in-app screens for:
-- Privacy Policy
-- Terms
-- Support
-- 特商法
+The bundled Google SDK privacy report may include advertising data, device ID, product interaction, coarse location, crash/performance data, and other diagnostics. Do not answer “not collected” or “not used for tracking” from the app's own manifest alone. Reconcile the generated archive privacy report, AdMob configuration, consent flow, and current App Store Connect questionnaire.
 
-The static legal site is the preferred public source. In-app legal text remains available as fallback copy.
+Keep `accountRecoveryReady=false` for submission until the Apple capability/provisioning, two-device recovery, and an in-app account-deletion path (or documented App Review determination that no account is created) are verified. Sign-out alone is not the deletion gate.
 
-Current support text points users to:
-- `kabuyomi.support@gmail.com`
-- `@0xt4dano`
+## Reviewer path
 
-## Current Ad Policy
-- Rewarded-credit UI is visible in this RC/App Review build.
-- Rewarded credits are optional and require Worker-side Google AdMob SSV verification before grant.
-- Banner/display ads may appear where implemented, but ads are not required to use paid credits.
-- Ads do not unlock investment advice, buy/sell recommendations, premium recommendations, stock price forecasts, or target prices.
-- No interstitial ads.
-- No native ads.
+1. Complete disclosure/consent.
+2. Search for a supported U.S. ticker and open its filing.
+3. View the summary and ask a filing-grounded question.
+4. Verify Saved, Recently Viewed, starter companies, and older filing conversations in the drawer.
+5. Verify Lite / Pro / Max descriptions separately label monthly credits, approximate questions, saved-company limit, and daily fair-use limit.
+6. Verify a supported search result opens without first consuming a saved-company slot; saving it is a separate action.
+7. Verify the exact capability response controls billing, consumables, account recovery, and rewarded credit. Do not instruct the reviewer to find a capability that is hidden in the uploaded build.
+8. Verify Privacy, Terms, Support, 特商法, and Apple's standard EULA are reachable in-app.
 
-## Final Manual Checks
-- Confirm the deployed static legal site has the latest source contents before using public legal URLs in App Store Connect
-- Confirm `LegalSiteConfig.baseURL` points to `https://kabuyomi-legal-site.pages.dev`
-- Open Settings and confirm Privacy Policy / Terms / Support / 特商法 screens open
-- Confirm the 特商法 page uses disclosure-by-request wording and contains no `TODO_FINAL_LEGAL_*` placeholders
-- Confirm Settings/Credits shows the intended Lite / Pro / Max subscription UI for v1.0.2.
-- Confirm the credit screen shows `kabuyomi.credits.50` as the primary paid credit pack.
-- Confirm `kabuyomi.credits.100` remains supported/visible as a compatibility pack if StoreKit returns it.
-- Confirm no ¥500 pack is visible
-- Confirm subscription price/credit copy matches App Store Connect and the v1.0.2 release truth.
-- Confirm rewarded-credit UI is visible from Credits / Account Status in the RC build.
-- Confirm rewarded-credit copy says ads are optional and credits require server-side Google AdMob SSV before grant.
-- Send one chat and confirm the displayed credit balance decreases
-- Translate one source preview and confirm it shows `訳 1 credit`
+Before submission, attach TestFlight StoreKit, notification, real-device App Attest, generated archive privacy report, observed capability-state screenshots, remote-config lifecycle monitor/alert evidence, and final release-gate evidence. Support requests and tester notes must ask for a redacted minimal reproduction, never identity tokens, installation credentials, full receipts/purchase IDs, App Attest artifacts, or confidential question text.

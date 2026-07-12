@@ -22,4 +22,14 @@ describe("filing cache freshness", () => {
 
     expect(isCurrentCacheRecord(record, { extractorVersion: "v1", promptVersion: "2" } as never)).toBe(true);
   });
+
+  it("rejects a v8 archive after the prepared-evidence v9 schema bump", () => {
+    const record = {
+      extractorVersion: "v8",
+      promptVersion: "v2",
+      primaryDocumentUrl: "https://www.sec.gov/Archives/edgar/data/320193/000032019326000013/aapl-20260328.htm"
+    } as FilingCacheRecord;
+
+    expect(isCurrentCacheRecord(record, { extractorVersion: "v9", promptVersion: "v2" } as never)).toBe(false);
+  });
 });

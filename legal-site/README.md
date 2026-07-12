@@ -9,6 +9,8 @@ cd /Users/0xt4/t4dano/Kabuyomi/legal-site
 npm run validate
 ```
 
+The validator reads `shared/product-catalog.json` and checks the public pages, bundled iOS legal/credit copy, Privacy/App Review-sensitive wording, active submission documents, Tokushoho disclosure-by-request text, and the absence of hard-coded shipping prices.
+
 ## Pages
 
 - `public/privacy/index.html`
