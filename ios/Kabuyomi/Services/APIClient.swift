@@ -300,6 +300,12 @@ struct APIClient {
     }
 
     func bootstrapInstallationIdentity() async throws -> InstallationCredential {
+        try await bootstrapInstallationIdentity(allowSimulatorConflictRecovery: true)
+    }
+
+    private func bootstrapInstallationIdentity(
+        allowSimulatorConflictRecovery: Bool
+    ) async throws -> InstallationCredential {
         if let credential = requestContext?.installationCredential {
             return credential
         }
@@ -323,7 +329,9 @@ struct APIClient {
                     // for the current server-issued credential instead of minting an identity.
                     state.credential = nil
                     try installationIdentityStore.saveState(state)
-                    return try await bootstrapInstallationIdentity()
+                    return try await bootstrapInstallationIdentity(
+                        allowSimulatorConflictRecovery: allowSimulatorConflictRecovery
+                    )
                 }
             }
             if credential.shouldRebootstrap() {
@@ -373,16 +381,37 @@ struct APIClient {
             throw InstallationIdentityError.identityUnavailable
         }
 
-        let response: InstallationBootstrapResponse = try await sendIdentityRequest(
-            path: Self.identityBootstrapPath,
-            method: "POST",
-            body: InstallationBootstrapRequest(
-                bootstrapOperationId: bootstrapOperationId,
-                legacyDeviceKey: deviceIdentity.legacyDeviceKeyForMigration(),
-                appAttestCapability: appAttestCapability,
-                appAttestKeyId: state.appAttestKeyId
+        let response: InstallationBootstrapResponse
+        do {
+            response = try await sendIdentityRequest(
+                path: Self.identityBootstrapPath,
+                method: "POST",
+                body: InstallationBootstrapRequest(
+                    bootstrapOperationId: bootstrapOperationId,
+                    legacyDeviceKey: deviceIdentity.legacyDeviceKeyForMigration(),
+                    appAttestCapability: appAttestCapability,
+                    appAttestKeyId: state.appAttestKeyId
+                )
             )
-        )
+        } catch {
+            #if targetEnvironment(simulator)
+            if allowSimulatorConflictRecovery,
+               case APIError.serverStatus(let statusCode, let message) = error,
+               statusCode == 409,
+               message.localizedCaseInsensitiveContains("installation bootstrap") {
+                // Unit-test hosts and simulator reinstalls can independently reset the
+                // legacy key and bootstrap state. Neither identity can produce paid or
+                // welcome grants without real App Attest, so recover once with a fresh,
+                // zero-credit simulator identity instead of trapping the UI forever.
+                try installationIdentityStore.clear()
+                deviceIdentity.reset()
+                return try await bootstrapInstallationIdentity(
+                    allowSimulatorConflictRecovery: false
+                )
+            }
+            #endif
+            throw error
+        }
 
         state.credential = response.credential
         try installationIdentityStore.saveState(state)
