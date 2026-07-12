@@ -165,6 +165,7 @@ struct APIClient {
     private let accountCredentialStore: (any AccountCredentialStoring)?
     #if DEBUG
     private var prevalidatedAssertionHeaders: [String: String]?
+    private var encodedRequestObserver: ((URLRequest, Data?) throws -> Void)?
     #endif
 
     init(
@@ -189,6 +190,7 @@ struct APIClient {
         self.accountCredentialStore = accountCredentialStore
         #if DEBUG
         self.prevalidatedAssertionHeaders = nil
+        self.encodedRequestObserver = nil
         #endif
     }
 
@@ -203,7 +205,8 @@ struct APIClient {
         installationIdentityStore: (any InstallationIdentityStateStoring)? = InstallationTokenStore.shared,
         appAttestClient: (any AppAttestClient)? = SystemAppAttestClient.shared,
         accountCredentialStore: (any AccountCredentialStoring)? = AccountCredentialStore.shared,
-        prevalidatedAssertionHeaders: [String: String]
+        prevalidatedAssertionHeaders: [String: String],
+        encodedRequestObserver: ((URLRequest, Data?) throws -> Void)? = nil
     ) {
         self.init(
             session: session,
@@ -217,6 +220,7 @@ struct APIClient {
             accountCredentialStore: accountCredentialStore
         )
         self.prevalidatedAssertionHeaders = prevalidatedAssertionHeaders
+        self.encodedRequestObserver = encodedRequestObserver
     }
     #endif
 
@@ -1005,6 +1009,10 @@ struct APIClient {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = bodyData
         }
+
+        #if DEBUG
+        try encodedRequestObserver?(request, bodyData)
+        #endif
 
         return request
     }

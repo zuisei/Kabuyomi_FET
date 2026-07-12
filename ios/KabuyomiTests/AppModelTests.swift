@@ -1541,14 +1541,17 @@ final class AppModelTests: XCTestCase {
     func testSendChatRetryAfterResponseLossReusesOperationId() async throws {
         let persistence = PersistenceController(inMemory: true)
         try persistence.saveCompany(TestFixtures.companyPayload(), searchItem: nil)
-        let model = makeAppModel(persistence: persistence)
-        model.setAIConsent(true)
         let recorder = OperationIDRecorder()
+        let model = makeAppModel(persistence: persistence) { request, body in
+            guard request.url?.path == "/v1/chat" else { return }
+            let body = try XCTUnwrap(body)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            recorder.record(try XCTUnwrap(json["operationId"] as? String))
+        }
+        model.setAIConsent(true)
 
         MockAppModelURLProtocol.requestHandler = { request in
-            let body = try XCTUnwrap(Self.requestBodyData(from: request))
-            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-            let requestNumber = recorder.record(try XCTUnwrap(json["operationId"] as? String))
+            let requestNumber = recorder.operationIds.count
 
             if requestNumber == 1 {
                 throw URLError(.networkConnectionLost)
@@ -1572,14 +1575,17 @@ final class AppModelTests: XCTestCase {
     func testSendChatChangedPayloadAfterResponseLossGetsNewOperationId() async throws {
         let persistence = PersistenceController(inMemory: true)
         try persistence.saveCompany(TestFixtures.companyPayload(), searchItem: nil)
-        let model = makeAppModel(persistence: persistence)
-        model.setAIConsent(true)
         let recorder = OperationIDRecorder()
+        let model = makeAppModel(persistence: persistence) { request, body in
+            guard request.url?.path == "/v1/chat" else { return }
+            let body = try XCTUnwrap(body)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            recorder.record(try XCTUnwrap(json["operationId"] as? String))
+        }
+        model.setAIConsent(true)
 
         MockAppModelURLProtocol.requestHandler = { request in
-            let body = try XCTUnwrap(Self.requestBodyData(from: request))
-            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-            let requestNumber = recorder.record(try XCTUnwrap(json["operationId"] as? String))
+            let requestNumber = recorder.operationIds.count
 
             if requestNumber == 1 {
                 throw URLError(.networkConnectionLost)
@@ -1603,14 +1609,17 @@ final class AppModelTests: XCTestCase {
     func testSendChatSuccessfulUserActionsGetDifferentOperationIds() async throws {
         let persistence = PersistenceController(inMemory: true)
         try persistence.saveCompany(TestFixtures.companyPayload(), searchItem: nil)
-        let model = makeAppModel(persistence: persistence)
-        model.setAIConsent(true)
         let recorder = OperationIDRecorder()
+        let model = makeAppModel(persistence: persistence) { request, body in
+            guard request.url?.path == "/v1/chat" else { return }
+            let body = try XCTUnwrap(body)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            recorder.record(try XCTUnwrap(json["operationId"] as? String))
+        }
+        model.setAIConsent(true)
 
         MockAppModelURLProtocol.requestHandler = { request in
-            let body = try XCTUnwrap(Self.requestBodyData(from: request))
-            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-            let requestNumber = recorder.record(try XCTUnwrap(json["operationId"] as? String))
+            let requestNumber = recorder.operationIds.count
             return (
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                 try Self.chatSuccessData(answer: "回答 \(requestNumber)", chatsUsed: requestNumber)
@@ -1629,14 +1638,16 @@ final class AppModelTests: XCTestCase {
     func testSendChatOperationResultExpiredRetryDoesNotMintNewOperationId() async throws {
         let persistence = PersistenceController(inMemory: true)
         try persistence.saveCompany(TestFixtures.companyPayload(), searchItem: nil)
-        let model = makeAppModel(persistence: persistence)
-        model.setAIConsent(true)
         let recorder = OperationIDRecorder()
-
-        MockAppModelURLProtocol.requestHandler = { request in
-            let body = try XCTUnwrap(Self.requestBodyData(from: request))
+        let model = makeAppModel(persistence: persistence) { request, body in
+            guard request.url?.path == "/v1/chat" else { return }
+            let body = try XCTUnwrap(body)
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             recorder.record(try XCTUnwrap(json["operationId"] as? String))
+        }
+        model.setAIConsent(true)
+
+        MockAppModelURLProtocol.requestHandler = { request in
             return (
                 HTTPURLResponse(url: request.url!, statusCode: 410, httpVersion: nil, headerFields: nil)!,
                 try TestFixtures.jsonData(["error": "operation_result_expired"])
@@ -3224,7 +3235,8 @@ final class AppModelTests: XCTestCase {
         persistence: PersistenceController = PersistenceController(inMemory: true),
         rewardedAdService: RewardedAdServing = MockRewardedAdService(result: false),
         baseURL: URL = URL(string: "https://example.com")!,
-        accountCredentialStore: (any AccountCredentialStoring)? = nil
+        accountCredentialStore: (any AccountCredentialStoring)? = nil,
+        encodedRequestObserver: ((URLRequest, Data?) throws -> Void)? = nil
     ) -> AppModel {
         if MockAppModelURLProtocol.requestHandler == nil {
             MockAppModelURLProtocol.requestHandler = { request in
@@ -3251,7 +3263,8 @@ final class AppModelTests: XCTestCase {
                 session: session,
                 deviceIdentity: deviceIdentity,
                 baseURL: baseURL,
-                accountCredentialStore: accountCredentialStore
+                accountCredentialStore: accountCredentialStore,
+                encodedRequestObserver: encodedRequestObserver
             ),
             persistence: persistence,
             deviceIdentity: deviceIdentity,
@@ -3314,7 +3327,8 @@ final class AppModelTests: XCTestCase {
         session: URLSession,
         deviceIdentity: DeviceIdentityStore,
         baseURL: URL = URL(string: "https://example.com")!,
-        accountCredentialStore: (any AccountCredentialStoring)? = nil
+        accountCredentialStore: (any AccountCredentialStoring)? = nil,
+        encodedRequestObserver: ((URLRequest, Data?) throws -> Void)? = nil
     ) -> APIClient {
         let credential = InstallationCredential(
             token: "app-model-test-installation-token",
@@ -3341,7 +3355,8 @@ final class AppModelTests: XCTestCase {
                 "x-kabuyomi-app-attest-key-id": "app-model-test-key",
                 "x-kabuyomi-app-attest-challenge-id": "app-model-test-challenge",
                 "x-kabuyomi-app-attest-assertion": "dGVzdA=="
-            ]
+            ],
+            encodedRequestObserver: encodedRequestObserver
         )
     }
 
