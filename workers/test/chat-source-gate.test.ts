@@ -65,6 +65,56 @@ describe("hard-intent source gate", () => {
     expect(result.failureLabels).not.toContain("revenue_driver_evidence_too_generic");
   });
 
+  it("accepts period-specific bank revenue components when a generic revenue XBRL fact is unavailable", () => {
+    const filing = makeFiling("JPM", "JPMorgan Chase & Co.", [], [
+      source(
+        "S3",
+        "md_a",
+        "– Net interest income was $25.4 billion, up 9%, driven by higher Markets net interest income, higher deposit balances, and higher revolving balances in Card Services, partially offset by lower rates. Noninterest revenue was $24.5 billion, up 11%, driven by higher asset management and investment banking fees."
+      )
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "売上成長の主な要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers[0]?.category).toContain("bank");
+    expect(result.failureLabels).not.toContain("driver_slots_empty");
+    expect(result.failureLabels).not.toContain("sector_required_source_missing");
+  });
+
+  it("keeps complete bullet-form software revenue narratives eligible as driver evidence", () => {
+    const filing = makeFiling("MSFT", "Microsoft Corporation", [
+      revenueMetric(82_886_000_000, 70_066_000_000, 18.3)
+    ], [
+      source(
+        "S2",
+        "md_a",
+        "• Search advertising revenue increased 9% driven by higher search volume and revenue per search. • Microsoft 365 Commercial cloud revenue grew 18% with growth in revenue per user driven by Microsoft 365 E5 and Microsoft 365 Copilot, with continued seat growth."
+      ),
+      metricSource("S10", "売上高: 82886000000 USD / 比較値: 70066000000 / YoY: 18.3%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "売上成長の主な要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers.length).toBeGreaterThan(0);
+    expect(result.failureLabels).not.toContain("driver_slots_empty");
+  });
+
   it("rejects generic business and properties text even when it mentions revenue", () => {
     const filing = makeFiling("WMT", "Walmart Inc.", [revenueMetric(680_985_000_000, 648_125_000_000, 5.1)], [
       source(
@@ -1563,6 +1613,95 @@ describe("evidence-slot fallback", () => {
     expect(result.sourceSufficient).toBe(true);
     expect(result.identifiedDrivers[0]?.category).toBe("technology_business_model");
     expect(result.failureLabels).not.toContain("business_model_sources_missing");
+  });
+
+  it("rejects r65 AMZN cost paragraphs as sales drivers while keeping AWS and North America sales bridges", () => {
+    const filing = makeFiling("AMZN", "Amazon.com, Inc.", [revenueMetric(181_519_000_000, 155_667_000_000, 16.6)], [
+      source("CTX1", "md_a", "The increase in technology and infrastructure costs in Q1 2026 was primarily due to an increase in spending on infrastructure, including depreciation and amortization."),
+      source("CTX2", "md_a", "North America sales increased 12% in Q1 2026. The sales growth primarily reflects increased unit sales, including sales by third-party sellers, advertising sales, and subscription services."),
+      source("CTX3", "md_a", "AWS sales increased 28% in Q1 2026. The sales growth primarily reflects increased customer usage, partially offset by pricing changes primarily driven by long-term customer contracts."),
+      metricSource("S9", "売上高: 181519000000 USD / 比較値: 155667000000 / YoY: 16.6%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "売上成長、または減収の主な要因は？",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.identifiedDrivers.map((driver) => driver.sourceIds[0])).toEqual(expect.arrayContaining(["CTX2", "CTX3"]));
+    expect(result.identifiedDrivers.map((driver) => driver.sourceIds[0])).not.toContain("CTX1");
+  });
+
+  it("recovers the AMZN Q04 target from concrete selected sales drivers when the prior answer was a cost error", () => {
+    const filing = makeFiling("AMZN", "Amazon.com, Inc.", [revenueMetric(181_519_000_000, 155_667_000_000, 16.6)], [
+      source("CTX2", "md_a", "North America sales increased 12% in Q1 2026. The sales growth primarily reflects increased unit sales, including advertising sales and subscription services."),
+      source("CTX3", "md_a", "AWS sales increased 28% in Q1 2026. The sales growth primarily reflects increased customer usage, partially offset by pricing changes primarily driven by long-term customer contracts."),
+      metricSource("S9", "売上高: 181519000000 USD / 比較値: 155667000000 / YoY: 16.6%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "その要因は一時的？それとも続きそう？",
+      previousAnswer: "インフラ支出、減価償却費、償却費が売上要因です。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.hardIntent).toBe("driver_durability_followup");
+    expect(result.followupTargetFound).toBe(true);
+    expect(result.sourceSufficient).toBe(true);
+    expect(result.failureLabels).not.toContain("missing_followup_target_driver");
+  });
+
+  it("keeps the AAPL Q04 product table as a narrow explicit-insufficiency case", () => {
+    const filing = makeFiling("AAPL", "Apple Inc.", [revenueMetric(111_184_000_000, 95_359_000_000, 16.6)], [
+      source("CTX2", "md_a", "Products and Services Performance. The following table shows net sales by category: iPhone $56,994 $46,841 22%; Mac $8,399 $7,949 6%; Services $30,013 $26,340 14%."),
+      metricSource("S9", "売上高: 111184000000 USD / 比較値: 95359000000 / YoY: 16.6%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "yoy_change",
+      question: "その要因は一時的？それとも続きそう？",
+      previousAnswer: "iPhoneとサービス売上が増収要因です。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.failureLabels).toEqual(["missing_durability_context", "durability_context_missing", "source_gate_failed"]);
+  });
+
+  it("does not exempt the genuine r65 CAT Q06 revenue-only context", () => {
+    const filing = makeFiling("CAT", "Caterpillar Inc.", [metric("operatingIncome", 3_085_000_000, 2_579_000_000, 19.6)], [
+      source("CTX1", "md_a", "We expect strong sales growth in Power & Energy. We expect favorable price realization and higher sales volume in Construction Industries."),
+      metricSource("S12", "営業利益: 3085000000 USD / 比較値: 2579000000 / YoY: 19.6%")
+    ]);
+
+    const result = evaluateSourceGate({
+      ticker: filing.ticker,
+      companyName: filing.companyName,
+      questionIntent: "margin_profitability",
+      question: "その要因は一時的？それとも構造的な変化？",
+      previousAnswer: "利益率要因は価格・ミックス、販売数量、製造コスト、減価償却費です。",
+      selectedSources: filing.sourceChunks,
+      metrics: filing.metrics
+    });
+
+    expect(result.sourceSufficient).toBe(false);
+    expect(result.failureLabels).toEqual(expect.arrayContaining([
+      "margin_driver_slots_empty",
+      "q06_margin_context_revenue_only",
+      "source_gate_failed"
+    ]));
   });
 });
 

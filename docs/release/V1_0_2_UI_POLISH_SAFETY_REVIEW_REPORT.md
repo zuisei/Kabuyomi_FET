@@ -1,5 +1,7 @@
 # Kabuyomi v1.0.2 UI Polish Safety Review Report
 
+> **Historical release evidence — not current shipping authority.** This point-in-time report preserves prior findings and may describe deployments, capabilities, or release decisions that have since changed. Use `CURRENT_SHIPPING_TRUTH.md`, `FEATURE_PARITY_COMPATIBILITY_REPORT.md`, `RELEASE_GATE_STATE.json`, and `FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md` for current decisions.
+
 ## 1. Conclusion
 
 The semantic safety review found no accidental Worker, SEC retrieval, model, prompt, answer-generation, source-selection, billing grant, StoreKit, product ID, or API endpoint contract changes.

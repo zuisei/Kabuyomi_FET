@@ -1,6 +1,7 @@
 import type { ChatPromptInput, QuoteTranslationPromptInput, SummaryPromptInput } from "./types";
-import type { MetricSnapshot, SourceChunkRecord } from "../../env";
+import type { MetricSnapshot, SourceChunkRecord, VerifiedFinancialFact } from "../../env";
 import { formatMetricValue, formatYoYDelta, metricLabel } from "../../lib/metrics";
+import { buildVerifiedFinancialFacts } from "../../lib/chat/verified-financial-facts";
 
 export function buildSummaryPrompt(input: SummaryPromptInput): string {
   return [
@@ -32,6 +33,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     questionIntent: input.questionIntent ?? "unknown",
     contentMode: input.filing.contentMode ?? "full",
     metrics: input.filing.metrics,
+    verifiedFacts: buildVerifiedFinancialFacts(input.filing),
     factualPack: undefined,
     sourceChunks: input.filing.sourceChunks
   };
@@ -73,6 +75,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "For business_overview, revenue_breakdown, and risk_factors, use the Factual pack before using raw source excerpts. Treat geography revenue as secondary unless the Factual pack has no segment, product, or service revenue categories.",
     "Use numbers only when they appear in the Factual pack, Factual metrics pack, or provided Sources. If the Factual pack lists missingFields, mention the gap briefly at the end instead of turning the whole answer into a refusal.",
     "When the Factual metrics pack contains display strings such as labelJa, valueJa, comparisonValueJa, or yoyJa, copy those display strings exactly. Do not recalculate, rescale, or reformat metric values.",
+    "For every material number, use a matching immutable factId from the Verified financial facts pack and copy one of that fact's displayAliases exactly. Never recalculate, rescale, swap periods, or change currency/sign.",
     "For risk_factors, do not answer from general business or AI strategy text when the Factual pack or Sources include risk-specific items such as competition, regulation, privacy/data, advertising dependence, customer concentration, supply, tariffs, or macro risks.",
     "For analytical questions, answer the user's question directly in 1 to 3 natural sentences. Add a caveat or next check only when it materially changes the answer.",
     "For prompts such as 前回との違い, 何が変わった, or 一番大きい変化, start with the biggest filing-backed numeric change, then add one short business explanation if the filing provides it.",
@@ -113,6 +116,9 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     "Factual metrics pack:",
     JSON.stringify(buildPromptMetricDisplayPack(contextPack.metrics, contextPack.sourceChunks)),
     "",
+    "Verified financial facts:",
+    JSON.stringify(buildPromptVerifiedFactPack(contextPack.verifiedFacts)),
+    "",
     "Factual pack:",
     JSON.stringify(contextPack.factualPack ?? null),
     "",
@@ -126,6 +132,7 @@ export function buildChatPromptTemplateVariables(input: ChatPromptInput): Record
     questionIntent: input.questionIntent ?? "unknown",
     contentMode: input.filing.contentMode ?? "full",
     metrics: input.filing.metrics,
+    verifiedFacts: buildVerifiedFinancialFacts(input.filing),
     factualPack: undefined,
     sourceChunks: input.filing.sourceChunks
   };
@@ -133,6 +140,10 @@ export function buildChatPromptTemplateVariables(input: ChatPromptInput): Record
   const questionForPrompt = conversationContext
     ? `${input.question}\n\n直近の会話文脈:\n${conversationContext}`
     : input.question;
+  const hostedPromptFactualPack = {
+    ...(contextPack.factualPack ?? {}),
+    verifiedFinancialFacts: buildPromptVerifiedFactPack(contextPack.verifiedFacts)
+  };
   return {
     question: questionForPrompt,
     question_intent: contextPack.questionIntent,
@@ -148,9 +159,51 @@ export function buildChatPromptTemplateVariables(input: ChatPromptInput): Record
       periodOfReport: input.filing.periodOfReport
     }),
     factual_metrics_pack_json: JSON.stringify(buildPromptMetricDisplayPack(contextPack.metrics, contextPack.sourceChunks)),
-    factual_pack_json: JSON.stringify(contextPack.factualPack ?? null),
+    factual_pack_json: JSON.stringify(hostedPromptFactualPack),
     sources_json: JSON.stringify(contextPack.sourceChunks)
   };
+}
+
+export function buildPromptVerifiedFactPack(facts: VerifiedFinancialFact[]): Array<{
+  factId: string;
+  concept: string;
+  semanticLabel: string;
+  labelJa: string;
+  canonicalValue: number;
+  currency: string | null;
+  unit: string;
+  role: VerifiedFinancialFact["role"];
+  scope: VerifiedFinancialFact["scope"];
+  periodStart: string | null;
+  periodEnd: string;
+  periodKind: VerifiedFinancialFact["periodKind"];
+  fiscalYear: number | null;
+  fiscalQuarter: VerifiedFinancialFact["fiscalQuarter"];
+  displayAliases: string[];
+  comparisonFactId?: string;
+  derivedPercentage?: VerifiedFinancialFact["derivedPercentage"];
+  sourceId: string;
+}> {
+  return facts.slice(0, 32).map((fact) => ({
+    factId: fact.factId,
+    concept: fact.concept,
+    semanticLabel: fact.semanticLabel,
+    labelJa: fact.semanticLabelJa,
+    canonicalValue: fact.canonicalValue,
+    currency: fact.currency,
+    unit: fact.unit,
+    role: fact.role,
+    scope: fact.scope,
+    periodStart: fact.periodStart,
+    periodEnd: fact.periodEnd,
+    periodKind: fact.periodKind,
+    fiscalYear: fact.fiscalYear,
+    fiscalQuarter: fact.fiscalQuarter,
+    displayAliases: fact.displayAliases.slice(0, 8),
+    ...(fact.comparisonFactId ? { comparisonFactId: fact.comparisonFactId } : {}),
+    ...(fact.derivedPercentage ? { derivedPercentage: fact.derivedPercentage } : {}),
+    sourceId: fact.sourceId
+  }));
 }
 
 export function buildPromptMetricDisplayPack(
@@ -162,23 +215,67 @@ export function buildPromptMetricDisplayPack(
   valueJa: string;
   comparisonValueJa?: string;
   yoyJa?: string;
+  periodStart?: string;
   periodEnd: string;
+  periodKind?: MetricSnapshot["periodKind"];
   unit: string;
   tagUsed: string;
   sourceId?: string;
+  sourceUrl?: string;
+  comparisonTagUsed?: string;
+  comparisonPeriodStart?: string;
+  comparisonPeriodEnd?: string;
+  comparisonPeriodKind?: MetricSnapshot["comparisonPeriodKind"];
+  comparisonSourceId?: string;
+  comparisonSourceUrl?: string;
 }> {
   return metrics.map((metric) => {
-    const source = sourceChunks.find((chunk) => chunk.sectionType === "xbrl_metric" && chunk.tagName === metric.tagUsed);
+    const source = sourceChunks.find((chunk) =>
+      chunk.sectionType === "xbrl_metric"
+      && chunk.tagName === metric.tagUsed
+      && chunk.metricRole === "current"
+    ) ?? sourceChunks.find((chunk) =>
+      chunk.sectionType === "xbrl_metric"
+      && chunk.tagName === metric.tagUsed
+      && chunk.metricRole === undefined
+    );
+    const comparisonTagUsed = metric.comparisonTagUsed ?? metric.tagUsed;
+    const distinctComparisonSource = sourceChunks.find((chunk) =>
+      chunk.sectionType === "xbrl_metric"
+      && chunk.tagName === comparisonTagUsed
+      && chunk.metricRole === "comparison"
+    );
+    const comparisonSource = distinctComparisonSource ?? (
+      metric.comparisonValue !== undefined
+      && comparisonTagUsed === metric.tagUsed
+      && (
+        !metric.comparisonSourceUrl
+        || (Boolean(source?.sourceUrl) && metric.comparisonSourceUrl === source?.sourceUrl)
+      )
+        ? source
+        : undefined
+    );
     return {
       logicalName: metric.logicalName,
       labelJa: metricLabel(metric.logicalName),
       valueJa: formatMetricValue(metric.value, metric.unit),
       ...(metric.comparisonValue !== undefined ? { comparisonValueJa: formatMetricValue(metric.comparisonValue, metric.unit) } : {}),
       ...(metric.yoyPercent !== undefined ? { yoyJa: `前年比 ${formatYoYDelta(metric.yoyPercent)}` } : {}),
+      ...(metric.periodStart ? { periodStart: metric.periodStart } : {}),
       periodEnd: metric.periodEnd,
+      ...(metric.periodKind ? { periodKind: metric.periodKind } : {}),
       unit: metric.unit,
       tagUsed: metric.tagUsed,
-      ...(source ? { sourceId: source.sourceId } : {})
+      ...(source ? { sourceId: source.sourceId } : {}),
+      ...(source?.sourceUrl ? { sourceUrl: source.sourceUrl } : {}),
+      ...(metric.comparisonValue !== undefined ? { comparisonTagUsed } : {}),
+      ...(metric.comparisonPeriodStart ? { comparisonPeriodStart: metric.comparisonPeriodStart } : {}),
+      ...(metric.comparisonPeriodEnd ? { comparisonPeriodEnd: metric.comparisonPeriodEnd } : {}),
+      ...(metric.comparisonPeriodKind ? { comparisonPeriodKind: metric.comparisonPeriodKind } : {}),
+      ...(comparisonSource ? { comparisonSourceId: comparisonSource.sourceId } : {}),
+      ...(comparisonSource?.sourceUrl || metric.comparisonSourceUrl
+        ? { comparisonSourceUrl: comparisonSource?.sourceUrl ?? metric.comparisonSourceUrl }
+        : {})
     };
   });
 }

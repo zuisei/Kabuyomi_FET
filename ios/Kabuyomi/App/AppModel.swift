@@ -1,14 +1,23 @@
+import CryptoKit
 import Foundation
 import Observation
 
 struct PendingChatState: Equatable {
     let id: UUID
+    let operationId: String
     let ticker: String
     let question: String
     let submittedAt: Date
 
-    init(id: UUID = UUID(), ticker: String, question: String, submittedAt: Date = .now) {
+    init(
+        id: UUID = UUID(),
+        operationId: String = UUID().uuidString,
+        ticker: String,
+        question: String,
+        submittedAt: Date = .now
+    ) {
         self.id = id
+        self.operationId = operationId
         self.ticker = ticker
         self.question = question
         self.submittedAt = submittedAt
@@ -26,11 +35,166 @@ struct PendingChatState: Equatable {
     }
 }
 
-enum UsageLoadState {
+private struct RetryableChatOperation: Equatable {
+    let filingKey: String
+    let question: String
+    let conversationContext: [ChatContextMessage]
+    let operationId: String
+
+    func matches(
+        filingKey: String,
+        question: String,
+        conversationContext: [ChatContextMessage]
+    ) -> Bool {
+        self.filingKey == filingKey
+            && self.question == question
+            && self.conversationContext == conversationContext
+    }
+}
+
+enum UsageLoadState: Equatable {
     case idle
     case loading
     case loaded
     case failed
+}
+
+enum InstallationIdentityFailureKind: Equatable {
+    case networkUnavailable
+    case appAttestTemporarilyUnavailable
+    case appAttestUnsupported
+    case serverMaintenance
+    case invalidCredentials
+    case secureStorageUnavailable
+    case permanentAuthenticationFailure
+    case unknown
+}
+
+struct InstallationIdentityFailure: Equatable {
+    let kind: InstallationIdentityFailureKind
+
+    var isRetryable: Bool {
+        switch kind {
+        case .networkUnavailable, .appAttestTemporarilyUnavailable, .serverMaintenance, .unknown:
+            return true
+        case .appAttestUnsupported, .invalidCredentials, .secureStorageUnavailable,
+             .permanentAuthenticationFailure:
+            return false
+        }
+    }
+
+    var title: String {
+        switch kind {
+        case .networkUnavailable:
+            return "オフラインで閲覧中"
+        case .appAttestTemporarilyUnavailable:
+            return "安全確認を再試行します"
+        case .appAttestUnsupported:
+            return "閲覧専用で利用中"
+        case .serverMaintenance:
+            return "認証サービスを確認中"
+        case .invalidCredentials:
+            return "端末認証を確認できません"
+        case .secureStorageUnavailable:
+            return "安全な保存領域を確認できません"
+        case .permanentAuthenticationFailure:
+            return "この端末の認証を利用できません"
+        case .unknown:
+            return "一部機能を一時停止しています"
+        }
+    }
+
+    var message: String {
+        switch kind {
+        case .networkUnavailable:
+            return "通信を確認できません。保存済みの企業・決算資料は閲覧できます。チャット、保存、購入などは再接続後に利用できます。"
+        case .appAttestTemporarilyUnavailable:
+            return "Apple の安全確認を一時的に完了できません。保存済みデータは閲覧できますが、クレジットを変更する操作は停止しています。"
+        case .appAttestUnsupported:
+            return "この端末では App Attest を利用できないため、保存済みデータの閲覧と公開検索のみ利用できます。クレジットを変更する操作は利用できません。"
+        case .serverMaintenance:
+            return "認証サービスが一時的に利用できません。保存済みデータは閲覧できます。メンテナンス終了後に再試行してください。"
+        case .invalidCredentials:
+            return "保存済みデータは閲覧できますが、端末の認証情報が無効なため認証が必要な操作を停止しています。"
+        case .secureStorageUnavailable:
+            return "端末の安全な保存領域から認証情報を読み出せません。保存済みデータは閲覧できます。"
+        case .permanentAuthenticationFailure:
+            return "保存済みデータは閲覧できますが、このインストールでは認証が必要な操作を利用できません。"
+        case .unknown:
+            return "端末認証を完了できません。保存済みデータは閲覧できますが、認証が必要な操作は一時停止しています。"
+        }
+    }
+
+    static func classify(_ error: Error) -> InstallationIdentityFailure {
+        if let identityError = error as? InstallationIdentityError {
+            switch identityError {
+            case .appAttestUnavailable:
+                return InstallationIdentityFailure(kind: .appAttestUnsupported)
+            case .appAttestTemporarilyUnavailable, .expiredChallenge:
+                return InstallationIdentityFailure(kind: .appAttestTemporarilyUnavailable)
+            case .keychainFailure, .invalidStoredCredential:
+                return InstallationIdentityFailure(kind: .secureStorageUnavailable)
+            case .attestationNotVerified, .replayedChallenge:
+                return InstallationIdentityFailure(kind: .permanentAuthenticationFailure)
+            case .identityUnavailable:
+                return InstallationIdentityFailure(kind: .unknown)
+            }
+        }
+
+        if let apiError = error as? APIError {
+            switch apiError {
+            case .serverStatus(let statusCode, _):
+                if statusCode == 401 {
+                    return InstallationIdentityFailure(kind: .invalidCredentials)
+                }
+                if statusCode == 403 || statusCode == 410 || statusCode == 451 {
+                    return InstallationIdentityFailure(kind: .permanentAuthenticationFailure)
+                }
+                if statusCode == 429 || (500...599).contains(statusCode) {
+                    return InstallationIdentityFailure(kind: .serverMaintenance)
+                }
+            case .routeMissing, .invalidResponse:
+                return InstallationIdentityFailure(kind: .serverMaintenance)
+            default:
+                break
+            }
+        }
+
+        let nsError = error as NSError
+        if error is URLError || nsError.domain == NSURLErrorDomain {
+            return InstallationIdentityFailure(kind: .networkUnavailable)
+        }
+        return InstallationIdentityFailure(kind: .unknown)
+    }
+}
+
+struct InstallationIdentityRetryPolicy: Equatable {
+    let automaticRetryDelaysNanoseconds: [UInt64]
+
+    // Initial attempt, then 1s, 2s, and 4s. The finite list prevents an
+    // unattended startup loop from retrying forever.
+    static let production = InstallationIdentityRetryPolicy(
+        automaticRetryDelaysNanoseconds: [1_000_000_000, 2_000_000_000, 4_000_000_000]
+    )
+
+    static let immediateForTests = InstallationIdentityRetryPolicy(
+        automaticRetryDelaysNanoseconds: [0, 0, 0]
+    )
+}
+
+enum InstallationIdentityLoadState: Equatable {
+    case idle
+    case loading(attempt: Int)
+    case ready(attestationStatus: InstallationAttestationStatus, creditMode: InstallationCreditMode)
+    case degraded(failure: InstallationIdentityFailure, attemptCount: Int)
+}
+
+struct InstallationAuthenticationStatus: Equatable {
+    let failure: InstallationIdentityFailure
+
+    var canRetry: Bool {
+        failure.kind != .appAttestUnsupported
+    }
 }
 
 enum SubscriptionProductLoadState {
@@ -126,6 +290,8 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     let deviceIdentity: DeviceIdentityStore
     private let subscriptionStore: SubscriptionStore
     private let rewardedAdService: RewardedAdServing
+    private let accountCredentialStore: (any AccountCredentialStoring)?
+    private let installationIdentityRetryPolicy: InstallationIdentityRetryPolicy
 
     var watchlist: [WatchlistCard] = []
     var recentCompanies: [WatchlistCard] = []
@@ -133,6 +299,8 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var searchErrorMessage: String?
     var usage: UsagePayload?
     var usageLoadState: UsageLoadState = .idle
+    var installationIdentityLoadState: InstallationIdentityLoadState = .idle
+    private(set) var installationAuthenticationIsRetrying = false
     var companyCache: [String: CompanyPayload] = [:]
     var companyLoadStates: [String: CompanyLoadStatePayload] = [:]
     var chatHistoryCache: [String: [LocalChatMessage]] = [:]
@@ -169,6 +337,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var billingAPIHealthReport: BillingAPIHealthReport?
     var billingAPIHealthCheckInFlight = false
     var activeAlert: AppAlertState?
+    private(set) var accountCredential: AccountCredential?
     var aiConsentGranted = UserDefaults.standard.bool(forKey: "kabuyomi.aiConsentGranted")
     var showStarterCompanies = UserDefaults.standard.object(forKey: "kabuyomi.showStarterCompanies") as? Bool ?? true
     var hasCompletedInitialEntry = UserDefaults.standard.bool(forKey: "kabuyomi.hasCompletedInitialEntry")
@@ -187,6 +356,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     private var refreshedTickersThisSession: Set<String> = []
     private var companyRetryTasks: [String: Task<Void, Never>] = [:]
     private var activeConversationFilingKeys: [String: String] = [:]
+    private var retryableChatOperations: [String: RetryableChatOperation] = [:]
+    private var authenticationDeferredCompanyTickers: Set<String> = []
+    private var installationIdentityAuthenticationTask: Task<Void, Never>?
+    private var installationIdentityAuthenticationTaskID: UUID?
     private var watchlistMutationInFlight = false
     private var watchlistMutationWaiters: [CheckedContinuation<Void, Never>] = []
     private var usageMutationGeneration = 0
@@ -203,13 +376,18 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         persistence: PersistenceController,
         deviceIdentity: DeviceIdentityStore,
         subscriptionStore: SubscriptionStore = .shared,
-        rewardedAdService: RewardedAdServing = GoogleRewardedAdService.shared
+        rewardedAdService: RewardedAdServing = GoogleRewardedAdService.shared,
+        accountCredentialStore: (any AccountCredentialStoring)? = nil,
+        installationIdentityRetryPolicy: InstallationIdentityRetryPolicy = .production
     ) {
         self.apiClient = apiClient
         self.persistence = persistence
         self.deviceIdentity = deviceIdentity
         self.subscriptionStore = subscriptionStore
         self.rewardedAdService = rewardedAdService
+        self.accountCredentialStore = accountCredentialStore
+        self.installationIdentityRetryPolicy = installationIdentityRetryPolicy
+        self.accountCredential = try? accountCredentialStore?.load()
         self.subscriptionStateObserver = NotificationCenter.default.addObserver(
             forName: .kabuyomiSubscriptionStateDidChange,
             object: nil,
@@ -226,14 +404,22 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     static func live() -> AppModel {
         let deviceIdentity = DeviceIdentityStore.shared
+        #if DEBUG
+        let installationIdentityStore: InstallationTokenStore =
+            APIBaseURLResolver.selectedDebugEnvironment == .test ? .testWorker : .shared
+        #else
+        let installationIdentityStore = InstallationTokenStore.shared
+        #endif
         return AppModel(
             apiClient: APIClient(
-                deviceIdentity: deviceIdentity
+                deviceIdentity: deviceIdentity,
+                installationIdentityStore: installationIdentityStore
             ),
             persistence: PersistenceController.shared,
             deviceIdentity: deviceIdentity,
             subscriptionStore: .shared,
-            rewardedAdService: GoogleRewardedAdService.shared
+            rewardedAdService: GoogleRewardedAdService.shared,
+            accountCredentialStore: AccountCredentialStore.shared
         )
     }
 
@@ -327,8 +513,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     var hasChatCreditAvailable: Bool {
-        guard usage?.creditBillingEnabled == true,
-              let credits = usage?.credits else {
+        // `creditBillingEnabled` describes whether StoreKit-backed billing is
+        // currently exposed. Server-side model metering remains authoritative
+        // even while purchase/subscription capabilities are disabled.
+        guard let credits = usage?.credits else {
             return true
         }
         return credits.totalRemaining >= chatCreditCost
@@ -338,9 +526,51 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         usage?.creditBillingEnabled == true
     }
 
+    var isConsumableCreditPurchasingEnabled: Bool {
+        isCreditBillingEnabled
+            && usage?.capabilities?.consumablePurchasesEnabled == true
+    }
+
+    var isPaidCreditAccountSignedIn: Bool {
+        accountCredential?.appAccountTokenUUID != nil && accountCredential?.isExpired == false
+    }
+
+    var requiresPaidCreditAccount: Bool {
+        usage?.capabilities?.consumablePurchasesEnabled == true
+            && usage?.capabilities?.accountRecoveryReady == true
+    }
+
+    var authenticatedCreditActionsAvailable: Bool {
+        authenticationStateAllowsMutation
+            && apiClient.authenticatedCreditActionsAvailable
+    }
+
+    var fraudSensitiveCreditActionsAvailable: Bool {
+        authenticationStateAllowsMutation
+            && apiClient.fraudSensitiveCreditActionsAvailable
+    }
+
+    var installationAuthenticationStatus: InstallationAuthenticationStatus? {
+        switch installationIdentityLoadState {
+        case .degraded(let failure, _):
+            return InstallationAuthenticationStatus(failure: failure)
+        case .ready(let attestationStatus, _)
+            where attestationStatus == .pending:
+            return InstallationAuthenticationStatus(
+                failure: InstallationIdentityFailure(kind: .appAttestTemporarilyUnavailable)
+            )
+        case .ready(let attestationStatus, let creditMode)
+            where attestationStatus == .verified && creditMode != .full:
+            return InstallationAuthenticationStatus(
+                failure: InstallationIdentityFailure(kind: .permanentAuthenticationFailure)
+            )
+        case .idle, .loading, .ready:
+            return nil
+        }
+    }
+
     var hasRecoveredEnoughCreditsForPendingRecovery: Bool {
         guard let recovery = insufficientCreditRecovery,
-              usage?.creditBillingEnabled == true,
               let credits = usage?.credits else {
             return false
         }
@@ -348,11 +578,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     var currentDeviceKeyDisplay: String {
-        deviceIdentity.deviceKey()
+        apiClient.installationPrincipalDisplayString ?? "not_bootstrapped"
     }
 
     var currentDeviceKeySuffixDisplay: String {
-        let key = deviceIdentity.deviceKey().trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = currentDeviceKeyDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return "unknown" }
         return String(key.suffix(6))
     }
@@ -476,6 +706,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     func bootstrap() async {
         isBootstrapped = false
+        let startupUsageGeneration = usageMutationGeneration
 
         sanitizeRestoredConversationState()
         recordAppLaunch()
@@ -484,20 +715,155 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         usageLoadState = .loading
 
         Task { [weak self] in
-            guard let self else { return }
-            if !Self.isRunningTests {
-                await self.subscriptionStore.refreshEntitlements(reason: "bootstrap")
-                _ = await self.syncBillingState(showErrors: false)
-                await self.loadSubscriptionProducts(showErrors: false)
-                await self.loadCreditPackProducts(showErrors: false)
-                await self.recoverUnfinishedCreditPurchases(showErrors: false)
+            await self?.retryInstallationAuthentication(
+                expectedUsageGeneration: startupUsageGeneration
+            )
+        }
+    }
+
+    func retryInstallationAuthentication() async {
+        await retryInstallationAuthentication(
+            expectedUsageGeneration: usageMutationGeneration
+        )
+    }
+
+    private func retryInstallationAuthentication(expectedUsageGeneration: Int) async {
+        if let existingTask = installationIdentityAuthenticationTask {
+            let existingTaskID = installationIdentityAuthenticationTaskID
+            await existingTask.value
+            if installationIdentityAuthenticationTaskID == existingTaskID {
+                installationIdentityAuthenticationTask = nil
+                installationIdentityAuthenticationTaskID = nil
+                installationAuthenticationIsRetrying = false
             }
-            await self.refreshUsage()
+            return
+        }
+
+        let taskID = UUID()
+        installationIdentityAuthenticationTaskID = taskID
+        installationAuthenticationIsRetrying = true
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.runInstallationAuthenticationCycle(
+                expectedUsageGeneration: expectedUsageGeneration
+            )
+        }
+        installationIdentityAuthenticationTask = task
+        await task.value
+
+        guard installationIdentityAuthenticationTaskID == taskID else { return }
+        installationIdentityAuthenticationTask = nil
+        installationIdentityAuthenticationTaskID = nil
+        installationAuthenticationIsRetrying = false
+    }
+
+    private func runInstallationAuthenticationCycle(expectedUsageGeneration: Int) async {
+        let preservesVisibleStatus = installationAuthenticationStatus != nil
+        let preservesAuthenticatedCredential = apiClient.authenticatedCreditActionsAvailable
+        let delays = [UInt64(0)] + installationIdentityRetryPolicy.automaticRetryDelaysNanoseconds
+        var lastFailure = InstallationIdentityFailure(kind: .unknown)
+        var completedAttempts = 0
+        var recoveredRejectedCredential = false
+
+        for (index, delay) in delays.enumerated() {
+            if delay > 0 {
+                do {
+                    try await Task.sleep(nanoseconds: delay)
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
+
+            completedAttempts = index + 1
+            if !preservesVisibleStatus, !preservesAuthenticatedCredential {
+                installationIdentityLoadState = .loading(attempt: completedAttempts)
+            }
+
+            do {
+                var credential = try await apiClient.bootstrapInstallationIdentity()
+                let startupUsage: UsagePayload
+                do {
+                    startupUsage = try await apiClient.fetchUsage()
+                } catch {
+                    guard !recoveredRejectedCredential,
+                          Self.isInstallationCredentialRejection(error),
+                          try apiClient.invalidateInstallationCredentialForRebootstrap() else {
+                        throw error
+                    }
+                    recoveredRejectedCredential = true
+                    credential = try await apiClient.bootstrapInstallationIdentity()
+                    startupUsage = try await apiClient.fetchUsage()
+                }
+                guard !Task.isCancelled else { return }
+
+                installationIdentityLoadState = .ready(
+                    attestationStatus: credential.attestationStatus,
+                    creditMode: credential.creditMode
+                )
+                if expectedUsageGeneration == usageMutationGeneration {
+                    storeUsage(startupUsage, source: .refresh)
+                    lastUsageRefreshAt = Date()
+                }
+                usageLoadState = .loaded
+                await completeAuthenticatedStartup()
+                return
+            } catch {
+                guard !shouldIgnore(error) else { return }
+                lastFailure = InstallationIdentityFailure.classify(error)
+                if !lastFailure.isRetryable {
+                    break
+                }
+            }
+        }
+
+        installationIdentityLoadState = .degraded(
+            failure: lastFailure,
+            attemptCount: completedAttempts
+        )
+        if usage == nil {
+            usageLoadState = .failed
+        }
+    }
+
+    private static func isInstallationCredentialRejection(_ error: Error) -> Bool {
+        guard let apiError = error as? APIError,
+              case .serverStatus(let statusCode, _) = apiError else { return false }
+        return statusCode == 401
+    }
+
+    private func completeAuthenticatedStartup() async {
+        if !Self.isRunningTests, isCreditBillingEnabled {
+            await subscriptionStore.refreshEntitlements(reason: "bootstrap")
+            if authenticatedCreditActionsAvailable {
+                _ = await syncBillingState(showErrors: false)
+                if isConsumableCreditPurchasingEnabled {
+                    await recoverUnfinishedCreditPurchases(showErrors: false)
+                }
+            }
+            await loadSubscriptionProducts(showErrors: false)
+            if isConsumableCreditPurchasingEnabled {
+                await loadCreditPackProducts(showErrors: false)
+            }
+        }
+
+        let deferredTickers = authenticationDeferredCompanyTickers
+        authenticationDeferredCompanyTickers = []
+        for ticker in deferredTickers {
+            await loadCompany(ticker: ticker)
         }
     }
 
     func purchaseSubscription(productId: String) async {
         guard !billingActionInFlight else { return }
+        guard isCreditBillingEnabled else {
+            activeAlert = AppAlertState(
+                message: "月額プランは現在利用できません。時間をおいてからもう一度お試しください。",
+                kind: .dismissOnly
+            )
+            return
+        }
+        guard requireAuthenticatedMutation() else { return }
         billingActionInFlight = true
         let stateGeneration = self.stateGeneration
         let usageGeneration = usageMutationGeneration
@@ -543,6 +909,14 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     func restorePurchases() async {
         guard !billingActionInFlight else { return }
+        guard isCreditBillingEnabled else {
+            activeAlert = AppAlertState(
+                message: "購入の復元は現在利用できません。時間をおいてからもう一度お試しください。",
+                kind: .dismissOnly
+            )
+            return
+        }
+        guard requireAuthenticatedMutation() else { return }
         billingActionInFlight = true
         defer { billingActionInFlight = false }
 
@@ -572,11 +946,35 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         storeUsage(usage, source: .quoteTranslation)
     }
 
+    func translateQuote(
+        text: String,
+        sourceLanguage: String? = nil,
+        targetLanguage: String = "ja",
+        operationId: String
+    ) async throws -> QuoteTranslationResponse {
+        guard authenticatedCreditActionsAvailable else {
+            throw apiClient.authenticatedActionUnavailableError
+        }
+        let response = try await apiClient.translateQuote(
+            text: text,
+            sourceLanguage: sourceLanguage,
+            targetLanguage: targetLanguage,
+            operationId: operationId
+        )
+        applyQuoteTranslationUsage(response)
+        return response
+    }
+
     func refreshUsageAfterQuoteTranslationFailure() async {
-        await refreshUsage()
+        await refreshUsage(showErrors: false)
     }
 
     func loadSubscriptionProducts(showErrors: Bool = true) async {
+        guard isCreditBillingEnabled else {
+            subscriptionProductLoadState = .idle
+            subscriptionProductLoadErrorMessage = nil
+            return
+        }
         guard subscriptionProductLoadState != .loading else { return }
 
         subscriptionProductLoadState = .loading
@@ -616,6 +1014,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     func loadCreditPackProducts(showErrors: Bool = true) async {
+        guard isConsumableCreditPurchasingEnabled else {
+            creditPackProducts = []
+            creditPackProductLoadErrorMessage = nil
+            return
+        }
         guard !creditPackProductLoadInFlight else { return }
 
         creditPackProductLoadInFlight = true
@@ -642,9 +1045,17 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     func purchaseCreditPack(productId: String) async {
         guard !billingActionInFlight else { return }
-        guard isCreditBillingEnabled else {
+        guard isConsumableCreditPurchasingEnabled else {
             activeAlert = AppAlertState(
                 message: "追加クレジット購入は現在利用できません。時間をおいてからもう一度お試しください。",
+                kind: .dismissOnly
+            )
+            return
+        }
+        guard requireAuthenticatedMutation() else { return }
+        if requiresPaidCreditAccount && !isPaidCreditAccountSignedIn {
+            activeAlert = AppAlertState(
+                message: "追加クレジットを端末変更後も復元できるよう、先にAppleアカウントで続けてください。",
                 kind: .dismissOnly
             )
             return
@@ -654,7 +1065,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         defer { billingActionInFlight = false }
 
         do {
-            guard let purchase = try await subscriptionStore.purchaseCreditPack(productId: productId) else {
+            guard let purchase = try await subscriptionStore.purchaseCreditPack(
+                productId: productId,
+                appAccountToken: requiresPaidCreditAccount ? accountCredential?.appAccountTokenUUID : nil
+            ) else {
                 refreshStoreKitDiagnostics()
                 activeAlert = AppAlertState(
                     message: "購入はキャンセルされました。",
@@ -689,8 +1103,61 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         }
     }
 
+    func completeAppleAccountSignIn(identityToken: String) async {
+        guard !billingActionInFlight else { return }
+        guard requireFraudSensitiveMutation() else { return }
+        guard usage?.capabilities?.accountRecoveryReady == true else {
+            activeAlert = AppAlertState(
+                message: "アカウント復元は現在利用できません。",
+                kind: .dismissOnly
+            )
+            return
+        }
+
+        billingActionInFlight = true
+        defer { billingActionInFlight = false }
+
+        do {
+            let credential = try await apiClient.createAppleAccountSession(identityToken: identityToken)
+            accountCredential = credential
+            let migrationId = paidCreditMigrationId(for: credential)
+            _ = try await apiClient.migratePaidCreditsToAccount(mode: "preview", migrationId: migrationId)
+            let migration = try await apiClient.migratePaidCreditsToAccount(mode: "apply", migrationId: migrationId)
+            await refreshUsage()
+            activeAlert = AppAlertState(
+                message: migration.status == "applied"
+                    ? "Appleアカウントで続行しました。購入済みクレジットもこのアカウントへ移行しました。"
+                    : "Appleアカウントで続行しました。購入済みクレジットはこのアカウントで復元できます。",
+                kind: .dismissOnly
+            )
+        } catch {
+            accountCredential = try? accountCredentialStore?.load()
+            handle(error)
+        }
+    }
+
+    func signOutPaidCreditAccount() async {
+        do {
+            try accountCredentialStore?.clear()
+            accountCredential = nil
+            await refreshUsage()
+        } catch {
+            handle(error)
+        }
+    }
+
+    private func paidCreditMigrationId(for credential: AccountCredential) -> String {
+        let source = "\(credential.appAccountToken)\u{0}\(apiClient.installationPrincipalDisplayString ?? "missing-installation")"
+        let digest = SHA256.hash(data: Data(source.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return "paid-credit-account-v1-\(digest)"
+    }
+
     func recoverUnfinishedCreditPurchases(showErrors: Bool = true) async {
+        guard isConsumableCreditPurchasingEnabled else { return }
         guard !creditGrantRecoveryInFlight else { return }
+        guard requireAuthenticatedMutation(showAlert: showErrors) else { return }
         creditGrantRecoveryInFlight = true
         defer { creditGrantRecoveryInFlight = false }
 
@@ -730,6 +1197,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 "earn_rewarded_ad_credits_early_return",
                 fields: ["reason": rewardedAdLastDebugReason]
             )
+            return
+        }
+        guard requireFraudSensitiveMutation() else {
+            setRewardedAdDebugReason("installation_authentication_unavailable")
+            requestRewardedAdReturnDestinationRestore(reason: "installation_authentication_unavailable")
             return
         }
         guard isCreditBillingEnabled else {
@@ -1022,7 +1494,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
 
     private func logRewardedAdDiagnostic(_ event: String, fields: [String: String] = [:]) {
         let credits = usage?.credits
-        let deviceKey = deviceIdentity.deviceKey()
+        let installationPrincipal = apiClient.installationPrincipalDisplayString ?? ""
         var mergedFields: [String: String] = [
             "build": AdMobConfig.buildConfiguration,
             "appVersion": appVersionDisplay,
@@ -1036,8 +1508,8 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             "googleMobileAdsTestDeviceIDs": AdMobConfig.testDeviceModeDiagnostic,
             "state": rewardedAdCreditState.debugName,
             "creditBillingEnabled": String(isCreditBillingEnabled),
-            "deviceKeyExists": String(!deviceKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
-            "deviceKey": RewardedAdDiagnostics.redact(deviceKey),
+            "installationPrincipalExists": String(!installationPrincipal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
+            "installationPrincipal": RewardedAdDiagnostics.redact(installationPrincipal),
             "mobileAdsInitialized": String(AdMobRuntimeState.mobileAdsInitialized),
             "totalRemaining": credits.map { String($0.totalRemaining) } ?? "nil",
             "monthlyRemaining": credits.map { String($0.monthlyRemaining) } ?? "nil",
@@ -1079,14 +1551,21 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         let environment: APIEnvironment = value ? .test : .production
         APIBaseURLResolver.setSelectedDebugEnvironment(environment)
         usesTestAPI = value
+        installationIdentityAuthenticationTask?.cancel()
+        installationIdentityAuthenticationTask = nil
+        installationIdentityAuthenticationTaskID = nil
+        installationAuthenticationIsRetrying = false
         apiClient = APIClient(
             deviceIdentity: deviceIdentity,
-            subscriptionStore: subscriptionStore
+            subscriptionStore: subscriptionStore,
+            installationIdentityStore: value ? InstallationTokenStore.testWorker : InstallationTokenStore.shared
         )
+        retryableChatOperations = [:]
         usage = nil
         usageLoadState = .loading
+        installationIdentityLoadState = .idle
         Task { [weak self] in
-            await self?.refreshUsage()
+            await self?.retryInstallationAuthentication()
         }
     }
 
@@ -1209,6 +1688,13 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             return
         }
 
+        if forceRefresh {
+            guard requireAuthenticatedMutation() else { return }
+        } else if !installationReadRequestsAvailable {
+            deferCompanyLoadUntilAuthentication(ticker: normalized)
+            return
+        }
+
         await fetchCompanyRemote(ticker: normalized, forceRefresh: forceRefresh)
     }
 
@@ -1221,6 +1707,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             requestAIConsent()
             return false
         }
+        guard requireAuthenticatedMutation() else { return false }
         guard let company = companyPayload(for: normalized) else {
             activeAlert = AppAlertState(message: "企業データを先に読み込んでください。", kind: .dismissOnly)
             return false
@@ -1234,19 +1721,48 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             return false
         }
 
-        let pendingStartedAt = Date()
-        pendingChats[normalized] = PendingChatState(ticker: normalized, question: trimmed)
-        chatIsSending = true
         let conversationContext = recentChatContext(for: normalized)
+        let existingOperation = retryableChatOperations[normalized]
+        let operationId: String
+        if let existingOperation,
+           existingOperation.matches(
+               filingKey: company.filingKey,
+               question: trimmed,
+               conversationContext: conversationContext
+           ) {
+            operationId = existingOperation.operationId
+        } else {
+            operationId = UUID().uuidString
+        }
+
+        let pendingChat = PendingChatState(
+            operationId: operationId,
+            ticker: normalized,
+            question: trimmed
+        )
+        retryableChatOperations[normalized] = RetryableChatOperation(
+            filingKey: company.filingKey,
+            question: trimmed,
+            conversationContext: conversationContext,
+            operationId: operationId
+        )
+        pendingChats[normalized] = pendingChat
+        chatIsSending = true
+        let pendingStartedAt = pendingChat.submittedAt
         defer {
-            finishPendingChat(ticker: normalized, stateGeneration: stateGeneration)
+            finishPendingChat(
+                ticker: normalized,
+                operationId: operationId,
+                stateGeneration: stateGeneration
+            )
         }
 
         do {
             let response = try await apiClient.sendChat(
                 filingKey: company.filingKey,
                 question: trimmed,
-                conversationContext: conversationContext
+                conversationContext: conversationContext,
+                operationId: operationId
             )
             guard stateGeneration == self.stateGeneration else {
                 await ensureMinimumPendingChatDuration(since: pendingStartedAt)
@@ -1255,6 +1771,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             try persistence.saveChat(question: trimmed, response: response, for: company)
             storeUsage(response.usage, source: .chat)
             chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized, filingKey: company.filingKey)?.chatHistory ?? []
+            clearRetryableChatOperation(ticker: normalized, operationId: operationId)
             await ensureMinimumPendingChatDuration(since: pendingStartedAt)
             return true
         } catch {
@@ -1487,6 +2004,8 @@ credit残高に使う端末識別情報は維持されます。
             companyLoadStates = [:]
             chatHistoryCache = [:]
             pendingChats = [:]
+            retryableChatOperations = [:]
+            authenticationDeferredCompanyTickers = []
             addingTickers = []
             loadingTickers = []
             cancelAllCompanyLoadRetries()
@@ -1532,6 +2051,7 @@ credit残高に使う端末識別情報は維持されます。
 
     func removeFromWatchlist(_ ticker: String) async {
         let normalized = normalizedTicker(ticker)
+        guard requireAuthenticatedMutation() else { return }
         await acquireWatchlistMutationLock()
         defer { releaseWatchlistMutationLock() }
         guard !addingTickers.contains(normalized) else { return }
@@ -1570,6 +2090,7 @@ credit残高に使う端末識別情報は維持されます。
 
     private func saveTicker(_ ticker: String, searchItem: SearchItem?, redirectToConversation: Bool) async {
         let normalized = normalizedTicker(ticker)
+        guard requireAuthenticatedMutation() else { return }
         await acquireWatchlistMutationLock()
         defer { releaseWatchlistMutationLock() }
         guard !addingTickers.contains(normalized) else { return }
@@ -1681,6 +2202,7 @@ credit残高に使う端末識別情報は維持されます。
 
     func refreshConversationCompany(ticker: String) async -> CompanyRefreshResult {
         let normalized = normalizedTicker(ticker)
+        guard requireAuthenticatedMutation() else { return .retryable }
         guard !loadingTickers.contains(normalized), !isLocalAccessRevoked(for: normalized) else {
             return .retryable
         }
@@ -1749,7 +2271,7 @@ credit残高に使う端末識別情報は維持されます。
         }
     }
 
-    private func refreshUsage() async {
+    private func refreshUsage(showErrors: Bool = true) async {
         let stateGeneration = self.stateGeneration
         let usageGeneration = usageMutationGeneration
         usageLoadState = .loading
@@ -1764,8 +2286,10 @@ credit残高に使う端末識別情報は維持されます。
             guard stateGeneration == self.stateGeneration else { return }
             guard !shouldIgnore(error) else { return }
             usageLoadState = .failed
-            if usage == nil {
+            if showErrors, usage == nil {
                 presentAlert(for: error)
+            } else {
+                scheduleInstallationCredentialRecoveryIfNeeded(error)
             }
         }
     }
@@ -1781,6 +2305,12 @@ credit残高に使う端末識別情報は維持されます。
 
     private func fetchCompanyRemote(ticker: String, forceRefresh: Bool) async {
         guard !loadingTickers.contains(ticker), !isLocalAccessRevoked(for: ticker) else { return }
+        if forceRefresh {
+            guard authenticatedCreditActionsAvailable else { return }
+        } else if !installationReadRequestsAvailable {
+            deferCompanyLoadUntilAuthentication(ticker: ticker)
+            return
+        }
         let stateGeneration = self.stateGeneration
 
         loadingTickers.insert(ticker)
@@ -1922,10 +2452,76 @@ credit残高に使う端末識別情報は維持されます。
         presentAlert(for: error)
     }
 
-    private func finishPendingChat(ticker: String, stateGeneration: Int) {
+    private var installationReadRequestsAvailable: Bool {
+        guard apiClient.hasInstallationCredential else { return false }
+        switch installationIdentityLoadState {
+        case .loading, .degraded:
+            return false
+        case .idle, .ready:
+            return true
+        }
+    }
+
+    private var authenticationStateAllowsMutation: Bool {
+        switch installationIdentityLoadState {
+        case .loading, .degraded:
+            return false
+        case .idle, .ready:
+            return true
+        }
+    }
+
+    private func deferCompanyLoadUntilAuthentication(ticker: String) {
+        let normalized = normalizedTicker(ticker)
+        guard companyCache[normalized] == nil else { return }
+        authenticationDeferredCompanyTickers.insert(normalized)
+    }
+
+    @discardableResult
+    private func requireAuthenticatedMutation(showAlert: Bool = true) -> Bool {
+        requireMutationAvailability(
+            authenticatedCreditActionsAvailable,
+            showAlert: showAlert
+        )
+    }
+
+    @discardableResult
+    private func requireFraudSensitiveMutation(showAlert: Bool = true) -> Bool {
+        requireMutationAvailability(
+            fraudSensitiveCreditActionsAvailable,
+            showAlert: showAlert
+        )
+    }
+
+    private func requireMutationAvailability(_ isAvailable: Bool, showAlert: Bool) -> Bool {
+        guard isAvailable else {
+            if showAlert, activeAlert == nil {
+                let message: String
+                if let status = installationAuthenticationStatus {
+                    message = status.failure.message
+                } else if installationAuthenticationIsRetrying {
+                    message = "端末認証を確認しています。完了後にもう一度お試しください。"
+                } else {
+                    message = apiClient.authenticatedActionUnavailableError.localizedDescription
+                }
+                activeAlert = AppAlertState(message: message, kind: .dismissOnly)
+            }
+            return false
+        }
+        return true
+    }
+
+    private func finishPendingChat(ticker: String, operationId: String, stateGeneration: Int) {
         guard stateGeneration == self.stateGeneration else { return }
-        pendingChats.removeValue(forKey: ticker)
+        if pendingChats[ticker]?.operationId == operationId {
+            pendingChats.removeValue(forKey: ticker)
+        }
         chatIsSending = !pendingChats.isEmpty
+    }
+
+    private func clearRetryableChatOperation(ticker: String, operationId: String) {
+        guard retryableChatOperations[ticker]?.operationId == operationId else { return }
+        retryableChatOperations.removeValue(forKey: ticker)
     }
 
     private func finishTickerMutation(ticker: String, stateGeneration: Int) {
@@ -1961,10 +2557,34 @@ credit残高に使う端末識別情報は維持されます。
     }
 
     private func presentAlert(for error: Error) {
+        scheduleInstallationCredentialRecoveryIfNeeded(error)
         activeAlert = AppAlertState(
             message: presentableMessage(for: error),
             kind: .dismissOnly
         )
+    }
+
+    private func scheduleInstallationCredentialRecoveryIfNeeded(_ error: Error) {
+        guard Self.isInstallationCredentialRejection(error) else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                guard try self.apiClient.invalidateInstallationCredentialForRebootstrap() else { return }
+                self.installationIdentityLoadState = .degraded(
+                    failure: InstallationIdentityFailure(kind: .invalidCredentials),
+                    attemptCount: 1
+                )
+                if self.usage == nil {
+                    self.usageLoadState = .failed
+                }
+                await self.retryInstallationAuthentication()
+            } catch {
+                self.installationIdentityLoadState = .degraded(
+                    failure: InstallationIdentityFailure.classify(error),
+                    attemptCount: 1
+                )
+            }
+        }
     }
 
     func refreshStoreKitDiagnostics() {
@@ -2112,6 +2732,18 @@ credit残高に使う端末識別情報は維持されます。
             return "現在メンテナンス中です。しばらくしてから再度お試しください。"
         }
 
+        if rawMessage.contains("execution_pending") {
+            return "処理を続行しています。少し待ってから、もう一度お試しください。"
+        }
+
+        if rawMessage.contains("operation_result_expired") {
+            return "処理結果の再取得期限が切れています。新しい質問として内容を変更して送信してください。"
+        }
+
+        if rawMessage.contains("operation_id_payload_mismatch") {
+            return "同じ操作IDに異なる内容が指定されたため、安全に送信できませんでした。"
+        }
+
         return rawMessage
     }
 
@@ -2128,6 +2760,12 @@ credit残高に使う端末識別情報は維持されます。
                 return "HTTP \(statusCode): route_missing path=\(path) url=\(url) message=\(message)"
             case .insufficientCredits(let required, let remaining):
                 return "insufficient_credits required=\(required) remaining=\(remaining)"
+            case .executionPending(let retryAfterSeconds):
+                return "execution_pending retryAfterSeconds=\(retryAfterSeconds)"
+            case .operationResultExpired:
+                return "operation_result_expired"
+            case .operationIdPayloadMismatch:
+                return "operation_id_payload_mismatch"
             }
         }
 
@@ -2164,20 +2802,22 @@ credit残高に使う端末識別情報は維持されます。
                 savedTickers: usage.savedTickers,
                 accessMode: usage.accessMode,
                 credits: nil,
-                creditBillingEnabled: usage.creditBillingEnabled
+                creditBillingEnabled: usage.creditBillingEnabled,
+                capabilities: usage.capabilities
             )
         }
 
-        let normalizedMonthlyLimit = max(credits.monthlyLimit, BillingCatalog.free.monthlyCredits)
-        let limitDelta = normalizedMonthlyLimit - credits.monthlyLimit
-        let normalizedMonthlyRemaining = max(0, min(normalizedMonthlyLimit, credits.monthlyRemaining + limitDelta))
         let normalizedCredits = CreditUsagePayload(
-            monthlyRemaining: normalizedMonthlyRemaining,
-            monthlyLimit: normalizedMonthlyLimit,
+            monthlyRemaining: max(0, min(credits.monthlyLimit, credits.monthlyRemaining)),
+            monthlyLimit: max(0, credits.monthlyLimit),
+            welcomeRemaining: credits.welcomeRemaining,
             rewardedAdRemaining: credits.rewardedAdRemaining,
             rewardedAdExpiresAt: credits.rewardedAdExpiresAt,
             purchasedRemaining: credits.purchasedRemaining,
-            totalRemaining: normalizedMonthlyRemaining + (credits.rewardedAdRemaining ?? 0) + credits.purchasedRemaining,
+            totalRemaining: max(0, min(credits.monthlyLimit, credits.monthlyRemaining))
+                + (credits.rewardedAdRemaining ?? 0)
+                + (credits.welcomeRemaining ?? 0)
+                + credits.purchasedRemaining,
             resetsAt: credits.resetsAt
         )
 
@@ -2197,7 +2837,8 @@ credit残高に使う端末識別情報は維持されます。
             savedTickers: usage.savedTickers,
             accessMode: usage.accessMode,
             credits: normalizedCredits,
-            creditBillingEnabled: usage.creditBillingEnabled
+            creditBillingEnabled: usage.creditBillingEnabled,
+            capabilities: usage.capabilities
         )
     }
 
@@ -2227,7 +2868,8 @@ credit残高に使う端末識別情報は維持されます。
             savedTickers: mergedTickers,
             accessMode: usage.accessMode,
             credits: usage.credits,
-            creditBillingEnabled: usage.creditBillingEnabled
+            creditBillingEnabled: usage.creditBillingEnabled,
+            capabilities: usage.capabilities
         )
     }
 
@@ -2345,6 +2987,7 @@ credit残高に使う端末識別情報は維持されます。
         companyLoadStates.removeValue(forKey: normalized)
         chatHistoryCache.removeValue(forKey: normalized)
         pendingChats.removeValue(forKey: normalized)
+        retryableChatOperations.removeValue(forKey: normalized)
         cancelCompanyLoadRetry(for: normalized)
         addingTickers.remove(normalized)
         loadingTickers.remove(normalized)
@@ -2713,6 +3356,8 @@ credit残高に使う端末識別情報は維持されます。
     }
 
     private func syncBillingState(showErrors: Bool) async -> BillingSyncResponse? {
+        guard isCreditBillingEnabled else { return nil }
+        guard requireAuthenticatedMutation(showAlert: showErrors) else { return nil }
         let stateGeneration = self.stateGeneration
         let usageGeneration = usageMutationGeneration
 

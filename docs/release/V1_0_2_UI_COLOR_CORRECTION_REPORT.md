@@ -1,5 +1,7 @@
 # Kabuyomi v1.0.2 UI Color Correction Report
 
+> **Historical release evidence — not current shipping authority.** This point-in-time report preserves prior findings and may describe deployments, capabilities, or release decisions that have since changed. Use `CURRENT_SHIPPING_TRUTH.md`, `FEATURE_PARITY_COMPATIBILITY_REPORT.md`, `RELEASE_GATE_STATE.json`, and `FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md` for current decisions.
+
 ## 1. Conclusion
 
 The narrow color correction pass is complete. Kabuyomi's global visual tone has been restored toward the warmer, softer brand palette while preserving the useful v1.0.2 layout and readability improvements from the prior UI polish pass.

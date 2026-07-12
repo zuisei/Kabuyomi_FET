@@ -399,6 +399,7 @@ struct UsagePayload: Decodable, Hashable {
     let accessMode: String?
     let credits: CreditUsagePayload?
     let creditBillingEnabled: Bool?
+    var capabilities: UsageCapabilitiesPayload? = nil
 
     var detachedAccessMode: DetachedAccessMode? {
         guard let accessMode else { return nil }
@@ -431,6 +432,30 @@ struct UsagePayload: Decodable, Hashable {
     }
 }
 
+struct UsageCapabilitiesPayload: Decodable, Hashable {
+    let configVersion: String
+    let configSource: String
+    let chatEnabled: Bool
+    let webSupplementEnabled: Bool
+    let consumablePurchasesEnabled: Bool
+    let accountRecoveryReady: Bool
+    let rewardedCredit: RewardedCreditCapabilityPayload
+}
+
+struct RewardedCreditCapabilityPayload: Decodable, Hashable {
+    let enabled: Bool
+    let rewardedCreditEnabled: Bool
+    let ssvReady: Bool
+    let environment: String
+    let dailyCap: Int
+    let dailyRemaining: Int
+    let rewardCredits: Int
+    let expiryDays: Int
+    let reasonCode: String?
+    let configVersion: String
+    let emergencyDisabled: Bool
+}
+
 struct ActiveSubscriptionPayload: Decodable, Hashable {
     let plan: String
     let productId: String?
@@ -445,11 +470,32 @@ struct ActiveSubscriptionPayload: Decodable, Hashable {
 struct CreditUsagePayload: Decodable, Hashable {
     let monthlyRemaining: Int
     let monthlyLimit: Int
+    let welcomeRemaining: Int?
     let rewardedAdRemaining: Int?
     let rewardedAdExpiresAt: String?
     let purchasedRemaining: Int
     let totalRemaining: Int
     let resetsAt: String
+
+    init(
+        monthlyRemaining: Int,
+        monthlyLimit: Int,
+        welcomeRemaining: Int? = nil,
+        rewardedAdRemaining: Int?,
+        rewardedAdExpiresAt: String?,
+        purchasedRemaining: Int,
+        totalRemaining: Int,
+        resetsAt: String
+    ) {
+        self.monthlyRemaining = monthlyRemaining
+        self.monthlyLimit = monthlyLimit
+        self.welcomeRemaining = welcomeRemaining
+        self.rewardedAdRemaining = rewardedAdRemaining
+        self.rewardedAdExpiresAt = rewardedAdExpiresAt
+        self.purchasedRemaining = purchasedRemaining
+        self.totalRemaining = totalRemaining
+        self.resetsAt = resetsAt
+    }
 
     var hasChatCredit: Bool {
         totalRemaining >= 1
@@ -474,10 +520,58 @@ struct AdMobRewardStatusResponse: Decodable, Hashable {
 
 struct BillingSyncRequest: Encodable {
     let originalTransactionId: String
-    let transactionId: String?
-    let productId: String?
-    let active: Bool
-    let signedTransactionInfo: String?
+    let transactionId: String
+    let productId: String
+    let signedTransactionInfo: String
+}
+
+enum AppAttestCapability: String, Encodable {
+    case supported
+    case unavailable
+}
+
+enum AppAttestChallengePurpose: String, Encodable {
+    case attestation
+    case assertion
+}
+
+struct InstallationBootstrapRequest: Encodable {
+    let bootstrapOperationId: String
+    let legacyDeviceKey: String
+    let appAttestCapability: AppAttestCapability
+    let appAttestKeyId: String?
+}
+
+struct InstallationBootstrapResponse: Decodable {
+    let credential: InstallationCredential
+    let attestationRequired: Bool
+}
+
+struct AppAttestChallengeRequest: Encodable {
+    let purpose: AppAttestChallengePurpose
+    let keyId: String
+    let method: String?
+    let path: String?
+    let bodySHA256: String?
+    let installationPrincipal: String
+    let tokenReference: String
+}
+
+struct AppAttestChallengeResponse: Decodable, Equatable {
+    let challengeId: String
+    let nonce: String
+    let expiresAt: String?
+}
+
+struct AppAttestCompleteRequest: Encodable {
+    let challengeId: String
+    let keyId: String
+    let clientDataHash: String
+    let attestationObject: String
+}
+
+struct AppAttestCompleteResponse: Decodable {
+    let credential: InstallationCredential
 }
 
 struct CreditPurchaseGrantRequest: Encodable {
@@ -499,6 +593,26 @@ struct CreditPurchaseGrantResponse: Decodable {
     let usage: UsagePayload
 }
 
+struct AppleAccountSessionRequest: Encodable {
+    let identityToken: String
+}
+
+struct AppleAccountSessionResponse: Decodable {
+    let credential: AccountCredential
+}
+
+struct PaidCreditAccountMigrationRequest: Encodable {
+    let mode: String
+    let migrationId: String
+}
+
+struct PaidCreditAccountMigrationResponse: Decodable {
+    let status: String
+    let expectedPurchasedRemaining: Int?
+    let purchaseEvidenceCount: Int?
+    let conflictReason: String?
+}
+
 struct ChatContextMessage: Encodable, Equatable {
     let role: String
     let content: String
@@ -509,6 +623,60 @@ struct ChatRequest: Encodable {
     let question: String
     let conversationContext: [ChatContextMessage]
     let operationId: String
+}
+
+struct QuoteTranslationRequest: Encodable {
+    let text: String
+    let sourceLanguage: String?
+    let targetLanguage: String
+    let operationId: String
+}
+
+struct PendingQuoteTranslationState: Equatable {
+    let text: String
+    let sourceLanguage: String?
+    let targetLanguage: String
+    let operationId: String
+
+    init(
+        text: String,
+        sourceLanguage: String?,
+        targetLanguage: String,
+        operationId: String = UUID().uuidString
+    ) {
+        self.text = text
+        self.sourceLanguage = sourceLanguage
+        self.targetLanguage = targetLanguage
+        self.operationId = operationId
+    }
+
+    func matches(text: String, sourceLanguage: String?, targetLanguage: String) -> Bool {
+        self.text == text
+            && self.sourceLanguage == sourceLanguage
+            && self.targetLanguage == targetLanguage
+    }
+
+    static func resolve(
+        existing: PendingQuoteTranslationState?,
+        text: String,
+        sourceLanguage: String?,
+        targetLanguage: String
+    ) -> PendingQuoteTranslationState {
+        if let existing,
+           existing.matches(
+               text: text,
+               sourceLanguage: sourceLanguage,
+               targetLanguage: targetLanguage
+           ) {
+            return existing
+        }
+
+        return PendingQuoteTranslationState(
+            text: text,
+            sourceLanguage: sourceLanguage,
+            targetLanguage: targetLanguage
+        )
+    }
 }
 
 struct BillingSyncResponse: Decodable {

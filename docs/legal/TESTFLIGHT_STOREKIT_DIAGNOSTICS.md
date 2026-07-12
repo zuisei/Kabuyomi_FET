@@ -2,11 +2,11 @@
 
 This note is for Kabuyomi v1.0.2 TestFlight troubleshooting when StoreKit returns no products for the expected monetization products:
 
-- `kabuyomi.credits.50`: consumable, 50 paid credits, price truth JPY 100.
+- `kabuyomi.credits.50`: consumable, 50 paid credits; price truth is the returned StoreKit localized product data.
 - `kabuyomi.credits.100`: existing compatibility consumable, 100 paid credits when App Store Connect returns it.
-- `kabuyomi.sub.lite.monthly`: auto-renewable subscription, group `Kabuyomi_sus`, 400 credits/month, price truth JPY 640/month.
-- `kabuyomi.sub.pro.monthly`: auto-renewable subscription, group `Kabuyomi_sus`, 900 credits/month, price truth JPY 1,280/month.
-- `kabuyomi.sub.max.monthly`: auto-renewable subscription, group `Kabuyomi_sus`, 2,000 credits/month, price truth JPY 2,560/month.
+- `kabuyomi.sub.lite.monthly`: auto-renewable subscription, group `Kabuyomi_sus`, 400 credits per verified period; price truth is StoreKit-localized.
+- `kabuyomi.sub.pro.monthly`: auto-renewable subscription, group `Kabuyomi_sus`, 900 credits per verified period; price truth is StoreKit-localized.
+- `kabuyomi.sub.max.monthly`: auto-renewable subscription, group `Kabuyomi_sus`, 2,000 credits per verified period; price truth is StoreKit-localized.
 
 The diagnostics are read-only. They do not expose the deferred 500 yen pack, environment switching, or any manual credit grant.
 
@@ -114,7 +114,7 @@ As of this diagnostics pass, the repo-side and App Store Connect checklist from 
 - Product IDs include `kabuyomi.credits.50`, `kabuyomi.credits.100`, `kabuyomi.sub.lite.monthly`, `kabuyomi.sub.pro.monthly`, and `kabuyomi.sub.max.monthly`.
 - Subscription group is `Kabuyomi_sus`.
 - Product types are consumable for credit packs and auto-renewable subscription for Lite / Pro / Max.
-- Price truth is JPY 100 for the 50-credit pack, JPY 640/month for Lite, JPY 1,280/month for Pro, and JPY 2,560/month for Max. The 100-credit compatibility product price should match App Store Connect if it is returned.
+- Prices, currency, tax treatment, and subscription duration must match the localized StoreKit products returned to the uploaded build and the corresponding App Store Connect records. Do not use repository-fixed currency amounts as authority.
 - Availability has been expanded.
 - IAP is attached to the app version.
 - IAP review screenshot exists.

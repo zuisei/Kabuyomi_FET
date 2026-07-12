@@ -1,10 +1,10 @@
 # Rewarded AdMob Credits Runbook
 
-AdMob rewarded-credit backend routes are implemented and server-side verification gated, but the rewarded-credit UI is hidden for the current RC. Keep this runbook as the operational checklist for re-enabling the visible rewarded-credit flow after real Google AdMob SSV grant evidence is recorded.
+AdMob rewarded-credit backend routes are implemented and server-side verification gated. Release UI visibility requires a fresh trusted full capability response with explicit compatible reward fields. Keep this runbook as the operational checklist: without recorded real Google AdMob SSV grant evidence, submission config must explicitly disable the action; with evidence, reviewer copy must match the exact uploaded build.
 
 ## Scope
 
-- Current RC App Review builds do not show the rewarded-credit card/button.
+- The rewarded-credit card/button is capability-controlled and must fail closed for missing, partial, stale, or explicitly disabled production config.
 - Rewarded ads are optional.
 - A completed rewarded ad view grants exactly 2 free/ad credits after server-side Google AdMob SSV verification.
 - The daily cap is 3 rewarded grants per user per JST calendar day.
@@ -51,7 +51,7 @@ The Worker expects Google AdMob SSV query parameters including `ad_unit`, `custo
 6. Confirm the ledger row has `creditSource = admob_rewarded`.
 7. Confirm usage reflects `rewardedAdRemaining` and the expected total balance.
 
-Do not re-enable rewarded-credit UI or describe it in App Store submission notes until step 5 succeeds and the evidence is recorded below.
+Do not enable rewarded-credit capability or describe it as visible in App Store submission notes until step 5 succeeds and the evidence is recorded below.
 
 Latest production-path route check:
 
@@ -63,7 +63,7 @@ Latest production-path route check:
 - `GET /v1/admob/ssv` with numeric production suffix `7202804414` and no signature: reached route and returned `invalid_signature`, not generic 404 or 500.
 - `GET /v1/admob/ssv` with full production ad unit `ca-app-pub-1248492954379402/7202804414` and no signature: reached route and returned `invalid_signature`, not generic 404 or 500.
 - External product-owner statement: real SSV was verified outside the previous Codex pass.
-- Repository evidence status: not recorded. Rewarded-credit UI remains hidden until a real callback reaches the Worker, verifies successfully, grants exactly 2 credits once, and the sanitized evidence record below is completed.
+- Repository evidence status: not recorded for the remediated candidate. The rewarded-credit implementation is retained but its submission capability must remain false until a real callback reaches the Worker, verifies successfully, grants exactly 2 credits once, and is recorded below.
 
 ## Real SSV Evidence Record
 

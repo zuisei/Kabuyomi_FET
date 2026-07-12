@@ -1,8 +1,21 @@
 import type { Env } from "../env";
 import { verifySubscriptionWithApple } from "./apple-store-server";
+import { resolveSubscriptionMonthlyCredits, type AccessPlan } from "./billing-catalog";
+import {
+  isEntitlementActiveAt,
+  shouldRefreshEntitlement,
+  toActiveEntitlementView,
+  type ActiveEntitlementView,
+  type ServerEntitlementState
+} from "./entitlement-state";
 import { AppError } from "./errors";
-import { logErrorEvent } from "./logging";
-import { resolvePlanFromBilling, resolveSubscriptionMonthlyCredits, type AccessPlan } from "./billing-catalog";
+import { hashForLog, logEvent, logWarnEvent } from "./logging";
+import {
+  buildStableSubscriptionGrantOperationId,
+  deriveStableSubscriptionPrincipal
+} from "./subscription-principal";
+import type { VerifiedAppleEnvironment } from "./apple-signed-data";
+import { resolveInstallationCredential } from "./installation-identity";
 
 export const ORIGINAL_TRANSACTION_ID_HEADER = "x-kabuyomi-original-transaction-id";
 
@@ -11,7 +24,6 @@ export interface SyncedEntitlement {
   quotaSubject: string;
   productId: string | null;
   syncedAt: string;
-  boundDeviceHash?: string;
   originalTransactionId?: string;
   transactionId?: string | null;
   subscriptionPeriodStart?: string | null;
@@ -19,6 +31,18 @@ export interface SyncedEntitlement {
   subscriptionExpiresAt?: string | null;
   subscriptionMonthlyCredits?: number | null;
   monthlyGrantOperationId?: string | null;
+  entitlementStatus: "active" | "inactive";
+  lastVerifiedAt?: string;
+  verificationEnvironment?: VerifiedAppleEnvironment;
+  verificationVersion?: string;
+}
+
+export interface PublicBillingSyncRequest {
+  originalTransactionId: string;
+  transactionId?: string;
+  productId?: string;
+  active?: boolean;
+  signedTransactionInfo?: string;
 }
 
 const ENTITLEMENT_DO_URL = "https://do/entitlement";
@@ -27,76 +51,76 @@ const DEVICE_BINDING_HEADER = "x-kabuyomi-device-binding";
 export async function syncBillingEntitlement(
   env: Env,
   deviceBindingHash: string,
-  boundQuotaSubject: string,
-  request: {
-    originalTransactionId: string;
-    transactionId?: string;
-    productId?: string;
-    active: boolean;
-    signedTransactionInfo?: string;
-  }
+  legacyQuotaSubject: string,
+  request: PublicBillingSyncRequest
 ): Promise<SyncedEntitlement> {
-  let verifiedRequest: {
-    originalTransactionId: string;
-    productId?: string;
-    active: boolean;
-    serverVerified: boolean;
-    boundDeviceHash?: string;
-    boundQuotaSubject?: string;
-    transactionId?: string | null;
-    subscriptionPeriodStart?: string | null;
-    subscriptionPeriodEnd?: string | null;
-    subscriptionExpiresAt?: string | null;
-    monthlyGrantOperationId?: string | null;
-  } = {
-    originalTransactionId: request.originalTransactionId,
-    productId: request.productId,
-    active: request.active,
-    serverVerified: false,
-    boundQuotaSubject
-  };
-
-  if (request.active) {
-    const verified = await verifySubscriptionWithApple(env, request);
-    verifiedRequest = {
-      originalTransactionId: verified.originalTransactionId,
-      productId: verified.productId ?? undefined,
-      active: verified.active,
-      serverVerified: true,
-      boundDeviceHash: deviceBindingHash,
-      boundQuotaSubject,
-      transactionId: verified.transactionId,
-      subscriptionPeriodStart: verified.periodStart,
-      subscriptionPeriodEnd: verified.periodEnd,
-      subscriptionExpiresAt: verified.expiresAt,
-      monthlyGrantOperationId:
-        verified.productId && verified.periodStart && verified.periodEnd
-          ? await buildSubscriptionMonthlyGrantOperationId(
-              verified.originalTransactionId,
-              verified.productId,
-              verified.periodStart,
-              verified.periodEnd
-            )
-          : null
-    };
+  // One-release compatibility: an explicit legacy inactive claim is read-only.
+  // It can neither erase an existing entitlement nor mint a new one.
+  if (request.active === false) {
+    const existing = await loadEntitlementByOriginalTransaction(
+      env,
+      request.originalTransactionId,
+      deviceBindingHash,
+      false
+    );
+    return existing ?? buildInactiveEntitlement(legacyQuotaSubject);
   }
 
-  return fetchEntitlementRecord(
+  if (!request.transactionId && !request.signedTransactionInfo) {
+    throw new AppError(400, "Subscription transaction id is required");
+  }
+
+  const verified = await verifySubscriptionWithApple(env, {
+    originalTransactionId: request.originalTransactionId,
+    transactionId: request.transactionId,
+    productId: request.productId,
+    active: true,
+    signedTransactionInfo: request.signedTransactionInfo
+  });
+  const stablePrincipal = await deriveStableSubscriptionPrincipal(
     env,
-    verifiedRequest.originalTransactionId,
-    new Request(ENTITLEMENT_DO_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        [DEVICE_BINDING_HEADER]: deviceBindingHash
-      },
-      body: JSON.stringify({
-        ...verifiedRequest,
-        boundDeviceHash: deviceBindingHash
-      })
-    }),
-    "billing_sync_failed"
+    verified.originalTransactionId,
+    verified.verificationEnvironment
   );
+  const monthlyGrantOperationId =
+    verified.status === "active" && verified.productId && verified.periodStart && verified.periodEnd
+      ? await buildStableSubscriptionGrantOperationId({
+          stablePrincipal: stablePrincipal.quotaSubject,
+          productId: verified.productId,
+          periodStart: verified.periodStart,
+          periodEnd: verified.periodEnd
+        })
+      : null;
+  const now = new Date().toISOString();
+  const state = await applyVerifiedEntitlement(env, stablePrincipal.quotaSubject, {
+    action: "apply_verified",
+    quotaSubject: stablePrincipal.quotaSubject,
+    principalKeyVersion: stablePrincipal.keyVersion,
+    originalTransactionId: verified.originalTransactionId,
+    transactionId: requireVerifiedValue(verified.transactionId, "Verified subscription transaction id is required"),
+    productId: requireVerifiedValue(verified.productId, "Verified subscription product is required"),
+    plan: requireVerifiedValue(verified.plan, "Verified subscription plan is required"),
+    status: verified.status,
+    periodStart: verified.periodStart,
+    periodEnd: verified.periodEnd,
+    expiresAt: verified.expiresAt,
+    revokedAt: verified.revokedAt,
+    monthlyCredits: resolveSubscriptionMonthlyCredits(verified.productId),
+    monthlyGrantOperationId,
+    lastVerifiedAt: now,
+    verificationEnvironment: verified.verificationEnvironment,
+    verificationVersion: verified.verificationVersion,
+    verificationPayloadDigest: verified.payloadDigest,
+    signedDate: verified.signedDate,
+    bindingHash: deviceBindingHash,
+    bindingMethod: "verified_restore"
+  });
+
+  await persistOpaqueEntitlementIndex(env, state, legacyQuotaSubject, deviceBindingHash);
+  if (!isEntitlementActiveAt(state)) {
+    return buildInactiveEntitlement(legacyQuotaSubject);
+  }
+  return toActiveEntitlementView(state);
 }
 
 export async function loadActiveEntitlementFromRequest(request: Request, env: Env): Promise<SyncedEntitlement | null> {
@@ -104,91 +128,282 @@ export async function loadActiveEntitlementFromRequest(request: Request, env: En
   if (!originalTransactionId) {
     return null;
   }
-  const deviceBindingHash = await resolveDeviceBindingHashFromRequest(request);
+  const deviceBindingHash = await resolveDeviceBindingHashFromRequest(request, env);
+  return loadEntitlementByOriginalTransaction(env, originalTransactionId, deviceBindingHash, true);
+}
 
-  try {
-    const payload = await fetchEntitlementRecord(
-      env,
-      originalTransactionId,
-      new Request(ENTITLEMENT_DO_URL, {
-        method: "GET",
-        headers: {
-          [DEVICE_BINDING_HEADER]: deviceBindingHash
-        }
-      }),
-      "entitlement_lookup_failed"
-    );
-    return payload.plan === "free" ? null : payload;
-  } catch (error) {
-    if (error instanceof AppError && error.status === 404) {
-      return null;
-    }
-    throw error;
+export async function resolveDeviceBindingHashFromRequest(request: Request, env: Env): Promise<string> {
+  const installation = await resolveInstallationCredential(request, env);
+  if (installation) {
+    return sha256Hex(`entitlement-installation:${installation.principal}`);
   }
-}
-
-export async function buildSyncedEntitlement(
-  originalTransactionId: string,
-  productId: string | null | undefined,
-  active: boolean,
-  options: {
-    serverVerified?: boolean;
-    boundDeviceHash?: string;
-    boundQuotaSubject?: string;
-    transactionId?: string | null;
-    subscriptionPeriodStart?: string | null;
-    subscriptionPeriodEnd?: string | null;
-    subscriptionExpiresAt?: string | null;
-    monthlyGrantOperationId?: string | null;
-  } = {}
-): Promise<SyncedEntitlement> {
-  const serverVerified = options.serverVerified === true;
-  const trustedActive = serverVerified ? active : false;
-  const trustedProductId = serverVerified ? productId : null;
-  const plan = resolvePlanFromBilling(trustedProductId, trustedActive);
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(originalTransactionId));
-  const hex = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
-
-  return {
-    plan,
-    quotaSubject: options.boundQuotaSubject ?? `${plan}:${hex}`,
-    productId: trustedProductId ?? null,
-    syncedAt: new Date().toISOString(),
-    boundDeviceHash: options.boundDeviceHash,
-    originalTransactionId,
-    transactionId: options.transactionId ?? null,
-    subscriptionPeriodStart: serverVerified ? options.subscriptionPeriodStart ?? null : null,
-    subscriptionPeriodEnd: serverVerified ? options.subscriptionPeriodEnd ?? null : null,
-    subscriptionExpiresAt: serverVerified ? options.subscriptionExpiresAt ?? null : null,
-    subscriptionMonthlyCredits: serverVerified ? resolveSubscriptionMonthlyCredits(trustedProductId) : null,
-    monthlyGrantOperationId: serverVerified ? options.monthlyGrantOperationId ?? null : null
-  };
-}
-
-export async function resolveDeviceBindingHashFromRequest(request: Request): Promise<string> {
   const deviceKey = request.headers.get("x-device-key")?.trim();
   if (!deviceKey) {
     throw new AppError(400, "Device key is required");
   }
-
   return sha256Hex(`entitlement-device:${deviceKey}`);
 }
 
-export async function resolveDeviceQuotaSubjectFromRequest(request: Request): Promise<string> {
+export async function resolveDeviceQuotaSubjectFromRequest(request: Request, env: Env): Promise<string> {
+  const installation = await resolveInstallationCredential(request, env);
+  if (installation) {
+    return installation.principal;
+  }
   const deviceKey = request.headers.get("x-device-key")?.trim();
   if (!deviceKey) {
     throw new AppError(400, "Device key is required");
   }
-
   if (isLocalQuotaFallbackRequest(request)) {
     return `free:local:${deviceKey}`;
   }
-
   return `free:device:${await sha256Hex(`free-device:${deviceKey}`)}`;
 }
 
-export function readDeviceBindingHash(request: Request): string | null {
-  return request.headers.get(DEVICE_BINDING_HEADER)?.trim() || null;
+async function loadEntitlementByOriginalTransaction(
+  env: Env,
+  originalTransactionId: string,
+  bindingHash: string,
+  refreshWhenRequired: boolean
+): Promise<ActiveEntitlementView | null> {
+  let candidates: Array<{ quotaSubject: string; environment: VerifiedAppleEnvironment }>;
+  try {
+    candidates = await derivePrincipalCandidates(env, originalTransactionId);
+  } catch (error) {
+    logWarnEvent("entitlement_principal_lookup_failed_closed", {
+      errorClass: error instanceof Error ? error.name : typeof error
+    });
+    return null;
+  }
+
+  for (const candidate of candidates) {
+    let state: ServerEntitlementState;
+    try {
+      state = await fetchEntitlementState(env, candidate.quotaSubject, bindingHash);
+    } catch (error) {
+      if (error instanceof AppError && error.status === 404) {
+        continue;
+      }
+      throw error;
+    }
+    if (!isEntitlementActiveAt(state)) {
+      return null;
+    }
+    if (!refreshWhenRequired || !shouldRefreshEntitlement(state)) {
+      return toActiveEntitlementView(state);
+    }
+    return refreshStoredEntitlement(env, state, bindingHash);
+  }
+  return null;
+}
+
+async function refreshStoredEntitlement(
+  env: Env,
+  current: ServerEntitlementState,
+  bindingHash: string
+): Promise<ActiveEntitlementView | null> {
+  try {
+    const refreshed = await syncBillingEntitlement(env, bindingHash, current.quotaSubject, {
+      originalTransactionId: current.originalTransactionId,
+      transactionId: current.transactionId,
+      productId: current.productId
+    });
+    return refreshed.entitlementStatus === "active" ? refreshed as ActiveEntitlementView : null;
+  } catch (error) {
+    const transient = error instanceof AppError && error.status >= 500;
+    if (transient && isEntitlementActiveAt(current)) {
+      await recordRefreshFailureSafely(env, current.quotaSubject, bindingHash);
+      logWarnEvent("entitlement_refresh_transient_grace", {
+        quotaSubjectHash: hashForLog(current.quotaSubject),
+        expiresAt: current.expiresAt,
+        errorStatus: error.status
+      });
+      return toActiveEntitlementView(current);
+    }
+    logWarnEvent("entitlement_refresh_failed_closed", {
+      quotaSubjectHash: hashForLog(current.quotaSubject),
+      errorStatus: error instanceof AppError ? error.status : 500,
+      errorClass: error instanceof Error ? error.name : typeof error
+    });
+    return null;
+  }
+}
+
+async function applyVerifiedEntitlement(
+  env: Env,
+  quotaSubject: string,
+  mutation: Record<string, unknown>
+): Promise<ServerEntitlementState> {
+  const response = await env.ENTITLEMENT.getByName(quotaSubject).fetch(
+    new Request(ENTITLEMENT_DO_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(mutation)
+    })
+  );
+  const payload = (await response.json()) as ServerEntitlementState & { error?: string };
+  if (!response.ok) {
+    throw new AppError(response.status, payload.error ?? "Entitlement mutation failed");
+  }
+  return payload;
+}
+
+async function fetchEntitlementState(
+  env: Env,
+  quotaSubject: string,
+  bindingHash: string
+): Promise<ServerEntitlementState> {
+  const response = await env.ENTITLEMENT.getByName(quotaSubject).fetch(
+    new Request(ENTITLEMENT_DO_URL, {
+      method: "GET",
+      headers: { [DEVICE_BINDING_HEADER]: bindingHash }
+    })
+  );
+  const payload = (await response.json()) as ServerEntitlementState & { error?: string };
+  if (!response.ok) {
+    throw new AppError(response.status, payload.error ?? "Entitlement lookup failed");
+  }
+  return payload;
+}
+
+async function recordRefreshFailureSafely(env: Env, quotaSubject: string, bindingHash: string): Promise<void> {
+  try {
+    await applyVerifiedEntitlement(env, quotaSubject, {
+      action: "record_refresh_failure",
+      failureAt: new Date().toISOString(),
+      bindingHash
+    });
+  } catch (error) {
+    logWarnEvent("entitlement_refresh_failure_record_failed", {
+      quotaSubjectHash: hashForLog(quotaSubject),
+      errorClass: error instanceof Error ? error.name : typeof error
+    });
+  }
+}
+
+async function derivePrincipalCandidates(
+  env: Env,
+  originalTransactionId: string
+): Promise<Array<{ quotaSubject: string; environment: VerifiedAppleEnvironment }>> {
+  const configured = env.APPLE_APP_STORE_SERVER_ENVIRONMENT?.trim().toLowerCase();
+  const environments: VerifiedAppleEnvironment[] = configured === "production"
+    ? ["production"]
+    : configured === "sandbox"
+      ? ["sandbox"]
+      : configured === "auto"
+        ? ["production", "sandbox"]
+        : [];
+  if (environments.length === 0) {
+    throw new AppError(503, "Subscription principal lookup is not configured");
+  }
+  return Promise.all(
+    environments.map(async (environment) => ({
+      ...(await deriveStableSubscriptionPrincipal(env, originalTransactionId, environment)),
+      environment
+    }))
+  );
+}
+
+async function persistOpaqueEntitlementIndex(
+  env: Env,
+  state: ServerEntitlementState,
+  legacyQuotaSubject: string,
+  bindingHash: string
+): Promise<void> {
+  if (!env.DB?.prepare) {
+    return;
+  }
+  const now = new Date().toISOString();
+  const entitlementKey = `entitlement:v1:${await sha256Hex(`entitlement-index:${state.quotaSubject}`)}`;
+  const opaqueLegacySubject = `legacy:v1:${await sha256Hex(`legacy-quota:${legacyQuotaSubject}`)}`;
+  try {
+    await env.DB.prepare(
+      `INSERT INTO subscription_entitlement_index (
+        entitlement_key, stable_principal, principal_key_version, legacy_quota_subject,
+        environment, status, product_id, period_start, period_end, expires_at,
+        last_verified_at, verification_version, migration_status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(entitlement_key) DO UPDATE SET
+        stable_principal = excluded.stable_principal,
+        principal_key_version = excluded.principal_key_version,
+        legacy_quota_subject = COALESCE(subscription_entitlement_index.legacy_quota_subject, excluded.legacy_quota_subject),
+        environment = excluded.environment,
+        status = excluded.status,
+        product_id = excluded.product_id,
+        period_start = excluded.period_start,
+        period_end = excluded.period_end,
+        expires_at = excluded.expires_at,
+        last_verified_at = excluded.last_verified_at,
+        verification_version = excluded.verification_version,
+        updated_at = excluded.updated_at`
+    ).bind(
+      entitlementKey,
+      state.quotaSubject,
+      state.principalKeyVersion,
+      opaqueLegacySubject,
+      state.verificationEnvironment,
+      state.status,
+      state.productId,
+      state.periodStart,
+      state.periodEnd,
+      state.expiresAt,
+      state.lastVerifiedAt,
+      state.verificationVersion,
+      "pending",
+      state.createdAt,
+      now
+    ).run();
+    const binding = state.bindings.find((candidate) => candidate.bindingHash === bindingHash);
+    if (binding) {
+      await env.DB.prepare(
+        `INSERT INTO subscription_device_bindings (
+          entitlement_key, binding_hash, status, method, bound_at, last_seen_at, revoked_at, transfer_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(entitlement_key, binding_hash) DO UPDATE SET
+          status = excluded.status,
+          method = excluded.method,
+          last_seen_at = excluded.last_seen_at,
+          revoked_at = excluded.revoked_at,
+          transfer_id = excluded.transfer_id`
+      ).bind(
+        entitlementKey,
+        binding.bindingHash,
+        binding.status,
+        binding.method,
+        binding.boundAt,
+        binding.lastSeenAt,
+        binding.revokedAt ?? null,
+        binding.transferId ?? null
+      ).run();
+    }
+  } catch (error) {
+    logWarnEvent("subscription_entitlement_index_write_failed", {
+      quotaSubjectHash: hashForLog(state.quotaSubject),
+      errorClass: error instanceof Error ? error.name : typeof error
+    });
+  }
+}
+
+function buildInactiveEntitlement(quotaSubject: string): SyncedEntitlement {
+  return {
+    plan: "free",
+    quotaSubject,
+    productId: null,
+    syncedAt: new Date().toISOString(),
+    transactionId: null,
+    subscriptionPeriodStart: null,
+    subscriptionPeriodEnd: null,
+    subscriptionExpiresAt: null,
+    subscriptionMonthlyCredits: null,
+    monthlyGrantOperationId: null,
+    entitlementStatus: "inactive"
+  };
+}
+
+function requireVerifiedValue<T>(value: T | null | undefined, message: string): T {
+  if (value === null || value === undefined || value === "") {
+    throw new AppError(400, message);
+  }
+  return value;
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -199,37 +414,4 @@ async function sha256Hex(value: string): Promise<string> {
 function isLocalQuotaFallbackRequest(request: Request): boolean {
   const hostname = new URL(request.url).hostname.toLowerCase();
   return hostname === "127.0.0.1" || hostname === "localhost" || hostname.endsWith(".test");
-}
-
-async function buildSubscriptionMonthlyGrantOperationId(
-  originalTransactionId: string,
-  productId: string,
-  periodStart: string,
-  periodEnd: string
-): Promise<string> {
-  const hash = await sha256Hex(`subscription:${originalTransactionId}:${productId}:${periodStart}:${periodEnd}`);
-  return `sub-grant:${hash.slice(0, 32)}`;
-}
-
-async function fetchEntitlementRecord(
-  env: Env,
-  originalTransactionId: string,
-  request: Request,
-  errorEvent: string
-): Promise<SyncedEntitlement> {
-  try {
-    const response = await env.ENTITLEMENT.getByName(originalTransactionId).fetch(request);
-    const payload = (await response.json()) as SyncedEntitlement & { error?: string };
-
-    if (!response.ok) {
-      throw new AppError(response.status, payload.error ?? "Entitlement request failed");
-    }
-
-    return payload;
-  } catch (error) {
-    logErrorEvent(errorEvent, {
-      reason: error instanceof Error ? error.message : String(error)
-    });
-    throw error;
-  }
 }

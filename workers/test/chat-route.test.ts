@@ -24,23 +24,14 @@ vi.mock("../src/lib/filings/content-upgrade", () => ({
 
 vi.mock("../src/lib/quota", () => ({
   readQuotaIdentity: vi.fn(),
-  ensureChatQuotaAvailable: vi.fn(),
-  loadUsage: vi.fn(),
-  consumeChatQuota: vi.fn(),
-  refundChatQuota: vi.fn(),
-  consumeCredit: vi.fn(),
-  refundCredit: vi.fn(),
-  InsufficientCreditsError: class InsufficientCreditsError extends Error {
-    readonly status = 402;
-    readonly publicMessage = "insufficient_credits";
+  loadUsage: vi.fn()
+}));
 
-    constructor(
-      readonly creditsRequired: number,
-      readonly creditsRemaining: number
-    ) {
-      super("insufficient_credits");
-    }
-  }
+vi.mock("../src/lib/request-execution", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/lib/request-execution")>()),
+  beginRequestExecution: vi.fn(),
+  completeRequestExecution: vi.fn(),
+  failRequestExecution: vi.fn()
 }));
 
 vi.mock("../src/clients/gemini/request", () => ({
@@ -56,14 +47,13 @@ import {
 } from "../src/lib/filings/content-upgrade";
 import { buildChatResponse } from "../src/lib/chat/orchestrator";
 import {
-  consumeChatQuota,
-  consumeCredit,
-  ensureChatQuotaAvailable,
+  beginRequestExecution,
+  completeRequestExecution,
+  failRequestExecution
+} from "../src/lib/request-execution";
+import {
   loadUsage,
-  readQuotaIdentity,
-  refundChatQuota,
-  refundCredit,
-  InsufficientCreditsError
+  readQuotaIdentity
 } from "../src/lib/quota";
 
 const mockBuildChatResponse = vi.mocked(buildChatResponse);
@@ -73,12 +63,31 @@ const mockUpgradeMetricsOnlyRecord = vi.mocked(upgradeMetricsOnlyRecord);
 const mockBackfillRevenueDriverSourceAssets = vi.mocked(backfillRevenueDriverSourceAssets);
 const mockNeedsRevenueDriverSourceBackfill = vi.mocked(needsRevenueDriverSourceBackfill);
 const mockReadQuotaIdentity = vi.mocked(readQuotaIdentity);
-const mockEnsureChatQuotaAvailable = vi.mocked(ensureChatQuotaAvailable);
 const mockLoadUsage = vi.mocked(loadUsage);
-const mockConsumeChatQuota = vi.mocked(consumeChatQuota);
-const mockRefundChatQuota = vi.mocked(refundChatQuota);
-const mockConsumeCredit = vi.mocked(consumeCredit);
-const mockRefundCredit = vi.mocked(refundCredit);
+const mockBeginRequestExecution = vi.mocked(beginRequestExecution);
+const mockCompleteRequestExecution = vi.mocked(completeRequestExecution);
+const mockFailRequestExecution = vi.mocked(failRequestExecution);
+
+function chatLeaderResult(mode: "credits" | "unmetered" = "credits") {
+  return {
+    outcome: "leader" as const,
+    executionPolicyVersion: "chat-request-execution-v1",
+    createdAt: "2026-04-18T00:00:00.000Z",
+    reservationId: "reservation-chat-1",
+    reservationMode: mode,
+    reservationExpiresAt: "2026-04-18T00:05:00.000Z",
+    creditsReserved: mode === "credits" ? 2 : 0
+  };
+}
+
+function chatCompletionResult(creditsCharged = 2, reservationStatus: "committed" | "released" | "none" = "committed") {
+  return {
+    outcome: "completed" as const,
+    didMutate: true,
+    reservationStatus,
+    creditsCharged
+  };
+}
 
 describe("handleChatRoute", () => {
   const env = {} as never;
@@ -88,7 +97,7 @@ describe("handleChatRoute", () => {
     plan: "free",
     identityKind: "local_device"
   } as const;
-  const legacyQuotaConfig = {
+  const billingUiDisabledConfig = {
     ...DEFAULT_REMOTE_CONFIG,
     creditBillingEnabled: false
   };
@@ -115,6 +124,18 @@ describe("handleChatRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockNeedsRevenueDriverSourceBackfill.mockReturnValue(false);
+    mockBeginRequestExecution.mockResolvedValue(chatLeaderResult());
+    mockCompleteRequestExecution.mockImplementation(async (_identity, _env, options) =>
+      chatCompletionResult(
+        Number(options.resultBody.creditsCharged ?? 0),
+        options.chargeable ? "committed" : "released"
+      )
+    );
+    mockFailRequestExecution.mockResolvedValue({
+      outcome: "failed",
+      didMutate: true,
+      reservationStatus: "released"
+    });
     mockBackfillRevenueDriverSourceAssets.mockImplementation(async (record) => record as never);
     mockLoadFilingByKey.mockResolvedValue({
       filingKey: "filing-1",
@@ -125,33 +146,7 @@ describe("handleChatRoute", () => {
     } as never);
     mockIsCurrentCacheRecord.mockReturnValue(true);
     mockReadQuotaIdentity.mockResolvedValue(identity as never);
-    mockEnsureChatQuotaAvailable.mockResolvedValue(usage as never);
     mockLoadUsage.mockResolvedValue(creditUsage as never);
-    mockConsumeChatQuota.mockResolvedValue(usage as never);
-    mockRefundChatQuota.mockResolvedValue(usage as never);
-    mockConsumeCredit.mockResolvedValue({
-      usage: {
-        ...usage,
-        credits: {
-          monthlyRemaining: 28,
-          monthlyLimit: 30,
-          purchasedRemaining: 0,
-          totalRemaining: 28,
-          resetsAt: "2026-05-01T00:00:00+09:00"
-        }
-      },
-      didMutate: true,
-      operationId: "chat-op-1",
-      creditsCharged: 2,
-      creditsRemaining: 28
-    } as never);
-    mockRefundCredit.mockResolvedValue({
-      usage,
-      didMutate: true,
-      operationId: "refund-chat-op-1",
-      creditsRefunded: 2,
-      creditsRemaining: 30
-    } as never);
   });
 
   it("returns a null modelName for non-remote response paths", async () => {
@@ -170,12 +165,13 @@ describe("handleChatRoute", () => {
         },
         body: JSON.stringify({
           filingKey: "filing-1",
-          question: "利益率は改善した？"
+          question: "利益率は改善した？",
+          operationId: "chat-op-test"
         })
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
       env,
-      config: legacyQuotaConfig,
+      config: billingUiDisabledConfig,
       ctx
     });
 
@@ -191,14 +187,39 @@ describe("handleChatRoute", () => {
       expect.anything(),
       { executionContext: ctx }
     );
-    expect(mockEnsureChatQuotaAvailable.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mockBeginRequestExecution.mock.invocationCallOrder[0]).toBeLessThan(
       mockBuildChatResponse.mock.invocationCallOrder[0]!
     );
     expect(mockBuildChatResponse.mock.invocationCallOrder[0]).toBeLessThan(
-      mockConsumeChatQuota.mock.invocationCallOrder[0]!
+      mockCompleteRequestExecution.mock.invocationCallOrder[0]!
     );
-    expect(mockRefundChatQuota).not.toHaveBeenCalled();
-    expect(mockConsumeCredit).not.toHaveBeenCalled();
+    expect(mockCompleteRequestExecution.mock.invocationCallOrder[0]).toBeLessThan(
+      mockLoadUsage.mock.invocationCallOrder[0]!
+    );
+    expect(mockBeginRequestExecution).toHaveBeenCalledWith(
+      identity,
+      env,
+      billingUiDisabledConfig,
+      expect.objectContaining({
+        reservation: {
+          mode: "credits",
+          creditsRequired: 2,
+          reference: { type: "chat", id: "filing-1" }
+        }
+      })
+    );
+    const cachedResult = mockCompleteRequestExecution.mock.calls[0]?.[2].resultBody;
+    expect(cachedResult).toEqual({
+      kind: "chat",
+      answer: "Deterministic answer",
+      sources: [],
+      responsePath: "deterministic",
+      modelName: null,
+      creditsCharged: 2
+    });
+    expect(cachedResult).not.toHaveProperty("usage");
+    expect(cachedResult).not.toHaveProperty("creditsRemaining");
+    expect(cachedResult).not.toHaveProperty("debug");
   });
 
   it("includes chat debug metadata only for the test worker environment", async () => {
@@ -224,18 +245,20 @@ describe("handleChatRoute", () => {
         },
         body: JSON.stringify({
           filingKey: "filing-1",
-          question: "何の会社？"
+          question: "何の会社？",
+          operationId: "chat-op-test"
         })
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
-      env: { KABUYOMI_ENV: "test" } as never,
-      config: legacyQuotaConfig,
+      env: { KABUYOMI_ENV: "test", RELEASE_CANDIDATE_ID: "a".repeat(64) } as never,
+      config: billingUiDisabledConfig,
       ctx
     });
 
     expect(response?.status).toBe(200);
     await expect(response?.json()).resolves.toMatchObject({
       debug: {
+        releaseCandidateId: "a".repeat(64),
         questionIntent: "business_overview",
         responsePath: "fallback",
         fallbackReason: "schema_invalid",
@@ -269,12 +292,13 @@ describe("handleChatRoute", () => {
           conversationContext: [
             { role: "user", content: "営業CF" },
             { role: "assistant", content: "営業キャッシュフローはマイナスで、前年比で減少しました。" }
-          ]
+          ],
+          operationId: "chat-op-test"
         })
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
       env: { KABUYOMI_ENV: "test" } as never,
-      config: legacyQuotaConfig,
+      config: billingUiDisabledConfig,
       ctx
     });
 
@@ -315,12 +339,13 @@ describe("handleChatRoute", () => {
           conversationContext: [
             { role: "user", content: "今回どう？" },
             { role: "assistant", content: "売上高は前年同期比で大きく増加しました。" }
-          ]
+          ],
+          operationId: "chat-op-test"
         })
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
       env: { KABUYOMI_ENV: "test", LLM_PROVIDER: "openai", OPENAI_CHAT_MODEL: "gpt-5-nano" } as never,
-      config: legacyQuotaConfig,
+      config: billingUiDisabledConfig,
       ctx
     });
 
@@ -364,12 +389,13 @@ describe("handleChatRoute", () => {
         },
         body: JSON.stringify({
           filingKey: "filing-1",
-          question: "売上成長、または減収の主な要因は？"
+          question: "売上成長、または減収の主な要因は？",
+          operationId: "chat-op-test"
         })
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
       env,
-      config: legacyQuotaConfig,
+      config: billingUiDisabledConfig,
       ctx
     });
 
@@ -430,12 +456,13 @@ describe("handleChatRoute", () => {
           conversationContext: [
             { role: "user", content: "売上高は？" },
             { role: "assistant", content: "売上高は前年同期比で増加しました。" }
-          ]
+          ],
+          operationId: "chat-op-test"
         })
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
       env: { KABUYOMI_ENV: "test" } as never,
-      config: legacyQuotaConfig,
+      config: billingUiDisabledConfig,
       ctx
     });
 
@@ -474,7 +501,7 @@ describe("handleChatRoute", () => {
     );
   });
 
-  it("upgrades metrics-only filings before checking and consuming chat quota", async () => {
+  it("upgrades metrics-only filings after reservation and before generation", async () => {
     const metricsOnlyFiling = {
       filingKey: "filing-1",
       ticker: "ORCL",
@@ -505,22 +532,23 @@ describe("handleChatRoute", () => {
         },
         body: JSON.stringify({
           filingKey: "filing-1",
-          question: "この企業はなんの企業？"
+          question: "この企業はなんの企業？",
+          operationId: "chat-op-test"
         })
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
       env,
-      config: legacyQuotaConfig,
+      config: billingUiDisabledConfig,
       ctx
     });
 
     expect(response?.status).toBe(200);
     expect(mockUpgradeMetricsOnlyRecord).toHaveBeenCalledWith(metricsOnlyFiling, env);
-    expect(mockUpgradeMetricsOnlyRecord.mock.invocationCallOrder[0]).toBeLessThan(
-      mockEnsureChatQuotaAvailable.mock.invocationCallOrder[0]!
+    expect(mockBeginRequestExecution.mock.invocationCallOrder[0]).toBeLessThan(
+      mockUpgradeMetricsOnlyRecord.mock.invocationCallOrder[0]!
     );
-    expect(mockBuildChatResponse.mock.invocationCallOrder[0]).toBeLessThan(
-      mockConsumeChatQuota.mock.invocationCallOrder[0]!
+    expect(mockUpgradeMetricsOnlyRecord.mock.invocationCallOrder[0]).toBeLessThan(
+      mockBuildChatResponse.mock.invocationCallOrder[0]!
     );
     expect(mockBuildChatResponse).toHaveBeenCalledWith(
       upgradedFiling,
@@ -547,7 +575,8 @@ describe("handleChatRoute", () => {
         },
         body: JSON.stringify({
           filingKey: "filing-1",
-          question: "ガイダンスの見方は？"
+          question: "ガイダンスの見方は？",
+          operationId: "chat-op-test"
         })
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
@@ -575,7 +604,8 @@ describe("handleChatRoute", () => {
         },
         body: JSON.stringify({
           filingKey: "filing-1",
-          question: "利益率は改善した？"
+          question: "利益率は改善した？",
+          operationId: "chat-op-test"
         })
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
@@ -588,12 +618,20 @@ describe("handleChatRoute", () => {
     await expect(response?.json()).resolves.toEqual({
       error: "Filing cache not found"
     });
-    expect(mockConsumeChatQuota).not.toHaveBeenCalled();
+    expect(mockFailRequestExecution).toHaveBeenCalledWith(
+      identity,
+      env,
+      expect.objectContaining({ failureCode: "filing_cache_not_found", route: "chat" })
+    );
+    expect(mockCompleteRequestExecution).not.toHaveBeenCalled();
     expect(mockBuildChatResponse).not.toHaveBeenCalled();
   });
 
-  it("does not consume chat quota when generation fails before final charge", async () => {
-    mockBuildChatResponse.mockRejectedValue(new Error("Gemini unavailable"));
+  it("releases the credit reservation when generation fails while billing UI is disabled", async () => {
+    const rawQuestion = "RAW_PRIVATE_CHAT_QUESTION";
+    const operationId = "chat-operation-private-1234567890";
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockBuildChatResponse.mockRejectedValue(new Error(`Gemini unavailable for ${rawQuestion}`));
 
     await expect(
       handleChatRoute({
@@ -605,22 +643,43 @@ describe("handleChatRoute", () => {
           },
           body: JSON.stringify({
             filingKey: "filing-1",
-            question: "ガイダンスの見方は？"
+            question: rawQuestion,
+            operationId
           })
         }),
         url: new URL("https://kabuyomi.test/v1/chat"),
         env,
-        config: legacyQuotaConfig,
+        config: billingUiDisabledConfig,
         ctx
       })
     ).rejects.toThrow("Gemini unavailable");
 
-    expect(mockEnsureChatQuotaAvailable).toHaveBeenCalledWith(identity, expect.anything(), expect.anything());
-    expect(mockConsumeChatQuota).not.toHaveBeenCalled();
-    expect(mockRefundChatQuota).not.toHaveBeenCalled();
+    expect(mockBeginRequestExecution).toHaveBeenCalledWith(
+      identity,
+      env,
+      billingUiDisabledConfig,
+      expect.objectContaining({
+        reservation: {
+          mode: "credits",
+          creditsRequired: 2,
+          reference: { type: "chat", id: "filing-1" }
+        }
+      })
+    );
+    expect(mockFailRequestExecution).toHaveBeenCalledWith(
+      identity,
+      env,
+      expect.objectContaining({ operationId, route: "chat" })
+    );
+    expect(mockCompleteRequestExecution).not.toHaveBeenCalled();
+    expect(mockLoadUsage).not.toHaveBeenCalled();
+    const serializedLogs = errorLog.mock.calls.map(([line]) => String(line)).join("\n");
+    expect(serializedLogs).not.toContain(rawQuestion);
+    expect(serializedLogs).not.toContain(operationId);
+    errorLog.mockRestore();
   });
 
-  it("does not charge chat quota for non-chargeable historical preparation responses", async () => {
+  it("releases a credit reservation for non-chargeable historical preparation responses", async () => {
     mockBuildChatResponse.mockResolvedValue({
       answer: "履歴比較をバックグラウンドで準備中のため、今回は3年比較を完了できません。",
       sources: [],
@@ -637,19 +696,22 @@ describe("handleChatRoute", () => {
         },
         body: JSON.stringify({
           filingKey: "filing-1",
-          question: "3年でどう推移した？"
+          question: "3年でどう推移した？",
+          operationId: "chat-op-test"
         })
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
       env,
-      config: legacyQuotaConfig,
+      config: billingUiDisabledConfig,
       ctx
     });
 
     expect(response?.status).toBe(200);
-    expect(mockEnsureChatQuotaAvailable).toHaveBeenCalledWith(identity, env, expect.anything());
-    expect(mockConsumeChatQuota).not.toHaveBeenCalled();
-    expect(mockRefundChatQuota).not.toHaveBeenCalled();
+    expect(mockCompleteRequestExecution).toHaveBeenCalledWith(
+      identity,
+      env,
+      expect.objectContaining({ chargeable: false, route: "chat" })
+    );
     await expect(response?.json()).resolves.toMatchObject({
       responsePath: "fallback",
       usage: {
@@ -664,6 +726,11 @@ describe("handleChatRoute", () => {
       sources: [],
       responsePath: "gemini"
     });
+
+    mockLoadUsage.mockResolvedValue({
+      ...creditUsage,
+      credits: { ...creditUsage.credits, monthlyRemaining: 28, totalRemaining: 28 }
+    } as never);
 
     const response = await handleChatRoute({
       request: new Request("https://kabuyomi.test/v1/chat", {
@@ -688,21 +755,33 @@ describe("handleChatRoute", () => {
     });
 
     expect(response?.status).toBe(200);
-    expect(mockConsumeChatQuota).not.toHaveBeenCalled();
-    expect(mockLoadUsage.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mockBeginRequestExecution.mock.invocationCallOrder[0]).toBeLessThan(
       mockBuildChatResponse.mock.invocationCallOrder[0]!
     );
     expect(mockBuildChatResponse.mock.invocationCallOrder[0]).toBeLessThan(
-      mockConsumeCredit.mock.invocationCallOrder[0]!
+      mockCompleteRequestExecution.mock.invocationCallOrder[0]!
     );
-    expect(mockConsumeCredit).toHaveBeenCalledWith(identity, env, expect.anything(), {
-      operationId: "chat-op-1",
-      creditsRequired: 2,
-      reference: {
-        type: "chat",
-        id: "filing-1"
-      }
-    });
+    expect(mockCompleteRequestExecution.mock.invocationCallOrder[0]).toBeLessThan(
+      mockLoadUsage.mock.invocationCallOrder[0]!
+    );
+    expect(mockBeginRequestExecution).toHaveBeenCalledWith(
+      identity,
+      env,
+      expect.anything(),
+      expect.objectContaining({
+        operationId: "chat-op-1",
+        reservation: {
+          mode: "credits",
+          creditsRequired: 2,
+          reference: { type: "chat", id: "filing-1" }
+        }
+      })
+    );
+    expect(mockCompleteRequestExecution).toHaveBeenCalledWith(
+      identity,
+      env,
+      expect.objectContaining({ operationId: "chat-op-1", chargeable: true })
+    );
     await expect(response?.json()).resolves.toMatchObject({
       creditsCharged: 2,
       creditsRemaining: 28,
@@ -746,8 +825,12 @@ describe("handleChatRoute", () => {
 
     expect(response?.status).toBe(200);
     expect(mockLoadUsage).toHaveBeenCalledWith(identity, env, expect.anything());
-    expect(mockConsumeCredit).not.toHaveBeenCalled();
-    expect(mockRefundCredit).not.toHaveBeenCalled();
+    expect(mockCompleteRequestExecution).toHaveBeenCalledWith(
+      identity,
+      env,
+      expect.objectContaining({ chargeable: false })
+    );
+    expect(mockCompleteRequestExecution.mock.results[0]?.value).toBeDefined();
     await expect(response?.json()).resolves.toMatchObject({
       creditsCharged: 0,
       creditsRemaining: 30,
@@ -759,7 +842,7 @@ describe("handleChatRoute", () => {
     });
   });
 
-  it("uses credit billing for detached dev access without the global credit flag", async () => {
+  it("uses an unmetered reservation for detached dev access", async () => {
     mockReadQuotaIdentity.mockResolvedValue({
       ...identity,
       plan: "pro",
@@ -788,23 +871,27 @@ describe("handleChatRoute", () => {
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
       env,
-      config: legacyQuotaConfig,
+      config: billingUiDisabledConfig,
       ctx
     });
 
     expect(response?.status).toBe(200);
-    expect(mockConsumeChatQuota).not.toHaveBeenCalled();
-    expect(mockConsumeCredit).toHaveBeenCalled();
+    expect(mockBeginRequestExecution).toHaveBeenCalledWith(
+      expect.objectContaining({ accessMode: "dev_unlimited" }),
+      env,
+      billingUiDisabledConfig,
+      expect.objectContaining({ reservation: { mode: "unmetered" } })
+    );
     await expect(response?.json()).resolves.toMatchObject({
       usage: {
         creditBillingEnabled: true
       },
-      creditsCharged: 2,
-      creditsRemaining: 28
+      creditsCharged: 0,
+      creditsRemaining: 30
     });
   });
 
-  it("does not consume credits when generation fails before final charge", async () => {
+  it("releases the credit reservation when generation fails", async () => {
     mockBuildChatResponse.mockRejectedValue(new Error("Gemini unavailable"));
 
     await expect(
@@ -831,13 +918,16 @@ describe("handleChatRoute", () => {
       })
     ).rejects.toThrow("Gemini unavailable");
 
-    expect(mockLoadUsage).toHaveBeenCalledWith(identity, env, expect.anything());
-    expect(mockConsumeCredit).not.toHaveBeenCalled();
-    expect(mockRefundChatQuota).not.toHaveBeenCalled();
-    expect(mockRefundCredit).not.toHaveBeenCalled();
+    expect(mockFailRequestExecution).toHaveBeenCalledWith(
+      identity,
+      env,
+      expect.objectContaining({ operationId: "chat-op-1", route: "chat" })
+    );
+    expect(mockCompleteRequestExecution).not.toHaveBeenCalled();
+    expect(mockLoadUsage).not.toHaveBeenCalled();
   });
 
-  it("does not consume credits when a simulated cpu-risk failure occurs before final charge", async () => {
+  it("releases the credit reservation on a simulated cpu-risk failure", async () => {
     mockBuildChatResponse.mockRejectedValue(new Error("simulated_cpu_risk_before_charge"));
 
     await expect(
@@ -864,50 +954,41 @@ describe("handleChatRoute", () => {
       })
     ).rejects.toThrow("simulated_cpu_risk_before_charge");
 
-    expect(mockLoadUsage).toHaveBeenCalled();
-    expect(mockConsumeCredit).not.toHaveBeenCalled();
-    expect(mockRefundCredit).not.toHaveBeenCalled();
+    expect(mockFailRequestExecution).toHaveBeenCalledWith(
+      identity,
+      env,
+      expect.objectContaining({ operationId: "chat-op-cpu-risk", route: "chat" })
+    );
+    expect(mockCompleteRequestExecution).not.toHaveBeenCalled();
+    expect(mockLoadUsage).not.toHaveBeenCalled();
   });
 
-  it("does not double charge duplicate operationId after successful answer", async () => {
+  it("replays an exact operation with one provider call, one commit, and fresh usage", async () => {
     mockBuildChatResponse.mockResolvedValue({
       answer: "Credit answer",
       sources: [],
       responsePath: "gemini"
     });
-    mockConsumeCredit
-      .mockResolvedValueOnce({
-        usage: {
-          ...usage,
-          credits: {
-            monthlyRemaining: 28,
-            monthlyLimit: 30,
-            purchasedRemaining: 0,
-            totalRemaining: 28,
-            resetsAt: "2026-05-01T00:00:00+09:00"
-          }
-        },
-        didMutate: true,
-        operationId: "chat-op-duplicate",
-        creditsCharged: 2,
-        creditsRemaining: 28
-      } as never)
-      .mockResolvedValueOnce({
-        usage: {
-          ...usage,
-          credits: {
-            monthlyRemaining: 28,
-            monthlyLimit: 30,
-            purchasedRemaining: 0,
-            totalRemaining: 28,
-            resetsAt: "2026-05-01T00:00:00+09:00"
-          }
-        },
-        didMutate: false,
-        operationId: "chat-op-duplicate",
-        creditsCharged: 2,
-        creditsRemaining: 28
-      } as never);
+    let cachedResult: Parameters<typeof completeRequestExecution>[2]["resultBody"] | undefined;
+    mockBeginRequestExecution.mockImplementation(async () =>
+      cachedResult
+        ? { outcome: "replay", result: cachedResult, resultMetadata: {} }
+        : chatLeaderResult()
+    );
+    mockCompleteRequestExecution.mockImplementation(async (_identity, _env, options) => {
+      cachedResult = options.resultBody;
+      return chatCompletionResult();
+    });
+    const replayUsage = {
+      ...creditUsage,
+      credits: {
+        ...creditUsage.credits,
+        monthlyRemaining: 27,
+        totalRemaining: 27
+      }
+    };
+    mockLoadUsage.mockReset();
+    mockLoadUsage.mockResolvedValueOnce(creditUsage as never).mockResolvedValue(replayUsage as never);
 
     const makeRequest = () =>
       handleChatRoute({
@@ -937,26 +1018,222 @@ describe("handleChatRoute", () => {
 
     expect(first?.status).toBe(200);
     expect(second?.status).toBe(200);
-    expect(mockConsumeCredit).toHaveBeenCalledTimes(2);
-    expect(mockConsumeCredit).toHaveBeenNthCalledWith(1, identity, env, expect.anything(), expect.objectContaining({ operationId: "chat-op-duplicate" }));
-    expect(mockConsumeCredit).toHaveBeenNthCalledWith(2, identity, env, expect.anything(), expect.objectContaining({ operationId: "chat-op-duplicate" }));
+    expect(mockBuildChatResponse).toHaveBeenCalledTimes(1);
+    expect(mockCompleteRequestExecution).toHaveBeenCalledTimes(1);
+    expect(mockCompleteRequestExecution).toHaveBeenCalledWith(
+      identity,
+      env,
+      expect.objectContaining({ operationId: "chat-op-duplicate", chargeable: true })
+    );
     await expect(second?.json()).resolves.toMatchObject({
+      answer: "Credit answer",
       creditsCharged: 2,
-      creditsRemaining: 28
+      creditsRemaining: 27,
+      usage: {
+        credits: {
+          totalRemaining: 27
+        }
+      }
     });
   });
 
-  it("returns insufficient_credits without running chat generation", async () => {
-    mockLoadUsage.mockResolvedValue({
-      ...usage,
-      credits: {
-        monthlyRemaining: 0,
-        monthlyLimit: 30,
-        purchasedRemaining: 0,
-        totalRemaining: 0,
-        resetsAt: "2026-05-01T00:00:00+09:00"
+  it.each([
+    ["question", { filingKey: "filing-1", question: "別の質問", operationId: "chat-op-mismatch" }],
+    ["filing", { filingKey: "filing-2", question: "最初の質問", operationId: "chat-op-mismatch" }],
+    [
+      "context",
+      {
+        filingKey: "filing-1",
+        question: "最初の質問",
+        conversationContext: [{ role: "user" as const, content: "別の文脈" }],
+        operationId: "chat-op-mismatch"
       }
-    } as never);
+    ]
+  ])("rejects operation ID reuse with changed %s before provider work", async (_field, changedPayload) => {
+    mockBuildChatResponse.mockResolvedValue({
+      answer: "Original answer",
+      sources: [],
+      responsePath: "gemini"
+    });
+    let originalHash: string | undefined;
+    mockBeginRequestExecution.mockImplementation(async (_identity, _env, _config, options) => {
+      if (!originalHash) {
+        originalHash = options.requestHash;
+        return chatLeaderResult();
+      }
+      return options.requestHash === originalHash
+        ? { outcome: "pending", retryAfterSeconds: 1 }
+        : { outcome: "payload_mismatch" };
+    });
+    const send = (body: Record<string, unknown>) =>
+      handleChatRoute({
+        request: new Request("https://kabuyomi.test/v1/chat", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-device-key": "device-123"
+          },
+          body: JSON.stringify(body)
+        }),
+        url: new URL("https://kabuyomi.test/v1/chat"),
+        env,
+        config: DEFAULT_REMOTE_CONFIG,
+        ctx
+      });
+
+    const first = await send({
+      filingKey: "filing-1",
+      question: "最初の質問",
+      operationId: "chat-op-mismatch"
+    });
+    const changed = await send(changedPayload);
+
+    expect(first?.status).toBe(200);
+    expect(changed?.status).toBe(409);
+    await expect(changed?.json()).resolves.toEqual({ error: "operation_id_payload_mismatch" });
+    expect(mockBuildChatResponse).toHaveBeenCalledTimes(1);
+    expect(mockCompleteRequestExecution).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns pending with Retry-After and never enters provider or charging", async () => {
+    mockBeginRequestExecution.mockResolvedValue({ outcome: "pending", retryAfterSeconds: 2 });
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "同じ質問",
+          operationId: "chat-op-pending"
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env,
+      config: DEFAULT_REMOTE_CONFIG,
+      ctx
+    });
+
+    expect(response?.status).toBe(202);
+    expect(response?.headers.get("retry-after")).toBe("2");
+    await expect(response?.json()).resolves.toEqual({ error: "execution_pending" });
+    expect(mockLoadFilingByKey).not.toHaveBeenCalled();
+    expect(mockBuildChatResponse).not.toHaveBeenCalled();
+    expect(mockCompleteRequestExecution).not.toHaveBeenCalled();
+  });
+
+  it("replays a completed result even after chat is disabled", async () => {
+    mockBeginRequestExecution.mockResolvedValue({
+      outcome: "replay",
+      result: {
+        kind: "chat",
+        answer: "Cached answer",
+        sources: [],
+        responsePath: "openai",
+        modelName: "gpt-5-nano",
+        creditsCharged: 2
+      },
+      resultMetadata: {}
+    });
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: "同じ質問",
+          operationId: "chat-op-disabled-replay"
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env,
+      config: { ...DEFAULT_REMOTE_CONFIG, chatEnabled: false },
+      ctx
+    });
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({
+      answer: "Cached answer",
+      creditsCharged: 2,
+      usage: { creditBillingEnabled: true }
+    });
+    expect(mockBeginRequestExecution).toHaveBeenCalledWith(
+      identity,
+      env,
+      expect.objectContaining({ chatEnabled: false }),
+      expect.objectContaining({ allowCreate: false })
+    );
+    expect(mockLoadFilingByKey).not.toHaveBeenCalled();
+    expect(mockBuildChatResponse).not.toHaveBeenCalled();
+  });
+
+  it("allows only one provider call for twenty concurrent exact duplicates", async () => {
+    let claimed = false;
+    let releaseProvider!: () => void;
+    const providerGate = new Promise<void>((resolve) => {
+      releaseProvider = resolve;
+    });
+    mockBeginRequestExecution.mockImplementation(async () => {
+      if (!claimed) {
+        claimed = true;
+        return chatLeaderResult();
+      }
+      return { outcome: "pending", retryAfterSeconds: 1 };
+    });
+    mockBuildChatResponse.mockImplementation(async () => {
+      await providerGate;
+      return {
+        answer: "Concurrent answer",
+        sources: [],
+        responsePath: "gemini"
+      };
+    });
+    const send = () =>
+      handleChatRoute({
+        request: new Request("https://kabuyomi.test/v1/chat", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-device-key": "device-123"
+          },
+          body: JSON.stringify({
+            filingKey: "filing-1",
+            question: "同じ質問",
+            operationId: "chat-op-concurrent"
+          })
+        }),
+        url: new URL("https://kabuyomi.test/v1/chat"),
+        env,
+        config: DEFAULT_REMOTE_CONFIG,
+        ctx
+      });
+
+    const pendingResponses = Array.from({ length: 20 }, () => send());
+    await vi.waitFor(() => expect(mockBeginRequestExecution).toHaveBeenCalledTimes(20));
+    expect(mockBuildChatResponse).toHaveBeenCalledTimes(1);
+    releaseProvider();
+    const responses = await Promise.all(pendingResponses);
+
+    expect(responses.filter((response) => response?.status === 200)).toHaveLength(1);
+    expect(responses.filter((response) => response?.status === 202)).toHaveLength(19);
+    expect(mockBuildChatResponse).toHaveBeenCalledTimes(1);
+    expect(mockCompleteRequestExecution).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 402 before filing or provider work when billing UI is disabled and credits are zero", async () => {
+    mockBeginRequestExecution.mockResolvedValue({
+      outcome: "failed",
+      failureCode: "insufficient_credits",
+      failureStatus: 402,
+      failureDetails: { creditsRequired: 2, creditsRemaining: 0 }
+    });
 
     const response = await handleChatRoute({
       request: new Request("https://kabuyomi.test/v1/chat", {
@@ -975,14 +1252,27 @@ describe("handleChatRoute", () => {
       env,
       config: {
         ...DEFAULT_REMOTE_CONFIG,
-        creditBillingEnabled: true
+        creditBillingEnabled: false
       },
       ctx
     });
 
     expect(response?.status).toBe(402);
+    expect(mockBeginRequestExecution).toHaveBeenCalledWith(
+      identity,
+      env,
+      expect.objectContaining({ creditBillingEnabled: false }),
+      expect.objectContaining({
+        reservation: {
+          mode: "credits",
+          creditsRequired: 2,
+          reference: { type: "chat", id: "filing-1" }
+        }
+      })
+    );
     expect(mockBuildChatResponse).not.toHaveBeenCalled();
-    expect(mockConsumeCredit).not.toHaveBeenCalled();
+    expect(mockCompleteRequestExecution).not.toHaveBeenCalled();
+    expect(mockLoadFilingByKey).not.toHaveBeenCalled();
     await expect(response?.json()).resolves.toEqual({
       error: "insufficient_credits",
       creditsRequired: 2,
@@ -990,45 +1280,54 @@ describe("handleChatRoute", () => {
     });
   });
 
-  it("returns insufficient_credits from final charge without returning generated answer", async () => {
+  it("never calls the provider for unique operations beyond reserved credit capacity", async () => {
+    let reservationsGranted = 0;
+    mockBeginRequestExecution.mockImplementation(async (_identity, _env, _config, _options) => {
+      if (reservationsGranted < 2) {
+        reservationsGranted += 1;
+        return chatLeaderResult("credits");
+      }
+      return {
+        outcome: "failed",
+        failureCode: "insufficient_credits",
+        failureStatus: 402,
+        failureDetails: { creditsRequired: 2, creditsRemaining: 0 }
+      };
+    });
     mockBuildChatResponse.mockResolvedValue({
-      answer: "Generated answer must not be returned",
+      answer: "Reserved answer",
       sources: [],
       responsePath: "gemini"
     });
-    mockConsumeCredit.mockRejectedValue(new InsufficientCreditsError(2, 0));
 
-    const response = await handleChatRoute({
-      request: new Request("https://kabuyomi.test/v1/chat", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-device-key": "device-123"
-        },
-        body: JSON.stringify({
-          filingKey: "filing-1",
-          question: "ガイダンスの見方は？",
-          operationId: "chat-op-final-empty"
+    const responses = await Promise.all(
+      Array.from({ length: 10 }, (_, index) =>
+        handleChatRoute({
+          request: new Request("https://kabuyomi.test/v1/chat", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "x-device-key": "device-123"
+            },
+            body: JSON.stringify({
+              filingKey: "filing-1",
+              question: `unique question ${index}`,
+              operationId: `chat-op-capacity-${index}`
+            })
+          }),
+          url: new URL("https://kabuyomi.test/v1/chat"),
+          env,
+          config: { ...DEFAULT_REMOTE_CONFIG, creditBillingEnabled: true },
+          ctx
         })
-      }),
-      url: new URL("https://kabuyomi.test/v1/chat"),
-      env,
-      config: {
-        ...DEFAULT_REMOTE_CONFIG,
-        creditBillingEnabled: true
-      },
-      ctx
-    });
+      )
+    );
 
-    expect(response?.status).toBe(402);
-    expect(mockBuildChatResponse).toHaveBeenCalled();
-    const body = await response?.json();
-    expect(body).toEqual({
-      error: "insufficient_credits",
-      creditsRequired: 2,
-      creditsRemaining: 0
-    });
-    expect(JSON.stringify(body)).not.toContain("Generated answer must not be returned");
+    expect(responses.filter((response) => response?.status === 200)).toHaveLength(2);
+    expect(responses.filter((response) => response?.status === 402)).toHaveLength(8);
+    expect(mockBuildChatResponse).toHaveBeenCalledTimes(2);
+    expect(mockCompleteRequestExecution).toHaveBeenCalledTimes(2);
+    expect(mockLoadFilingByKey).toHaveBeenCalledTimes(2);
   });
 
   it("emits compact production chat diagnostics without source excerpts or raw question text", async () => {
@@ -1124,12 +1423,13 @@ describe("handleChatRoute", () => {
         },
         body: JSON.stringify({
           filingKey: "filing-1",
-          question: "verbose question"
+          question: "verbose question",
+          operationId: "chat-op-test"
         })
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),
       env: { KABUYOMI_ENV: "test" } as never,
-      config: legacyQuotaConfig,
+      config: billingUiDisabledConfig,
       ctx
     });
 
@@ -1144,6 +1444,54 @@ describe("handleChatRoute", () => {
       selectedSourceExcerpts: ["verbose excerpt"],
       selectedSourceTextPreview: ["verbose preview"]
     });
+  });
+
+  it("ignores a verbose diagnostics override in production", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const rawQuestion = "PRODUCTION_PRIVATE_QUESTION";
+    const sourceText = "PRODUCTION_PRIVATE_SOURCE_TEXT";
+    mockBuildChatResponse.mockResolvedValue({
+      answer: "Compact production answer",
+      sources: [],
+      responsePath: "fallback",
+      debug: {
+        selectedSourceExcerpts: [sourceText],
+        selectedSourceTextPreview: [sourceText]
+      }
+    });
+
+    const response = await handleChatRoute({
+      request: new Request("https://kabuyomi.test/v1/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123"
+        },
+        body: JSON.stringify({
+          filingKey: "filing-1",
+          question: rawQuestion,
+          operationId: "chat-op-production-verbose-override"
+        })
+      }),
+      url: new URL("https://kabuyomi.test/v1/chat"),
+      env: {
+        KABUYOMI_ENV: "production",
+        ENVIRONMENT: "production",
+        CHAT_DIAGNOSTICS_LEVEL: "verbose"
+      } as never,
+      config: billingUiDisabledConfig,
+      ctx
+    });
+
+    expect(response?.status).toBe(200);
+    const qualityLog = logSpy.mock.calls
+      .map(([line]) => (typeof line === "string" ? JSON.parse(line) as Record<string, unknown> : null))
+      .find((entry): entry is Record<string, unknown> => entry?.event === "chat_quality_pipeline");
+    const serialized = JSON.stringify(qualityLog);
+
+    expect(qualityLog).toMatchObject({ diagnosticsLevel: "compact" });
+    expect(serialized).not.toContain(rawQuestion);
+    expect(serialized).not.toContain(sourceText);
   });
 
   it("allows filing chat access without a saved ticker gate", async () => {
@@ -1169,7 +1517,8 @@ describe("handleChatRoute", () => {
         },
         body: JSON.stringify({
           filingKey: "filing-1",
-          question: "どう？"
+          question: "どう？",
+          operationId: "chat-op-test"
         })
       }),
       url: new URL("https://kabuyomi.test/v1/chat"),

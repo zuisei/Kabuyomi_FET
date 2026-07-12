@@ -1,5 +1,7 @@
 # Kabuyomi v1.0.2 Purchase 404 And Credits UI Report
 
+> **Historical release evidence — not current shipping authority.** This point-in-time report preserves prior findings and may describe deployments, capabilities, or release decisions that have since changed. Use `CURRENT_SHIPPING_TRUTH.md`, `FEATURE_PARITY_COMPATIBILITY_REPORT.md`, `RELEASE_GATE_STATE.json`, and `FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md` for current decisions.
+
 ## Executive Summary
 
 The purchase 404 was diagnosed as an API deployment/base-route issue, not a StoreKit product validation error and not a client-side credit grant issue.

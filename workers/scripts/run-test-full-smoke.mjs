@@ -10,6 +10,9 @@ try {
 
   requireSecret(env, "CLOUDFLARE_API_TOKEN");
   requireSecret(env, "OPENAI_API_KEY");
+  requireSecret(env, "KABUYOMI_TEST_AUTOMATION_SECRET");
+
+  putTestSecret("TEST_AUTOMATION_SHARED_SECRET", env.KABUYOMI_TEST_AUTOMATION_SECRET, env);
 
   run("npm", ["run", "deploy:test"], env);
   run("npm", ["run", "testbench:full-smoke", "--", "--check-only"], env);
@@ -37,6 +40,16 @@ function requireSecret(env, name) {
   if (!env[name]?.trim()) {
     throw new Error(`${name} is missing. Run npm run secrets:test:setup first.`);
   }
+}
+
+function putTestSecret(name, value, env) {
+  const result = spawnSync("npx", ["wrangler", "secret", "put", name, "--config", "wrangler.test.toml"], {
+    cwd: rootDir,
+    env,
+    input: `${value}\n`,
+    stdio: ["pipe", "inherit", "inherit"]
+  });
+  if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
 function readDevVars(path) {

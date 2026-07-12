@@ -35,7 +35,9 @@ export const handleInternalBackfillHistoryRoute: RouteHandler = async ({ request
     env,
     config,
     (filing, comparisonFiling, routeEnv, routeConfig) =>
-      ensureHistoricalFilingStored(filing, comparisonFiling, routeEnv, routeConfig, { contentMode: "metrics_only" })
+      ensureHistoricalFilingStored(filing, comparisonFiling, routeEnv, routeConfig, {
+        contentMode: payload.contentMode
+      })
   );
 
   return json(result);

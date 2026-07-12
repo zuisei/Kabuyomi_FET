@@ -38,6 +38,19 @@ struct AppRootView: View {
         .onChange(of: scenePhase) { _, newPhase in
             appModel.handleRewardedAdScenePhaseChanged(scenePhaseName(newPhase))
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let status = appModel.installationAuthenticationStatus {
+                InstallationAuthenticationStatusView(
+                    status: status,
+                    isRetrying: appModel.installationAuthenticationIsRetrying,
+                    retry: {
+                        Task {
+                            await appModel.retryInstallationAuthentication()
+                        }
+                    }
+                )
+            }
+        }
         .alert(
             "Kabuyomi",
             isPresented: alertIsPresented,
@@ -71,6 +84,54 @@ struct AppRootView: View {
             return "background"
         @unknown default:
             return "unknown"
+        }
+    }
+}
+
+private struct InstallationAuthenticationStatusView: View {
+    let status: InstallationAuthenticationStatus
+    let isRetrying: Bool
+    let retry: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "lock.trianglebadge.exclamationmark")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.accentDeep)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(status.failure.title)
+                    .font(.system(.footnote, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+
+                Text(status.failure.message)
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 4)
+
+            if isRetrying {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(KabuyomiTheme.accentDeep)
+                    .accessibilityLabel("端末認証を再試行中")
+            } else if status.canRetry {
+                Button("再試行", action: retry)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .accessibilityHint("端末認証をもう一度確認します")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) {
+            Divider()
+                .opacity(0.45)
         }
     }
 }

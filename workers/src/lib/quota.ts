@@ -11,11 +11,15 @@ import { enqueueCreditAuditRepair } from "./credit-audit-repair";
 import { AppError } from "./errors";
 import { hashForLog, logEvent, logWarnEvent, suffixForLog } from "./logging";
 import type { RemoteConfig } from "./remote-config";
+import { installationQuotaSubject, resolveInstallationCredential } from "./installation-identity";
+import { resolveAccountCredential } from "./account-recovery";
+import { loadTestAutomationAccessFromRequest } from "./test-automation-access";
+import { isLegacyClientCompatibilityRequestAuthorized } from "./legacy-client-compatibility";
 
 export interface QuotaIdentity {
   quotaSubject: string;
   plan: AccessPlan;
-  identityKind: "device_key" | "ip_hash" | "local_device" | "entitlement" | "detached_device";
+  identityKind: "installation" | "device_key" | "ip_hash" | "local_device" | "entitlement" | "detached_device" | "account";
   accessMode?: string;
   chatLimitOverride?: number;
   stockLimitOverride?: number;
@@ -52,7 +56,17 @@ interface PurchaseTransactionRow {
   transaction_id: string;
   original_transaction_id: string | null;
   credits_granted: number;
-  status: "pending" | "granted";
+  status: "pending" | "granted" | "refunded" | "refund_reversed";
+  debt_offset_applied: number;
+  refunded_at: string | null;
+  refund_reversed_at: string | null;
+  refund_available_removed: number;
+  refund_debt_created: number;
+  refund_debt_released: number;
+  refund_debt_settled_restored: number;
+  refund_credits_restored: number;
+  refund_notification_uuid: string | null;
+  refund_reversed_notification_uuid: string | null;
   purchased_at: string | null;
   created_at: string;
   updated_at: string;
@@ -73,6 +87,43 @@ export interface CreditReference {
   id: string;
 }
 
+export type RequestExecutionReservationOptions =
+  | {
+      mode: "credits";
+      creditsRequired: number;
+      reference: CreditReference;
+    }
+  | { mode: "legacy_chat" }
+  | { mode: "unmetered" };
+
+export type RequestExecutionReservationIntent =
+  | {
+      mode: "credits";
+      creditsRequired: number;
+      referenceType: string;
+      referenceId: string;
+      quota: {
+        plan: AccessPlan;
+        accessMode?: string;
+        dateJST: string;
+        monthlyCreditLimit: number;
+        monthlyCreditPeriodStart?: string;
+        monthlyCreditPeriodEnd?: string;
+        monthlyGrantOperationId?: string;
+      };
+    }
+  | {
+      mode: "legacy_chat";
+      slots: 1;
+      quota: {
+        plan: AccessPlan;
+        accessMode?: string;
+        dateJST: string;
+        chatLimit: number;
+      };
+    }
+  | { mode: "unmetered" };
+
 export interface CreditMutationResult {
   usage: UsageState;
   didMutate: boolean;
@@ -87,9 +138,22 @@ export interface PurchaseCreditGrantResult {
   didMutate: boolean;
   transactionId: string;
   productId: string;
+  creditsPurchased: number;
   creditsGranted: number;
+  creditsAppliedToRefundDebt: number;
   creditsRemaining: number;
   transactionStatus: "pending" | "granted";
+}
+
+export interface ConsumablePurchaseNotificationResult {
+  found: boolean;
+  quotaSubject?: string;
+  transactionId: string;
+  productId: string;
+  outcome: "unclaimed" | "refunded" | "reinstated" | "already_reinstated" | "not_refunded";
+  purchaseState: "unclaimed" | "granted" | "refunded" | "reinstated";
+  didMutate: boolean;
+  operation?: CreditOperationResult;
 }
 
 export interface EvalCreditGrantResult {
@@ -123,9 +187,17 @@ export class InsufficientCreditsError extends AppError {
   }
 }
 
-interface CreditOperationResult {
+export interface CreditOperationResult {
   operationId: string;
-  type: "consume" | "refund" | "monthly_grant" | "purchase_grant" | "eval_grant" | "admob_rewarded_grant";
+  type:
+    | "consume"
+    | "refund"
+    | "monthly_grant"
+    | "purchase_grant"
+    | "purchase_refund"
+    | "purchase_refund_reversal"
+    | "eval_grant"
+    | "admob_rewarded_grant";
   status: "applied" | "insufficient" | "noop";
   delta: number;
   balanceAfter: number;
@@ -133,13 +205,32 @@ interface CreditOperationResult {
   rewardedAdBalanceAfter?: number;
   rewardedAdExpiresAt?: string;
   purchasedBalanceAfter: number;
+  creditsRequired?: number;
+  consumedMonthly?: number;
+  consumedRewardedAd?: number;
+  consumedWelcome?: number;
+  consumedPurchased?: number;
+  consumedMonthlyPeriodStart?: string;
+  consumedMonthlyPeriodEnd?: string;
+  consumedRewardedAdLots?: Array<{
+    lotId: string;
+    credits: number;
+    expiresAt: string | null;
+  }>;
   originalOperationId?: string;
+  purchaseRefundDebtAfter?: number;
+  purchaseDebtOffset?: number;
+  refundAvailableRemoved?: number;
+  refundDebtCreated?: number;
+  refundDebtReleased?: number;
+  refundDebtSettledRestored?: number;
+  refundCreditsRestored?: number;
   referenceType?: string;
   referenceId?: string;
   createdAt: string;
 }
 
-interface MonthlyGrantResult {
+export interface MonthlyGrantResult {
   operationId: string;
   plan: AccessPlan;
   periodStart: string;
@@ -150,15 +241,85 @@ interface MonthlyGrantResult {
   purchasedBalanceAfter: number;
   createdAt: string;
 }
+
+export function buildRequestExecutionReservationIntent(
+  identity: QuotaIdentity,
+  config: RemoteConfig,
+  reservation: RequestExecutionReservationOptions
+): RequestExecutionReservationIntent {
+  if (reservation.mode === "unmetered") {
+    return { mode: "unmetered" };
+  }
+
+  const dateJST = buildQuotaDateJST();
+  const limits = resolveIdentityLimits(identity, config);
+  if (reservation.mode === "legacy_chat") {
+    return {
+      mode: "legacy_chat",
+      slots: 1,
+      quota: {
+        plan: identity.plan,
+        accessMode: identity.accessMode,
+        dateJST,
+        chatLimit: limits.chatLimit
+      }
+    };
+  }
+
+  return {
+    mode: "credits",
+    creditsRequired: reservation.creditsRequired,
+    referenceType: reservation.reference.type,
+    referenceId: reservation.reference.id,
+    quota: {
+      plan: identity.plan,
+      accessMode: identity.accessMode,
+      dateJST,
+      monthlyCreditLimit: limits.monthlyCreditLimit,
+      monthlyCreditPeriodStart: limits.monthlyCreditPeriodStart,
+      monthlyCreditPeriodEnd: limits.monthlyCreditPeriodEnd,
+      monthlyGrantOperationId: limits.monthlyGrantOperationId
+    }
+  };
+}
+
+export async function persistRequestExecutionAccounting(
+  identity: QuotaIdentity,
+  env: Env,
+  effects: {
+    monthlyGrant?: MonthlyGrantResult;
+    creditOperation?: CreditOperationResult;
+  }
+): Promise<void> {
+  if (effects.monthlyGrant) {
+    await persistMonthlyGrant(env, identity, effects.monthlyGrant);
+  }
+  if (effects.creditOperation && effects.creditOperation.delta !== 0) {
+    await persistCreditLedgerEntry(env, identity, effects.creditOperation);
+  }
+}
 export async function readQuotaIdentity(
   request: Request,
   env: Env,
   options: QuotaIdentityOptions = {}
 ): Promise<QuotaIdentity> {
-  const deviceKey = request.headers.get("x-device-key")?.trim();
+  const testAutomationAccess = await loadTestAutomationAccessFromRequest(request, env);
+  if (testAutomationAccess) {
+    return {
+      quotaSubject: testAutomationAccess.quotaSubject,
+      plan: "pro",
+      identityKind: "detached_device",
+      accessMode: testAutomationAccess.accessMode,
+      chatLimitOverride: testAutomationAccess.chatLimitOverride,
+      stockLimitOverride: testAutomationAccess.stockLimitOverride
+    };
+  }
 
-  if (options.requireDeviceKey && !deviceKey) {
-    throw new AppError(400, "Device key is required");
+  const deviceKey = request.headers.get("x-device-key")?.trim();
+  const installationCredential = await resolveInstallationCredential(request, env);
+
+  if (options.requireDeviceKey && !deviceKey && !installationCredential) {
+    throw new AppError(400, "Installation credential is required");
   }
 
   const detachedAccess = await loadDetachedAccessFromRequest(request, env);
@@ -174,6 +335,33 @@ export async function readQuotaIdentity(
   }
 
   const syncedEntitlement = await loadActiveEntitlementFromRequest(request, env);
+  const hasAccountCredential = Boolean(
+    request.headers.get("x-kabuyomi-account-token")?.trim()
+    || request.headers.get("authorization")?.trim().startsWith("Account ")
+  );
+  const accountCredential = hasAccountCredential
+    ? await resolveAccountCredential(request, env)
+    : null;
+
+  if (accountCredential) {
+    return {
+      quotaSubject: accountCredential.accountPrincipal,
+      plan: syncedEntitlement?.plan ?? "free",
+      identityKind: "account",
+      accessMode: "verified_apple_account",
+      activeSubscription: syncedEntitlement ? {
+        originalTransactionId: syncedEntitlement.originalTransactionId,
+        transactionId: syncedEntitlement.transactionId,
+        productId: syncedEntitlement.productId,
+        periodStart: syncedEntitlement.subscriptionPeriodStart,
+        periodEnd: syncedEntitlement.subscriptionPeriodEnd,
+        expiresAt: syncedEntitlement.subscriptionExpiresAt,
+        monthlyCredits: syncedEntitlement.subscriptionMonthlyCredits,
+        monthlyGrantOperationId: syncedEntitlement.monthlyGrantOperationId
+      } : undefined
+    };
+  }
+
   if (syncedEntitlement) {
     return {
       quotaSubject: syncedEntitlement.quotaSubject,
@@ -192,6 +380,15 @@ export async function readQuotaIdentity(
     };
   }
 
+  if (installationCredential) {
+    return {
+      quotaSubject: installationQuotaSubject(installationCredential),
+      plan: "free",
+      identityKind: "installation",
+      accessMode: installationCredential.creditMode === "full" ? "verified_installation" : "restricted_installation"
+    };
+  }
+
   if (isLocalQuotaFallbackRequest(request) && deviceKey) {
     return {
       quotaSubject: `free:local:${deviceKey}`,
@@ -201,6 +398,17 @@ export async function readQuotaIdentity(
   }
 
   if (deviceKey) {
+    if (isLegacyClientCompatibilityRequestAuthorized(request)) {
+      return {
+        quotaSubject: `free:device:${await sha256Hex(`free-device:${deviceKey}`)}`,
+        plan: "free",
+        identityKind: "device_key",
+        accessMode: "legacy_client_compatibility"
+      };
+    }
+    if (env.INSTALLATION_TOKEN_HMAC_KEY_V1?.trim()) {
+      throw new AppError(401, "Server-issued installation credential is required");
+    }
     return {
       quotaSubject: `free:device:${await sha256Hex(`free-device:${deviceKey}`)}`,
       plan: "free",
@@ -210,6 +418,9 @@ export async function readQuotaIdentity(
 
   const connectingIp = normalizeConnectingIp(request.headers.get("cf-connecting-ip"));
   if (connectingIp) {
+    if (env.INSTALLATION_TOKEN_HMAC_KEY_V1?.trim()) {
+      throw new AppError(401, "Server-issued installation credential is required");
+    }
     return {
       quotaSubject: `free:${await sha256Hex(`free-ip:${connectingIp}`)}`,
       plan: "free",
@@ -327,6 +538,7 @@ export async function grantPurchasedCredits(
     purchasedAt?: string;
   }
 ): Promise<PurchaseCreditGrantResult> {
+  assertPurchasedCreditGrantsEnabled(config);
   const creditsGranted = resolveCreditPackCredits(options.productId);
   if (!creditsGranted) {
     throw new AppError(400, "Unsupported credit product");
@@ -352,12 +564,15 @@ export async function grantPurchasedCredits(
 
   if (transaction.status === "granted") {
     const usage = await loadUsage(identity, env, config);
+    const creditsAppliedToRefundDebt = transaction.debt_offset_applied ?? 0;
     return {
       usage,
       didMutate: false,
       transactionId: options.transactionId,
       productId: transaction.product_id,
-      creditsGranted: transaction.credits_granted,
+      creditsPurchased: transaction.credits_granted,
+      creditsGranted: transaction.credits_granted - creditsAppliedToRefundDebt,
+      creditsAppliedToRefundDebt,
       creditsRemaining: usage.credits?.totalRemaining ?? 0,
       transactionStatus: "granted"
     };
@@ -371,8 +586,9 @@ export async function grantPurchasedCredits(
     purchasedAt: options.purchasedAt,
     purchaseCredits: creditsGranted
   });
+  const creditsAppliedToRefundDebt = result.creditOperation?.purchaseDebtOffset ?? 0;
   try {
-    await markPurchaseTransactionGranted(env, options.transactionId);
+    await markPurchaseTransactionGranted(env, options.transactionId, creditsAppliedToRefundDebt);
   } catch (error) {
     await enqueueCreditAuditRepair(env, {
       kind: "purchase_transaction_mark",
@@ -381,7 +597,8 @@ export async function grantPurchasedCredits(
       transactionId: options.transactionId,
       source: "grantPurchasedCredits.markPurchaseTransactionGranted",
       payload: {
-        transactionId: options.transactionId
+        transactionId: options.transactionId,
+        debtOffsetApplied: creditsAppliedToRefundDebt
       }
     });
     logWarnEvent("purchase_transaction_mark_granted_failed", {
@@ -398,10 +615,120 @@ export async function grantPurchasedCredits(
     didMutate: result.didMutate,
     transactionId: options.transactionId,
     productId: options.productId,
-    creditsGranted,
+    creditsPurchased: creditsGranted,
+    creditsGranted: creditsGranted - creditsAppliedToRefundDebt,
+    creditsAppliedToRefundDebt,
     creditsRemaining: result.creditsRemaining,
     transactionStatus: "granted"
   };
+}
+
+export async function applyConsumablePurchaseNotification(
+  env: Env,
+  options: {
+    action: "refund" | "reverse_refund";
+    notificationId: string;
+    transactionId: string;
+    productId: string;
+  }
+): Promise<ConsumablePurchaseNotificationResult> {
+  const catalogCredits = resolveCreditPackCredits(options.productId);
+  if (!catalogCredits) {
+    throw new AppError(400, "Unsupported credit product");
+  }
+  const transaction = await loadPurchaseTransactionRow(env, options.transactionId);
+  if (!transaction) {
+    return {
+      found: false,
+      transactionId: options.transactionId,
+      productId: options.productId,
+      outcome: "unclaimed",
+      purchaseState: "unclaimed",
+      didMutate: false
+    };
+  }
+  if (transaction.product_id !== options.productId || transaction.credits_granted !== catalogCredits) {
+    throw new AppError(409, "Purchase transaction authority mismatch");
+  }
+
+  const identity: QuotaIdentity = {
+    quotaSubject: transaction.user_id,
+    plan: "free",
+    identityKind: "account"
+  };
+  const response = await env.USER_QUOTA.getByName(transaction.user_id).fetch(
+    "https://do/purchase-adjustment",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: options.action,
+        quotaSubject: transaction.user_id,
+        transactionId: transaction.transaction_id,
+        productId: transaction.product_id,
+        creditsGranted: transaction.credits_granted,
+        notificationId: options.notificationId
+      })
+    }
+  );
+  const payload = await response.json() as Omit<ConsumablePurchaseNotificationResult, "found" | "quotaSubject" | "transactionId" | "productId"> & {
+    error?: string;
+  };
+  if (!response.ok) {
+    throw new AppError(response.status, payload.error ?? "Purchase credit adjustment failed");
+  }
+  if (
+    !payload.outcome ||
+    !payload.purchaseState ||
+    typeof payload.didMutate !== "boolean"
+  ) {
+    throw new AppError(502, "Purchase credit adjustment returned an invalid response");
+  }
+  if (payload.purchaseState === "unclaimed" && transaction.status === "granted") {
+    throw new AppError(409, "Granted purchase is missing durable credit authority");
+  }
+
+  if (options.action === "refund") {
+    if (payload.purchaseState === "refunded" || payload.purchaseState === "unclaimed") {
+      await markPurchaseTransactionRefunded(env, transaction, options.notificationId, payload.operation);
+    }
+  } else if (payload.purchaseState === "reinstated") {
+    await markPurchaseTransactionRefundReversed(env, transaction, options.notificationId, payload.operation);
+  } else if (payload.purchaseState === "unclaimed") {
+    await markUnclaimedPurchaseRefundReversed(env, transaction, options.notificationId);
+  }
+
+  if (payload.operation) {
+    await writeCreditLedgerEntry(env, identity, payload.operation);
+  }
+  logEvent("credit_purchase_notification_adjustment", {
+    quotaSubjectHash: hashForLog(transaction.user_id),
+    transactionIdSuffix: suffixForLog(transaction.transaction_id),
+    notificationIdSuffix: suffixForLog(options.notificationId),
+    action: options.action,
+    outcome: payload.outcome,
+    didMutate: payload.didMutate,
+    delta: payload.operation?.delta ?? 0,
+    refundDebtAfter: payload.operation?.purchaseRefundDebtAfter ?? null
+  });
+  return {
+    found: true,
+    quotaSubject: transaction.user_id,
+    transactionId: transaction.transaction_id,
+    productId: transaction.product_id,
+    outcome: payload.outcome,
+    purchaseState: payload.purchaseState,
+    didMutate: payload.didMutate,
+    operation: payload.operation
+  };
+}
+
+export function assertPurchasedCreditGrantsEnabled(
+  config: Pick<RemoteConfig, "creditBillingEnabled" | "consumablePurchasesEnabled" | "emergencyPaidGrantsDisabled">
+): void {
+  if (!config.creditBillingEnabled || !config.consumablePurchasesEnabled || config.emergencyPaidGrantsDisabled) {
+    throw new AppError(503, "Credit purchases are temporarily unavailable");
+  }
 }
 
 export async function grantEvalCredits(
@@ -752,7 +1079,7 @@ async function mutateCreditUsage(
   if (payload.monthlyGrant) {
     await persistMonthlyGrant(env, identity, payload.monthlyGrant);
   }
-  if (payload.creditOperation && payload.creditOperation.delta !== 0) {
+  if (payload.creditOperation) {
     await persistCreditLedgerEntry(env, identity, payload.creditOperation);
   }
 
@@ -843,7 +1170,7 @@ async function mutatePurchaseCreditGrant(
   if (payload.monthlyGrant) {
     await persistMonthlyGrant(env, identity, payload.monthlyGrant);
   }
-  if (payload.creditOperation && payload.creditOperation.delta !== 0) {
+  if (payload.creditOperation) {
     await persistCreditLedgerEntry(env, identity, payload.creditOperation);
   }
 
@@ -1079,7 +1406,18 @@ async function ensurePurchaseTransactionRow(
     )
     .run();
 
-  const row = await env.DB.prepare(
+  const row = await loadPurchaseTransactionRow(env, options.transactionId);
+  if (!row) {
+    throw new AppError(500, "Purchase transaction could not be recorded");
+  }
+  return row;
+}
+
+async function loadPurchaseTransactionRow(
+  env: Env,
+  transactionId: string
+): Promise<PurchaseTransactionRow | null> {
+  return env.DB.prepare(
     `SELECT
       user_id,
       product_id,
@@ -1087,28 +1425,130 @@ async function ensurePurchaseTransactionRow(
       original_transaction_id,
       credits_granted,
       status,
+      debt_offset_applied,
+      refunded_at,
+      refund_reversed_at,
+      refund_available_removed,
+      refund_debt_created,
+      refund_debt_released,
+      refund_debt_settled_restored,
+      refund_credits_restored,
+      refund_notification_uuid,
+      refund_reversed_notification_uuid,
       purchased_at,
       created_at,
       updated_at
     FROM purchase_transactions
     WHERE transaction_id = ?`
   )
-    .bind(options.transactionId)
+    .bind(transactionId)
     .first<PurchaseTransactionRow>();
-  if (!row) {
-    throw new AppError(500, "Purchase transaction could not be recorded");
-  }
-  return row;
 }
 
-async function markPurchaseTransactionGranted(env: Env, transactionId: string): Promise<void> {
+async function markPurchaseTransactionGranted(
+  env: Env,
+  transactionId: string,
+  debtOffsetApplied: number
+): Promise<void> {
   await env.DB.prepare(
     `UPDATE purchase_transactions
-    SET status = ?, updated_at = ?
-    WHERE transaction_id = ?`
+    SET status = ?, debt_offset_applied = ?, updated_at = ?
+    WHERE transaction_id = ? AND status = 'pending'`
   )
-    .bind("granted", new Date().toISOString(), transactionId)
+    .bind("granted", debtOffsetApplied, new Date().toISOString(), transactionId)
     .run();
+}
+
+async function markPurchaseTransactionRefunded(
+  env: Env,
+  transaction: PurchaseTransactionRow,
+  notificationId: string,
+  operation?: CreditOperationResult
+): Promise<void> {
+  const now = operation?.createdAt ?? new Date().toISOString();
+  const result = await env.DB.prepare(
+    `UPDATE purchase_transactions
+     SET status = 'refunded',
+         refunded_at = ?,
+         refund_available_removed = ?,
+         refund_debt_created = ?,
+         refund_notification_uuid = COALESCE(refund_notification_uuid, ?),
+         updated_at = ?
+     WHERE transaction_id = ? AND user_id = ? AND product_id = ? AND credits_granted = ?`
+  ).bind(
+    now,
+    operation?.refundAvailableRemoved ?? 0,
+    operation?.refundDebtCreated ?? 0,
+    notificationId,
+    new Date().toISOString(),
+    transaction.transaction_id,
+    transaction.user_id,
+    transaction.product_id,
+    transaction.credits_granted
+  ).run();
+  assertPurchaseProjectionUpdated(result);
+}
+
+async function markPurchaseTransactionRefundReversed(
+  env: Env,
+  transaction: PurchaseTransactionRow,
+  notificationId: string,
+  operation?: CreditOperationResult
+): Promise<void> {
+  const result = await env.DB.prepare(
+    `UPDATE purchase_transactions
+     SET status = 'refund_reversed',
+         refund_reversed_at = ?,
+         refund_debt_released = ?,
+         refund_debt_settled_restored = ?,
+         refund_credits_restored = ?,
+         refund_reversed_notification_uuid = COALESCE(refund_reversed_notification_uuid, ?),
+         updated_at = ?
+     WHERE transaction_id = ? AND user_id = ? AND product_id = ? AND credits_granted = ?`
+  ).bind(
+    operation?.createdAt ?? new Date().toISOString(),
+    operation?.refundDebtReleased ?? 0,
+    operation?.refundDebtSettledRestored ?? 0,
+    operation?.refundCreditsRestored ?? 0,
+    notificationId,
+    new Date().toISOString(),
+    transaction.transaction_id,
+    transaction.user_id,
+    transaction.product_id,
+    transaction.credits_granted
+  ).run();
+  assertPurchaseProjectionUpdated(result);
+}
+
+async function markUnclaimedPurchaseRefundReversed(
+  env: Env,
+  transaction: PurchaseTransactionRow,
+  notificationId: string
+): Promise<void> {
+  const result = await env.DB.prepare(
+    `UPDATE purchase_transactions
+     SET status = 'pending',
+         refund_reversed_at = ?,
+         refund_reversed_notification_uuid = COALESCE(refund_reversed_notification_uuid, ?),
+         updated_at = ?
+     WHERE transaction_id = ? AND user_id = ? AND product_id = ? AND credits_granted = ?`
+  ).bind(
+    new Date().toISOString(),
+    notificationId,
+    new Date().toISOString(),
+    transaction.transaction_id,
+    transaction.user_id,
+    transaction.product_id,
+    transaction.credits_granted
+  ).run();
+  assertPurchaseProjectionUpdated(result);
+}
+
+function assertPurchaseProjectionUpdated(result: D1Result<unknown>): void {
+  const changes = Number(result.meta?.changes);
+  if (Number.isFinite(changes) && changes < 1) {
+    throw new AppError(409, "Purchase transaction authority changed during notification processing");
+  }
 }
 
 async function persistMonthlyGrant(env: Env, identity: QuotaIdentity, grant: MonthlyGrantResult): Promise<void> {
@@ -1190,43 +1630,7 @@ async function persistCreditLedgerEntry(
   operation: CreditOperationResult
 ): Promise<void> {
   try {
-    await env.DB.prepare(
-      `INSERT OR IGNORE INTO credit_ledger (
-        id,
-        user_id,
-        operation_id,
-        type,
-        delta,
-        balance_after,
-        monthly_balance_after,
-        purchased_balance_after,
-        reference_type,
-        reference_id,
-        metadata_json,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        crypto.randomUUID(),
-        identity.quotaSubject,
-        operation.operationId,
-        operation.type,
-        operation.delta,
-        operation.balanceAfter,
-        operation.monthlyBalanceAfter,
-        operation.purchasedBalanceAfter,
-        operation.referenceType ?? null,
-        operation.referenceId ?? null,
-        JSON.stringify({
-          status: operation.status,
-          originalOperationId: operation.originalOperationId ?? null,
-          rewardedAdBalanceAfter: operation.rewardedAdBalanceAfter ?? null,
-          rewardedAdExpiresAt: operation.rewardedAdExpiresAt ?? null,
-          creditSource: operation.type === "admob_rewarded_grant" ? "admob_rewarded" : null
-        }),
-        operation.createdAt
-      )
-      .run();
+    await writeCreditLedgerEntry(env, identity, operation);
   } catch (error) {
     await enqueueCreditAuditRepair(env, {
       kind: "credit_ledger",
@@ -1244,6 +1648,65 @@ async function persistCreditLedgerEntry(
       reason: error instanceof Error ? error.message : String(error)
     });
   }
+}
+
+async function writeCreditLedgerEntry(
+  env: Env,
+  identity: QuotaIdentity,
+  operation: CreditOperationResult
+): Promise<void> {
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO credit_ledger (
+      id,
+      user_id,
+      operation_id,
+      type,
+      delta,
+      balance_after,
+      monthly_balance_after,
+      purchased_balance_after,
+      reference_type,
+      reference_id,
+      metadata_json,
+      created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      crypto.randomUUID(),
+      identity.quotaSubject,
+      operation.operationId,
+      operation.type,
+      operation.delta,
+      operation.balanceAfter,
+      operation.monthlyBalanceAfter,
+      operation.purchasedBalanceAfter,
+      operation.referenceType ?? null,
+      operation.referenceId ?? null,
+      JSON.stringify({
+        status: operation.status,
+        originalOperationId: operation.originalOperationId ?? null,
+        rewardedAdBalanceAfter: operation.rewardedAdBalanceAfter ?? null,
+        rewardedAdExpiresAt: operation.rewardedAdExpiresAt ?? null,
+        creditsRequired: operation.creditsRequired ?? null,
+        consumedMonthly: operation.consumedMonthly ?? null,
+        consumedRewardedAd: operation.consumedRewardedAd ?? null,
+        consumedWelcome: operation.consumedWelcome ?? null,
+        consumedPurchased: operation.consumedPurchased ?? null,
+        consumedMonthlyPeriodStart: operation.consumedMonthlyPeriodStart ?? null,
+        consumedMonthlyPeriodEnd: operation.consumedMonthlyPeriodEnd ?? null,
+        consumedRewardedAdLots: operation.consumedRewardedAdLots ?? [],
+        purchaseRefundDebtAfter: operation.purchaseRefundDebtAfter ?? null,
+        purchaseDebtOffset: operation.purchaseDebtOffset ?? null,
+        refundAvailableRemoved: operation.refundAvailableRemoved ?? null,
+        refundDebtCreated: operation.refundDebtCreated ?? null,
+        refundDebtReleased: operation.refundDebtReleased ?? null,
+        refundDebtSettledRestored: operation.refundDebtSettledRestored ?? null,
+        refundCreditsRestored: operation.refundCreditsRestored ?? null,
+        creditSource: operation.type === "admob_rewarded_grant" ? "admob_rewarded" : null
+      }),
+      operation.createdAt
+    )
+    .run();
 }
 
 export function buildQuotaDateJST(): string {

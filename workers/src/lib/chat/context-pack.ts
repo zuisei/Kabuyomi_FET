@@ -1,6 +1,6 @@
-import type { FilingCacheRecord, MetricSnapshot, SourceChunkRecord } from "../../env";
+import type { FilingCacheRecord, MetricSnapshot, SourceChunkRecord, VerifiedFinancialFact } from "../../env";
 import { buildChatFactualPack, type ChatFactualPack } from "./context-factual-pack";
-import { findMetricSourceChunk, selectIntentMetrics } from "./context-metrics";
+import { findMetricSourceChunks, selectIntentMetrics } from "./context-metrics";
 import {
   businessContextPattern,
   isAccountingEstimateRiskDistractor,
@@ -26,6 +26,7 @@ import {
   type NarrativeQuality
 } from "./context-quality";
 import type { QuestionIntent } from "./intent";
+import { buildVerifiedFinancialFacts } from "./verified-financial-facts";
 
 export type { ChatContextPackMode } from "./context-profile";
 export { resolveContentMode } from "./context-profile";
@@ -34,6 +35,7 @@ export interface ChatContextPack {
   questionIntent: QuestionIntent;
   contentMode: "full" | "metrics_only";
   metrics: MetricSnapshot[];
+  verifiedFacts: VerifiedFinancialFact[];
   factualPack?: ChatFactualPack;
   sourceChunks: SourceChunkRecord[];
   contextTokenBudget: number;
@@ -177,10 +179,15 @@ export function buildChatContextPack(
   const selectedChunks = trimToBudget(expandedChunks, profile.tokenBudget);
   const sourceSelectionStrategy = strategyParts.join(":");
   const selectionDiagnostics = finalizeSelectionDiagnostics(diagnostics, selectedChunks, profile, sourceSelectionStrategy);
+  const verifiedFacts = buildVerifiedFinancialFacts(filing, {
+    metrics,
+    sourceChunks: selectedChunks
+  });
   return {
     questionIntent,
     contentMode: resolveContentMode(filing),
     metrics,
+    verifiedFacts,
     factualPack,
     sourceChunks: selectedChunks,
     contextTokenBudget: profile.tokenBudget,
@@ -356,6 +363,7 @@ function orderSelectedSources(sourceChunks: SourceChunkRecord[], questionIntent:
   if (
     questionIntent === "margin_profitability" ||
     questionIntent === "cash_flow" ||
+    questionIntent === "liquidity_debt" ||
     questionIntent === "historical_comparison"
   ) {
     return sourceChunks;
@@ -388,7 +396,9 @@ function addMetricSources(
   add: (chunk: SourceChunkRecord | undefined) => void
 ): void {
   for (const metric of metrics) {
-    add(findMetricSourceChunk(sourceChunks, metric));
+    for (const source of findMetricSourceChunks(sourceChunks, metric)) {
+      add(source);
+    }
   }
 }
 
@@ -665,7 +675,7 @@ function supplementalPriorityPattern(questionIntent: QuestionIntent): RegExp | n
   if (questionIntent !== "yoy_change" && questionIntent !== "mda_summary") {
     return null;
   }
-  return /total net revenue|sales and revenues|net sales|revenue was|revenues were|revenue increased|revenue decreased|net sales increased|net sales decreased|driven by|primarily due to|reflected|reflecting|partially offset|offset by|net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|commodity prices?|crude demand|natural gas prices?|production volumes?|refining margins?|chemical margins?|sales volume|price realization|backlog|dealer inventory|equipment to end users|comparable sales|average ticket|transactions?|traffic|ecommerce|e-commerce|membership income|unit volumes/gi;
+  return /automotive sales revenue|services and other revenue|total net revenue|sales and revenues|net sales|revenue was|revenues were|revenue increased|revenue decreased|net sales increased|net sales decreased|google services revenues?|google cloud revenues?|youtube ads revenues?|subscriptions?, platforms?, and devices revenues?|aws sales|north america sales|business unit revenue increased|driven by|primarily due to|reflected|reflecting|partially offset|offset by|net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|commodity prices?|crude demand|natural gas prices?|production volumes?|refining margins?|chemical margins?|sales volume|price realization|average selling prices?|bit shipments?|cash deliveries|backlog|dealer inventory|equipment to end users|comparable sales|average ticket|transactions?|traffic|ecommerce|e-commerce|membership income|unit volumes/gi;
 }
 
 function supplementalPattern(questionIntent: QuestionIntent): RegExp {
@@ -884,9 +894,9 @@ function supplementalWindowScore(text: string, questionIntent: QuestionIntent): 
 
 function revenueDriverWindowQualityScore(text: string): number {
   const haystack = text.toLowerCase();
-  const hasCausalLanguage = /driven by|primarily due to|reflected|reflecting|partially offset|offset by|largely offset|resulting in/.test(haystack);
+  const hasRevenueCausalLink = hasRevenueCausalRelationship(haystack);
   const hasConcreteSectorKpi =
-    /net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|card services|commodity prices?|crude|natural gas|production volumes?|refining margins?|chemical margins?|upstream|downstream|sales volume|price realization|backlog|dealer inventory|equipment to end users|construction industries|resource industries|power & energy|comparable sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership|average ticket|unit volumes/.test(haystack);
+    /net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|card services|commodity prices?|crude|natural gas|production volumes?|refining margins?|chemical margins?|upstream|downstream|sales volume|price realization|average selling prices?|bit shipments?|cash deliveries|automotive sales|services and other revenue|backlog|dealer inventory|equipment to end users|construction industries|resource industries|power & energy|comparable sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership|average ticket|unit volumes|google services|google cloud|youtube ads|paid subscriptions?|customer usage|unit sales/.test(haystack);
   let score = 0;
   if (/(total net revenue|net sales|sales and revenues|sales|revenue).{0,220}(up|down|increased|decreased|growth|decline|higher|lower|compared)/.test(haystack)) {
     score += 45;
@@ -894,7 +904,7 @@ function revenueDriverWindowQualityScore(text: string): number {
   if (/(up|down|increased|decreased|growth|decline|higher|lower).{0,220}(total net revenue|net sales|sales and revenues|sales|revenue)/.test(haystack)) {
     score += 35;
   }
-  if (hasCausalLanguage) {
+  if (hasRevenueCausalLink) {
     score += 45;
   }
   if (/net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|card services/.test(haystack)) {
@@ -909,13 +919,22 @@ function revenueDriverWindowQualityScore(text: string): number {
   if (/comparable sales|transactions?|traffic|ticket|ecommerce|e-commerce|membership|average ticket|unit volumes/.test(haystack)) {
     score += 35;
   }
+  if (/automotive sales|services and other revenue|cash deliveries|average selling prices?|sales mix|used vehicle sales volume|supercharging|insurance business revenue/.test(haystack)) {
+    score += 45;
+  }
+  if (/google services|google cloud|youtube ads|paid subscriptions?|aws sales|customer usage|unit sales|third-party sellers?|bit shipments?/.test(haystack)) {
+    score += 45;
+  }
+  if (/(?:cash provided by operating activities|operating cash flows?|capital expenditures?|technology and infrastructure costs?|fulfillment costs?|operating expenses?|net income|earnings driver analysis).{0,220}(?:driven by|primarily due to|reflecting)/.test(haystack) && !hasRevenueCausalLink) {
+    score -= 180;
+  }
   if (/risk factors?|forward-looking statements?|available information|properties|website/.test(haystack) && !/driven by|primarily due to|reflected|reflecting|total net revenue|net sales|sales and revenues/.test(haystack)) {
     score -= 80;
   }
   if (isBroadEnergyContextWithoutPeriodResult(haystack)) {
     score -= 140;
   }
-  if (!hasCausalLanguage && !hasConcreteSectorKpi) {
+  if (!hasRevenueCausalLink && !hasConcreteSectorKpi) {
     score -= 120;
   }
   return score;
@@ -925,18 +944,29 @@ function hasConcreteRevenueDriverWindow(text: string): boolean {
   const haystack = text.toLowerCase();
   const hasRevenueMovement =
     /(total net revenue|net sales|sales and revenues|sales|revenue|comparable sales).{0,220}(up|down|increased|decreased|growth|decline|higher|lower|compared)|(?:up|down|increased|decreased|growth|decline|higher|lower).{0,220}(total net revenue|net sales|sales and revenues|sales|revenue|comparable sales)/.test(haystack);
-  const hasCausalLanguage = /driven by|primarily due to|reflected|reflecting|partially offset|offset by|resulting in/.test(haystack);
   const hasBankEvidence = /net interest income|noninterest revenue|noninterest income|markets revenue|investment banking fees|card services/.test(haystack);
   const hasEnergyEvidence = /commodity prices?|crude demand|natural gas prices?|production volumes?|refining margins?|chemical margins?|upstream|downstream/.test(haystack);
   const hasIndustrialEvidence = /sales volume|price realization|backlog|dealer inventory|equipment to end users|construction industries|resource industries|power & energy/.test(haystack);
   const hasRetailEvidence = /comparable sales|transactions?|traffic|average ticket|ecommerce|e-commerce|membership|unit volumes/.test(haystack);
-  const hasSectorEvidence = hasBankEvidence || hasEnergyEvidence || hasIndustrialEvidence || hasRetailEvidence;
+  const hasAutoEvidence = /automotive sales|services and other revenue|cash deliveries|average selling prices?|sales mix|used vehicle sales volume|supercharging|insurance business revenue/.test(haystack);
+  const hasTechnologyEvidence = /google services|google cloud|youtube ads|paid subscriptions?|aws sales|customer usage|unit sales|third-party sellers?|average selling prices?|bit shipments?/.test(haystack);
+  const hasSectorEvidence = hasBankEvidence || hasEnergyEvidence || hasIndustrialEvidence || hasRetailEvidence || hasAutoEvidence || hasTechnologyEvidence;
 
   if (hasEnergyEvidence && !hasCurrentPeriodEnergyResultContext(haystack)) {
     return false;
   }
 
-  return (hasRevenueMovement && (hasCausalLanguage || hasSectorEvidence)) || (hasCausalLanguage && hasSectorEvidence);
+  const hasRevenueCausalLink = hasRevenueCausalRelationship(haystack);
+  return (hasRevenueMovement && (hasRevenueCausalLink || hasSectorEvidence)) || (hasRevenueCausalLink && hasSectorEvidence);
+}
+
+function hasRevenueCausalRelationship(text: string): boolean {
+  const subject = "(?:total net revenue|total revenues?|net sales|sales and revenues|automotive sales revenue|services and other revenue|google services revenues?|google cloud revenues?|youtube ads revenues?|aws sales|north america sales|business unit revenue|comparable sales|net interest income|noninterest revenue)";
+  const movement = "(?:increased|decreased|grew|growth|higher|lower|up|down)";
+  const cause = "(?:driven by|primarily due to|due to|reflecting|attributable to|positively contributed|partially offset)";
+  return new RegExp(`${subject}.{0,300}${movement}.{0,260}${cause}`, "i").test(text) ||
+    new RegExp(`${subject}.{0,300}${cause}.{0,260}${movement}`, "i").test(text) ||
+    new RegExp(`${movement}.{0,180}${subject}.{0,260}${cause}`, "i").test(text);
 }
 
 function hasCurrentPeriodEnergyResultContext(text: string): boolean {
@@ -986,6 +1016,12 @@ function driverSpecificityScore(text: string): number {
   }
   if (/customer demand|end-market demand|market demand|new customers?|existing customers?|additional modules?|module adoption|annual recurring revenue|\barr\b|subscription revenue/.test(haystack)) {
     score += 45;
+  }
+  if (/automotive sales|cash deliveries|average selling prices?|services and other revenue|used vehicle sales volume|supercharging|insurance business revenue/.test(haystack)) {
+    score += 55;
+  }
+  if (/google services|google cloud|youtube ads|paid subscriptions?|aws sales|customer usage|unit sales|third-party sellers?|bit shipments?/.test(haystack)) {
+    score += 55;
   }
   if (/customer-centric experience|our stores|our brands|we operate|we provide|we offer/.test(haystack) && !/primarily due to|driven by|attributable to|resulted from|because of|partially offset|offset by/.test(haystack)) {
     score -= 30;

@@ -11,8 +11,9 @@ vi.mock("../src/clients/sec", () => ({
 }));
 
 import { backfillHistoricalFilings, loadHistoricalOverview, maybeBuildHistoricalChatResponse } from "../src/lib/history-store";
-import type { FilingReference } from "../src/env";
+import type { FilingCacheRecord, FilingReference } from "../src/env";
 import { fetchSubmissionsWithHistory, listSupportedFilings, lookupTicker } from "../src/clients/sec";
+import { readHistoricalFinancialFactEvidence } from "../src/lib/chat/historical-financial-fact";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -56,6 +57,19 @@ function makeHistoricalBindingsEnv() {
                 results:
                   subject === "0001067983"
                     ? [
+                        {
+                          filingKey: "v3:0001067983:3",
+                          ticker: "BRK-B",
+                          formType: "10-K",
+                          filedAt: "2026-03-02",
+                          periodOfReport: "2025-12-31",
+                          periodEnd: "2025-12-31",
+                          logicalName: "revenue",
+                          value: 110,
+                          unit: "USDm",
+                          yoyPercent: 10,
+                          sourceId: "S10"
+                        },
                         {
                           filingKey: "v3:0001067983:1",
                           ticker: "BRK-A",
@@ -119,7 +133,52 @@ function makeHistoricalBindingsEnv() {
       batch: vi.fn().mockResolvedValue([])
     },
     FILINGS_BUCKET: {
-      get: vi.fn(),
+      get: vi.fn(async (key: string) => {
+        const filingKey = key.replace(/^filings\//, "").replace(/\.json$/, "");
+        const periodByKey: Record<string, { filedAt: string; periodEnd: string; value: number; sourceId: string }> = {
+          "v3:0001067983:1": { filedAt: "2025-02-20", periodEnd: "2024-12-31", value: 100, sourceId: "S9" },
+          "v3:0001067983:2": { filedAt: "2024-02-20", periodEnd: "2023-12-31", value: 90, sourceId: "S8" }
+        };
+        const entry = periodByKey[filingKey];
+        if (!entry) return null;
+        return {
+          text: async () => JSON.stringify({
+            filingKey,
+            ticker: "BRK-A",
+            companyName: "Berkshire Hathaway",
+            cik: "0001067983",
+            formType: "10-K",
+            filedAt: entry.filedAt,
+            periodOfReport: entry.periodEnd,
+            primaryDocumentUrl: `https://example.com/${filingKey.at(-1)}`,
+            mdaText: "",
+            mdaTokenCount: 0,
+            metrics: [{
+              logicalName: "revenue",
+              tagUsed: "Revenue",
+              value: entry.value,
+              unit: "USDm",
+              periodEnd: entry.periodEnd,
+              periodKind: "annual"
+            }],
+            sourceChunks: [{
+              sourceId: entry.sourceId,
+              sectionType: "xbrl_metric",
+              sectionTitle: "Revenue",
+              sourceLabel: "XBRL Revenue",
+              text: `Revenue ${entry.value} USDm`,
+              startOffset: 0,
+              endOffset: 20,
+              tagName: "Revenue",
+              sortOrder: 1
+            }],
+            summary: { verdict: "", highlights: [], changes: [] },
+            generatedAt: "2026-03-02T00:00:00Z",
+            extractorVersion: "v3",
+            promptVersion: "v2"
+          })
+        };
+      }),
       put: vi.fn(),
       head: vi.fn().mockResolvedValue({ key: "archived" })
     }
@@ -307,6 +366,63 @@ describe("history backfill guardrails", () => {
     ]);
   });
 
+  it("passes indexed filings through bounded storage when full content is requested", async () => {
+    vi.mocked(lookupTicker).mockResolvedValue({
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      cik: "0000320193",
+      exchange: "Nasdaq"
+    });
+    vi.mocked(fetchSubmissionsWithHistory).mockResolvedValue({ filings: { recent: { form: [], accessionNumber: [], primaryDocument: [], filingDate: [], reportDate: [] } } } as never);
+    vi.mocked(listSupportedFilings).mockReturnValue([
+      makeFiling("AAPL", "10-K", "0001-01", "2025-12-31"),
+      makeFiling("AAPL", "10-K", "0001-02", "2024-12-31")
+    ]);
+
+    const env = {
+      DB: {
+        prepare: vi.fn((sql: string) => ({
+          bind: vi.fn(() => ({
+            all: vi.fn().mockResolvedValue(sql.includes("SELECT filing_key, ticker FROM filings")
+              ? { results: [{ filing_key: "v1:0000000001:000101", ticker: "AAPL" }] }
+              : { results: [] }),
+            first: vi.fn().mockResolvedValue(null)
+          }))
+        })),
+        batch: vi.fn().mockResolvedValue([])
+      },
+      FILINGS_BUCKET: { get: vi.fn(), put: vi.fn(), head: vi.fn() }
+    };
+    const ensureStoredFiling = vi.fn(async (_filing: FilingReference) => ({
+      filingKey: "v1:0000000001:000101",
+      contentMode: "full"
+    }));
+
+    const result = await backfillHistoricalFilings(
+      {
+        tickers: ["AAPL"],
+        years: 3,
+        forms: ["10-K"],
+        maxFilingsPerTicker: 2,
+        maxTotalFilings: 1,
+        contentMode: "full"
+      },
+      env as never,
+      { extractorVersion: "v1" } as never,
+      ensureStoredFiling as never
+    );
+
+    expect(ensureStoredFiling).toHaveBeenCalledTimes(1);
+    expect(ensureStoredFiling.mock.calls[0]?.[0].accessionNumber).toBe("0001-01");
+    expect(result.processedFilings).toEqual([{
+      ticker: "AAPL",
+      filingKey: "v1:0000000001:000101"
+    }]);
+    expect(result.skippedFilings).toEqual([]);
+    expect(result.totalCapReached).toBe(true);
+    expect(result.nextCursorByTicker).toEqual({ AAPL: 1 });
+  });
+
   it("honors explicit total filing caps above the default batch size", async () => {
     vi.mocked(lookupTicker).mockImplementation(async (ticker: string) => ({
       ticker,
@@ -450,7 +566,7 @@ describe("history backfill guardrails", () => {
 
     expect(overview?.comparisonBasis).toBe("annual");
     expect(overview?.series).toHaveLength(1);
-    expect(overview?.series[0]?.points).toHaveLength(2);
+    expect(overview?.series[0]?.points).toHaveLength(3);
     expect(env.DB.prepare).toHaveBeenCalledWith(expect.stringContaining("substr(f.filing_key, 1, instr(f.filing_key, ':') - 1) = ?"));
   });
 
@@ -467,8 +583,25 @@ describe("history backfill guardrails", () => {
         primaryDocumentUrl: "https://www.sec.gov/Archives/test.htm",
         mdaText: "",
         mdaTokenCount: 0,
-        metrics: [],
-        sourceChunks: [],
+        metrics: [{
+          logicalName: "revenue",
+          tagUsed: "Revenue",
+          value: 110,
+          unit: "USDm",
+          periodEnd: "2025-12-31",
+          periodKind: "annual"
+        }],
+        sourceChunks: [{
+          sourceId: "S10",
+          sectionType: "xbrl_metric",
+          sectionTitle: "Revenue",
+          sourceLabel: "XBRL Revenue",
+          text: "Revenue 110 USDm",
+          startOffset: 0,
+          endOffset: 17,
+          tagName: "Revenue",
+          sortOrder: 1
+        }],
         summary: { verdict: "", highlights: [], changes: [] },
         generatedAt: "2026-04-19T00:00:00.000Z",
         extractorVersion: "v3",
@@ -480,5 +613,294 @@ describe("history backfill guardrails", () => {
 
     expect(response).not.toBeNull();
     expect(response?.sources.length).toBeGreaterThan(0);
+  });
+
+  it("refuses Q07 comparisons when typed duration scopes are incompatible", async () => {
+    const current: FilingCacheRecord = {
+      filingKey: "v6:0000320193:current",
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      cik: "0000320193",
+      formType: "10-Q",
+      filedAt: "2026-01-30",
+      periodOfReport: "2025-12-27",
+      primaryDocumentUrl: "https://example.com/current",
+      mdaText: "",
+      mdaTokenCount: 0,
+      metrics: [{
+        logicalName: "revenue",
+        tagUsed: "Revenue",
+        value: 143_756_000_000,
+        unit: "USD",
+        periodStart: "2025-09-28",
+        periodEnd: "2025-12-27",
+        periodKind: "quarter"
+      }],
+      sourceChunks: [{
+        sourceId: "S9", sectionType: "xbrl_metric", sectionTitle: "Revenue", sourceLabel: "XBRL Revenue",
+        text: "Revenue 143756000000 USD", startOffset: 0, endOffset: 24, tagName: "Revenue", sortOrder: 1
+      }],
+      summary: { verdict: "", highlights: [], changes: [] },
+      generatedAt: "2026-01-30T00:00:00Z",
+      extractorVersion: "v6",
+      promptVersion: "v2"
+    };
+    const prior: FilingCacheRecord = {
+      ...current,
+      filingKey: "v6:0000320193:prior",
+      filedAt: "2025-08-01",
+      periodOfReport: "2025-06-28",
+      primaryDocumentUrl: "https://example.com/prior",
+      metrics: [{
+        ...current.metrics[0]!,
+        value: 260_000_000_000,
+        periodStart: "2024-09-29",
+        periodEnd: "2025-06-28",
+        periodKind: "year_to_date"
+      }]
+    };
+    const env = {
+      DB: {
+        prepare: vi.fn((sql: string) => ({
+          bind: vi.fn(() => ({
+            first: vi.fn().mockResolvedValue(
+              sql.includes("period_of_report < ?")
+                ? {
+                    filingKey: prior.filingKey,
+                    filedAt: prior.filedAt,
+                    periodOfReport: prior.periodOfReport,
+                    primaryDocumentUrl: prior.primaryDocumentUrl
+                  }
+                : "existing"
+            ),
+            all: vi.fn().mockResolvedValue({ results: [] })
+          }))
+        })),
+        batch: vi.fn().mockResolvedValue([])
+      },
+      FILINGS_BUCKET: {
+        head: vi.fn().mockResolvedValue({ key: "existing" }),
+        get: vi.fn().mockResolvedValue({ text: async () => JSON.stringify(prior) }),
+        put: vi.fn().mockResolvedValue(undefined)
+      }
+    };
+
+    const response = await maybeBuildHistoricalChatResponse(
+      current,
+      "前回決算と比べて大きく変わった点は？",
+      env as never
+    );
+
+    expect(response).toBeNull();
+  });
+
+  it("does not treat a prewarmed prior-year 10-Q as the immediate prior filing", async () => {
+    const current: FilingCacheRecord = {
+      filingKey: "v7:0001018724:current",
+      ticker: "AMZN",
+      companyName: "Amazon.com, Inc.",
+      cik: "0001018724",
+      formType: "10-Q",
+      filedAt: "2026-04-30",
+      periodOfReport: "2026-03-31",
+      primaryDocumentUrl: "https://example.com/current",
+      mdaText: "",
+      mdaTokenCount: 0,
+      metrics: [{
+        logicalName: "revenue",
+        tagUsed: "Revenue",
+        value: 181_519_000_000,
+        unit: "USD",
+        periodStart: "2026-01-01",
+        periodEnd: "2026-03-31",
+        periodKind: "quarter"
+      }],
+      sourceChunks: [{
+        sourceId: "S1", sectionType: "xbrl_metric", sectionTitle: "Revenue", sourceLabel: "XBRL Revenue",
+        text: "Revenue 181519000000 USD", startOffset: 0, endOffset: 24, tagName: "Revenue", sortOrder: 1
+      }],
+      summary: { verdict: "", highlights: [], changes: [] },
+      generatedAt: "2026-04-30T00:00:00Z",
+      extractorVersion: "v7",
+      promptVersion: "v2"
+    };
+    const prior: FilingCacheRecord = {
+      ...current,
+      filingKey: "v7:0001018724:prior-year",
+      filedAt: "2025-05-02",
+      periodOfReport: "2025-03-31",
+      primaryDocumentUrl: "https://example.com/prior-year",
+      metrics: [{
+        ...current.metrics[0]!,
+        value: 155_667_000_000,
+        periodStart: "2025-01-01",
+        periodEnd: "2025-03-31"
+      }]
+    };
+    const env = {
+      DB: {
+        prepare: vi.fn((sql: string) => ({
+          bind: vi.fn(() => ({
+            first: vi.fn().mockResolvedValue(
+              sql.includes("period_of_report < ?")
+                ? {
+                    filingKey: prior.filingKey,
+                    filedAt: prior.filedAt,
+                    periodOfReport: prior.periodOfReport,
+                    primaryDocumentUrl: prior.primaryDocumentUrl
+                  }
+                : "existing"
+            ),
+            all: vi.fn().mockResolvedValue({ results: [] })
+          }))
+        })),
+        batch: vi.fn().mockResolvedValue([])
+      },
+      FILINGS_BUCKET: {
+        head: vi.fn().mockResolvedValue({ key: "existing" }),
+        get: vi.fn().mockResolvedValue({ text: async () => JSON.stringify(prior) }),
+        put: vi.fn().mockResolvedValue(undefined)
+      }
+    };
+
+    const response = await maybeBuildHistoricalChatResponse(
+      current,
+      "前回決算と比べて大きく変わった点は？",
+      env as never
+    );
+
+    expect(response).toBeNull();
+  });
+
+  it("uses archived typed facts and excludes unlike quarters and YTD rows from a three-year trend", async () => {
+    const makeRecord = ({
+      filingKey,
+      filedAt,
+      periodEnd,
+      periodStart,
+      periodKind,
+      value
+    }: {
+      filingKey: string;
+      filedAt: string;
+      periodEnd: string;
+      periodStart: string;
+      periodKind: "quarter" | "year_to_date";
+      value: number;
+    }): FilingCacheRecord => ({
+      filingKey,
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      cik: "0000320193",
+      formType: "10-Q",
+      filedAt,
+      periodOfReport: periodEnd,
+      primaryDocumentUrl: `https://example.com/${filingKey.split(":").at(-1)}`,
+      mdaText: "",
+      mdaTokenCount: 0,
+      metrics: [{
+        logicalName: "revenue",
+        tagUsed: "Revenue",
+        value,
+        unit: "USD",
+        periodStart,
+        periodEnd,
+        periodKind
+      }],
+      sourceChunks: [{
+        sourceId: "S9",
+        sectionType: "xbrl_metric",
+        sectionTitle: "Revenue",
+        sourceLabel: "XBRL Revenue",
+        text: `Revenue ${value} USD`,
+        startOffset: 0,
+        endOffset: 24,
+        tagName: "Revenue",
+        sortOrder: 1
+      }],
+      summary: { verdict: "", highlights: [], changes: [] },
+      generatedAt: "2026-01-30T00:00:00Z",
+      extractorVersion: "v6",
+      promptVersion: "v2"
+    });
+    const current = makeRecord({
+      filingKey: "v6:0000320193:current",
+      filedAt: "2026-01-30",
+      periodEnd: "2025-12-27",
+      periodStart: "2025-09-28",
+      periodKind: "quarter",
+      value: 143_756_000_000
+    });
+    const wrongSeason = makeRecord({
+      filingKey: "v6:0000320193:wrong-season",
+      filedAt: "2025-10-31",
+      periodEnd: "2025-09-27",
+      periodStart: "2025-06-29",
+      periodKind: "quarter",
+      value: 130_000_000_000
+    });
+    const incompatibleYtd = makeRecord({
+      filingKey: "v6:0000320193:ytd",
+      filedAt: "2025-01-31",
+      periodEnd: "2024-12-28",
+      periodStart: "2024-03-31",
+      periodKind: "year_to_date",
+      value: 250_000_000_000
+    });
+    const comparableQuarter = makeRecord({
+      filingKey: "v6:0000320193:comparable",
+      filedAt: "2024-02-02",
+      periodEnd: "2023-12-30",
+      periodStart: "2023-10-01",
+      periodKind: "quarter",
+      value: 119_580_000_000
+    });
+    const archived = new Map([
+      [wrongSeason.filingKey, wrongSeason],
+      [incompatibleYtd.filingKey, incompatibleYtd],
+      [comparableQuarter.filingKey, comparableQuarter]
+    ]);
+    const rows = [current, wrongSeason, incompatibleYtd, comparableQuarter].map((record) => ({
+      filingKey: record.filingKey,
+      ticker: record.ticker,
+      formType: record.formType,
+      filedAt: record.filedAt,
+      periodOfReport: record.periodOfReport,
+      periodEnd: record.metrics[0]!.periodEnd,
+      logicalName: "revenue",
+      value: record.metrics[0]!.value,
+      unit: record.metrics[0]!.unit,
+      yoyPercent: null,
+      sourceId: "S9",
+      primaryDocumentUrl: record.primaryDocumentUrl
+    }));
+    const env = {
+      DB: {
+        prepare: vi.fn((sql: string) => ({
+          bind: vi.fn(() => ({
+            first: vi.fn().mockResolvedValue(sql.includes("SELECT filing_key FROM filings WHERE filing_key") ? "existing" : null),
+            all: vi.fn().mockResolvedValue({ results: sql.includes("FROM metric_history") ? rows : [] })
+          }))
+        })),
+        batch: vi.fn().mockResolvedValue([])
+      },
+      FILINGS_BUCKET: {
+        head: vi.fn().mockResolvedValue({ key: "existing" }),
+        get: vi.fn(async (key: string) => {
+          const record = archived.get(key.replace(/^filings\//, "").replace(/\.json$/, ""));
+          return record ? { text: async () => JSON.stringify(record) } : null;
+        }),
+        put: vi.fn().mockResolvedValue(undefined)
+      }
+    };
+
+    const response = await maybeBuildHistoricalChatResponse(current, "この3年の売上推移は？", env as never);
+
+    expect(response?.answer).toContain("2025年12月27日");
+    expect(response?.answer).toContain("2023年12月30日");
+    expect(response?.answer).not.toContain("2025年9月27日");
+    expect(response?.answer).not.toContain("2024年12月28日");
+    expect(response?.sources).toHaveLength(2);
+    expect(response?.sources.every((source) => readHistoricalFinancialFactEvidence(source))).toBe(true);
   });
 });

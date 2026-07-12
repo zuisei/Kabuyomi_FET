@@ -13,8 +13,16 @@ vi.mock("../src/lib/quota", () => ({
 
 import { verifyAdMobSsvCallback } from "../src/lib/admob-ssv";
 import { grantRewardedAdCredits, loadUsage, readQuotaIdentity } from "../src/lib/quota";
-import { DEFAULT_REMOTE_CONFIG } from "../src/lib/remote-config";
-import { handleAdMobRewardRoutes } from "../src/routes/admob-rewards";
+import { DEFAULT_REMOTE_CONFIG as BASE_REMOTE_CONFIG } from "../src/lib/remote-config";
+import { buildRewardedCreditCapability, handleAdMobRewardRoutes } from "../src/routes/admob-rewards";
+
+const DEFAULT_REMOTE_CONFIG = {
+  ...BASE_REMOTE_CONFIG,
+  adsEnabled: true,
+  rewardedCreditEnabled: true,
+  rewardedSsvReady: true
+};
+const ENABLED_REMOTE_CONFIG = DEFAULT_REMOTE_CONFIG;
 
 const mockVerifySsv = vi.mocked(verifyAdMobSsvCallback);
 const mockGrantRewardedAdCredits = vi.mocked(grantRewardedAdCredits);
@@ -182,7 +190,9 @@ function createDb(seed?: {
 function envWithDb(db: unknown) {
   return {
     DB: db,
-    ADMOB_REWARDED_AD_UNIT_ID: "ca-app-pub-3940256099942544/1712485313"
+    ADMOB_REWARDED_AD_UNIT_ID: "ca-app-pub-3940256099942544/1712485313",
+    ADMOB_SSV_PUBLIC_KEYS_URL: "https://www.gstatic.com/admob/reward/verifier-keys.json",
+    KABUYOMI_ENV: "production"
   } as never;
 }
 
@@ -216,17 +226,45 @@ describe("AdMob rewarded credits route", () => {
     mockVerifySsv.mockResolvedValue(true);
   });
 
+  it("keeps the released reward capability enabled with the built-in Google SSV key URL", async () => {
+    const { db } = createDb();
+    const capability = await buildRewardedCreditCapability(
+      {
+        DB: db,
+        ADMOB_REWARDED_AD_UNIT_ID: "ca-app-pub-3940256099942544/1712485313",
+        KABUYOMI_ENV: "production"
+      } as never,
+      ENABLED_REMOTE_CONFIG,
+      {
+        quotaSubject: "free:local:device-123",
+        plan: "free",
+        identityKind: "local_device"
+      } as never
+    );
+
+    expect(capability).toMatchObject({
+      enabled: true,
+      ssvReady: true,
+      environment: "production"
+    });
+  });
+
   it("creates a reward intent with a server-defined +2 credit grant and daily cap snapshot", async () => {
     const { db, intents } = createDb();
     const response = await handleAdMobRewardRoutes({
       request: new Request("https://kabuyomi.test/v1/admob/reward-intents", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-device-key": "device-123" },
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123",
+          "x-kabuyomi-ad-unit-id": "ca-app-pub-3940256099942544/1712485313",
+          "x-kabuyomi-ad-environment": "production"
+        },
         body: "{}"
       }),
       url: new URL("https://kabuyomi.test/v1/admob/reward-intents"),
       env: envWithDb(db),
-      config: DEFAULT_REMOTE_CONFIG,
+      config: ENABLED_REMOTE_CONFIG,
       ctx: {} as never
     });
 
@@ -250,12 +288,17 @@ describe("AdMob rewarded credits route", () => {
     const intentResponse = await handleAdMobRewardRoutes({
       request: new Request("https://kabuyomi.test/v1/admob/reward-intents", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-device-key": "device-123" },
+        headers: {
+          "content-type": "application/json",
+          "x-device-key": "device-123",
+          "x-kabuyomi-ad-unit-id": "ca-app-pub-3940256099942544/1712485313",
+          "x-kabuyomi-ad-environment": "production"
+        },
         body: "{}"
       }),
       url: new URL("https://kabuyomi.test/v1/admob/reward-intents"),
       env: envWithDb(db),
-      config: DEFAULT_REMOTE_CONFIG,
+      config: ENABLED_REMOTE_CONFIG,
       ctx: {} as never
     });
     const intentPayload = (await intentResponse?.json()) as { rewardIntentId: string };

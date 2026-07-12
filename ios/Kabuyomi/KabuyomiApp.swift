@@ -28,7 +28,6 @@ struct KabuyomiApp: App {
             AppRootView()
                 .environment(appModel)
                 .environment(\.managedObjectContext, appModel.persistence.viewContext)
-                .preferredColorScheme(.light)
         }
     }
 }

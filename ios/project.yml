@@ -71,8 +71,14 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Kabuyomi/Kabuyomi.entitlements
         PRODUCT_NAME: Kabuyomi
         TARGETED_DEVICE_FAMILY: "1"
+      configs:
+        Debug:
+          APP_ATTEST_ENVIRONMENT: development
+        Release:
+          APP_ATTEST_ENVIRONMENT: production
     postBuildScripts:
       - name: Generate Ad SDK dSYMs for Archive
         basedOnDependencyAnalysis: false

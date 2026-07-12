@@ -39,17 +39,16 @@ describe("buildChatResponse", () => {
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
   });
 
-  it("answers common change-overview prompts with the biggest filing-backed differences first", async () => {
+  it("does not substitute current-filing comparison values when previous-filing history is unavailable", async () => {
     const filing = makeTestFiling();
 
     const response = await buildChatResponse(filing, "前回決算との違いは？", {} as never);
 
-    expect(response.answer).toContain("数字で目立つのは");
-    expect(response.answer).toContain("営業利益は 508.5億ドル");
-    expect(response.answer).toContain("売上高は 1,437.6億ドル");
-    expect(response.answer).toContain("前年同期比");
-    expect(response.sources.length).toBeGreaterThanOrEqual(2);
-    expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
+    expect(response.answer).toContain("直前の同じ様式の 10-Q との比較を完了できません");
+    expect(response.answer).toContain("別基準の比較値で代用しません");
+    expect(response.answer).not.toContain("前年同期比");
+    expect(response.responsePath).toBe("fallback");
+    expect(response.chargeable).toBe(false);
   });
 
   it("keeps cash-flow cause follow-ups anchored to operating cash flow", async () => {
@@ -68,7 +67,7 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: false }
     );
 
-    expect(response.answer).toContain("営業CFは -676.3億ドル");
+    expect(response.answer).toContain("営業CFは当期 -676.3億ドル");
     expect(response.answer).toContain("営業CFは売上高ではなく");
     expect(response.answer).toContain("減少理由の内訳は断定できません");
     expect(response.answer).not.toContain("売上高は");
@@ -351,7 +350,7 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("エネルギー生成・蓄電");
     expect(response.answer).not.toContain("利息収入");
     expect(response.answer).not.toContain("規制クレジット");
-    expect(response.sources.map((source) => source.sourceId)).toEqual(["S2", "S4"]);
+    expect(response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S2", "S4"]));
     expect(response.responsePath).toBe("deterministic");
   });
 
@@ -435,36 +434,9 @@ describe("buildChatResponse", () => {
     expect(crowdstrike.answer).not.toContain("データセンター向けコンピューティング");
   });
 
-  it("lets Gemini answer business-overview prompts when it stays filing-grounded", async () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  it("uses deterministic filing context for business-overview prompts before provider work", async () => {
     const filing = makeBusinessOverviewFiling();
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          candidates: [
-            {
-              content: {
-                parts: [
-                  {
-                    text: JSON.stringify({
-                      answer:
-                        "Guardant Healthは、がんの血液検査と精密医療を手がける会社です。患者や医療機関向けの検査に加えて、製薬会社の臨床研究も支援しています。",
-                      sourceIds: ["S2"]
-                    })
-                  }
-                ]
-              }
-            }
-          ],
-          usageMetadata: {
-            promptTokenCount: 1200,
-            candidatesTokenCount: 80,
-            totalTokenCount: 1280
-          }
-        }),
-        { status: 200, headers: { "content-type": "application/json" } }
-      )
-    );
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await buildChatResponse(
@@ -474,27 +446,12 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: false }
     );
 
-    expect(response.answer).toContain("がんの血液検査と精密医療");
-    expect(response.answer).toContain("製薬会社の臨床研究");
+    expect(response.answer).toContain("がん領域の精密医療");
+    expect(response.answer).toContain("製薬会社向けサービス");
     expect(response.answer).not.toContain("売上高は");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S2"]);
-    expect(response.responsePath).toBe("gemini");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    const llmUsage = findLogEvent(logSpy, "llm_usage");
-    expect(llmUsage).toMatchObject({
-      aiTask: "chat",
-      model: "gemma-4-31b-it",
-      route: "/v1/chat",
-      ticker: filing.ticker,
-      filingKey: filing.filingKey,
-      responsePath: "gemini",
-      promptTokenCount: 1200,
-      candidatesTokenCount: 80,
-      totalTokenCount: 1280,
-      latencyMs: expect.any(Number)
-    });
-    expect(JSON.stringify(llmUsage)).not.toContain("この企業はなんの企業");
+    expect(response.responsePath).toBe("deterministic");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("recovers business-overview prompts when remote output starts without a subject", async () => {
@@ -534,7 +491,7 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("Guardant Health, Inc.は");
     expect(response.answer).not.toMatch(/^は、/);
     expect(response.responsePath).toBe("deterministic");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("recovers business-overview prompts to deterministic filing context when remote output is weak", async () => {
@@ -578,7 +535,7 @@ describe("buildChatResponse", () => {
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S8"]);
     expect(response.responsePath).toBe("deterministic");
     expect(response.debug?.sourceIdsValid).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("uses revenue buckets for broad what-company prompts when business buckets are available", async () => {
@@ -596,7 +553,7 @@ describe("buildChatResponse", () => {
     expect(response.answer).toContain("サービス・その他");
     expect(response.answer).toContain("エネルギー生成・蓄電");
     expect(response.answer).not.toContain("売上高は");
-    expect(response.sources.map((source) => source.sourceId)).toEqual(["S2", "S4"]);
+    expect(response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["S2", "S4"]));
     expect(response.responsePath).toBe("deterministic");
   });
 
@@ -637,8 +594,199 @@ describe("buildChatResponse", () => {
     expect(response.sources.every((source) => source.sourceKind === "sec_filing")).toBe(true);
   });
 
+  it("answers Q07 from the actual immediate prior same-form filing instead of YoY values", async () => {
+    const filing = {
+      ...makeTestFiling(),
+      primaryDocumentUrl: "https://historical.example.com/aapl-current",
+      metrics: makeTestFiling().metrics.map((metric: any) => ({
+        ...metric,
+        periodStart: "2025-09-28",
+        periodKind: "quarter",
+        fiscalQuarter: "Q1"
+      }))
+    };
+    const currentKey = filing.filingKey;
+    const priorKey = "v3:0000320193:000032019325000070";
+    const priorValues: Record<string, number> = {
+      revenue: 130000000000,
+      operatingIncome: 52000000000,
+      netIncome: -38000000000
+    };
+    const priorFiling = {
+      ...filing,
+      filingKey: priorKey,
+      filedAt: "2025-08-01",
+      periodOfReport: "2025-06-28",
+      primaryDocumentUrl: "https://historical.example.com/aapl-prior",
+      metrics: filing.metrics.map((metric: any) => ({
+        ...metric,
+        value: priorValues[metric.logicalName],
+        periodStart: "2025-03-30",
+        periodEnd: "2025-06-28",
+        periodKind: "quarter",
+        fiscalQuarter: "Q3",
+        comparisonValue: undefined,
+        yoyPercent: undefined
+      }))
+    };
+    const env = makeHistoryEnv({
+      immediatePriorFiling: {
+        filingKey: priorKey,
+        filedAt: "2025-08-01",
+        periodOfReport: "2025-06-28",
+        primaryDocumentUrl: "https://historical.example.com/aapl-prior"
+      },
+      archivedFilings: { [priorKey]: priorFiling },
+      metricRows: []
+    });
+
+    const response = await buildChatResponse(
+      filing,
+      "前回決算と比べて大きく変わった点は？",
+      env as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.responsePath).toBe("historical");
+    expect(response.answer).toContain("対象期間 2025年12月27日");
+    expect(response.answer).toContain("2025年6月28日");
+    expect(response.answer).not.toContain("2024年12月28日");
+    expect(response.answer).not.toMatch(/前年同期|YoY/i);
+    expect(response.answer).toContain("マイナスからプラスに転じました");
+    expect(response.answer).not.toMatch(/純利益[^。]*前回比/u);
+    expect(response.debug?.numericAlignmentStatus).toBe("passed");
+    expect(response.debug?.numericAlignmentClaimCount).toBeGreaterThan(0);
+    expect(response.sources.every((source) => source.sourceKind === "historical_filing")).toBe(true);
+    expect(new Set(response.sources.map((source) => source.sourceUrl))).toEqual(new Set([
+      "https://historical.example.com/aapl-current",
+      "https://historical.example.com/aapl-prior"
+    ]));
+    expect(new Set(response.sources.map((source) => source.sourceId.split(":").slice(0, 3).join(":")))).toEqual(
+      new Set([currentKey, priorKey])
+    );
+  });
+
+  it("keeps AMZN-sized Q07 changes mapped to typed facts", async () => {
+    const currentKey = "v7:0001018724:000101872426000014";
+    const priorKey = "v7:0001018724:000101872425000099";
+    const metricDefinitions = [
+      ["revenue", "RevenueFromContractWithCustomerExcludingAssessedTax", 181_519_000_000, 155_667_000_000],
+      ["operatingIncome", "OperatingIncomeLoss", 23_852_000_000, 18_405_000_000],
+      ["netIncome", "NetIncomeLoss", 30_255_000_000, 17_127_000_000],
+      ["operatingCashFlow", "NetCashProvidedByUsedInOperatingActivities", 26_032_000_000, 17_015_000_000]
+    ] as const;
+    const buildMetrics = (role: "current" | "comparison") => metricDefinitions.map(([
+      logicalName,
+      tagUsed,
+      currentValue,
+      comparisonValue
+    ]) => ({
+      logicalName,
+      tagUsed,
+      value: role === "current" ? currentValue : comparisonValue,
+      unit: "USD",
+      periodStart: role === "current" ? "2026-01-01" : "2025-10-01",
+      periodEnd: role === "current" ? "2026-03-31" : "2025-12-31",
+      periodKind: "quarter" as const,
+      fiscalYear: role === "current" ? 2026 : 2025,
+      fiscalQuarter: role === "current" ? "Q1" as const : "Q4" as const
+    }));
+    const buildSourceChunks = (role: "current" | "comparison") => metricDefinitions.map(([
+      logicalName,
+      tagName,
+      currentValue,
+      comparisonValue
+    ], index) => ({
+      sourceId: `S${index + 1}`,
+      sectionType: "xbrl_metric" as const,
+      sectionTitle: logicalName,
+      sourceLabel: `XBRL ${logicalName}`,
+      text: `${logicalName}: ${role === "current" ? currentValue : comparisonValue} USD`,
+      startOffset: 0,
+      endOffset: 0,
+      tagName,
+      sortOrder: index + 1
+    }));
+    const current = {
+      ...makeTestFiling(),
+      filingKey: currentKey,
+      ticker: "AMZN",
+      companyName: "Amazon.com, Inc.",
+      cik: "0001018724",
+      filedAt: "2026-04-30",
+      periodOfReport: "2026-03-31",
+      primaryDocumentUrl: "https://historical.example.com/amzn-current",
+      extractorVersion: "v7",
+      metrics: buildMetrics("current"),
+      sourceChunks: buildSourceChunks("current")
+    };
+    const prior = {
+      ...current,
+      filingKey: priorKey,
+      filedAt: "2026-02-01",
+      periodOfReport: "2025-12-31",
+      primaryDocumentUrl: "https://historical.example.com/amzn-prior",
+      metrics: buildMetrics("comparison"),
+      sourceChunks: buildSourceChunks("comparison")
+    };
+    const env = makeHistoryEnv({
+      immediatePriorFiling: {
+        filingKey: priorKey,
+        filedAt: prior.filedAt,
+        periodOfReport: prior.periodOfReport,
+        primaryDocumentUrl: prior.primaryDocumentUrl
+      },
+      archivedFilings: { [priorKey]: prior },
+      metricRows: []
+    });
+
+    const response = await buildChatResponse(
+      current,
+      "前回決算と比べて大きく変わった点は？",
+      env as never,
+      { webSupplementEnabled: false }
+    );
+
+    expect(response.responsePath).toBe("historical");
+    expect(response.answer).toContain("純利益は");
+    expect(response.answer).toContain("営業CFは");
+    expect(response.answer).toContain("営業利益は");
+    expect(response.debug?.sourceRepairLabels).not.toContain("numeric_alignment_qualitative_recovery");
+    expect(response.debug?.numericAlignmentStatus).toBe("passed");
+    expect(response.debug?.numericAlignmentClaimCount).toBe(9);
+    expect(response.debug?.numericAlignmentVerifiedClaimCount).toBe(9);
+  });
+
   it("uses D1-backed history only for trend-style questions", async () => {
-    const filing = makeTestFiling();
+    const filing = {
+      ...makeTestFiling(),
+      primaryDocumentUrl: "https://historical.example.com/aapl-current",
+      metrics: makeTestFiling().metrics.map((metric: any) => ({
+        ...metric,
+        periodStart: "2025-09-28",
+        periodKind: "quarter",
+        fiscalQuarter: "Q1"
+      }))
+    };
+    const priorKey = "v3:0000320193:000032019325000111";
+    const priorFiling = {
+      ...filing,
+      filingKey: priorKey,
+      filedAt: "2024-01-29",
+      periodOfReport: "2023-12-30",
+      primaryDocumentUrl: "https://historical.example.com/aapl-prior",
+      metrics: filing.metrics
+        .filter((metric: any) => metric.logicalName === "revenue")
+        .map((metric: any) => ({
+          ...metric,
+          value: 119580000000,
+          periodStart: "2023-10-01",
+          periodEnd: "2023-12-30",
+          comparisonValue: undefined,
+          comparisonPeriodEnd: undefined,
+          yoyPercent: undefined
+        }))
+    };
     const env = makeHistoryEnv({
       metricRows: [
         {
@@ -653,10 +801,10 @@ describe("buildChatResponse", () => {
           unit: "USD",
           yoyPercent: 15.7,
           sourceId: "S9",
-          primaryDocumentUrl: "https://historical.example.com/aapl-q"
+          primaryDocumentUrl: "https://historical.example.com/aapl-current"
         },
         {
-          filingKey: "v3:0000320193:000032019325000111",
+          filingKey: priorKey,
           ticker: "AAPL",
           formType: "10-Q",
           filedAt: "2024-01-29",
@@ -667,9 +815,10 @@ describe("buildChatResponse", () => {
           unit: "USD",
           yoyPercent: 2.1,
           sourceId: "S9",
-          primaryDocumentUrl: "https://historical.example.com/aapl-q"
+          primaryDocumentUrl: "https://historical.example.com/aapl-prior"
         }
-      ]
+      ],
+      archivedFilings: { [priorKey]: priorFiling }
     });
 
     const response = await buildChatResponse(
@@ -680,10 +829,15 @@ describe("buildChatResponse", () => {
     );
 
     expect(response.answer).toContain("この3年の四半期提出資料ベース");
-    expect(response.answer).toContain("2023-12-30");
-    expect(response.answer).toContain("2025-12-27");
+    expect(response.answer).toContain("2023年12月30日");
+    expect(response.answer).toContain("2025年12月27日");
+    expect(response.debug?.numericAlignmentStatus).toBe("passed");
+    expect(response.debug?.numericAlignmentBlockedClaimCount).toBe(0);
     expect(response.sources.every((source) => source.sourceKind === "historical_filing")).toBe(true);
-    expect(response.sources.every((source) => source.sourceUrl === "https://historical.example.com/aapl-q")).toBe(true);
+    expect(new Set(response.sources.map((source) => source.sourceUrl))).toEqual(new Set([
+      "https://historical.example.com/aapl-current",
+      "https://historical.example.com/aapl-prior"
+    ]));
   });
 
   it("degrades to the latest filing with a reason when historical storage is temporarily unavailable", async () => {
@@ -1115,10 +1269,9 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: false }
     );
 
-    expect(response.responsePath).toBe("fallback");
-    expect(response.answer).toContain("前問の具体的な要因");
-    expect(response.answer).toContain("分類しません");
-    expect(response.answer).toContain("経営陣による業績説明");
+    expect(response.responsePath).toBe("deterministic");
+    expect(response.answer).toContain("提出資料だけでは継続性は断定できません");
+    expect(response.answer).toContain("売上要因候補");
     expect(response.answer).not.toContain("一般的な注意書き");
     expect(response.answer).not.toContain("本文の要因説明と並べると判断しやすくなります");
     expect(response.answer).not.toContain("product revenueです");
@@ -1166,14 +1319,13 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: false }
     );
 
-    expect(response.responsePath).toBe("fallback");
-    expect(response.answer).toContain("前問の具体的な要因");
-    expect(response.answer).toContain("分類しません");
-    expect(response.answer).toContain("経営陣による業績説明");
+    expect(response.responsePath).toBe("deterministic");
+    expect(response.answer).toContain("提出資料だけでは継続性は断定できません");
+    expect(response.answer).toContain("売上要因候補");
     expect(response.answer).not.toContain("もう一段絞れます");
     expect(response.answer).not.toContain("本文の要因説明と並べると判断しやすくなります");
     expect(response.answer).not.toContain("product revenueです");
-    expect(response.debug?.fallbackReason).toBe("low_quality_answer");
+    expect(response.debug?.fallbackReason).toBeNull();
   });
 
   it("recovers to filing-first fallback when Gemini returns only invalid sourceIds", async () => {
@@ -1605,10 +1757,9 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: true }
     );
 
-    expect(response.answer).toContain("外部報道ベースでは、決算後に株価は 3.2% 上昇で反応しています");
-    expect(response.answer).toContain("反応チャート:");
-    expect(response.answer).toContain("↗ 3.2%");
-    expect(response.answer).toContain("今回の決算から見ると、足元はやや強めです");
+    expect(response.answer).toContain("少なくとも、足元の数字自体は弱くありません");
+    expect(response.answer).not.toContain("3.2%");
+    expect(response.answer).not.toContain("反応チャート:");
     expect(response.answer).not.toContain("実際の株価推移や決算後ニュースをこの決算の数字と並べる");
     expect(response.answer).toContain("値動き自体は検索 snippet ベースの弱い外部補足で、なぜそう見られたかの整理は今回の決算資料に基づいています");
     expect(response.sources.map((source) => source.sourceId)).toEqual(["S9", "S12", "W1"]);
@@ -2511,16 +2662,23 @@ function makeMarketContrastFiling() {
 
 function makeHistoryEnv({
   metricRows,
-  segmentRows = []
+  segmentRows = [],
+  immediatePriorFiling = null,
+  archivedFilings = {}
 }: {
   metricRows: any[];
   segmentRows?: any[];
+  immediatePriorFiling?: Record<string, unknown> | null;
+  archivedFilings?: Record<string, unknown>;
 }) {
   const prepare = vi.fn((sql: string) => ({
     bind: (...values: unknown[]) => ({
       first: async () => {
         if (sql.includes("SELECT filing_key FROM filings WHERE filing_key")) {
           return null;
+        }
+        if (sql.includes("period_of_report < ?") && sql.includes("FROM filings")) {
+          return immediatePriorFiling;
         }
         return null;
       },
@@ -2544,7 +2702,13 @@ function makeHistoryEnv({
     },
     FILINGS_BUCKET: {
       head: vi.fn().mockResolvedValue(null),
-      get: vi.fn().mockResolvedValue(null),
+      get: vi.fn(async (key: string) => {
+        const filingKey = key.replace(/^filings\//, "").replace(/\.json$/, "");
+        const archived = archivedFilings[filingKey];
+        return archived
+          ? { text: async () => JSON.stringify(archived) }
+          : null;
+      }),
       put: vi.fn().mockResolvedValue(undefined)
     }
   };

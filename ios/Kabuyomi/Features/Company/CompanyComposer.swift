@@ -144,7 +144,33 @@ struct ComposerBar: View {
     }
 
     private var composerStatusLine: some View {
-        HStack(spacing: 10) {
+        Group {
+            if usesStackedStatusLine {
+                VStack(alignment: .leading, spacing: 6) {
+                    statusLabels
+                    if !hasEnoughCredits {
+                        creditRecoveryButton
+                    }
+                }
+            } else {
+                HStack(spacing: 10) {
+                    statusLabels
+                    Spacer(minLength: 0)
+                    if !hasEnoughCredits {
+                        creditRecoveryButton
+                    }
+                }
+                .lineLimit(1)
+            }
+        }
+        .font(.system(.caption2, design: .rounded, weight: .semibold))
+        .padding(.horizontal, 4)
+        .dynamicTypeSize(.xSmall ... .accessibility2)
+    }
+
+    @ViewBuilder
+    private var statusLabels: some View {
+        Group {
             if !aiConsentGranted {
                 Label("初回のみ同意", systemImage: "info.circle.fill")
                     .foregroundStyle(KabuyomiTheme.accentDeep)
@@ -155,22 +181,20 @@ struct ComposerBar: View {
                 systemImage: hasEnoughCredits ? "bolt.circle.fill" : "exclamationmark.circle.fill"
             )
             .foregroundStyle(hasEnoughCredits ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative)
-
-            Spacer(minLength: 0)
-
-            if !hasEnoughCredits {
-                Button("対応を見る") {
-                    openCreditOptions()
-                }
-                .font(.system(.caption2, design: .rounded, weight: .bold))
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-            }
         }
-        .font(.system(.caption2, design: .rounded, weight: .semibold))
-        .padding(.horizontal, 4)
-        .lineLimit(1)
-        .dynamicTypeSize(.xSmall ... .accessibility2)
+    }
+
+    private var creditRecoveryButton: some View {
+        Button("対応を見る") {
+            openCreditOptions()
+        }
+        .font(.system(.caption2, design: .rounded, weight: .bold))
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+    }
+
+    private var usesStackedStatusLine: Bool {
+        dynamicTypeSize.isAccessibilitySize || dynamicTypeSize >= .xxxLarge
     }
 }
 

@@ -2,6 +2,19 @@ import XCTest
 @testable import Kabuyomi
 
 @MainActor
+private final class TestAccountCredentialStore: AccountCredentialStoring {
+    var credential: AccountCredential?
+
+    init(credential: AccountCredential? = nil) {
+        self.credential = credential
+    }
+
+    func load() throws -> AccountCredential? { credential }
+    func save(_ credential: AccountCredential) throws { self.credential = credential }
+    func clear() throws { credential = nil }
+}
+
+@MainActor
 final class AppModelTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
@@ -36,6 +49,67 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(model.shouldShowConversationEntry)
         XCTAssertEqual(model.consumePendingDraftQuestion(for: "MSFT"), "前回決算との違いは？")
         XCTAssertNil(model.consumePendingDraftQuestion(for: "MSFT"))
+    }
+
+    func testPaidCreditAccountSignOutClearsOnlyLocalSessionAndRefreshesInstallationUsage() async {
+        let store = TestAccountCredentialStore(credential: AccountCredential(
+            token: "opaque-account-session",
+            accountPrincipal: "account:v1:opaque",
+            appAccountToken: "43fbd3f0-78b1-4d65-9968-0f5bc42aab47",
+            issuedAt: "2026-07-11T00:00:00.000Z",
+            expiresAt: "2026-08-10T00:00:00.000Z"
+        ))
+        let recorder = AccountSignOutRequestRecorder()
+        MockAppModelURLProtocol.requestHandler = { request in
+            recorder.record(request)
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "plan": "free",
+                    "chatsUsed": 0,
+                    "chatLimit": 10,
+                    "stocksUsed": 0,
+                    "stockLimit": 3,
+                    "dateJST": "2026-07-11"
+                ])
+            )
+        }
+        let model = makeAppModel(accountCredentialStore: store)
+        XCTAssertTrue(model.isPaidCreditAccountSignedIn)
+
+        await model.signOutPaidCreditAccount()
+
+        XCTAssertNil(store.credential)
+        XCTAssertFalse(model.isPaidCreditAccountSignedIn)
+        XCTAssertEqual(recorder.snapshot.path, "/v1/usage")
+        XCTAssertNil(recorder.snapshot.accountHeader)
+    }
+
+    func testConsumablePurchaseUIPreservesLegacyModeAndRequiresSignInOnlyAfterAccountRecoveryIsReady() {
+        XCTAssertTrue(ConsumableCreditReviewUI.isVisible(
+            creditBillingEnabled: true,
+            consumablePurchasesEnabled: true
+        ))
+        XCTAssertFalse(ConsumableCreditReviewUI.isVisible(
+            creditBillingEnabled: false,
+            consumablePurchasesEnabled: true
+        ))
+        XCTAssertFalse(ConsumableCreditReviewUI.isVisible(
+            creditBillingEnabled: true,
+            consumablePurchasesEnabled: false
+        ))
+        XCTAssertTrue(ConsumableCreditReviewUI.canShowProducts(
+            accountRecoveryReady: false,
+            isAccountSignedIn: false
+        ))
+        XCTAssertFalse(ConsumableCreditReviewUI.canShowProducts(
+            accountRecoveryReady: true,
+            isAccountSignedIn: false
+        ))
+        XCTAssertTrue(ConsumableCreditReviewUI.canShowProducts(
+            accountRecoveryReady: true,
+            isAccountSignedIn: true
+        ))
     }
 
     func testOpenConversationDoesNotPersistEphemeralTickerWithoutLocalData() {
@@ -333,6 +407,79 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.chatHistory(for: "AAPL").count, 2)
     }
 
+    func testRecentConversationLibraryDataIncludesUnsavedVisitAndOlderFilingThread() throws {
+        UserDefaults.standard.set(["AAPL"], forKey: AppModel.savedTickersKey)
+
+        let persistence = PersistenceController(inMemory: true)
+        let priorAAPL = TestFixtures.companyPayload(
+            filingKey: "v1:AAPL:0000320193-24-000001",
+            filedAt: "2024-11-01"
+        )
+        let latestAAPL = TestFixtures.companyPayload(
+            filingKey: "v1:AAPL:0000320193-25-000001",
+            filedAt: "2025-11-01"
+        )
+        let recentMSFT = TestFixtures.companyPayload(
+            ticker: "MSFT",
+            cik: "0000789019",
+            filingKey: "v1:MSFT:0000789019-25-000001",
+            filedAt: "2025-10-25"
+        )
+
+        for company in [priorAAPL, latestAAPL, recentMSFT] {
+            try persistence.saveCompany(company, searchItem: nil)
+            try persistence.saveChat(
+                question: "この決算の重要点は？",
+                response: TestFixtures.chatResponse(),
+                for: company
+            )
+        }
+
+        let model = makeAppModel(persistence: persistence)
+        model.openConversation(for: "MSFT")
+        model.recordCompanyVisit(ticker: "MSFT")
+        model.openConversation(for: "AAPL")
+        model.recordCompanyVisit(ticker: "AAPL")
+
+        XCTAssertEqual(model.recentCompanyCards(limit: 8).map(\.ticker), ["MSFT"])
+        XCTAssertEqual(
+            model.conversationHistory(for: "AAPL").map(\.company.filingKey),
+            [latestAAPL.filingKey, priorAAPL.filingKey]
+        )
+        XCTAssertEqual(model.conversationHistory(for: "AAPL").map(\.chatHistory.count), [2, 2])
+    }
+
+    func testRecentConversationSectionShowsExplicitEmptyCopyAndKeepsPopulatedBranch() {
+        XCTAssertEqual(
+            ConversationLibraryRecentSectionState(recentCompanies: []),
+            .empty
+        )
+        XCTAssertEqual(
+            ConversationLibraryRecentEmptyCopy.title,
+            "最近見た銘柄はまだありません"
+        )
+        XCTAssertEqual(
+            ConversationLibraryRecentEmptyCopy.message,
+            "銘柄を開くと、ここから前回の会話へ戻れます。"
+        )
+
+        let recentCompany = WatchlistCard(
+            filingKey: "v1:MSFT:0000789019-25-000001",
+            ticker: "MSFT",
+            companyName: "Microsoft Corporation",
+            formType: "10-K",
+            filedAt: Date(timeIntervalSince1970: 1_750_000_000),
+            verdict: "クラウド成長を確認",
+            metrics: [],
+            isPlaceholder: false
+        )
+
+        XCTAssertEqual(
+            ConversationLibraryRecentSectionState(recentCompanies: [recentCompany]),
+            .populated
+        )
+    }
+
     func testConversationRefreshWithNewerFilingRequiresConfirmationBeforeSwitching() async throws {
         let persistence = PersistenceController(inMemory: true)
         let oldCompany = TestFixtures.companyPayload(
@@ -472,6 +619,45 @@ final class AppModelTests: XCTestCase {
         XCTAssertNotNil(model.insufficientCreditRecoveryRequestID)
     }
 
+    func testChatCreditPreflightRemainsActiveWhenStoreKitBillingIsDisabled() async {
+        let persistence = PersistenceController(inMemory: true)
+        try? persistence.saveCompany(TestFixtures.companyPayload(), searchItem: nil)
+        let model = makeAppModel(persistence: persistence)
+        model.setAIConsent(true)
+        model.usage = UsagePayload(
+            plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
+            chatsUsed: 0,
+            chatLimit: 25,
+            stocksUsed: 1,
+            stockLimit: 3,
+            dateJST: "2026-07-11",
+            savedTickers: ["AAPL"],
+            accessMode: nil,
+            credits: CreditUsagePayload(
+                monthlyRemaining: 0,
+                monthlyLimit: 0,
+                rewardedAdRemaining: 0,
+                rewardedAdExpiresAt: nil,
+                purchasedRemaining: 0,
+                totalRemaining: 0,
+                resetsAt: "2026-08-01T00:00:00+09:00"
+            ),
+            creditBillingEnabled: false
+        )
+        MockAppModelURLProtocol.requestHandler = { request in
+            XCTFail("Credit preflight must reject before network: \(request.url?.path ?? "")")
+            throw URLError(.badServerResponse)
+        }
+
+        let didSend = await model.sendChat(question: "売上高は？", ticker: "AAPL")
+
+        XCTAssertFalse(didSend)
+        XCTAssertFalse(model.hasChatCreditAvailable)
+        XCTAssertEqual(model.insufficientCreditRecovery?.remainingCredits, 0)
+    }
+
     func testSendChatServerInsufficientCreditsOpensRecoveryState() async throws {
         let persistence = PersistenceController(inMemory: true)
         let company = TestFixtures.companyPayload()
@@ -565,6 +751,35 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.hasRecoveredEnoughCreditsForPendingRecovery)
     }
 
+    func testRecoveryUsesAuthoritativeCreditsWhenStoreKitBillingIsDisabled() {
+        let model = makeAppModel()
+        model.requestInsufficientCreditRecovery(requiredCredits: 2, remainingCredits: 0, source: .chatComposer)
+        model.usage = UsagePayload(
+            plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
+            chatsUsed: 0,
+            chatLimit: 25,
+            stocksUsed: 0,
+            stockLimit: 3,
+            dateJST: "2026-07-11",
+            savedTickers: [],
+            accessMode: nil,
+            credits: CreditUsagePayload(
+                monthlyRemaining: 0,
+                monthlyLimit: 0,
+                rewardedAdRemaining: 0,
+                rewardedAdExpiresAt: nil,
+                purchasedRemaining: 2,
+                totalRemaining: 2,
+                resetsAt: "2026-08-01T00:00:00+09:00"
+            ),
+            creditBillingEnabled: false
+        )
+
+        XCTAssertTrue(model.hasRecoveredEnoughCreditsForPendingRecovery)
+    }
+
     func testClosingInsufficientCreditRecoveryClearsRecoveryState() {
         let model = makeAppModel()
         model.requestInsufficientCreditRecovery(requiredCredits: 2, remainingCredits: 0, source: .chatComposer)
@@ -612,6 +827,81 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(model.billingActionInFlight)
     }
 
+    func testDisabledCreditBillingGuardsSubscriptionProductsPurchaseAndRestore() async {
+        let model = makeAppModel()
+        model.usage = makeBillingUsage(
+            creditBillingEnabled: false,
+            consumablePurchasesEnabled: true
+        )
+        model.subscriptionProductLoadErrorMessage = "stale error"
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            XCTFail("Unexpected network request: \(request.url?.path ?? "")")
+            throw URLError(.badServerResponse)
+        }
+
+        await model.loadSubscriptionProducts(showErrors: true)
+        if case .idle = model.subscriptionProductLoadState {
+            // Expected: the disabled capability returns before StoreKit loading.
+        } else {
+            XCTFail("Disabled billing must keep subscription product loading idle")
+        }
+        XCTAssertNil(model.subscriptionProductLoadErrorMessage)
+
+        await model.purchaseSubscription(productId: "kabuyomi.sub.pro.monthly")
+        XCTAssertEqual(
+            model.activeAlert?.message,
+            "月額プランは現在利用できません。時間をおいてからもう一度お試しください。"
+        )
+        model.activeAlert = nil
+
+        await model.restorePurchases()
+        XCTAssertEqual(
+            model.activeAlert?.message,
+            "購入の復元は現在利用できません。時間をおいてからもう一度お試しください。"
+        )
+        XCTAssertFalse(model.billingActionInFlight)
+    }
+
+    func testDisabledConsumableCapabilityGuardsPackLoadPurchaseAndRecovery() async {
+        let model = makeAppModel()
+        model.usage = makeBillingUsage(
+            creditBillingEnabled: true,
+            consumablePurchasesEnabled: false
+        )
+        model.creditPackProducts = [
+            CreditPackProduct(
+                id: SubscriptionStore.primaryCreditProductID,
+                credits: 50,
+                displayPrice: "¥100",
+                isAvailable: true
+            )
+        ]
+        model.creditPackProductLoadErrorMessage = "stale error"
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            XCTFail("Unexpected network request: \(request.url?.path ?? "")")
+            throw URLError(.badServerResponse)
+        }
+
+        XCTAssertTrue(model.isCreditBillingEnabled)
+        XCTAssertFalse(model.isConsumableCreditPurchasingEnabled)
+        await model.loadCreditPackProducts(showErrors: true)
+        XCTAssertTrue(model.creditPackProducts.isEmpty)
+        XCTAssertNil(model.creditPackProductLoadErrorMessage)
+
+        await model.purchaseCreditPack(productId: SubscriptionStore.primaryCreditProductID)
+        XCTAssertEqual(
+            model.activeAlert?.message,
+            "追加クレジット購入は現在利用できません。時間をおいてからもう一度お試しください。"
+        )
+
+        model.activeAlert = nil
+        await model.recoverUnfinishedCreditPurchases(showErrors: true)
+        XCTAssertNil(model.activeAlert)
+        XCTAssertFalse(model.billingActionInFlight)
+    }
+
     func testMiniConsumableUsesProductionStoreKitProductId() {
         XCTAssertEqual(SubscriptionStore.miniCreditProductID, "kabuyomi.credits.50")
         XCTAssertEqual(SubscriptionStore.creditPackProductIDs, ["kabuyomi.credits.50", "kabuyomi.credits.100"])
@@ -627,6 +917,58 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(BillingCatalog.pro.monthlyCredits, 900)
         XCTAssertEqual(BillingCatalog.proMax.monthlyCredits, 2000)
         XCTAssertEqual(BillingCatalog.proMax.title, "Max")
+    }
+
+    func testSubscriptionStoreInactiveStateCannotCreateDemotingSyncRequest() async throws {
+        let suiteName = "AppModelTests.inactive-subscription-sync.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("kabuyomi.sub.pro.monthly", forKey: "kabuyomi.subscription.productId")
+        defaults.set("orig-inactive-12345678", forKey: "kabuyomi.subscription.originalTransactionId")
+        defaults.set(false, forKey: "kabuyomi.subscription.active")
+        let store = SubscriptionStore(defaults: defaults)
+
+        XCTAssertFalse(store.isSubscriptionActive)
+        XCTAssertEqual(store.entitlementLookupOriginalTransactionId, "orig-inactive-12345678")
+        let syncRequest = try await store.syncRequestIfAvailable()
+        XCTAssertNil(syncRequest)
+    }
+
+    func testSubscriptionStoreVerifiedMaterialSyncAndApplyRemainIdempotent() async throws {
+        let suiteName = "AppModelTests.verified-subscription-sync.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("kabuyomi.sub.pro.monthly", forKey: "kabuyomi.subscription.productId")
+        defaults.set("tx-verified-12345678", forKey: "kabuyomi.subscription.transactionId")
+        defaults.set("orig-verified-12345678", forKey: "kabuyomi.subscription.originalTransactionId")
+        defaults.set("signed-transaction-jws", forKey: "kabuyomi.subscription.signedTransactionInfo")
+        defaults.set(true, forKey: "kabuyomi.subscription.active")
+        let store = SubscriptionStore(defaults: defaults)
+
+        let pendingRequest = try await store.syncRequestIfAvailable()
+        let request = try XCTUnwrap(pendingRequest)
+        XCTAssertEqual(request.productId, "kabuyomi.sub.pro.monthly")
+        XCTAssertEqual(request.transactionId, "tx-verified-12345678")
+        XCTAssertEqual(request.originalTransactionId, "orig-verified-12345678")
+        XCTAssertEqual(request.signedTransactionInfo, "signed-transaction-jws")
+
+        store.apply(
+            BillingSyncResponse(
+                plan: "pro",
+                quotaSubject: "subscription:v1:stable-principal",
+                productId: "kabuyomi.sub.pro.monthly",
+                syncedAt: "2026-07-10T00:00:00.000Z",
+                activePlan: "pro",
+                activeSubscription: nil,
+                creditBillingEnabled: true,
+                usage: nil
+            )
+        )
+
+        XCTAssertEqual(store.plan, "pro")
+        XCTAssertEqual(store.quotaSubject, "subscription:v1:stable-principal")
+        let duplicateRequest = try await store.syncRequestIfAvailable()
+        XCTAssertNil(duplicateRequest)
     }
 
     func testCreditPackPresentationKeepsPrimaryAndCompatibilityRowsSeparate() {
@@ -653,8 +995,9 @@ final class AppModelTests: XCTestCase {
             savedTickers: [],
             accessMode: nil,
             credits: CreditUsagePayload(
-                monthlyRemaining: 50,
-                monthlyLimit: 50,
+                monthlyRemaining: 0,
+                monthlyLimit: 0,
+                welcomeRemaining: 50,
                 rewardedAdRemaining: nil,
                 rewardedAdExpiresAt: nil,
                 purchasedRemaining: 100,
@@ -683,7 +1026,9 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(rows["環境"], "本番")
         XCTAssertEqual(rows["現在のプラン"], "無料")
         XCTAssertEqual(rows["合計クレジット"], "150")
-        XCTAssertEqual(rows["月額/初回分"], "50 / 50")
+        XCTAssertEqual(rows["月額分"], "0 / 0")
+        XCTAssertEqual(rows["ウェルカム"], "50")
+        XCTAssertEqual(rows["広告分"], "未提供")
         XCTAssertEqual(rows["購入分"], "100")
         XCTAssertNil(normalRows["Device"])
         XCTAssertNil(normalRows["API"])
@@ -1191,6 +1536,181 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertFalse(sent)
         XCTAssertEqual(model.activeAlert?.message, "チャット応答を現在生成できません。少し待ってから、もう一度お試しください。")
+    }
+
+    func testSendChatRetryAfterResponseLossReusesOperationId() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        try persistence.saveCompany(TestFixtures.companyPayload(), searchItem: nil)
+        let model = makeAppModel(persistence: persistence)
+        model.setAIConsent(true)
+        let recorder = OperationIDRecorder()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let body = try XCTUnwrap(Self.requestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let requestNumber = recorder.record(try XCTUnwrap(json["operationId"] as? String))
+
+            if requestNumber == 1 {
+                throw URLError(.networkConnectionLost)
+            }
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try Self.chatSuccessData(answer: "再取得できました。", chatsUsed: 1)
+            )
+        }
+
+        let firstAttempt = await model.sendChat(question: "今回の変化は？", ticker: "AAPL")
+        let retryAttempt = await model.sendChat(question: "今回の変化は？", ticker: "AAPL")
+
+        XCTAssertFalse(firstAttempt)
+        XCTAssertTrue(retryAttempt)
+        XCTAssertEqual(recorder.operationIds.count, 2)
+        XCTAssertEqual(Set(recorder.operationIds).count, 1)
+    }
+
+    func testSendChatChangedPayloadAfterResponseLossGetsNewOperationId() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        try persistence.saveCompany(TestFixtures.companyPayload(), searchItem: nil)
+        let model = makeAppModel(persistence: persistence)
+        model.setAIConsent(true)
+        let recorder = OperationIDRecorder()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let body = try XCTUnwrap(Self.requestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let requestNumber = recorder.record(try XCTUnwrap(json["operationId"] as? String))
+
+            if requestNumber == 1 {
+                throw URLError(.networkConnectionLost)
+            }
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try Self.chatSuccessData(answer: "別の質問に回答しました。", chatsUsed: 1)
+            )
+        }
+
+        let firstAttempt = await model.sendChat(question: "今回の変化は？", ticker: "AAPL")
+        let changedAttempt = await model.sendChat(question: "利益率は？", ticker: "AAPL")
+
+        XCTAssertFalse(firstAttempt)
+        XCTAssertTrue(changedAttempt)
+        XCTAssertEqual(recorder.operationIds.count, 2)
+        XCTAssertNotEqual(recorder.operationIds[0], recorder.operationIds[1])
+    }
+
+    func testSendChatSuccessfulUserActionsGetDifferentOperationIds() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        try persistence.saveCompany(TestFixtures.companyPayload(), searchItem: nil)
+        let model = makeAppModel(persistence: persistence)
+        model.setAIConsent(true)
+        let recorder = OperationIDRecorder()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let body = try XCTUnwrap(Self.requestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let requestNumber = recorder.record(try XCTUnwrap(json["operationId"] as? String))
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try Self.chatSuccessData(answer: "回答 \(requestNumber)", chatsUsed: requestNumber)
+            )
+        }
+
+        let firstAction = await model.sendChat(question: "今回の変化は？", ticker: "AAPL")
+        let secondAction = await model.sendChat(question: "今回の変化は？", ticker: "AAPL")
+
+        XCTAssertTrue(firstAction)
+        XCTAssertTrue(secondAction)
+        XCTAssertEqual(recorder.operationIds.count, 2)
+        XCTAssertNotEqual(recorder.operationIds[0], recorder.operationIds[1])
+    }
+
+    func testSendChatOperationResultExpiredRetryDoesNotMintNewOperationId() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        try persistence.saveCompany(TestFixtures.companyPayload(), searchItem: nil)
+        let model = makeAppModel(persistence: persistence)
+        model.setAIConsent(true)
+        let recorder = OperationIDRecorder()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let body = try XCTUnwrap(Self.requestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            recorder.record(try XCTUnwrap(json["operationId"] as? String))
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 410, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData(["error": "operation_result_expired"])
+            )
+        }
+
+        let firstAttempt = await model.sendChat(question: "今回の変化は？", ticker: "AAPL")
+        let retryAttempt = await model.sendChat(question: "今回の変化は？", ticker: "AAPL")
+
+        XCTAssertFalse(firstAttempt)
+        XCTAssertFalse(retryAttempt)
+        XCTAssertEqual(recorder.operationIds.count, 2)
+        XCTAssertEqual(Set(recorder.operationIds).count, 1)
+    }
+
+    func testQuoteTranslationOperationReusesExactPayloadAndChangesForNewPayload() {
+        let original = PendingQuoteTranslationState(
+            text: "Revenue increased.",
+            sourceLanguage: "en",
+            targetLanguage: "ja",
+            operationId: "quote-operation"
+        )
+
+        let exactRetry = PendingQuoteTranslationState.resolve(
+            existing: original,
+            text: "Revenue increased.",
+            sourceLanguage: "en",
+            targetLanguage: "ja"
+        )
+        let changedText = PendingQuoteTranslationState.resolve(
+            existing: original,
+            text: "Operating income increased.",
+            sourceLanguage: "en",
+            targetLanguage: "ja"
+        )
+        let changedTarget = PendingQuoteTranslationState.resolve(
+            existing: original,
+            text: "Revenue increased.",
+            sourceLanguage: "en",
+            targetLanguage: "fr"
+        )
+
+        XCTAssertEqual(exactRetry.operationId, "quote-operation")
+        XCTAssertNotEqual(changedText.operationId, "quote-operation")
+        XCTAssertNotEqual(changedTarget.operationId, "quote-operation")
+    }
+
+    func testTranslateQuoteUsesInjectedClientAndCallerOperationId() async throws {
+        let model = makeAppModel()
+        let recorder = OperationIDRecorder()
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/translate-quote")
+            let body = try XCTUnwrap(Self.requestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            recorder.record(try XCTUnwrap(json["operationId"] as? String))
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "translatedText": "売上高は増加しました。",
+                    "modelName": "translation-model"
+                ])
+            )
+        }
+
+        let response = try await model.translateQuote(
+            text: "Revenue increased.",
+            sourceLanguage: "en",
+            targetLanguage: "ja",
+            operationId: "injected-quote-operation"
+        )
+
+        XCTAssertEqual(response.translatedText, "売上高は増加しました。")
+        XCTAssertEqual(recorder.operationIds, ["injected-quote-operation"])
     }
 
     func testSendChatSendsRecentConversationContextForFollowUps() async throws {
@@ -2200,7 +2720,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.rewardedAdCreditState, .idle)
         XCTAssertEqual(model.rewardedAdStatusMessage, "2無料/ad creditを獲得しました。")
         XCTAssertEqual(model.creditUsage?.rewardedAdRemaining, 2)
-        XCTAssertEqual(model.creditUsage?.totalRemaining, 52)
+        XCTAssertEqual(model.creditUsage?.totalRemaining, 32)
         XCTAssertEqual(model.rewardedAdLastDebugReason, "granted")
         XCTAssertTrue(model.rewardedAdDeveloperDiagnosticLine.contains("API: custom"))
         XCTAssertTrue(model.rewardedAdDeveloperDiagnosticLine.contains("AdUnit:"))
@@ -2329,7 +2849,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(statusRequestCounter.count, 0)
         XCTAssertEqual(model.rewardedAdCreditState, .idle)
         XCTAssertEqual(model.rewardedAdStatusMessage, RewardedAdServiceError.dismissedWithoutReward.localizedDescription)
-        XCTAssertEqual(model.creditUsage?.totalRemaining, 50)
+        XCTAssertEqual(model.creditUsage?.totalRemaining, 30)
         XCTAssertEqual(model.rewardedAdLastDebugReason, "ad_dismissed_without_reward")
     }
 
@@ -2703,7 +3223,8 @@ final class AppModelTests: XCTestCase {
     private func makeAppModel(
         persistence: PersistenceController = PersistenceController(inMemory: true),
         rewardedAdService: RewardedAdServing = MockRewardedAdService(result: false),
-        baseURL: URL = URL(string: "https://example.com")!
+        baseURL: URL = URL(string: "https://example.com")!,
+        accountCredentialStore: (any AccountCredentialStoring)? = nil
     ) -> AppModel {
         if MockAppModelURLProtocol.requestHandler == nil {
             MockAppModelURLProtocol.requestHandler = { request in
@@ -2726,22 +3247,101 @@ final class AppModelTests: XCTestCase {
         let deviceIdentity = DeviceIdentityStore()
 
         return AppModel(
-            apiClient: makeAPIClient(session: session, deviceIdentity: deviceIdentity, baseURL: baseURL),
+            apiClient: makeAPIClient(
+                session: session,
+                deviceIdentity: deviceIdentity,
+                baseURL: baseURL,
+                accountCredentialStore: accountCredentialStore
+            ),
             persistence: persistence,
             deviceIdentity: deviceIdentity,
-            rewardedAdService: rewardedAdService
+            rewardedAdService: rewardedAdService,
+            accountCredentialStore: accountCredentialStore
+        )
+    }
+
+    private func makeBillingUsage(
+        creditBillingEnabled: Bool,
+        consumablePurchasesEnabled: Bool
+    ) -> UsagePayload {
+        UsagePayload(
+            plan: "free",
+            activePlan: nil,
+            activeSubscription: nil,
+            chatsUsed: 0,
+            chatLimit: 10,
+            stocksUsed: 0,
+            stockLimit: 3,
+            dateJST: "2026-07-11",
+            savedTickers: [],
+            accessMode: nil,
+            credits: CreditUsagePayload(
+                monthlyRemaining: 0,
+                monthlyLimit: 0,
+                welcomeRemaining: 50,
+                rewardedAdRemaining: 0,
+                rewardedAdExpiresAt: nil,
+                purchasedRemaining: 0,
+                totalRemaining: 50,
+                resetsAt: "2026-08-01T00:00:00+09:00"
+            ),
+            creditBillingEnabled: creditBillingEnabled,
+            capabilities: UsageCapabilitiesPayload(
+                configVersion: "test",
+                configSource: "unit-test",
+                chatEnabled: true,
+                webSupplementEnabled: false,
+                consumablePurchasesEnabled: consumablePurchasesEnabled,
+                accountRecoveryReady: consumablePurchasesEnabled,
+                rewardedCredit: RewardedCreditCapabilityPayload(
+                    enabled: false,
+                    rewardedCreditEnabled: false,
+                    ssvReady: false,
+                    environment: "test",
+                    dailyCap: 0,
+                    dailyRemaining: 0,
+                    rewardCredits: 0,
+                    expiryDays: 0,
+                    reasonCode: "unit_test",
+                    configVersion: "test",
+                    emergencyDisabled: true
+                )
+            )
         )
     }
 
     private func makeAPIClient(
         session: URLSession,
         deviceIdentity: DeviceIdentityStore,
-        baseURL: URL = URL(string: "https://example.com")!
+        baseURL: URL = URL(string: "https://example.com")!,
+        accountCredentialStore: (any AccountCredentialStoring)? = nil
     ) -> APIClient {
+        let credential = InstallationCredential(
+            token: "app-model-test-installation-token",
+            principal: "installation:app-model-test",
+            tokenReference: "app-model-test-token-reference",
+            tokenVersion: 1,
+            issuedAt: "2026-07-10T00:00:00.000Z",
+            attestationStatus: .verified,
+            creditMode: .full
+        )
         return APIClient(
             session: session,
             baseURL: baseURL,
-            deviceIdentity: deviceIdentity
+            deviceIdentity: deviceIdentity,
+            requestContext: QuotaRequestContext(
+                deviceKey: deviceIdentity.legacyDeviceKeyForMigration(),
+                installationCredential: credential,
+                appAttestKeyId: "app-model-test-key"
+            ),
+            installationIdentityStore: nil,
+            appAttestClient: nil,
+            accountCredentialStore: accountCredentialStore,
+            prevalidatedAssertionHeaders: [
+                "x-kabuyomi-app-attest-key-id": "app-model-test-key",
+                "x-kabuyomi-app-attest-challenge-id": "app-model-test-challenge",
+                "x-kabuyomi-app-attest-assertion": "dGVzdA=="
+            ]
         )
     }
 
@@ -2775,6 +3375,23 @@ final class AppModelTests: XCTestCase {
         }
 
         return data.isEmpty ? nil : data
+    }
+
+    private nonisolated static func chatSuccessData(answer: String, chatsUsed: Int) throws -> Data {
+        try TestFixtures.jsonData([
+            "answer": answer,
+            "sources": [],
+            "responsePath": "deterministic",
+            "modelName": NSNull(),
+            "usage": [
+                "plan": "free",
+                "chatsUsed": chatsUsed,
+                "chatLimit": 10,
+                "stocksUsed": 1,
+                "stockLimit": 3,
+                "dateJST": "2026-04-18"
+            ]
+        ])
     }
 
     private nonisolated static func creditUsageData(
@@ -2833,6 +3450,25 @@ private final class ThreadSafeCounter: @unchecked Sendable {
     }
 }
 
+private final class OperationIDRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String] = []
+
+    @discardableResult
+    func record(_ operationId: String) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        values.append(operationId)
+        return values.count
+    }
+
+    var operationIds: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return values
+    }
+}
+
 private final class DeviceKeyWatchlistRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var seenDeviceKeys: [String] = []
@@ -2855,6 +3491,25 @@ private final class DeviceKeyWatchlistRecorder: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return Set(seenDeviceKeys).count
+    }
+}
+
+private final class AccountSignOutRequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var path: String?
+    private var accountHeader: String?
+
+    func record(_ request: URLRequest) {
+        lock.lock()
+        defer { lock.unlock() }
+        path = request.url?.path
+        accountHeader = request.value(forHTTPHeaderField: "x-kabuyomi-account-token")
+    }
+
+    var snapshot: (path: String?, accountHeader: String?) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (path, accountHeader)
     }
 }
 

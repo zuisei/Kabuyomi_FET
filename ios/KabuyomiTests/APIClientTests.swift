@@ -2,11 +2,44 @@ import Foundation
 import XCTest
 @testable import Kabuyomi
 
+private let apiClientTestCredential = InstallationCredential(
+    token: "test-installation-token",
+    principal: "installation:test-principal",
+    tokenReference: "test-token-reference",
+    tokenVersion: 1,
+    issuedAt: "2026-07-10T00:00:00.000Z",
+    attestationStatus: .verified,
+    creditMode: .full
+)
+
+@MainActor
+private final class InMemoryAccountCredentialStore: AccountCredentialStoring {
+    var credential: AccountCredential?
+
+    func load() throws -> AccountCredential? { credential }
+    func save(_ credential: AccountCredential) throws { self.credential = credential }
+    func clear() throws { credential = nil }
+}
+
 @MainActor
 final class APIClientTests: XCTestCase {
-    private let standardContext = QuotaRequestContext(deviceKey: "device-123")
-    private let proContext = QuotaRequestContext(deviceKey: "device-123", originalTransactionId: "tx-123")
-    private let devContext = QuotaRequestContext(deviceKey: "device-123", detachedAccessMode: .devUnlimited)
+    private let standardContext = QuotaRequestContext(
+        deviceKey: "device-123",
+        installationCredential: apiClientTestCredential,
+        appAttestKeyId: "test-app-attest-key"
+    )
+    private let proContext = QuotaRequestContext(
+        deviceKey: "device-123",
+        installationCredential: apiClientTestCredential,
+        appAttestKeyId: "test-app-attest-key",
+        originalTransactionId: "tx-123"
+    )
+    private let devContext = QuotaRequestContext(
+        deviceKey: "device-123",
+        installationCredential: apiClientTestCredential,
+        appAttestKeyId: "test-app-attest-key",
+        detachedAccessMode: .devUnlimited
+    )
 
     override func tearDown() {
         MockURLProtocol.requestHandler = nil
@@ -264,6 +297,39 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(usage.stockLimit, 20)
     }
 
+    func testFetchUsageKeepsEntitlementLocatorHeaderWhenLocalSubscriptionIsInactive() async throws {
+        let suiteName = "APIClientTests.inactive-entitlement-locator.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(false, forKey: "kabuyomi.subscription.active")
+        defaults.set("orig-inactive-12345678", forKey: "kabuyomi.subscription.originalTransactionId")
+        let subscriptionStore = SubscriptionStore(defaults: defaults)
+
+        let client = makeClient(subscriptionStore: subscriptionStore) { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "x-kabuyomi-original-transaction-id"),
+                "orig-inactive-12345678"
+            )
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "plan": "free",
+                    "chatsUsed": 0,
+                    "chatLimit": 10,
+                    "stocksUsed": 0,
+                    "stockLimit": 3,
+                    "dateJST": "2026-07-10",
+                    "savedTickers": []
+                ])
+            )
+        }
+
+        _ = try await client.fetchUsage()
+        XCTAssertEqual(subscriptionStore.entitlementLookupOriginalTransactionId, "orig-inactive-12345678")
+    }
+
     func testSyncBillingSendsDeviceBindingHeaders() async throws {
         let client = makeClient(context: proContext) { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/v1/ios/subscriptions/sync")
@@ -276,8 +342,12 @@ final class APIClientTests: XCTestCase {
             XCTAssertEqual(json["originalTransactionId"] as? String, "orig-tx-123")
             XCTAssertEqual(json["transactionId"] as? String, "tx-123")
             XCTAssertEqual(json["productId"] as? String, "kabuyomi.sub.pro.monthly")
-            XCTAssertEqual(json["active"] as? Bool, true)
             XCTAssertEqual(json["signedTransactionInfo"] as? String, "signed-jws")
+            XCTAssertNil(json["active"])
+            XCTAssertEqual(
+                Set(json.keys),
+                Set(["originalTransactionId", "transactionId", "productId", "signedTransactionInfo"])
+            )
 
             return (
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
@@ -306,7 +376,6 @@ final class APIClientTests: XCTestCase {
                 originalTransactionId: "orig-tx-123",
                 transactionId: "tx-123",
                 productId: "kabuyomi.sub.pro.monthly",
-                active: true,
                 signedTransactionInfo: "signed-jws"
             )
         )
@@ -331,7 +400,6 @@ final class APIClientTests: XCTestCase {
                     originalTransactionId: "orig-tx-123",
                     transactionId: "tx-123",
                     productId: "kabuyomi.sub.pro.monthly",
-                    active: true,
                     signedTransactionInfo: "signed-jws"
                 )
             )
@@ -412,12 +480,133 @@ final class APIClientTests: XCTestCase {
 
         let response = try await client.sendChat(
             filingKey: "v1:AAPL:0000320193-24-000001",
-            question: "今回の変化は？"
+            question: "今回の変化は？",
+            operationId: "chat-response-path-operation"
         )
 
         XCTAssertEqual(response.responsePath, .gemini)
         XCTAssertEqual(response.modelName, "gemini-2.5-flash")
         XCTAssertEqual(response.sources.first?.sourceUrl, "https://www.sec.gov/Archives/AAPL.htm")
+    }
+
+    func testUnsupportedAppAttestUsesInstallationCredentialForCoreChatWithoutAssertion() async throws {
+        let credential = InstallationCredential(
+            token: "unsupported-installation-token",
+            principal: "installation:unsupported-device",
+            tokenReference: "unsupported-token-reference",
+            tokenVersion: 1,
+            issuedAt: "2026-07-11T00:00:00.000Z",
+            attestationStatus: .unavailable,
+            creditMode: .none
+        )
+        let context = QuotaRequestContext(
+            deviceKey: "legacy-unsupported-device",
+            installationCredential: credential,
+            appAttestKeyId: nil
+        )
+        let client = makeClient(context: context) { request in
+            XCTAssertEqual(request.url?.path, "/v1/chat")
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Authorization"),
+                "Installation unsupported-installation-token"
+            )
+            XCTAssertNil(request.value(forHTTPHeaderField: "x-kabuyomi-app-attest-key-id"))
+            XCTAssertNil(request.value(forHTTPHeaderField: "x-kabuyomi-app-attest-challenge-id"))
+            XCTAssertNil(request.value(forHTTPHeaderField: "x-kabuyomi-app-attest-assertion"))
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "answer": "利用可能です。",
+                    "sources": [],
+                    "responsePath": "deterministic",
+                    "modelName": NSNull(),
+                    "usage": [
+                        "plan": "free",
+                        "chatsUsed": 1,
+                        "chatLimit": 10,
+                        "stocksUsed": 1,
+                        "stockLimit": 3,
+                        "dateJST": "2026-07-11"
+                    ]
+                ])
+            )
+        }
+
+        XCTAssertTrue(client.authenticatedCreditActionsAvailable)
+        XCTAssertFalse(client.fraudSensitiveCreditActionsAvailable)
+        let response = try await client.sendChat(
+            filingKey: "v1:AAPL:0000320193-24-000001",
+            question: "売上高は？",
+            operationId: "unsupported-core-chat"
+        )
+        XCTAssertEqual(response.answer, "利用可能です。")
+    }
+
+    func testUnsupportedAppAttestRejectsFraudSensitiveRewardIntentBeforeNetwork() async {
+        let credential = InstallationCredential(
+            token: "unsupported-installation-token",
+            principal: "installation:unsupported-device",
+            tokenReference: "unsupported-token-reference",
+            tokenVersion: 1,
+            issuedAt: "2026-07-11T00:00:00.000Z",
+            attestationStatus: .unavailable,
+            creditMode: .none
+        )
+        let client = makeClient(context: QuotaRequestContext(
+            deviceKey: "legacy-unsupported-device",
+            installationCredential: credential,
+            appAttestKeyId: nil
+        )) { request in
+            XCTFail("Fraud-sensitive request reached the network: \(request.url?.path ?? "")")
+            throw URLError(.badServerResponse)
+        }
+
+        do {
+            _ = try await client.createAdMobRewardIntent()
+            XCTFail("Expected unsupported App Attest to block the reward intent")
+        } catch let error as InstallationIdentityError {
+            guard case .appAttestUnavailable = error else {
+                return XCTFail("Unexpected identity error: \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testPendingAttestationRejectsCoreMutationBeforeNetwork() async {
+        let credential = InstallationCredential(
+            token: "pending-installation-token",
+            principal: "installation:pending-device",
+            tokenReference: "pending-token-reference",
+            tokenVersion: 1,
+            issuedAt: "2026-07-11T00:00:00.000Z",
+            attestationStatus: .pending,
+            creditMode: .none
+        )
+        let client = makeClient(context: QuotaRequestContext(
+            deviceKey: "legacy-pending-device",
+            installationCredential: credential,
+            appAttestKeyId: "pending-app-attest-key"
+        )) { request in
+            XCTFail("Pending identity request reached the network: \(request.url?.path ?? "")")
+            throw URLError(.badServerResponse)
+        }
+
+        XCTAssertFalse(client.authenticatedCreditActionsAvailable)
+        do {
+            _ = try await client.sendChat(
+                filingKey: "v1:AAPL:0000320193-24-000001",
+                question: "売上高は？",
+                operationId: "pending-core-chat"
+            )
+            XCTFail("Expected pending attestation to block the chat")
+        } catch let error as InstallationIdentityError {
+            guard case .attestationNotVerified = error else {
+                return XCTFail("Unexpected identity error: \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
     }
 
     func testSendChatIncludesConversationContext() async throws {
@@ -429,7 +618,7 @@ final class APIClientTests: XCTestCase {
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             XCTAssertEqual(json["filingKey"] as? String, "v1:AAPL:0000320193-24-000001")
             XCTAssertEqual(json["question"] as? String, "なぜ？")
-            XCTAssertNotNil(json["operationId"] as? String)
+            XCTAssertEqual(json["operationId"] as? String, "chat-context-operation")
             let context = try XCTUnwrap(json["conversationContext"] as? [[String: String]])
             XCTAssertEqual(context, [
                 ["role": "user", "content": "営業CF"],
@@ -461,10 +650,90 @@ final class APIClientTests: XCTestCase {
             conversationContext: [
                 ChatContextMessage(role: "user", content: "営業CF"),
                 ChatContextMessage(role: "assistant", content: "営業CFは 312億ドル です。")
-            ]
+            ],
+            operationId: "chat-context-operation"
         )
 
         XCTAssertEqual(response.responsePath, .deterministic)
+    }
+
+    func testSendChatPollsExecutionPendingUsingSameOperationId() async throws {
+        let recorder = OperationIDRecorder()
+        let client = makeClient(context: standardContext) { request in
+            let body = try XCTUnwrap(Self.requestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let operationId = try XCTUnwrap(json["operationId"] as? String)
+            let requestNumber = recorder.record(operationId)
+
+            if requestNumber == 1 {
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 202,
+                        httpVersion: nil,
+                        headerFields: ["Retry-After": "0"]
+                    )!,
+                    try TestFixtures.jsonData([
+                        "error": "execution_pending",
+                        "retryAfterSeconds": 0
+                    ])
+                )
+            }
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "answer": "再試行で同じ結果を取得しました。",
+                    "sources": [],
+                    "responsePath": "deterministic",
+                    "modelName": NSNull(),
+                    "usage": [
+                        "plan": "free",
+                        "chatsUsed": 1,
+                        "chatLimit": 10,
+                        "stocksUsed": 1,
+                        "stockLimit": 3,
+                        "dateJST": "2026-04-18"
+                    ]
+                ])
+            )
+        }
+
+        let response = try await client.sendChat(
+            filingKey: "v1:AAPL:0000320193-24-000001",
+            question: "今回の変化は？",
+            operationId: "chat-pending-operation"
+        )
+
+        XCTAssertEqual(response.answer, "再試行で同じ結果を取得しました。")
+        XCTAssertEqual(recorder.operationIds, ["chat-pending-operation", "chat-pending-operation"])
+    }
+
+    func testSendChatSurfacesOperationResultExpiredWithoutChangingOperationId() async {
+        let recorder = OperationIDRecorder()
+        let client = makeClient(context: standardContext) { request in
+            let body = try XCTUnwrap(Self.requestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            recorder.record(try XCTUnwrap(json["operationId"] as? String))
+
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 410, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData(["error": "operation_result_expired"])
+            )
+        }
+
+        do {
+            let _: ChatResponse = try await client.sendChat(
+                filingKey: "v1:AAPL:0000320193-24-000001",
+                question: "今回の変化は？",
+                operationId: "chat-expired-operation"
+            )
+            XCTFail("Expected operation_result_expired")
+        } catch {
+            XCTAssertEqual(error as? APIError, .operationResultExpired)
+        }
+
+        XCTAssertEqual(recorder.operationIds, ["chat-expired-operation"])
     }
 
     func testSendChatDecodesLegacyResponseWithoutResponsePath() async throws {
@@ -500,7 +769,8 @@ final class APIClientTests: XCTestCase {
 
         let response = try await client.sendChat(
             filingKey: "v1:AAPL:0000320193-24-000001",
-            question: "今回の変化は？"
+            question: "今回の変化は？",
+            operationId: "chat-legacy-operation"
         )
 
         XCTAssertNil(response.responsePath)
@@ -533,7 +803,8 @@ final class APIClientTests: XCTestCase {
 
         let response = try await client.sendChat(
             filingKey: "v1:AAPL:0000320193-24-000001",
-            question: "今回の変化は？"
+            question: "今回の変化は？",
+            operationId: "chat-openai-operation"
         )
 
         XCTAssertEqual(response.responsePath, .openai)
@@ -567,7 +838,8 @@ final class APIClientTests: XCTestCase {
 
         let response = try await client.sendChat(
             filingKey: "v1:AAPL:0000320193-24-000001",
-            question: "今回の変化は？"
+            question: "今回の変化は？",
+            operationId: "chat-unknown-path-operation"
         )
 
         XCTAssertEqual(response.responsePath, .unknown)
@@ -784,7 +1056,7 @@ final class APIClientTests: XCTestCase {
             XCTAssertEqual(json["text"], "Revenue increased year over year.")
             XCTAssertEqual(json["targetLanguage"], "ja")
             XCTAssertNil(json["sourceLanguage"])
-            XCTAssertFalse(json["operationId"]?.isEmpty ?? true)
+            XCTAssertEqual(json["operationId"], "quote-translation-operation")
 
             return (
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
@@ -795,7 +1067,10 @@ final class APIClientTests: XCTestCase {
             )
         }
 
-        let response = try await client.translateQuote(text: "Revenue increased year over year.")
+        let response = try await client.translateQuote(
+            text: "Revenue increased year over year.",
+            operationId: "quote-translation-operation"
+        )
 
         XCTAssertEqual(response.translatedText, "売上高は前年同期比で増加しました。")
         XCTAssertEqual(response.modelName, "gemma-4-26b-a4b-it")
@@ -831,9 +1106,70 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(response.usage.stocksUsed, 0)
     }
 
+    func testAppleAccountSessionPersistsOpaqueCredentialAndMigrationUsesAccountAndLegacyEvidence() async throws {
+        let store = InMemoryAccountCredentialStore()
+        let expected = AccountCredential(
+            token: "opaque-account-session",
+            accountPrincipal: "account:v1:opaque-principal",
+            appAccountToken: "43fbd3f0-78b1-4d65-9968-0f5bc42aab47",
+            issuedAt: "2026-07-11T00:00:00.000Z",
+            expiresAt: "2026-08-10T00:00:00.000Z"
+        )
+        let requestRecorder = OperationIDRecorder()
+        let client = makeClient(accountCredentialStore: store) { request in
+            let requestCount = requestRecorder.record(request.url?.path ?? "missing")
+            if requestCount == 1 {
+                XCTAssertEqual(request.url?.path, "/v1/account/apple/session")
+                XCTAssertNil(request.value(forHTTPHeaderField: "x-kabuyomi-account-token"))
+                let body = try XCTUnwrap(Self.requestBodyData(from: request))
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+                XCTAssertEqual(json["identityToken"], "apple-identity-token")
+                return (
+                    HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    try TestFixtures.jsonData([
+                        "credential": [
+                            "token": expected.token,
+                            "accountPrincipal": expected.accountPrincipal,
+                            "appAccountToken": expected.appAccountToken,
+                            "issuedAt": expected.issuedAt,
+                            "expiresAt": expected.expiresAt
+                        ]
+                    ])
+                )
+            }
+
+            XCTAssertEqual(request.url?.path, "/v1/account/paid-credit-migration")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-kabuyomi-account-token"), expected.token)
+            // This helper injects a legacy header explicitly through QuotaRequestContext.
+            // Live clients have no request context and no longer add one for this route.
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-device-key"), "device-123")
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData([
+                    "status": "applied",
+                    "expectedPurchasedRemaining": 25,
+                    "purchaseEvidenceCount": 1
+                ])
+            )
+        }
+
+        let credential = try await client.createAppleAccountSession(identityToken: "apple-identity-token")
+        XCTAssertEqual(credential, expected)
+        XCTAssertEqual(store.credential, expected)
+
+        let migration = try await client.migratePaidCreditsToAccount(
+            mode: "apply",
+            migrationId: "paid-credit-account-v1-test"
+        )
+        XCTAssertEqual(migration.status, "applied")
+        XCTAssertEqual(migration.expectedPurchasedRemaining, 25)
+    }
+
     private func makeClient(
         baseURL: URL? = URL(string: "https://example.com")!,
-        context: QuotaRequestContext = QuotaRequestContext(deviceKey: "device-123"),
+        context: QuotaRequestContext? = nil,
+        subscriptionStore: SubscriptionStore? = nil,
+        accountCredentialStore: (any AccountCredentialStoring)? = nil,
         handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> APIClient {
         MockURLProtocol.requestHandler = handler
@@ -845,9 +1181,17 @@ final class APIClientTests: XCTestCase {
         return APIClient(
             session: session,
             baseURL: baseURL,
-            requestContext: context,
-            subscriptionStore: nil,
-            detachedAccessStore: nil
+            requestContext: context ?? standardContext,
+            subscriptionStore: subscriptionStore,
+            detachedAccessStore: nil,
+            installationIdentityStore: nil,
+            appAttestClient: nil,
+            accountCredentialStore: accountCredentialStore,
+            prevalidatedAssertionHeaders: [
+                "x-kabuyomi-app-attest-key-id": "test-app-attest-key",
+                "x-kabuyomi-app-attest-challenge-id": "test-challenge",
+                "x-kabuyomi-app-attest-assertion": "dGVzdA=="
+            ]
         )
     }
 
@@ -874,6 +1218,25 @@ final class APIClientTests: XCTestCase {
         }
 
         return data.isEmpty ? nil : data
+    }
+}
+
+private final class OperationIDRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String] = []
+
+    @discardableResult
+    func record(_ operationId: String) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        values.append(operationId)
+        return values.count
+    }
+
+    var operationIds: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return values
     }
 }
 

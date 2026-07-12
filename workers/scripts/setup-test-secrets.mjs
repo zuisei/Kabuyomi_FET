@@ -1,41 +1,38 @@
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 
 const rootDir = resolve(new URL("..", import.meta.url).pathname);
 const targetPath = join(rootDir, ".dev.vars");
 
 try {
-  const openaiKey = await resolveSecret("OPENAI_API_KEY", "OpenAI API key");
-  const cloudflareToken = await resolveSecret("CLOUDFLARE_API_TOKEN", "Cloudflare API token");
+  const existingDevVars = readDevVars(targetPath);
+  const openaiKey = await resolveSecret("OPENAI_API_KEY", "OpenAI API key", existingDevVars.OPENAI_API_KEY);
+  const cloudflareToken = await resolveSecret("CLOUDFLARE_API_TOKEN", "Cloudflare API token", existingDevVars.CLOUDFLARE_API_TOKEN);
+  const testAutomationSecret = process.env.KABUYOMI_TEST_AUTOMATION_SECRET?.trim()
+    || existingDevVars.KABUYOMI_TEST_AUTOMATION_SECRET?.trim()
+    || randomBytes(32).toString("hex");
 
   upsertDevVars(targetPath, {
     OPENAI_API_KEY: openaiKey,
-    CLOUDFLARE_API_TOKEN: cloudflareToken
+    CLOUDFLARE_API_TOKEN: cloudflareToken,
+    KABUYOMI_TEST_AUTOMATION_SECRET: testAutomationSecret
   });
 
-  console.log(`[secrets] wrote OPENAI_API_KEY and CLOUDFLARE_API_TOKEN to ${targetPath}`);
-  console.log("[secrets] uploading OPENAI_API_KEY to the test Worker secret store...");
+  console.log(`[secrets] wrote required local test credentials to ${targetPath}`);
 
-  const secretResult = spawnSync("npx", ["wrangler", "secret", "put", "OPENAI_API_KEY", "--config", "wrangler.test.toml"], {
-    cwd: rootDir,
-    env: { ...process.env, CLOUDFLARE_API_TOKEN: cloudflareToken },
-    input: `${openaiKey}\n`,
-    stdio: ["pipe", "inherit", "inherit"]
-  });
+  uploadSecret("OPENAI_API_KEY", openaiKey, cloudflareToken);
+  uploadSecret("TEST_AUTOMATION_SHARED_SECRET", testAutomationSecret, cloudflareToken);
 
-  if (secretResult.status !== 0) {
-    process.exit(secretResult.status ?? 1);
-  }
-
-  console.log("[secrets] test Worker OPENAI_API_KEY secret is set.");
+  console.log("[secrets] test Worker secrets are set; values were not printed.");
 } catch (error) {
   console.error(`[secrets] ${error.message}`);
   process.exit(1);
 }
 
-async function resolveSecret(envName, label) {
-  const existing = process.env[envName]?.trim();
+async function resolveSecret(envName, label, savedValue) {
+  const existing = process.env[envName]?.trim() || savedValue?.trim();
   if (existing) {
     return existing;
   }
@@ -73,6 +70,41 @@ function escapeDevVar(value) {
     return value;
   }
   return JSON.stringify(value);
+}
+
+function readDevVars(path) {
+  if (!existsSync(path)) return {};
+  const values = {};
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match) continue;
+    values[match[1]] = parseDevVarValue(match[2]);
+  }
+  return values;
+}
+
+function parseDevVarValue(value) {
+  const trimmed = value.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return trimmed.slice(1, -1);
+    }
+  }
+  return trimmed;
+}
+
+function uploadSecret(name, value, cloudflareToken) {
+  console.log(`[secrets] uploading ${name} to the test Worker secret store...`);
+  const result = spawnSync("npx", ["wrangler", "secret", "put", name, "--config", "wrangler.test.toml"], {
+    cwd: rootDir,
+    env: { ...process.env, CLOUDFLARE_API_TOKEN: cloudflareToken },
+    input: `${value}\n`,
+    stdio: ["pipe", "inherit", "inherit"]
+  });
+  if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
 function promptHidden(prompt) {

@@ -25,10 +25,17 @@ export function contextProfile(questionIntent: QuestionIntent, mode: ChatContext
         supplementalWindowChars: Math.min(base.supplementalWindowChars + 500, 3_600)
       };
     case "compact":
+      // Metric-led intents use very short XBRL chunks. Preserve the complete
+      // current/comparison fact set even on retry; compacting those sources
+      // would silently remove the authority needed to validate Q07/Q09/Q10.
+      const preserveMetricSources =
+        questionIntent === "cash_flow"
+        || questionIntent === "liquidity_debt"
+        || questionIntent === "historical_comparison";
       return {
         tokenBudget: Math.min(base.tokenBudget, 5_500),
         minSources: Math.min(base.minSources, 3),
-        maxSources: Math.min(base.maxSources, 5),
+        maxSources: preserveMetricSources ? base.maxSources : Math.min(base.maxSources, 5),
         supplementalSources: Math.min(base.supplementalSources, 2),
         sourceExcerptChars: Math.min(base.sourceExcerptChars, 1_100),
         supplementalWindowChars: Math.min(base.supplementalWindowChars, 1_800)
@@ -134,7 +141,12 @@ function baseContextProfile(questionIntent: QuestionIntent): ContextProfile {
       return {
         tokenBudget: questionIntent === "yoy_change" ? 8_000 : questionIntent === "liquidity_debt" ? 7_000 : 6_000,
         minSources: questionIntent === "yoy_change" ? 4 : questionIntent === "liquidity_debt" ? 3 : 2,
-        maxSources: questionIntent === "yoy_change" ? 7 : questionIntent === "liquidity_debt" ? 7 : 6,
+        maxSources:
+          questionIntent === "liquidity_debt" || questionIntent === "cash_flow"
+            ? questionIntent === "liquidity_debt" ? 12 : 10
+            : questionIntent === "yoy_change"
+              ? 7
+              : 6,
         supplementalSources: questionIntent === "yoy_change" ? 5 : questionIntent === "liquidity_debt" ? 4 : 2,
         sourceExcerptChars: questionIntent === "yoy_change" ? 1_300 : questionIntent === "liquidity_debt" ? 1_200 : 900,
         supplementalWindowChars: questionIntent === "yoy_change" ? 2_700 : questionIntent === "liquidity_debt" ? 2_500 : 1_800

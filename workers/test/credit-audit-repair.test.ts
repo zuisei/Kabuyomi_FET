@@ -104,10 +104,11 @@ class FakeAuditDb {
         this.failNextPurchaseMark = false;
         throw new Error("purchase mark failed");
       }
-      const row = this.purchaseTransactions.find((candidate) => candidate.transaction_id === args[2]);
+      const row = this.purchaseTransactions.find((candidate) => candidate.transaction_id === args[3]);
       if (row) {
         row.status = args[0];
-        row.updated_at = args[1];
+        row.debt_offset_applied = args[1];
+        row.updated_at = args[2];
       }
       return {};
     }

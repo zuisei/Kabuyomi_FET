@@ -140,7 +140,7 @@ export function resolvePlanLimits(plan: AccessPlan, config: RemoteConfig): PlanL
 
   if (plan === "lite") {
     return {
-      chatLimit: config.freeDailyChatLimit,
+      chatLimit: config.liteDailyChatLimit,
       stockLimit: config.freeStockLimit
     };
   }

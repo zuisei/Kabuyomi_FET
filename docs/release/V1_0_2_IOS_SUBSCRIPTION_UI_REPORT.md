@@ -1,5 +1,7 @@
 # Kabuyomi v1.0.2-B iOS Subscription UI Report
 
+> **Historical release evidence — not current shipping authority.** This point-in-time report preserves prior findings and may describe deployments, capabilities, or release decisions that have since changed. Use `CURRENT_SHIPPING_TRUTH.md`, `FEATURE_PARITY_COMPATIBILITY_REPORT.md`, `RELEASE_GATE_STATE.json`, and `FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md` for current decisions.
+
 ## Executive summary
 
 This phase wires the iOS app to the v1.0.2 subscription backend without changing Worker answer quality, SEC retrieval, model config, prompt policy, or filing router logic.

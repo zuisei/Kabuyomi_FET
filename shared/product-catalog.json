@@ -1,0 +1,21 @@
+{
+  "catalogVersion": "2026-07-11.v1",
+  "currencyDisplayAuthority": "storekit",
+  "normalChatCreditCost": 2,
+  "welcome": {
+    "credits": 50,
+    "recurring": false,
+    "requiresVerifiedInstallation": true
+  },
+  "plans": [
+    { "plan": "free", "productId": null, "monthlyCredits": 0, "savedCompanyLimit": 3, "dailyFairUseQuestionLimit": 25 },
+    { "plan": "lite", "productId": "kabuyomi.sub.lite.monthly", "monthlyCredits": 400, "savedCompanyLimit": 3, "dailyFairUseQuestionLimit": 10 },
+    { "plan": "pro", "productId": "kabuyomi.sub.pro.monthly", "monthlyCredits": 900, "savedCompanyLimit": 20, "dailyFairUseQuestionLimit": 50 },
+    { "plan": "pro_max", "productId": "kabuyomi.sub.max.monthly", "monthlyCredits": 2000, "savedCompanyLimit": 20, "dailyFairUseQuestionLimit": 50 }
+  ],
+  "consumables": [
+    { "productId": "kabuyomi.credits.50", "credits": 50, "newPurchaseVisibleByDefault": true },
+    { "productId": "kabuyomi.credits.100", "credits": 100, "newPurchaseVisibleByDefault": true, "legacy": true }
+  ],
+  "rewardedCredit": { "credits": 2, "dailyCap": 3, "expiryDays": 30, "grantAuthority": "admob_ssv" }
+}

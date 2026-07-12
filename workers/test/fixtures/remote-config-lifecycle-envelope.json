@@ -1,0 +1,42 @@
+{
+  "version": "review-fixture-v1",
+  "updatedAt": "2026-07-11T00:00:00.000Z",
+  "maxStaleAgeSeconds": 3888000,
+  "config": {
+    "freeStockLimit": 3,
+    "freeDailyChatLimit": 25,
+    "liteDailyChatLimit": 10,
+    "proStockLimit": 20,
+    "proDailyChatLimit": 50,
+    "adsEnabled": true,
+    "rewardedCreditEnabled": false,
+    "rewardedSsvReady": false,
+    "chatEnabled": true,
+    "webSupplementEnabled": false,
+    "creditBillingEnabled": true,
+    "consumablePurchasesEnabled": true,
+    "accountRecoveryReady": false,
+    "planCredits": {
+      "free": 0,
+      "lite": 400,
+      "pro": 900,
+      "pro_max": 2000
+    },
+    "maintenanceMode": false,
+    "extractorVersion": "v6",
+    "promptVersion": "v1",
+    "dailyRefreshEnabled": false,
+    "dailyRefreshBatchSize": 3,
+    "dailyRefreshConcurrency": 2,
+    "trackedTickers": [
+      "AAPL",
+      "MSFT",
+      "NVDA"
+    ],
+    "emergencyPaidGrantsDisabled": false,
+    "legacyClientCompatibility": {
+      "enabled": false,
+      "expiresAt": "1970-01-01T00:00:00.000Z"
+    }
+  }
+}

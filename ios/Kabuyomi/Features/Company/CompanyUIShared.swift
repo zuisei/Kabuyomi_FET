@@ -3,9 +3,9 @@ import SwiftUI
 extension View {
     @ViewBuilder
     func kabuyomiGlass(
-        radius: CGFloat = 26,
-        tint: Color = Color.white.opacity(0.34),
-        stroke: Color = Color.white.opacity(0.72),
+        radius: CGFloat = 22,
+        tint: Color = KabuyomiTheme.accent.opacity(0.035),
+        stroke: Color = Color.primary.opacity(0.07),
         interactive: Bool = false
     ) -> some View {
         if #available(iOS 26, *) {
@@ -20,7 +20,7 @@ extension View {
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .stroke(stroke, lineWidth: 1)
                 )
-                .shadow(color: Color.black.opacity(0.08), radius: 16, x: 0, y: 10)
+                .shadow(color: Color.black.opacity(0.055), radius: 10, x: 0, y: 4)
         } else {
             self.background(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -33,7 +33,7 @@ extension View {
                         RoundedRectangle(cornerRadius: radius, style: .continuous)
                             .stroke(stroke, lineWidth: 1)
                     )
-                    .shadow(color: Color.black.opacity(0.08), radius: 14, x: 0, y: 10)
+                    .shadow(color: Color.black.opacity(0.055), radius: 10, x: 0, y: 4)
             )
         }
     }

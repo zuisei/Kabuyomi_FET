@@ -22,6 +22,7 @@ r2_buckets = [
 cpu_ms = 30000
 
 [vars]
+KABUYOMI_ENV = "production"
 SEC_USER_AGENT = "Kabuyomi admin@kabuyomi.app"
 SEC_FETCHER_BASE_URL = "cloudflare-internal"
 # Leave GEMINI_MODEL unset here so the repo default lives in workers/src/clients/gemini/request.ts.

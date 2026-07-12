@@ -1,4 +1,11 @@
-import type { Env, FilingReference, MetricSnapshot, TickerRecord } from "../env";
+import type {
+  Env,
+  FilingReference,
+  FinancialFactPeriodKind,
+  FinancialFiscalQuarter,
+  MetricSnapshot,
+  TickerRecord
+} from "../env";
 import {
   fetchFilingAssetsFromFetcher,
   fetchFilingHtmlFromFetcher,
@@ -17,6 +24,7 @@ import {
   resolveBaseTickerFallback
 } from "./sec-ticker-alias";
 import { logWarnEvent } from "../lib/logging";
+import { AppError } from "../lib/errors";
 import { loadSearchFormTypeCache, upsertSearchFormTypeCache } from "../lib/search-form-type-cache";
 
 const METRIC_TAGS = {
@@ -32,12 +40,27 @@ const METRIC_TAGS = {
   operatingCashFlow: [
     "NetCashProvidedByUsedInOperatingActivities",
     "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"
-  ]
+  ],
+  // Do not conflate restricted cash with freely available cash equivalents.
+  cashAndCashEquivalents: ["CashAndCashEquivalentsAtCarryingValue"],
+  // These concepts intentionally exclude lease obligations and aggregate debt.
+  currentDebt: ["LongTermDebtCurrent"],
+  longTermDebt: ["LongTermDebtNoncurrent"]
 } as const;
 
 const METRIC_TAG_LIST = [...new Set(Object.values(METRIC_TAGS).flat())];
 
 type MetricName = keyof typeof METRIC_TAGS;
+
+type MetricPeriodType = "duration" | "cash_flow_ytd" | "instant";
+
+const INSTANT_METRICS = new Set<MetricName>([
+  "cashAndCashEquivalents",
+  "currentDebt",
+  "longTermDebt"
+]);
+const PRIOR_YEAR_ALIGNMENT_WINDOW_DAYS = 28;
+const AVERAGE_CALENDAR_YEAR_DAYS = 365.2425;
 
 interface SubmissionRecent {
   form: string[];
@@ -61,6 +84,9 @@ export interface ConceptFact {
   end?: string;
   form?: string;
   accn?: string;
+  fy?: number;
+  fp?: string;
+  frame?: string;
 }
 
 export interface ConceptResponse {
@@ -80,6 +106,7 @@ export interface PreparedFilingResponse {
   primaryDocumentUrl: string;
   mdaText: string;
   mdaTokenCount: number;
+  supplementalEvidenceText?: string;
   metrics: MetricSnapshot[];
   usedStartPattern: string;
   usedEndPattern: string;
@@ -364,6 +391,9 @@ function compareTickerSearchEntry(left: TickerSearchIndexEntry, right: TickerSea
 }
 
 export async function refreshTickerSnapshot(env: Env): Promise<void> {
+  if (/^(1|true|yes|on)$/iu.test(env.EMERGENCY_DISABLE_SEC_REFRESH?.trim() ?? "")) {
+    throw new AppError(503, "SEC refresh is temporarily disabled");
+  }
   const payload = await fetchTickerSnapshotFromFetcher(env);
   const normalized = normalizeTickerSnapshot(payload, new Date().toISOString());
   await env.KABUYOMI_CACHE.put("tickers_snapshot", JSON.stringify(normalized));
@@ -470,20 +500,42 @@ export function pickComparisonFiling(
     return item.accessionNumber !== current.accessionNumber && item.formType === current.formType;
   });
 
-  if (current.formType === "10-K") {
-    return candidates.find((item) => item.periodOfReport < current.periodOfReport) ?? null;
+  const currentPeriodTime = isoDateToTime(current.periodOfReport);
+  const currentFiledTime = isoDateToTime(current.filedAt);
+  if (currentPeriodTime === null || currentFiledTime === null) {
+    return null;
   }
 
-  const targetDate = new Date(current.periodOfReport);
-  const approxPriorYear = new Date(targetDate);
-  approxPriorYear.setUTCFullYear(targetDate.getUTCFullYear() - 1);
-
   const sorted = candidates
-    .map((item) => ({
-      filing: item,
-      distance: Math.abs(new Date(item.periodOfReport).getTime() - approxPriorYear.getTime())
-    }))
-    .sort((left, right) => left.distance - right.distance);
+    .flatMap((item) => {
+      const candidatePeriodTime = isoDateToTime(item.periodOfReport);
+      const candidateFiledTime = isoDateToTime(item.filedAt);
+      if (
+        candidatePeriodTime === null
+        || candidateFiledTime === null
+        || candidatePeriodTime >= currentPeriodTime
+        || candidateFiledTime >= currentFiledTime
+      ) {
+        return [];
+      }
+
+      const elapsedDays = (currentPeriodTime - candidatePeriodTime) / 86_400_000;
+      const priorYearDistanceDays = Math.abs(elapsedDays - AVERAGE_CALENDAR_YEAR_DAYS);
+
+      // A 52/53-week fiscal calendar can move a like-for-like annual or
+      // quarterly endpoint by seven days, while leap years move calendar-year
+      // issuers by one day. Four weeks covers those legitimate shifts but
+      // excludes both adjacent fiscal quarters and skipped annual periods.
+      if (priorYearDistanceDays > PRIOR_YEAR_ALIGNMENT_WINDOW_DAYS) {
+        return [];
+      }
+
+      return [{ filing: item, priorYearDistanceDays, candidatePeriodTime }];
+    })
+    .sort((left, right) =>
+      left.priorYearDistanceDays - right.priorYearDistanceDays
+      || right.candidatePeriodTime - left.candidatePeriodTime
+    );
 
   return sorted[0]?.filing ?? null;
 }
@@ -543,6 +595,7 @@ export async function fetchPreparedFiling(
     primaryDocumentUrl: fetcherPayload.primaryDocumentUrl,
     mdaText: fetcherPayload.mdaText,
     mdaTokenCount: fetcherPayload.mdaTokenCount,
+    supplementalEvidenceText: fetcherPayload.supplementalEvidenceText,
     metrics: buildMetricSnapshotsFromFetcherPayload(filing, comparisonFiling, fetcherPayload),
     usedStartPattern: fetcherPayload.usedStartPattern,
     usedEndPattern: fetcherPayload.usedEndPattern,
@@ -567,25 +620,57 @@ function buildMetricSnapshotsFromFetcherPayload(
       continue;
     }
 
-    const comparison = resolveComparisonFact(
+    let comparison = resolveComparisonFact(
       logicalName,
+      current.tagUsed,
       filing,
       comparisonFiling,
       fetcherPayload.concepts,
       fetcherPayload.companyFacts
     );
+    if (comparison && !comparisonFactsCompatible(logicalName, current, comparison, filing)) {
+      comparison = null;
+    }
+    const currentFiscalYear = normalizeFiscalYear(current.fact.fy);
+    const currentFiscalQuarter = normalizeFiscalQuarter(current.fact.fp);
+    const comparisonFiscalYear = comparison
+      ? resolveComparisonFiscalYear(current.fact, comparison, filing)
+      : undefined;
+    const comparisonFiscalQuarter = normalizeFiscalQuarter(comparison?.fact.fp);
 
     results.push({
       logicalName,
       tagUsed: current.tagUsed,
       value: current.fact.val,
       unit: current.unit,
+      ...(current.fact.start ? { periodStart: current.fact.start } : {}),
       periodEnd: current.fact.end ?? filing.periodOfReport,
-      comparisonValue: comparison?.fact.val,
-      yoyPercent:
-        comparison && comparison.fact.val !== 0
-          ? ((current.fact.val - comparison.fact.val) / Math.abs(comparison.fact.val)) * 100
-          : undefined
+      periodKind: inferFactPeriodKind(current.fact, filing, metricPeriodType(logicalName)),
+      ...(currentFiscalYear !== undefined ? { fiscalYear: currentFiscalYear } : {}),
+      ...(currentFiscalQuarter !== undefined ? { fiscalQuarter: currentFiscalQuarter } : {}),
+      ...(comparison ? { comparisonValue: comparison.fact.val } : {}),
+      ...(comparison?.fact.start ? { comparisonPeriodStart: comparison.fact.start } : {}),
+      ...(comparison?.fact.end ? { comparisonPeriodEnd: comparison.fact.end } : {}),
+      ...(comparison
+        ? { comparisonPeriodKind: inferFactPeriodKind(comparison.fact, comparison.filing, metricPeriodType(logicalName)) }
+        : {}),
+      ...(comparisonFiscalYear !== undefined ? { comparisonFiscalYear } : {}),
+      ...(comparisonFiscalQuarter !== undefined ? { comparisonFiscalQuarter } : {}),
+      ...(comparison
+        ? {
+            comparisonTagUsed: comparison.tagUsed,
+            comparisonSourceUrl: buildPrimaryDocumentUrl(comparison.filing),
+            comparisonAccessionNumber: comparison.filing.accessionNumber
+          }
+        : {}),
+      ...(comparison
+        && comparison.fact.val !== 0
+        && !valuesCrossZero(current.fact.val, comparison.fact.val)
+        ? {
+            yoyPercent:
+              ((current.fact.val - comparison.fact.val) / Math.abs(comparison.fact.val)) * 100
+          }
+        : {})
     });
   }
 
@@ -594,16 +679,17 @@ function buildMetricSnapshotsFromFetcherPayload(
 
 function resolveComparisonFact(
   logicalName: MetricName,
+  requiredTag: string,
   filing: FilingReference,
   comparisonFiling: FilingReference | null,
   concepts: Record<string, ConceptResponse | null>,
   companyFacts: CompanyFactsResponse | null
-): { tagUsed: string; unit: string; fact: ConceptFact } | null {
+): { tagUsed: string; unit: string; fact: ConceptFact; filing: FilingReference } | null {
   const sameFilingComparison = inferSameFilingComparisonReference(filing);
   if (sameFilingComparison) {
-    const fact = resolveFact(logicalName, sameFilingComparison, concepts, companyFacts);
+    const fact = resolveFact(logicalName, sameFilingComparison, concepts, companyFacts, requiredTag);
     if (fact) {
-      return fact;
+      return { ...fact, filing: sameFilingComparison };
     }
   }
 
@@ -611,14 +697,16 @@ function resolveComparisonFact(
     return null;
   }
 
-  return resolveFact(logicalName, comparisonFiling, concepts, companyFacts);
+  const fact = resolveFact(logicalName, comparisonFiling, concepts, companyFacts, requiredTag);
+  return fact ? { ...fact, filing: comparisonFiling } : null;
 }
 
 function resolveFact(
   logicalName: MetricName,
   filing: FilingReference,
   concepts: Record<string, ConceptResponse | null>,
-  companyFacts: CompanyFactsResponse | null
+  companyFacts: CompanyFactsResponse | null,
+  requiredTag?: string
 ): { tagUsed: string; unit: string; fact: ConceptFact } | null {
   const usGaap = companyFacts?.facts?.["us-gaap"] ?? {};
   let bestCandidate:
@@ -631,11 +719,17 @@ function resolveFact(
       }
     | null = null;
 
-  for (const [tagPriority, tag] of METRIC_TAGS[logicalName].entries()) {
+  const candidateTags = requiredTag ? [requiredTag] : METRIC_TAGS[logicalName];
+  for (const [tagPriority, tag] of candidateTags.entries()) {
     const sources = [concepts[tag] ?? null, usGaap[tag] ?? null];
 
     for (const concept of sources) {
-      const fact = selectBestFact(concept?.units, filing, logicalName === "epsBasic");
+      const fact = selectBestFact(
+        concept?.units,
+        filing,
+        logicalName === "epsBasic",
+        metricPeriodType(logicalName)
+      );
       if (!fact) {
         continue;
       }
@@ -650,8 +744,8 @@ function resolveFact(
 
       if (
         !bestCandidate ||
-        candidate.score < bestCandidate.score ||
-        (candidate.score === bestCandidate.score && candidate.tagPriority < bestCandidate.tagPriority)
+        candidate.tagPriority < bestCandidate.tagPriority ||
+        (candidate.tagPriority === bestCandidate.tagPriority && candidate.score < bestCandidate.score)
       ) {
         bestCandidate = candidate;
       }
@@ -669,22 +763,24 @@ function resolveFact(
 function selectBestFact(
   units: Record<string, ConceptFact[]> | undefined,
   filing: FilingReference,
-  isEPS: boolean
+  isEPS: boolean,
+  periodType: MetricPeriodType
 ): { unit: string; fact: ConceptFact; score: number } | null {
   if (!units) {
     return null;
   }
 
-  const preferredUnits = isEPS ? ["USD/shares", "USD"] : ["USD"];
-  const targetPeriod = new Date(filing.periodOfReport).getTime();
-  const targetFiled = new Date(filing.filedAt).getTime();
-  const targetDurationDays = filing.formType === "10-Q" ? 100 : 380;
+  const preferredUnits = isEPS ? ["USD/shares"] : ["USD"];
   const flattened: Array<{ unit: string; fact: ConceptFact; score: number }> = [];
 
   for (const [unit, facts] of Object.entries(units)) {
-    const unitWeight = preferredUnits.includes(unit) ? 0 : 50_000_000;
+    const unitPriority = preferredUnits.indexOf(unit);
+    if (unitPriority < 0) {
+      continue;
+    }
+
     for (const fact of facts) {
-      if (typeof fact.val !== "number") {
+      if (!Number.isFinite(fact.val)) {
         continue;
       }
 
@@ -693,14 +789,20 @@ function selectBestFact(
         continue;
       }
 
-      const durationPenalty = durationScore(fact, targetDurationDays);
-      const endTime = fact.end ? new Date(fact.end).getTime() : targetPeriod;
-      const filedTime = fact.filed ? new Date(fact.filed).getTime() : targetFiled;
+      if (!matchesFilingIdentity(fact, filing) || fact.end !== filing.periodOfReport) {
+        continue;
+      }
+
+      const periodPenalty = periodType === "instant"
+        ? instantPeriodScore(fact)
+        : durationScore(fact, filing.formType, periodType);
+      if (periodPenalty === null) {
+        continue;
+      }
+
       const score =
-        unitWeight +
-        durationPenalty +
-        Math.abs(endTime - targetPeriod) +
-        Math.abs(filedTime - targetFiled);
+        unitPriority * 1_000_000 +
+        periodPenalty;
 
       flattened.push({ unit, fact, score });
     }
@@ -709,6 +811,31 @@ function selectBestFact(
   flattened.sort((left, right) => left.score - right.score);
   const best = flattened[0];
   return best ? { unit: best.unit, fact: best.fact, score: best.score } : null;
+}
+
+function metricPeriodType(logicalName: MetricName): MetricPeriodType {
+  if (INSTANT_METRICS.has(logicalName)) {
+    return "instant";
+  }
+  return logicalName === "operatingCashFlow" ? "cash_flow_ytd" : "duration";
+}
+
+function matchesFilingIdentity(fact: ConceptFact, filing: FilingReference): boolean {
+  if (fact.accn) {
+    return accessionWithoutDashes(fact.accn) === accessionWithoutDashes(filing.accessionNumber);
+  }
+
+  // Trimmed regression fixtures may omit accession numbers. In that case,
+  // require the SEC filed date when it is available rather than accepting a
+  // same-form fact from another filing.
+  return !fact.filed || fact.filed === filing.filedAt;
+}
+
+function instantPeriodScore(fact: ConceptFact): number | null {
+  if (fact.start !== undefined && fact.start.trim().length > 0) {
+    return null;
+  }
+  return isIsoDate(fact.end) ? 0 : null;
 }
 
 function inferSameFilingComparisonReference(filing: FilingReference): FilingReference | null {
@@ -748,19 +875,244 @@ function shiftPeriodEndByYears(dateString: string, years: number): string | null
   ].join("-");
 }
 
-function durationScore(fact: ConceptFact, targetDurationDays: number): number {
+function durationScore(
+  fact: ConceptFact,
+  formType: FilingReference["formType"],
+  periodType: Exclude<MetricPeriodType, "instant">
+): number | null {
   if (!fact.start || !fact.end) {
-    return 200_000_000;
+    return null;
   }
 
   const start = new Date(fact.start).getTime();
   const end = new Date(fact.end).getTime();
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-    return 200_000_000;
+    return null;
   }
 
   const durationDays = Math.round((end - start) / 86_400_000);
-  return Math.abs(durationDays - targetDurationDays) * 10_000;
+  if (formType === "10-K") {
+    return durationDays >= 300 && durationDays <= 400
+      ? Math.abs(durationDays - 380) * 10_000
+      : null;
+  }
+
+  if (periodType === "cash_flow_ytd") {
+    return cashFlowYtdDurationScore(durationDays, fact.fp);
+  }
+
+  if (durationDays < 60 || durationDays > 120) {
+    return null;
+  }
+
+  return Math.abs(durationDays - 100) * 10_000;
+}
+
+function cashFlowYtdDurationScore(durationDays: number, fiscalPeriod: string | undefined): number | null {
+  const normalizedPeriod = fiscalPeriod?.trim().toUpperCase();
+  const expected = normalizedPeriod === "Q1"
+    ? { minimum: 60, maximum: 120, target: 100 }
+    : normalizedPeriod === "Q2"
+      ? { minimum: 140, maximum: 220, target: 190 }
+      : normalizedPeriod === "Q3"
+        ? { minimum: 225, maximum: 310, target: 280 }
+        : null;
+
+  if (expected) {
+    return durationDays >= expected.minimum && durationDays <= expected.maximum
+      ? Math.abs(durationDays - expected.target) * 10_000
+      : null;
+  }
+
+  if (normalizedPeriod) {
+    return null;
+  }
+
+  // Older trimmed facts may omit fp. A 10-Q cash-flow statement is cumulative;
+  // among otherwise identical candidates, prefer the longest valid YTD span.
+  return durationDays >= 60 && durationDays <= 310
+    ? (310 - durationDays) * 10_000
+    : null;
+}
+
+function inferFactPeriodKind(
+  fact: ConceptFact,
+  filing: FilingReference,
+  periodType: MetricPeriodType
+): FinancialFactPeriodKind {
+  if (periodType === "instant") {
+    return "instant";
+  }
+  if (!fact.start || !fact.end) {
+    return "unknown";
+  }
+
+  const start = new Date(fact.start).getTime();
+  const end = new Date(fact.end).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return "unknown";
+  }
+
+  const durationDays = Math.round((end - start) / 86_400_000);
+  if (filing.formType === "10-K" && durationDays >= 300 && durationDays <= 400) {
+    return "annual";
+  }
+  if (periodType === "cash_flow_ytd" && filing.formType === "10-Q") {
+    const fiscalPeriod = fact.fp?.trim().toUpperCase();
+    if (fiscalPeriod === "Q1") {
+      // Q1 cash flow is both fiscal-YTD and the exact quarter. Classifying it
+      // as a quarter keeps it period-compatible with Q1 income-statement facts.
+      return "quarter";
+    }
+    if (fiscalPeriod === "Q2" || fiscalPeriod === "Q3") {
+      return "year_to_date";
+    }
+    // Older SEC facts can omit fp. Preserve the exact-period distinction from
+    // the observed duration instead of labeling a one-quarter span as YTD.
+    return durationDays >= 60 && durationDays <= 120 ? "quarter" : "year_to_date";
+  }
+  if (durationDays >= 60 && durationDays <= 120) {
+    return "quarter";
+  }
+  if (durationDays > 120 && durationDays <= 300) {
+    return "year_to_date";
+  }
+  return "duration";
+}
+
+function normalizeFiscalYear(fiscalYear: number | undefined): number | undefined {
+  if (fiscalYear === undefined || !Number.isInteger(fiscalYear) || fiscalYear < 1900 || fiscalYear > 2200) {
+    return undefined;
+  }
+  return fiscalYear;
+}
+
+function resolveComparisonFiscalYear(
+  currentFact: ConceptFact,
+  comparison: { fact: ConceptFact; filing: FilingReference },
+  currentFiling: FilingReference
+): number | undefined {
+  const sameFilingContext = accessionWithoutDashes(comparison.filing.accessionNumber)
+    === accessionWithoutDashes(currentFiling.accessionNumber);
+  if (!sameFilingContext) {
+    return normalizeFiscalYear(comparison.fact.fy);
+  }
+
+  // SEC comparative contexts embedded in a later filing carry the later
+  // filing's fy/fp metadata. Preserve the fiscal-calendar offset from the
+  // current fact instead of falsely labeling the prior period as the current
+  // fiscal year (important for off-calendar issuers as well).
+  const currentFiscalYear = normalizeFiscalYear(currentFact.fy);
+  const currentPeriodYear = isoDateYear(currentFact.end ?? currentFiling.periodOfReport);
+  const comparisonPeriodYear = isoDateYear(comparison.fact.end);
+  if (
+    currentFiscalYear === undefined
+    || currentPeriodYear === undefined
+    || comparisonPeriodYear === undefined
+  ) {
+    return undefined;
+  }
+  const derived = currentFiscalYear - (currentPeriodYear - comparisonPeriodYear);
+  return normalizeFiscalYear(derived);
+}
+
+function comparisonFactsCompatible(
+  logicalName: MetricName,
+  current: { tagUsed: string; unit: string; fact: ConceptFact },
+  comparison: { tagUsed: string; unit: string; fact: ConceptFact; filing: FilingReference },
+  currentFiling: FilingReference
+): boolean {
+  if (current.tagUsed !== comparison.tagUsed || current.unit !== comparison.unit) {
+    return false;
+  }
+
+  // Callers normally obtain comparisonFiling through pickComparisonFiling,
+  // but keep the metric builder fail-closed as well: an injected or stale
+  // multi-year filing must never be surfaced as an ordinary YoY comparison.
+  if (!arePriorYearPeriodsAligned(
+    current.fact.end ?? currentFiling.periodOfReport,
+    comparison.fact.end ?? comparison.filing.periodOfReport
+  )) {
+    return false;
+  }
+
+  const currentQuarter = normalizeFiscalQuarter(current.fact.fp);
+  const comparisonQuarter = normalizeFiscalQuarter(comparison.fact.fp);
+  if (currentQuarter !== undefined && comparisonQuarter !== undefined && currentQuarter !== comparisonQuarter) {
+    return false;
+  }
+
+  const periodType = metricPeriodType(logicalName);
+  const currentPeriodKind = inferFactPeriodKind(current.fact, currentFiling, periodType);
+  const comparisonPeriodKind = inferFactPeriodKind(comparison.fact, comparison.filing, periodType);
+  if (currentPeriodKind !== comparisonPeriodKind) {
+    return false;
+  }
+  if (currentPeriodKind === "instant") {
+    return true;
+  }
+
+  const currentDurationDays = factDurationDays(current.fact);
+  const comparisonDurationDays = factDurationDays(comparison.fact);
+  return currentDurationDays !== null
+    && comparisonDurationDays !== null
+    && Math.abs(currentDurationDays - comparisonDurationDays) <= 7;
+}
+
+function factDurationDays(fact: ConceptFact): number | null {
+  if (!fact.start || !fact.end) return null;
+  const start = Date.parse(fact.start);
+  const end = Date.parse(fact.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  return Math.round((end - start) / 86_400_000);
+}
+
+function isoDateYear(value: string | undefined): number | undefined {
+  const match = /^(\d{4})-\d{2}-\d{2}$/u.exec(value ?? "");
+  if (!match) return undefined;
+  const year = Number(match[1]);
+  return Number.isInteger(year) ? year : undefined;
+}
+
+function valuesCrossZero(current: number, comparison: number): boolean {
+  return (current < 0 && comparison >= 0) || (current >= 0 && comparison < 0);
+}
+
+function normalizeFiscalQuarter(fiscalPeriod: string | undefined): FinancialFiscalQuarter | undefined {
+  const normalized = fiscalPeriod?.trim().toUpperCase();
+  if (normalized === "Q1" || normalized === "Q2" || normalized === "Q3" || normalized === "Q4" || normalized === "FY") {
+    return normalized;
+  }
+  return undefined;
+}
+
+function isIsoDate(value: string | undefined): value is string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? "");
+  if (!match) {
+    return false;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+}
+
+function isoDateToTime(value: string | undefined): number | null {
+  if (!isIsoDate(value)) {
+    return null;
+  }
+  return Date.parse(`${value}T00:00:00.000Z`);
+}
+
+function arePriorYearPeriodsAligned(currentPeriodEnd: string, comparisonPeriodEnd: string): boolean {
+  const currentTime = isoDateToTime(currentPeriodEnd);
+  const comparisonTime = isoDateToTime(comparisonPeriodEnd);
+  if (currentTime === null || comparisonTime === null || comparisonTime >= currentTime) {
+    return false;
+  }
+  const elapsedDays = (currentTime - comparisonTime) / 86_400_000;
+  return Math.abs(elapsedDays - AVERAGE_CALENDAR_YEAR_DAYS) <= PRIOR_YEAR_ALIGNMENT_WINDOW_DAYS;
 }
 
 function allSupportedFilings(tickerRecord: TickerRecord, submissions: SubmissionResponse): FilingReference[] {

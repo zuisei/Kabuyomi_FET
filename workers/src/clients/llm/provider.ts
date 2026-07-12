@@ -18,7 +18,7 @@ export function resolveLlmProvider(env: Env): LlmProviderName {
   if (raw === "gemini") {
     return "gemini-legacy";
   }
-  return "gemini-legacy";
+  return raw ? "disabled" : "gemini-legacy";
 }
 
 export async function generateModelChatAnswer(env: Env, input: ChatPromptInput): Promise<GeminiChatAnswer> {

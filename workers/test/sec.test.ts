@@ -7,7 +7,7 @@ import {
   sortTickerSearchResults
 } from "../src/clients/sec";
 import { readQuotaIdentity } from "../src/lib/pipeline";
-import type { TickerRecord } from "../src/env";
+import type { FilingReference, TickerRecord } from "../src/env";
 
 const ticker: TickerRecord = {
   ticker: "AAPL",
@@ -40,6 +40,8 @@ afterEach(() => {
 
 function entitlementEnv(payload?: Record<string, unknown>, status = 200) {
   return {
+    SUBSCRIPTION_PRINCIPAL_HMAC_KEY_V1: "test-subscription-principal-secret",
+    APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox",
     ENTITLEMENT: {
       getByName: vi.fn().mockReturnValue({
         fetch: vi.fn().mockResolvedValue(
@@ -83,6 +85,137 @@ describe("SEC filing selection", () => {
     const current = pickLatestSupportedFiling(ticker, submissions)!;
     const comparison = pickComparisonFiling(ticker, submissions, current);
     expect(comparison?.accessionNumber).toBe("0000320193-25-000093");
+  });
+
+  it("does not use the previous quarter when no prior-year 10-Q is available", () => {
+    const current: FilingReference = {
+      ...ticker,
+      formType: "10-Q",
+      accessionNumber: "0000320193-26-000057",
+      primaryDocument: "current.htm",
+      filedAt: "2026-01-30",
+      periodOfReport: "2025-12-27"
+    };
+    const comparison = pickComparisonFiling(ticker, {
+      name: ticker.companyName,
+      filings: {
+        recent: {
+          form: ["10-Q", "10-Q"],
+          accessionNumber: [current.accessionNumber, "0000320193-25-000101"],
+          primaryDocument: [current.primaryDocument, "previous-quarter.htm"],
+          filingDate: [current.filedAt, "2025-10-31"],
+          reportDate: [current.periodOfReport, "2025-09-27"]
+        }
+      }
+    }, current);
+
+    expect(comparison).toBeNull();
+  });
+
+  it("excludes future filings during backfill and accepts a 53-week prior-year comparison", () => {
+    const current: FilingReference = {
+      ...ticker,
+      formType: "10-Q",
+      accessionNumber: "0000320193-26-000020",
+      primaryDocument: "backfill-current.htm",
+      filedAt: "2026-02-27",
+      periodOfReport: "2026-02-01"
+    };
+    const comparison = pickComparisonFiling(ticker, {
+      name: ticker.companyName,
+      filings: {
+        recent: {
+          form: ["10-Q", "10-Q", "10-Q"],
+          accessionNumber: [
+            "0000320193-26-000090",
+            current.accessionNumber,
+            "0000320193-25-000020"
+          ],
+          primaryDocument: ["future.htm", current.primaryDocument, "prior-53-week.htm"],
+          filingDate: ["2026-05-29", current.filedAt, "2025-02-28"],
+          reportDate: ["2026-05-03", current.periodOfReport, "2025-01-26"]
+        }
+      }
+    }, current);
+
+    expect(comparison?.accessionNumber).toBe("0000320193-25-000020");
+    expect(comparison?.periodOfReport).toBe("2025-01-26");
+  });
+
+  it("does not use a two-year-old 10-K as an annual comparison", () => {
+    const current: FilingReference = {
+      ...ticker,
+      formType: "10-K",
+      accessionNumber: "0000320193-26-000120",
+      primaryDocument: "annual-2026.htm",
+      filedAt: "2026-03-20",
+      periodOfReport: "2026-01-31"
+    };
+    const comparison = pickComparisonFiling(ticker, {
+      name: ticker.companyName,
+      filings: {
+        recent: {
+          form: ["10-K", "10-K"],
+          accessionNumber: [current.accessionNumber, "0000320193-24-000120"],
+          primaryDocument: [current.primaryDocument, "annual-2024.htm"],
+          filingDate: [current.filedAt, "2024-03-22"],
+          reportDate: [current.periodOfReport, "2024-02-03"]
+        }
+      }
+    }, current);
+
+    expect(comparison).toBeNull();
+  });
+
+  it("accepts a 53-week prior-year 10-K as an annual comparison", () => {
+    const current: FilingReference = {
+      ...ticker,
+      formType: "10-K",
+      accessionNumber: "0000320193-26-000121",
+      primaryDocument: "annual-current.htm",
+      filedAt: "2026-03-20",
+      periodOfReport: "2026-02-01"
+    };
+    const comparison = pickComparisonFiling(ticker, {
+      name: ticker.companyName,
+      filings: {
+        recent: {
+          form: ["10-K", "10-K"],
+          accessionNumber: [current.accessionNumber, "0000320193-25-000121"],
+          primaryDocument: [current.primaryDocument, "annual-prior-53-week.htm"],
+          filingDate: [current.filedAt, "2025-03-14"],
+          reportDate: [current.periodOfReport, "2025-01-26"]
+        }
+      }
+    }, current);
+
+    expect(comparison?.accessionNumber).toBe("0000320193-25-000121");
+    expect(comparison?.periodOfReport).toBe("2025-01-26");
+  });
+
+  it("rejects a prior-year 10-K that was filed after the current backfill filing", () => {
+    const current: FilingReference = {
+      ...ticker,
+      formType: "10-K",
+      accessionNumber: "0000320193-26-000122",
+      primaryDocument: "annual-backfill.htm",
+      filedAt: "2026-03-20",
+      periodOfReport: "2026-01-31"
+    };
+    const comparison = pickComparisonFiling(ticker, {
+      name: ticker.companyName,
+      filings: {
+        recent: {
+          form: ["10-K", "10-K"],
+          accessionNumber: [current.accessionNumber, "0000320193-25-000122"],
+          primaryDocument: [current.primaryDocument, "late-filed-prior.htm"],
+          filingDate: [current.filedAt, "2026-04-01"],
+          reportDate: [current.periodOfReport, "2025-02-01"]
+        }
+      }
+    }, current);
+
+    expect(comparison).toBeNull();
   });
 
   it("prioritizes exact and prefix ticker matches in search ordering", () => {
@@ -503,7 +636,7 @@ describe("SEC filing selection", () => {
       )
     ).rejects.toMatchObject({
       status: 400,
-      publicMessage: "Device key is required"
+      publicMessage: "Installation credential is required"
     });
   });
 
@@ -533,6 +666,8 @@ describe("SEC filing selection", () => {
       }),
       {
         ...entitlementEnv(),
+        KABUYOMI_ENV: "test",
+        ENVIRONMENT: "test",
         DEV_DETACHED_ACCESS_DEVICE_KEYS: "device-123"
       } as any
     );
@@ -555,6 +690,8 @@ describe("SEC filing selection", () => {
       }),
       {
         ...entitlementEnv(),
+        KABUYOMI_ENV: "test",
+        ENVIRONMENT: "test",
         DEV_DETACHED_ACCESS_DEVICE_KEYS: "device-123,bench-*"
       } as any
     );
@@ -578,7 +715,19 @@ describe("SEC filing selection", () => {
         plan: "pro",
         quotaSubject: "pro:abc123",
         productId: "app.kabuyomi.pro.monthly",
-        syncedAt: "2026-04-20T00:00:00.000Z"
+        status: "active",
+        expiresAt: "2099-04-20T00:00:00.000Z",
+        revokedAt: null,
+        updatedAt: "2026-04-20T00:00:00.000Z",
+        originalTransactionId: "tx-123",
+        transactionId: "tx-123-current",
+        periodStart: "2026-04-01T00:00:00.000Z",
+        periodEnd: "2099-04-20T00:00:00.000Z",
+        monthlyCredits: 900,
+        monthlyGrantOperationId: "sub-grant:v1:test",
+        lastVerifiedAt: new Date().toISOString(),
+        verificationEnvironment: "sandbox",
+        verificationVersion: "test"
       })
     );
 

@@ -1,5 +1,6 @@
 import type { Env, FilingCacheRecord } from "../../env";
 import type { ChatFallbackReason, GeminiChatAnswer, GeminiInvocationUsage } from "../../clients/gemini/types";
+import { resolveLlmProvider } from "../../clients/llm/provider";
 import { CONTEXT_UNAVAILABLE_ANSWER } from "./grounding";
 import { shouldRecoverFromWeakModelSources, type DeterministicChatAnswer } from "./deterministic";
 import type { QuestionIntent } from "./intent";
@@ -21,10 +22,11 @@ export function shouldLetModelTryBeforeDeterministic(
 }
 
 function hasConfiguredChatModel(env: Env): boolean {
-  if (env.LLM_PROVIDER === "openai") {
+  const provider = resolveLlmProvider(env);
+  if (provider === "openai") {
     return Boolean(env.OPENAI_API_KEY);
   }
-  if (env.LLM_PROVIDER === "disabled") {
+  if (provider === "disabled") {
     return false;
   }
   return Boolean(env.GEMINI_API_KEY);

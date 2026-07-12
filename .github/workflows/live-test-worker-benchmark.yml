@@ -1,0 +1,113 @@
+name: Live Test Worker Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Generate live evidence or verify an existing reviewed release packet
+        required: true
+        default: generate
+        type: choice
+        options:
+          - generate
+          - verify-release
+      run_id:
+        description: Optional testbench run ID
+        required: false
+        type: string
+      run_path:
+        description: Committed 150-row JSONL path relative to workers/ for verify-release mode
+        required: false
+        type: string
+      human_review_packet_path:
+        description: Committed sealed packet path relative to workers/ for verify-release mode
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-test-worker-benchmark
+  cancel-in-progress: false
+
+jobs:
+  generate-evidence:
+    if: ${{ inputs.mode == 'generate' }}
+    name: Generate live evidence (pending human review)
+    runs-on: ubuntu-latest
+    environment: test-worker-benchmark
+    defaults:
+      run:
+        working-directory: workers
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      KABUYOMI_TESTBENCH_BASE_URL: ${{ vars.KABUYOMI_TESTBENCH_BASE_URL }}
+      KABUYOMI_TESTBENCH_RUN_ID: ${{ inputs.run_id || format('ci-live-{0}', github.run_id) }}
+      KABUYOMI_TEST_AUTOMATION_SECRET: ${{ secrets.KABUYOMI_TEST_AUTOMATION_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: workers/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Require protected test automation credential
+        run: test -n "$KABUYOMI_TEST_AUTOMATION_SECRET"
+      - name: Deploy only the isolated test Worker
+        run: npm run deploy:test
+      - name: Validate the live benchmark matrix
+        run: npm run testbench:full-smoke -- --check-only
+      - name: Run automated gate and generate pending review packet
+        run: npm run testbench:full-smoke
+      - name: Mark release state explicitly pending
+        if: success()
+        run: echo "PENDING_HUMAN_REVIEW - the generated packet must be reviewed and sealed before release verification."
+      - name: Preserve benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-worker-benchmark-${{ github.run_id }}
+          path: |
+            workers/testbench/runs/${{ env.KABUYOMI_TESTBENCH_RUN_ID }}.jsonl
+            workers/testbench/runs/${{ env.KABUYOMI_TESTBENCH_RUN_ID }}-summary.json
+            workers/testbench/runs/${{ env.KABUYOMI_TESTBENCH_RUN_ID }}-gate.json
+            workers/testbench/runs/${{ env.KABUYOMI_TESTBENCH_RUN_ID }}-answers.md
+            workers/testbench/runs/${{ env.KABUYOMI_TESTBENCH_RUN_ID }}-human-review.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  verify-release-evidence:
+    if: ${{ inputs.mode == 'verify-release' }}
+    name: Verify sealed 150-row release evidence
+    runs-on: ubuntu-latest
+    environment: test-worker-benchmark
+    defaults:
+      run:
+        working-directory: workers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: workers/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Require committed evidence paths
+        env:
+          RUN_PATH: ${{ inputs.run_path }}
+          REVIEW_PACKET_PATH: ${{ inputs.human_review_packet_path }}
+        run: |
+          test -n "$RUN_PATH"
+          test -n "$REVIEW_PACKET_PATH"
+      - name: Verify automated gate and complete hash-bound human review
+        env:
+          RUN_PATH: ${{ inputs.run_path }}
+          REVIEW_PACKET_PATH: ${{ inputs.human_review_packet_path }}
+        run: >-
+          npm run testbench:full-smoke --
+          --release-verify
+          --run-path "$RUN_PATH"
+          --human-review-packet "$REVIEW_PACKET_PATH"

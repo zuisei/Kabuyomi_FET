@@ -128,7 +128,8 @@ export async function upgradeMetricsOnlyRecord(record: FilingCacheRecord, env: E
     });
     const sourceChunks = buildSourceChunks(filing, extracted.text, current.metrics, {
       revenueDriverSearchText: normalizeFilingText(html),
-      marginDriverSearchText: normalizeFilingText(html)
+      marginDriverSearchText: normalizeFilingText(html),
+      primaryDocumentUrl: current.primaryDocumentUrl
     });
     const generated = await generateSummary(env, {
       filingKey: current.filingKey,
@@ -221,7 +222,8 @@ export async function backfillRevenueDriverSourceAssets(
 
     const sourceChunks = buildSourceChunks(filing, extracted.text, current.metrics, {
       revenueDriverSearchText: normalizeFilingText(html),
-      marginDriverSearchText: normalizeFilingText(html)
+      marginDriverSearchText: normalizeFilingText(html),
+      primaryDocumentUrl: current.primaryDocumentUrl
     });
     const upgraded: FilingCacheRecord = {
       ...current,
@@ -293,7 +295,8 @@ export async function backfillMarginSourceAssets(
 
     const sourceChunks = buildSourceChunks(filing, extracted.text, current.metrics, {
       revenueDriverSearchText: normalizedHtml,
-      marginDriverSearchText: normalizedHtml
+      marginDriverSearchText: normalizedHtml,
+      primaryDocumentUrl: current.primaryDocumentUrl
     });
     const upgraded: FilingCacheRecord = {
       ...current,

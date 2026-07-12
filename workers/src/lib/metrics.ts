@@ -1,4 +1,5 @@
 import type { MetricSnapshot } from "../env";
+import { formatDisplayNumber, formatVerifiedFinancialValue } from "./financial-number-format";
 
 export function metricLabel(metric: MetricSnapshot["logicalName"]): string {
   const labels: Record<MetricSnapshot["logicalName"], string> = {
@@ -6,34 +7,21 @@ export function metricLabel(metric: MetricSnapshot["logicalName"]): string {
     netIncome: "純利益",
     epsBasic: "EPS（Basic）",
     operatingIncome: "営業利益",
-    operatingCashFlow: "営業CF"
+    operatingCashFlow: "営業CF",
+    cashAndCashEquivalents: "現金及び現金同等物",
+    currentDebt: "1年内返済予定の長期債務",
+    longTermDebt: "長期債務（非流動）"
   };
 
   return labels[metric];
 }
 
 export function formatMetricValue(value: number, unit: string): string {
-  if (unit === "USD") {
-    const abs = Math.abs(value);
-    if (abs >= 1_000_000_000_000) {
-      return `${formatCompactNumber(value / 1_000_000_000_000)}兆ドル`;
-    }
-    if (abs >= 100_000_000) {
-      return `${formatCompactNumber(value / 100_000_000)}億ドル`;
-    }
-    if (abs >= 1_000_000) {
-      return `${formatCompactNumber(value / 1_000_000)}百万ドル`;
-    }
-  }
-
-  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value)} ${unit}`.trim();
+  return formatVerifiedFinancialValue(value, unit);
 }
 
 export function formatCompactNumber(value: number): string {
-  return new Intl.NumberFormat("ja-JP", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 1
-  }).format(value);
+  return formatDisplayNumber(value, 1);
 }
 
 export function formatYoYDelta(yoyPercent: number): string {

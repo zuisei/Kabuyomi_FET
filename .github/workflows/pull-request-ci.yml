@@ -1,0 +1,234 @@
+name: Pull Request CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pull-request-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository-sanity:
+    name: Repository sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check changed-file whitespace
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            git diff --check "$BASE_SHA...$HEAD_SHA"
+          else
+            git diff --check "HEAD^...HEAD"
+          fi
+      - name: Validate release hold state
+        run: node scripts/validate-release-gate.mjs
+
+  worker:
+    name: Worker
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: workers/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+
+  worker-dry-run:
+    name: Worker dry-run
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: workers/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Validate test bindings and build a dry-run bundle
+        run: |
+          set -o pipefail
+          npm run dryrun:test 2>&1 \
+            | sed -E 's/(DEV_DETACHED_ACCESS_DEVICE_KEYS).*/\1 = [REDACTED]/'
+
+  testbench:
+    name: Testbench
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: workers/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run testbench:validate
+      - name: Validate the 150-row full-smoke fixture matrix
+        run: npm run testbench:full-smoke -- --check-only
+      - name: Verify committed accepted release evidence when present
+        run: npm run testbench:full-smoke -- --verify-manifest-if-present
+      - name: Validate the production-safe release smoke harness
+        run: npm run smoke:production:release -- --check-only
+      - name: Run local quality-gate unit tests
+        run: npm run test:quality-gate
+
+  d1-migrations:
+    name: D1 migration order
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: workers/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run migrations:validate
+
+  sec-fetcher:
+    name: SEC fetcher
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sec-fetcher
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: sec-fetcher/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+
+  legal-site:
+    name: Legal site
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: legal-site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: legal-site/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run validate
+
+  ios-tests:
+    name: iOS unit tests
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned XcodeGen
+        run: |
+          curl -fsSL --retry 3 \
+            https://github.com/yonaskolb/XcodeGen/releases/download/2.45.4/xcodegen.zip \
+            -o "${RUNNER_TEMP}/xcodegen.zip"
+          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  ${RUNNER_TEMP}/xcodegen.zip" \
+            | shasum -a 256 -c -
+          ditto -x -k "${RUNNER_TEMP}/xcodegen.zip" "${RUNNER_TEMP}"
+          echo "${RUNNER_TEMP}/xcodegen/bin" >> "${GITHUB_PATH}"
+          xcodegen --version
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Select an available iPhone simulator
+        run: |
+          /usr/bin/python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+
+          payload = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
+          candidates = []
+          for runtime, devices in payload.get("devices", {}).items():
+              match = re.search(r"\.iOS-(\d+)-(\d+)$", runtime)
+              if not match:
+                  continue
+              version = (int(match.group(1)), int(match.group(2)))
+              for device in devices:
+                  if device.get("isAvailable") and device.get("name", "").startswith("iPhone"):
+                      candidates.append((version, device["name"], device["udid"]))
+          if not candidates:
+              raise SystemExit("No available iPhone simulator was found")
+          version, name, udid = max(candidates)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write(f"SIMULATOR_UDID={udid}\n")
+          print(f"Selected {name} on iOS {version[0]}.{version[1]}")
+          PY
+      - name: Run iOS unit tests
+        run: |
+          xcodebuild test \
+            -project Kabuyomi.xcodeproj \
+            -scheme Kabuyomi \
+            -destination "platform=iOS Simulator,id=${SIMULATOR_UDID}" \
+            -derivedDataPath "${RUNNER_TEMP}/KabuyomiDerivedData" \
+            -resultBundlePath "${RUNNER_TEMP}/KabuyomiTests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+  ios-release:
+    name: iOS unsigned Release
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned XcodeGen
+        run: |
+          curl -fsSL --retry 3 \
+            https://github.com/yonaskolb/XcodeGen/releases/download/2.45.4/xcodegen.zip \
+            -o "${RUNNER_TEMP}/xcodegen.zip"
+          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  ${RUNNER_TEMP}/xcodegen.zip" \
+            | shasum -a 256 -c -
+          ditto -x -k "${RUNNER_TEMP}/xcodegen.zip" "${RUNNER_TEMP}"
+          echo "${RUNNER_TEMP}/xcodegen/bin" >> "${GITHUB_PATH}"
+          xcodegen --version
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build unsigned Release
+        run: |
+          xcodebuild \
+            -project Kabuyomi.xcodeproj \
+            -scheme Kabuyomi \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "${RUNNER_TEMP}/KabuyomiDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build

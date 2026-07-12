@@ -22,11 +22,15 @@ struct ChatTopBar: View {
 
     @ViewBuilder
     var body: some View {
-        if dynamicTypeSize.isAccessibilitySize {
+        if usesStackedLayout {
             stackedToolbar
         } else {
             compactToolbar
         }
+    }
+
+    private var usesStackedLayout: Bool {
+        dynamicTypeSize.isAccessibilitySize || dynamicTypeSize >= .xxxLarge
     }
 
     private var compactToolbar: some View {

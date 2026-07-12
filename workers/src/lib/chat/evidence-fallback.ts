@@ -197,11 +197,38 @@ function sourceIdsForFallback(
   for (const driver of [...evidenceSlots.companyExplainedDrivers, ...evidenceSlots.marginDrivers]) {
     for (const sourceId of driver.sourceIds) ids.add(sourceId);
   }
+  if (
+    sourceGateResult.hardIntent === "driver_durability_followup" ||
+    sourceGateResult.hardIntent === "margin_durability_followup"
+  ) {
+    const narrative = bestHardFollowupNarrativeSource(selectedSources, sourceGateResult.hardIntent);
+    if (narrative) ids.add(narrative.sourceId);
+  }
   if (ids.size === 0) {
     const fallbackSource = selectedSources.find((source) => source.sectionType === "xbrl_metric") ?? selectedSources[0];
     if (fallbackSource) ids.add(fallbackSource.sourceId);
   }
   return [...ids].slice(0, 4);
+}
+
+function bestHardFollowupNarrativeSource(
+  sources: SourceChunkRecord[],
+  hardIntent: "driver_durability_followup" | "margin_durability_followup"
+): SourceChunkRecord | null {
+  const scored = sources
+    .filter((source) => source.sectionType !== "xbrl_metric")
+    .map((source) => {
+      const text = `${source.sourceLabel} ${source.sectionTitle} ${source.text}`;
+      const relevant = hardIntent === "margin_durability_followup"
+        ? /(?:margin|profitability|gross profit|operating income|operating expenses?|cost of sales|cost of revenue|price realization|manufacturing cost|price-cost|inventory|depreciation|average selling prices?|favorable mix)/i.test(text)
+        : /(?:net sales|revenue|sales by category|products and services performance|net interest income|noninterest revenue|comparable sales|unit sales|customer usage|services revenue|cloud revenue|subscription)/i.test(text);
+      const causal = /(?:primarily due to|driven by|reflecting|attributable to|resulted from|continue|continued|expected|long-term)/i.test(text);
+      const rawTablePenalty = (text.match(/\$?\d[\d,.%]*/g)?.length ?? 0) >= 10 ? 25 : 0;
+      return { source, score: (relevant ? 80 : 0) + (causal ? 30 : 0) - rawTablePenalty };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.source.sortOrder - b.source.sortOrder);
+  return scored[0]?.source ?? null;
 }
 
 function cleanBannedPhrases(answer: string): string {

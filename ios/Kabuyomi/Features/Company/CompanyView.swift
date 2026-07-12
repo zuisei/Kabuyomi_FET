@@ -100,9 +100,7 @@ struct CompanyView: View {
 
     @State private var currentTicker: String
     @State private var question = ""
-    @State private var libraryQuery = ""
     @State private var activePanel: CompanySidePanel?
-    @State private var librarySearchTask: Task<Void, Never>?
     @State private var creditsPresented = false
     @State private var creditInitialSheet: CreditInitialSheet?
     @State private var settingsPresented = false
@@ -160,15 +158,15 @@ struct CompanyView: View {
         guard appModel.showStarterCompanies else { return [] }
         let occupiedTickers = Set(savedCompanies.map(\.ticker) + recentCompanies.map(\.ticker))
         let starters = appModel.starterCompanies.filter { !occupiedTickers.contains($0.ticker) }
-        return filterStarters(starters, query: libraryQuery)
+        return starters
     }
 
     private var filteredSavedCompanies: [WatchlistCard] {
-        filterCards(savedCompanies, query: libraryQuery)
+        savedCompanies
     }
 
     private var filteredRecentCompanies: [WatchlistCard] {
-        filterCards(recentCompanies, query: libraryQuery)
+        recentCompanies
     }
 
     private var isCurrentTickerSaved: Bool {
@@ -248,22 +246,16 @@ struct CompanyView: View {
                 if shouldRenderPanel(.library) {
                     ZStack(alignment: .leading) {
                         ConversationLibraryDrawer(
-                            query: $libraryQuery,
                             currentTicker: currentTicker,
                             savedCompanies: filteredSavedCompanies,
                             recentCompanies: filteredRecentCompanies,
                             starterCompanies: filteredStarterCompanies,
-                            searchResults: appModel.searchResults,
-                            isSearchLoading: appModel.searchIsLoading,
-                            searchErrorMessage: appModel.searchErrorMessage,
                             pendingTicker: pendingDrawerTickerOpen?.ticker,
                             pendingCompanyName: pendingDrawerTickerOpen?.companyName,
                             pendingDetail: pendingDrawerTickerOpen?.detail,
                             conversationHistory: conversationHistory,
                             selectTicker: openDrawerTicker,
                             selectFiling: openDrawerFiling,
-                            saveSearchResult: saveSearchResult,
-                            openSearchResult: openSearchResult,
                             openSearch: openSearchScreen,
                             openCredits: openCreditsScreen,
                             openSettings: openSettingsScreen,
@@ -349,22 +341,10 @@ struct CompanyView: View {
             question = ""
             pendingConsentSubmission = nil
             cancelPendingDrawerOpen()
-            libraryQuery = ""
-            librarySearchTask?.cancel()
             Task { await appModel.search(query: "") }
             appModel.openConversation(for: newValue)
         }
-        .onChange(of: libraryQuery) { _, newValue in
-            librarySearchTask?.cancel()
-            librarySearchTask = Task {
-                try? await Task.sleep(for: .milliseconds(260))
-                if !Task.isCancelled {
-                    await appModel.search(query: newValue)
-                }
-            }
-        }
         .onDisappear {
-            librarySearchTask?.cancel()
             pendingDrawerOpenTask?.cancel()
             pendingConsentSubmission = nil
         }
@@ -971,8 +951,6 @@ struct CompanyView: View {
 
     private func openSearchScreen() {
         dismissKeyboard()
-        libraryQuery = ""
-        librarySearchTask?.cancel()
         Task { await appModel.search(query: "") }
         closePanels()
         Task {
@@ -1093,26 +1071,6 @@ struct CompanyView: View {
         closePanels()
     }
 
-    private func openSearchResult(_ item: SearchItem) {
-        guard item.canAttemptInV1 else {
-            appModel.activeAlert = AppAlertState(
-                message: item.unsupportedAlertMessage,
-                kind: .dismissOnly
-            )
-            return
-        }
-
-        let normalized = item.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        openDrawerTicker(normalized, item.companyName)
-    }
-
-    private func saveSearchResult(_ item: SearchItem) {
-        guard pendingDrawerTickerOpen == nil else { return }
-        Task {
-            await appModel.saveSearchResult(item)
-        }
-    }
-
     private func cancelPendingDrawerOpen() {
         pendingDrawerOpenTask?.cancel()
         pendingDrawerOpenTask = nil
@@ -1226,6 +1184,8 @@ private struct SourceEvidenceSheet: View {
     @State private var selectedDocumentRequest: SourceDocumentRequest?
     @State private var previewMode: SourcePreviewMode
     @State private var previewTranslationState: PreviewTranslationState
+    @State private var previewTranslationOperation: PendingQuoteTranslationState?
+    @State private var previewTranslationRetryGeneration: Int
 
     init(company: CompanyPayload, source: LocalMessageSourceRef) {
         self.company = company
@@ -1233,6 +1193,8 @@ private struct SourceEvidenceSheet: View {
 
         _previewMode = State(initialValue: .original)
         _previewTranslationState = State(initialValue: .idle)
+        _previewTranslationOperation = State(initialValue: nil)
+        _previewTranslationRetryGeneration = State(initialValue: 0)
     }
 
     private var matchedChunk: SourceChunkPayload? {
@@ -1324,7 +1286,7 @@ private struct SourceEvidenceSheet: View {
         guard offersPreviewTranslation, previewMode == .translated else {
             return "\(source.id.uuidString)-off"
         }
-        return "\(source.id.uuidString)-translated"
+        return "\(source.id.uuidString)-translated-\(previewTranslationRetryGeneration)"
     }
 
     private var detailLabel: String {
@@ -1493,6 +1455,7 @@ private struct SourceEvidenceSheet: View {
         Button {
             if mode == .translated, case .failed = previewTranslationState {
                 previewTranslationState = .idle
+                previewTranslationRetryGeneration += 1
             }
             previewMode = mode
         } label: {
@@ -1618,12 +1581,26 @@ private struct SourceEvidenceSheet: View {
         let trimmed = previewText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        let sourceLanguage: String? = nil
+        let targetLanguage = "ja"
+        let operation = PendingQuoteTranslationState.resolve(
+            existing: previewTranslationOperation,
+            text: trimmed,
+            sourceLanguage: sourceLanguage,
+            targetLanguage: targetLanguage
+        )
+        previewTranslationOperation = operation
+
         previewTranslationState = .loading
 
         do {
             Self.logger.debug("request started length=\(trimmed.count, privacy: .public) source=\(source.sourceLabelSnapshot, privacy: .public)")
-            let response = try await APIClient().translateQuote(text: trimmed, targetLanguage: "ja")
-            appModel.applyQuoteTranslationUsage(response)
+            let response = try await appModel.translateQuote(
+                text: trimmed,
+                sourceLanguage: sourceLanguage,
+                targetLanguage: targetLanguage,
+                operationId: operation.operationId
+            )
             let translated = response.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard !translated.isEmpty, translated != trimmed else {
@@ -1637,6 +1614,10 @@ private struct SourceEvidenceSheet: View {
             previewTranslationState = .idle
         } catch APIError.insufficientCredits(let required, let remaining) {
             previewTranslationState = .failed("翻訳には \(required) credit 必要です。残り \(remaining) credits です。")
+        } catch APIError.operationResultExpired {
+            previewTranslationState = .failed("翻訳結果の再取得期限が切れています。原文を表示しています。")
+        } catch APIError.operationIdPayloadMismatch {
+            previewTranslationState = .failed("翻訳リクエストを安全に再試行できません。原文を表示しています。")
         } catch APIError.serverStatus(let statusCode, _) where statusCode == 503 {
             await appModel.refreshUsageAfterQuoteTranslationFailure()
             previewTranslationState = .unavailable("翻訳は現在利用できません。creditは消費されていません。原文を表示しています。")
@@ -2589,24 +2570,6 @@ private func buildFeaturedMetricQuestion(for company: CompanyPayload) -> String?
 
     guard let metric = company.metrics.first(where: { $0.yoyPercent != nil }) else { return nil }
     return "\(MetricLabeler.title(for: metric.logicalName))の変化を詳しく教えて"
-}
-
-private func filterCards(_ cards: [WatchlistCard], query: String) -> [WatchlistCard] {
-    let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    guard !normalized.isEmpty else { return cards }
-
-    return cards.filter { card in
-        card.ticker.lowercased().contains(normalized) || card.companyName.lowercased().contains(normalized)
-    }
-}
-
-private func filterStarters(_ starters: [StarterCompany], query: String) -> [StarterCompany] {
-    let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    guard !normalized.isEmpty else { return starters }
-
-    return starters.filter { starter in
-        starter.ticker.lowercased().contains(normalized) || starter.companyName.lowercased().contains(normalized)
-    }
 }
 
 private func questionSnippet(from text: String) -> String {

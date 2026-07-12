@@ -20,6 +20,10 @@ describe("chat route policy helpers", () => {
     expect(shouldLetModelTryBeforeDeterministic({ GEMINI_API_KEY: "key" } as Env, deterministic("revenue_drivers"))).toBe(true);
     expect(shouldLetModelTryBeforeDeterministic({ GEMINI_API_KEY: "key" } as Env, deterministic("margin_snapshot"))).toBe(true);
     expect(shouldLetModelTryBeforeDeterministic({} as Env, deterministic("revenue_drivers"))).toBe(false);
+    expect(shouldLetModelTryBeforeDeterministic({
+      LLM_PROVIDER: "unsupported",
+      GEMINI_API_KEY: "must-not-be-used"
+    } as never, deterministic("revenue_drivers"))).toBe(false);
   });
 
   it("chooses retry reasons without mixing retry policy into orchestration", () => {

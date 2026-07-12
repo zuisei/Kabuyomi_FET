@@ -24,6 +24,7 @@ export interface PreparedFilingFetcherResponse extends MetricsFetcherResponse {
   primaryDocumentUrl: string;
   mdaText: string;
   mdaTokenCount: number;
+  supplementalEvidenceText?: string;
   usedStartPattern: string;
   usedEndPattern: string;
   diagnostics: {

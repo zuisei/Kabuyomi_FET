@@ -3,7 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
     @State private var presentedLegalDocument: LegalDocumentKind?
 
     var body: some View {
@@ -316,16 +315,14 @@ struct SettingsView: View {
             LegalDocumentView(
                 title: document.title,
                 subtitle: document.subtitle,
+                lastUpdated: document.lastUpdated,
+                publicURL: LegalSiteConfig.url(pathComponent: document.pathComponent),
                 sections: legalSections(for: document)
             )
         }
     }
 
     private func openLegalDocument(_ document: LegalDocumentKind) {
-        if let url = LegalSiteConfig.url(pathComponent: document.pathComponent) {
-            openURL(url)
-            return
-        }
         presentedLegalDocument = document
     }
 
@@ -355,7 +352,11 @@ struct SettingsView: View {
         [
             LegalSection(
                 title: "収集する情報",
-                body: "Kabuyomi は、匿名の device key、検索履歴、保存銘柄、閲覧した企業・提出書類、利用回数、credit 残高、購入復元に必要な最小情報、エラー診断の最小ログを扱います。氏名、メールアドレス、証券口座情報、保有資産情報、銀行口座情報はアプリの利用に必要としません。"
+                body: "Kabuyomi は、サーバー発行の匿名 installation credential、App Attest の検証結果、検索履歴、保存銘柄、閲覧した企業・提出書類、質問文とAI応答、利用回数、credit残高、購入検証・復元に必要な最小情報、アプリ内操作、エラーやパフォーマンスの診断情報を扱います。氏名、メールアドレス、証券口座情報、保有資産情報、銀行口座情報は通常利用に必要としません。"
+            ),
+            LegalSection(
+                title: "任意の購入復元アカウント",
+                body: "アカウント復元機能が有効な場合に限り、購入クレジットの復元と新規購入のためSign in with Appleを任意で利用できます。SEC資料の閲覧や質問にサインインは不要です。氏名・メールアドレスのscopeは要求せず、本人確認tokenとAppleの生の利用者識別子は保存しません。サーバー秘密鍵で変換した識別子、StoreKitのappAccountToken、認証済み端末との関連、購入・移行の監査記録を保持します。"
             ),
             LegalSection(
                 title: "OpenAI API 利用時に送信する情報",
@@ -367,11 +368,11 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "広告と購入",
-                body: "広告視聴によるcredit獲得は任意です。広告完了だけでは付与せず、Google AdMob SSV をWorkerが確認した後に無料/ad creditとして反映します。追加 paid credit の購入、返金、請求、購入復元は Apple ID と App Store の仕組みに従います。"
+                body: "Google AdMobのバナー広告を表示する場合があります。広告視聴によるcredit獲得は任意で、サーバーがrewarded credit機能と配信環境を明示的に許可し、広告完了後にGoogle AdMob SSVを確認した場合だけ広告クレジットとして反映します。追加paid creditの購入、返金、請求、購入復元はApple IDとApp Storeの仕組みに従います。"
             ),
             LegalSection(
                 title: "保存期間",
-                body: "ローカルの保存銘柄、取得済みの決算資料、チャット履歴は設定画面の「データをリセット」で削除できます。サーバー側では、利用制限、credit 台帳、購入重複防止、運用監査、障害調査に必要な最小限の記録と、SEC 提出資料キャッシュを保持します。"
+                body: "ローカルの保存銘柄、取得済みの決算資料、チャット履歴は設定画面の「データをリセット」で削除できます。リセット後もKeychainの匿名installation credentialとサーバーのcredit・購入記録は維持され、別の新規残高は作られません。サーバー側では、利用制限、credit台帳、購入重複防止、運用監査、障害調査に必要な最小限の記録と、SEC提出資料キャッシュを保持します。削除・確認の依頼はサポート窓口で受け付けます。"
             ),
             LegalSection(
                 title: "国外処理",
@@ -408,7 +409,11 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "credit購入",
-                body: "Kabuyomi では App Store のアプリ内課金として、買い切りの paid credit と月額自動更新サブスクリプションを提供します。表示する主要な paid credit 商品は kabuyomi.credits.50 で、50 paid credits を付与します。kabuyomi.credits.100 は互換性のためサポートします。月額プランは Lite、Pro、Max で、それぞれ毎月 400 / 900 / 2000 credits を付与します。paid credit は失効しません。free/promotional credit、月額プラン分 credit、paid credit はサーバー側で分けて管理され、表示された期限がある場合はその期限に従います。購入、返金、請求、購入履歴、購入復元は Apple ID と App Store の仕組みおよび適用法に従います。"
+                body: "KabuyomiではApp Storeのアプリ内課金として、買い切りのpaid creditと月額自動更新サブスクリプションを提供します。kabuyomi.credits.50は50、kabuyomi.credits.100は互換商品として100 paid creditsを付与します。kabuyomi.sub.lite.monthly / kabuyomi.sub.pro.monthly / kabuyomi.sub.max.monthlyはAppleが検証した各期間に400 / 900 / 2000 creditsを付与します。価格はStoreKitのローカライズ表示が正本です。Freeの月次付与は0 creditsで、保存3銘柄・1日25質問です。Liteは保存3銘柄・1日10質問、ProとMaxは保存20銘柄・1日50質問です。App Attestで確認できたinstallationにはwelcome 50 creditsを一度だけ付与する場合があります。通常質問は1回2 creditsです。subscription、期限付きpromotional/ad、welcome、paidの各bucketは分けて管理し、paid creditは失効しません。"
+            ),
+            LegalSection(
+                title: "購入復元と広告クレジット",
+                body: "購入復元アカウント機能が有効な場合だけ、購入クレジットの復元と新規購入にSign in with Appleを利用します。通常利用にサインインは不要です。広告クレジットは任意で、Google AdMob SSVをWorkerが確認した場合だけ2 creditsを付与し、1日3回まで、獲得から30日間有効です。"
             ),
             LegalSection(
                 title: "外部サービス",
@@ -429,7 +434,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "報告してほしい内容",
-                body: "対象企業、画面名、質問文、表示された出典、期待した結果、実際の結果、発生時刻をできるだけ具体的に記載してください。"
+                body: "対象企業、画面名、個人情報や機密情報を除いた短い再現手順、表示された出典、期待した結果、実際の結果、発生時刻を記載してください。質問文は必要な範囲だけ伏せ字にし、本人確認token、端末credential、完全な購入ID・receipt、App Attest資料は送らないでください。"
             ),
             LegalSection(
                 title: "正式サポート",
@@ -442,10 +447,6 @@ struct SettingsView: View {
         [
             LegalSection(
                 title: "公開法務ページ",
-                body: "最新版は https://kabuyomi-legal-site.pages.dev/tokushoho/ で確認できます。"
-            ),
-            LegalSection(
-                title: "提出前ブロッカー",
                 body: "最新版は https://kabuyomi-legal-site.pages.dev/tokushoho/ で確認できます。"
             ),
             LegalSection(
@@ -466,7 +467,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "販売価格",
-                body: "paid credit 商品は kabuyomi.credits.50 を主要商品として表示し、50 paid credits を付与します。kabuyomi.credits.100 は互換性のためサポートします。月額自動更新サブスクリプションは kabuyomi.sub.lite.monthly、kabuyomi.sub.pro.monthly、kabuyomi.sub.max.monthly で、それぞれ毎月 400 / 900 / 2000 credits を付与します。販売価格、税・手数料、更新条件は App Store の購入画面に表示される内容に従います。"
+                body: "買い切り商品はkabuyomi.credits.50（50 paid credits）と互換商品kabuyomi.credits.100（100 paid credits）です。月額自動更新サブスクリプションはkabuyomi.sub.lite.monthly（400 credits）、kabuyomi.sub.pro.monthly（900 credits）、kabuyomi.sub.max.monthly（2,000 credits）です。販売価格、通貨、税・手数料、更新条件は購入時のApp Store / StoreKitローカライズ表示に従います。"
             ),
             LegalSection(
                 title: "支払時期 / 支払方法",
@@ -486,7 +487,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "credit の有効期限",
-                body: "paid credit は失効しません。free/promotional credit は paid credit と分けて管理され、期限がある場合はアプリ内表示または関連説明に従います。"
+                body: "paid creditとwelcome creditは現在のサーバー会計では失効しません。subscription credit、期限付きpromotional credit、30日間有効な広告credit、welcome credit、paid creditは分けて管理されます。Freeの月次付与は0で、認証済みinstallationへのwelcome 50 creditsは一度だけです。"
             ),
             LegalSection(
                 title: "投資助言ではありません",
@@ -546,6 +547,10 @@ enum LegalDocumentKind: String, Identifiable {
             "販売者情報と paid credit の条件"
         }
     }
+
+    var lastUpdated: String {
+        "2026-07-11"
+    }
 }
 
 private struct SettingsLinkRow: View {
@@ -580,6 +585,8 @@ private struct LegalDocumentView: View {
 
     let title: String
     let subtitle: String
+    let lastUpdated: String
+    let publicURL: URL?
     let sections: [LegalSection]
 
     var body: some View {
@@ -611,6 +618,17 @@ private struct LegalDocumentView: View {
                         Text(subtitle)
                             .font(.system(.footnote, design: .rounded, weight: .medium))
                             .foregroundStyle(KabuyomiTheme.inkMuted)
+                        Text("最終更新日: \(lastUpdated)")
+                            .font(.system(.caption, design: .rounded, weight: .medium))
+                            .foregroundStyle(KabuyomiTheme.inkMuted)
+                        if let publicURL {
+                            Link(destination: publicURL) {
+                                Label("最新版をWebで確認", systemImage: "arrow.up.right.square")
+                                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                            }
+                            .padding(.top, 2)
+                        }
                     }
                     .padding(18)
                     .kabuyomiCard(.primary, radius: 24)

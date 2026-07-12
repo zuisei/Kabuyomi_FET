@@ -1,7 +1,10 @@
 import { loadUsage, readQuotaIdentity } from "../lib/quota";
+import type { Env } from "../env";
+import type { RemoteConfig } from "../lib/remote-config";
 import { isCreditBillingEnabledForIdentity } from "../lib/remote-config";
 import { json } from "../lib/response";
 import type { RouteHandler } from "./types";
+import { buildRewardedCreditCapability } from "./admob-rewards";
 
 export const handleUsageRoute: RouteHandler = async ({ request, url, env, config }) => {
   if (!(request.method === "GET" && url.pathname === "/v1/usage")) {
@@ -10,9 +13,19 @@ export const handleUsageRoute: RouteHandler = async ({ request, url, env, config
 
   const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
   const usage = await loadUsage(identity, env, config);
+  const runtime = resolveBillingRuntimeCapabilities(env, config);
   const payload: Record<string, unknown> = {
     ...usage,
-    creditBillingEnabled: isCreditBillingEnabledForIdentity(config, identity)
+    creditBillingEnabled: runtime.creditBillingEnabled && isCreditBillingEnabledForIdentity(config, identity),
+    capabilities: {
+      configVersion: config.configVersion,
+      configSource: config.configSource,
+      chatEnabled: config.chatEnabled,
+      webSupplementEnabled: config.webSupplementEnabled,
+      consumablePurchasesEnabled: runtime.consumablePurchasesEnabled,
+      accountRecoveryReady: runtime.accountRecoveryReady,
+      rewardedCredit: await buildRewardedCreditCapability(env, config, identity)
+    }
   };
   if (identity.activeSubscription) {
     payload.activePlan = identity.plan;
@@ -29,3 +42,36 @@ export const handleUsageRoute: RouteHandler = async ({ request, url, env, config
   }
   return json(payload);
 };
+
+export function resolveBillingRuntimeCapabilities(
+  env: Env,
+  config: Pick<RemoteConfig,
+    "creditBillingEnabled" | "consumablePurchasesEnabled" | "accountRecoveryReady" | "emergencyPaidGrantsDisabled">
+) {
+  const appleServerReady = [
+    env.APPLE_APP_STORE_ISSUER_ID,
+    env.APPLE_APP_STORE_KEY_ID,
+    env.APPLE_APP_STORE_PRIVATE_KEY,
+    env.APPLE_BUNDLE_ID,
+    env.SUBSCRIPTION_PRINCIPAL_HMAC_KEY_V1
+  ].every(nonEmpty);
+  const accountSecretsReady = [
+    env.ACCOUNT_PRINCIPAL_HMAC_KEY_V1,
+    env.ACCOUNT_SESSION_HMAC_KEY_V1,
+    env.APPLE_SIGN_IN_CLIENT_ID ?? env.APPLE_BUNDLE_ID
+  ].every(nonEmpty);
+  const creditBillingEnabled = config.creditBillingEnabled && !config.emergencyPaidGrantsDisabled && appleServerReady;
+  const accountRecoveryReady = config.accountRecoveryReady && accountSecretsReady;
+  return {
+    creditBillingEnabled,
+    accountRecoveryReady,
+    consumablePurchasesEnabled:
+      creditBillingEnabled &&
+      config.consumablePurchasesEnabled &&
+      (!config.accountRecoveryReady || accountRecoveryReady)
+  };
+}
+
+function nonEmpty(value: string | undefined): boolean {
+  return Boolean(value?.trim());
+}

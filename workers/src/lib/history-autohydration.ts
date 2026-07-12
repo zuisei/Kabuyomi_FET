@@ -1,4 +1,5 @@
 import type { FilingReference } from "../env";
+import type { HistoricalComparisonMode } from "./history-question";
 
 const AUTO_HYDRATION_YEARS = 3;
 const AUTO_HYDRATION_MAX_PRIOR_FILINGS = 2;
@@ -6,7 +7,8 @@ const SAME_QUARTER_MATCH_WINDOW_DAYS = 45;
 
 export function selectHistoricalAutohydrationCandidates(
   current: Pick<FilingReference, "formType" | "accessionNumber" | "periodOfReport">,
-  filings: FilingReference[]
+  filings: FilingReference[],
+  mode: HistoricalComparisonMode = "multi_period_trend"
 ): FilingReference[] {
   const currentAccession = normalizeAccession(current.accessionNumber);
   const windowStart = subtractYearsIsoDate(current.periodOfReport, AUTO_HYDRATION_YEARS);
@@ -16,6 +18,10 @@ export function selectHistoricalAutohydrationCandidates(
     .filter((candidate) => candidate.periodOfReport < current.periodOfReport)
     .filter((candidate) => candidate.periodOfReport >= windowStart)
     .sort((left, right) => right.periodOfReport.localeCompare(left.periodOfReport));
+
+  if (mode === "immediate_prior") {
+    return candidates.slice(0, 1);
+  }
 
   if (current.formType === "10-K") {
     return candidates.slice(0, AUTO_HYDRATION_MAX_PRIOR_FILINGS);

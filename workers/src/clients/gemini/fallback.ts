@@ -438,6 +438,15 @@ function buildNonHardFallbackAnswer(
         sourceIds
       };
     case "margin_driver":
+      {
+        const marginObservation = buildTypedMarginDirectionObservation(input.filing, input.question, sourceChunks);
+        if (marginObservation) {
+          return {
+            answer: `${marginObservation.answer} ただし、改善・悪化の具体的な要因は、選択された資料だけでは十分に特定できません。判断には、コスト、構成、価格改定、営業費用、引当、構造改革費用、減損、セグメント利益率の説明が必要です。`,
+            sourceIds: marginObservation.sourceIds
+          };
+        }
+      }
       return {
         answer: `${metricObservation ? `${metricObservation} ` : ""}利益率の方向は確認できますが、改善/悪化の具体的な要因は十分に特定できません。判断には、コスト、mix、pricing、営業費用、provision、restructuring、impairment、segment margin の説明が必要です。`,
         sourceIds
@@ -458,6 +467,69 @@ function buildNonHardFallbackAnswer(
         sourceIds
       };
   }
+}
+
+function buildTypedMarginDirectionObservation(
+  filing: FilingCacheRecord,
+  question: string,
+  sourceChunks: SourceChunkRecord[]
+): { answer: string; sourceIds: string[] } | null {
+  const revenue = filing.metrics.find((candidate) => candidate.logicalName === "revenue");
+  const operatingIncome = filing.metrics.find((candidate) => candidate.logicalName === "operatingIncome");
+  const netIncome = filing.metrics.find((candidate) => candidate.logicalName === "netIncome");
+  if (
+    !revenue || !operatingIncome || !netIncome ||
+    revenue.value === 0 || revenue.comparisonValue === undefined || revenue.comparisonValue === 0 ||
+    operatingIncome.comparisonValue === undefined || netIncome.comparisonValue === undefined ||
+    !areMarginInputsCompatible(revenue, operatingIncome) ||
+    !areMarginInputsCompatible(revenue, netIncome)
+  ) {
+    return null;
+  }
+
+  const revenueSourceId = findMetricSourceId(sourceChunks, revenue);
+  const operatingSourceId = findMetricSourceId(sourceChunks, operatingIncome);
+  const netSourceId = findMetricSourceId(sourceChunks, netIncome);
+  if (!revenueSourceId || !operatingSourceId || !netSourceId) {
+    return null;
+  }
+
+  const operatingCurrent = operatingIncome.value / revenue.value * 100;
+  const operatingPrior = operatingIncome.comparisonValue / revenue.comparisonValue * 100;
+  const netCurrent = netIncome.value / revenue.value * 100;
+  const netPrior = netIncome.comparisonValue / revenue.comparisonValue * 100;
+  const operatingDirection = operatingCurrent >= operatingPrior ? "改善" : "低下";
+  const netDirection = netCurrent >= netPrior ? "改善" : "低下";
+  const premise = /悪化/u.test(question) && operatingDirection === "改善" && netDirection === "改善"
+    ? "提出資料上、今期の利益率悪化は確認できません。"
+    : "提出資料上の利益率の方向を確認すると、";
+  const answer = `${premise}営業利益率は前年同期の${operatingPrior.toFixed(1)}%から当期の${operatingCurrent.toFixed(1)}%へ${operatingDirection}し、純利益率は前年同期の${netPrior.toFixed(1)}%から当期の${netCurrent.toFixed(1)}%へ${netDirection}しています。`;
+  return {
+    answer,
+    sourceIds: Array.from(new Set([revenueSourceId, operatingSourceId, netSourceId]))
+  };
+}
+
+function areMarginInputsCompatible(revenue: MetricSnapshot, profit: MetricSnapshot): boolean {
+  if (revenue.unit !== profit.unit || revenue.periodEnd !== profit.periodEnd) {
+    return false;
+  }
+  const comparableFields: Array<keyof MetricSnapshot> = [
+    "periodStart",
+    "periodKind",
+    "fiscalYear",
+    "fiscalQuarter",
+    "comparisonPeriodStart",
+    "comparisonPeriodEnd",
+    "comparisonPeriodKind",
+    "comparisonFiscalYear",
+    "comparisonFiscalQuarter"
+  ];
+  return comparableFields.every((field) => {
+    const left = revenue[field];
+    const right = profit[field];
+    return left === undefined || right === undefined || left === right;
+  });
 }
 
 function missingSourceTypesForNonHard(

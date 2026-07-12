@@ -18,11 +18,11 @@ Kabuyomi is an iOS + Cloudflare Workers app for reading SEC filings in Japanese 
 - `CompanyView` is split into focused subcomponents under `ios/Kabuyomi/Features/Company/`.
 - v1 submission scope is a Japanese SEC filing reader for U.S. stocks, limited to `10-K` / `10-Q`.
 - v1 chat is filing-grounded by default and must not be described as web search, investment advice, buy/sell recommendation, stock-price forecast, or target-price service.
-- v1.0.2 monetization includes the visible `kabuyomi.credits.50` paid credit pack plus Lite / Pro / Max monthly subscriptions.
-- `kabuyomi.credits.100` remains supported for compatibility, but it is not the primary visible paid credit pack.
-- Paid credits do not expire. Free/promotional credits, monthly subscription credits, and paid credits are separate server-side buckets in the visible RC.
-- Rewarded-ad credit UI is visible for the RC. Rewarded ads are optional and credits are granted only after Worker-side Google AdMob SSV verification.
-- App Attest, DeviceCheck, account systems, 8-K support, and web search are v1.1+ or later.
+- Current product and feature truth is authoritative in `docs/release/CURRENT_SHIPPING_TRUTH.md` and `shared/product-catalog.json`.
+- Free has no recurring monthly grant; a verified installation can receive the one-time 50-credit welcome grant.
+- Lite / Pro / Max monthly credits are tied to Apple-verified subscription periods.
+- The banner-ad, rewarded-credit, consumable, and subscription implementations remain available, but deployed capability surfaces require a fresh trusted full config with explicit typed fields; missing, malformed, stale, or emergency-disabled configuration fails closed.
+- App Attest-backed server installation identity is the Release identity path; 8-K and general web search remain outside the current filing-product scope.
 - Public legal pages are served from `https://kabuyomi-legal-site.pages.dev`. Worker `/legal/*` routes are legacy API-hosted fallback copies, not the preferred App Store metadata surface.
 - Workers routes live under `workers/src/routes/`; shared logic is split across `workers/src/lib/` and `workers/src/clients/gemini/`.
 
@@ -85,11 +85,11 @@ Preferred public legal URLs:
 
 - Saved tickers are persistent on the server. In `/v1/usage`, `stocksUsed` means the current saved ticker count, not "today's stock consumption".
 - Opening a ticker is independent from saving it. `/v1/company/{ticker}` and `/v1/chat` require a device identity, but they do not consume or require a saved ticker slot.
-- Free/promotional credit applies to chats and resets according to the server-provided reset time.
-- Free-plan quota identity currently trusts the client-provided `x-device-key`. That is acceptable for the current beta, but it is not abuse-resistant because rotating keys can evade the free limits; production hardening would need a server-issued identity or attestation.
+- Welcome credit is one-time and does not reset monthly; subscription/promotional expiry is server-provided.
+- Release quota identity uses a server-issued installation credential. Full welcome credit requires verified App Attest; the old `x-device-key` is retained only as one-time migration evidence and cannot authorize a fresh production balance.
 - `/v1/watchlist/add` saves a ticker. `/v1/watchlist/remove` removes it and returns updated usage.
 - `/v1/chat` returns `responsePath`; `modelName` is populated only when the answer actually used the remote Gemini path.
-- `resetLocalData()` is a full "start over" reset: local saved data and chat history are cleared, device identity is regenerated, and usage may come back in a new-user state.
+- `resetLocalData()` clears local saved data and chat history while retaining the Keychain installation identity; reset does not create a new welcome balance.
 - `/v1/credits/purchase-grant` and `/v1/ios/purchases/credits/complete` require Worker-side App Store Server verification before granting paid credits.
 
 ## Storage And History
@@ -159,15 +159,18 @@ npm run smoke:staging
 ```
 
 The smoke path covers `usage-baseline -> search -> watchlist/add -> company -> chat -> chat-history -> watchlist/remove -> billing-sync`.
-It also validates the current chat metadata contract: `responsePath` must be present, and `modelName` must be non-null only for the remote Gemini path.
+It also validates the current chat metadata contract: `responsePath` must be present, and `modelName` must be non-null only for a remote-model response.
 
-## Historical Docs
+## Release Documentation
 
 - Start from `docs/INDEX.md` for the maintained documentation map.
-- Current v1 release truth lives at `docs/release/RELEASE_TRUTH.md`.
-- Current shipping snapshot lives at `docs/release/CURRENT_SHIPPING_TRUTH.md`.
+- Authoritative shipping truth lives at `docs/release/CURRENT_SHIPPING_TRUTH.md`.
+- The complete 46-domain evidence matrix lives at `docs/release/FEATURE_PARITY_COMPATIBILITY_REPORT.md`.
+- The final discovery/remediation evidence lives at `docs/release/FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md`.
+- Machine-readable gate state lives at `docs/release/RELEASE_GATE_STATE.json`.
+- Remote-config review/refresh lifecycle lives at `docs/release/REMOTE_CONFIG_LIFECYCLE_RUNBOOK.md`.
 - App Review notes live at `docs/release/APP_STORE_SUBMISSION_NOTES.md`.
-- TestFlight readiness notes live at `docs/release/TESTFLIGHT_READINESS_CHECKLIST.md`.
+- `docs/release/RELEASE_TRUTH.md` and `docs/release/TESTFLIGHT_READINESS_CHECKLIST.md` are historical snapshots, not current authority.
 - Older specs and handoffs under `docs/archive/` are reference-only. Some still describe Home/Tab roots, subscription-era monetization, old beta quota language, or broader product plans.
 - Screenshot notes are consolidated at `artifacts/README.md` instead of keeping README files inside dated capture folders.
 

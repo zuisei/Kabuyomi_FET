@@ -28,15 +28,18 @@ final class SubscriptionStore {
     private let lastSyncedOriginalTransactionIdKey = "kabuyomi.subscription.lastSynced.originalTransactionId"
     private let lastSyncedProductIdKey = "kabuyomi.subscription.lastSynced.productId"
     private let lastSyncedTransactionIdKey = "kabuyomi.subscription.lastSynced.transactionId"
-    private let lastSyncedActiveKey = "kabuyomi.subscription.lastSynced.active"
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
     private let logger = Logger(subsystem: "app.kabuyomi.ios", category: "subscription")
 
     private var updatesTask: Task<Void, Never>?
     private var cachedProducts: [Product] = []
     private var cachedCreditPackProducts: [Product] = []
     private var diagnostics = StoreKitDiagnosticsSnapshot.initial(requestedProductIds: creditPackProductIDs)
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
 
     var quotaSubject: String? {
         defaults.string(forKey: quotaSubjectKey)
@@ -54,9 +57,14 @@ final class SubscriptionStore {
         defaults.bool(forKey: activeKey)
     }
 
+    var entitlementLookupOriginalTransactionId: String? {
+        let value = defaults.string(forKey: originalTransactionIdKey)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    // Kept as a source-compatible alias while callers migrate to locator terminology.
     var requestOriginalTransactionId: String? {
-        guard isSubscriptionActive else { return nil }
-        return defaults.string(forKey: originalTransactionIdKey)
+        entitlementLookupOriginalTransactionId
     }
 
     var storeKitDiagnostics: StoreKitDiagnosticsSnapshot {
@@ -123,7 +131,7 @@ final class SubscriptionStore {
             }
 
             logger.notice(
-                "purchase_result=success product_id=\(transaction.productID, privacy: .public) transaction_id=\(String(transaction.id), privacy: .public)"
+                "purchase_result=success product_id=\(transaction.productID, privacy: .public) transaction_id=\(Self.redactedIdentifier(String(transaction.id)), privacy: .public)"
             )
             storeSubscriptionState(
                 productId: transaction.productID,
@@ -180,12 +188,17 @@ final class SubscriptionStore {
         }
     }
 
-    func purchaseCreditPack(productId: String) async throws -> PendingCreditPurchase? {
+    func purchaseCreditPack(productId: String, appAccountToken: UUID? = nil) async throws -> PendingCreditPurchase? {
         startObservingTransactionsIfNeeded()
         diagnostics.markPurchaseStarted(productId: productId)
         logger.notice("mini_iap_purchase_started product_id=\(productId, privacy: .public)")
         let product = try await creditPackProduct(id: productId)
-        let result = try await product.purchase()
+        let result: Product.PurchaseResult
+        if let appAccountToken {
+            result = try await product.purchase(options: [.appAccountToken(appAccountToken)])
+        } else {
+            result = try await product.purchase()
+        }
 
         switch result {
         case .success(let verification):
@@ -197,7 +210,7 @@ final class SubscriptionStore {
 
             diagnostics.markPurchaseStatus("succeeded:\(productId)")
             logger.notice(
-                "mini_iap_purchase_succeeded product_id=\(transaction.productID, privacy: .public) transaction_id=\(Self.redactedTransactionId(String(transaction.id)), privacy: .public)"
+                "mini_iap_purchase_succeeded product_id=\(transaction.productID, privacy: .public) transaction_id=\(Self.redactedIdentifier(String(transaction.id)), privacy: .public)"
             )
             return PendingCreditPurchase(transaction: transaction, signedTransactionInfo: verification.jwsRepresentation)
 
@@ -229,7 +242,7 @@ final class SubscriptionStore {
                     continue
                 }
                 logger.notice(
-                    "credit_purchase_recovery=found product_id=\(transaction.productID, privacy: .public) transaction_id=\(String(transaction.id), privacy: .public)"
+                    "credit_purchase_recovery=found product_id=\(transaction.productID, privacy: .public) transaction_id=\(Self.redactedIdentifier(String(transaction.id)), privacy: .public)"
                 )
                 purchases.append(PendingCreditPurchase(transaction: transaction, signedTransactionInfo: verification.jwsRepresentation))
 
@@ -271,7 +284,7 @@ final class SubscriptionStore {
                 active: true
             )
             logger.notice(
-                "refresh_entitlements_result=active reason=\(reason, privacy: .public) product_id=\(transaction.productID, privacy: .public) original_transaction_id=\(String(transaction.originalID), privacy: .public)"
+                "refresh_entitlements_result=active reason=\(reason, privacy: .public) product_id=\(transaction.productID, privacy: .public) original_transaction_id=\(Self.redactedIdentifier(String(transaction.originalID)), privacy: .public)"
             )
         } else if let previousOriginalTransactionId = defaults.string(forKey: originalTransactionIdKey) {
             storeSubscriptionState(
@@ -282,7 +295,7 @@ final class SubscriptionStore {
                 active: false
             )
             logger.notice(
-                "refresh_entitlements_result=inactive reason=\(reason, privacy: .public) original_transaction_id=\(previousOriginalTransactionId, privacy: .public)"
+                "refresh_entitlements_result=inactive reason=\(reason, privacy: .public) original_transaction_id=\(Self.redactedIdentifier(previousOriginalTransactionId), privacy: .public)"
             )
         } else {
             clearLocalEntitlement()
@@ -292,7 +305,7 @@ final class SubscriptionStore {
 
     func syncRequestIfAvailable() async throws -> BillingSyncRequest? {
         let snapshot = currentSnapshot()
-        guard let originalTransactionId = snapshot.originalTransactionId else {
+        guard let request = snapshot.verifiedRequest else {
             return nil
         }
 
@@ -302,16 +315,10 @@ final class SubscriptionStore {
         }
 
         logger.notice(
-            "billing_sync_attempt active=\(snapshot.active, privacy: .public) product_id=\(snapshot.productId ?? "nil", privacy: .public) original_transaction_id=\(originalTransactionId, privacy: .public)"
+            "billing_sync_attempt material=verified product_id=\(request.productId, privacy: .public) original_transaction_id=\(Self.redactedIdentifier(request.originalTransactionId), privacy: .public) transaction_id=\(Self.redactedIdentifier(request.transactionId), privacy: .public)"
         )
 
-        return BillingSyncRequest(
-            originalTransactionId: originalTransactionId,
-            transactionId: snapshot.transactionId,
-            productId: snapshot.productId,
-            active: snapshot.active,
-            signedTransactionInfo: snapshot.signedTransactionInfo
-        )
+        return request
     }
 
     func apply(_ response: BillingSyncResponse) {
@@ -322,10 +329,9 @@ final class SubscriptionStore {
         set(snapshot.originalTransactionId, forKey: lastSyncedOriginalTransactionIdKey)
         set(snapshot.productId, forKey: lastSyncedProductIdKey)
         set(snapshot.transactionId, forKey: lastSyncedTransactionIdKey)
-        defaults.set(snapshot.active, forKey: lastSyncedActiveKey)
 
         logger.notice(
-            "billing_sync_result plan=\(response.plan, privacy: .public) quota_subject=\(response.quotaSubject, privacy: .public) product_id=\(response.productId ?? "nil", privacy: .public)"
+            "billing_sync_result plan=\(response.plan, privacy: .public) quota_subject=\(Self.redactedIdentifier(response.quotaSubject), privacy: .public) product_id=\(response.productId ?? "nil", privacy: .public)"
         )
     }
 
@@ -339,11 +345,11 @@ final class SubscriptionStore {
                 switch update {
                 case .verified(let transaction):
                     self.logger.notice(
-                        "transaction_update product_id=\(transaction.productID, privacy: .public) original_transaction_id=\(String(transaction.originalID), privacy: .public)"
+                        "transaction_update product_id=\(transaction.productID, privacy: .public) original_transaction_id=\(Self.redactedIdentifier(String(transaction.originalID)), privacy: .public)"
                     )
                     if Self.isCreditPackProduct(transaction.productID) {
                         self.logger.notice(
-                            "transaction_update=mini_credit_pending_server_grant product_id=\(transaction.productID, privacy: .public) transaction_id=\(String(transaction.id), privacy: .public)"
+                            "transaction_update=mini_credit_pending_server_grant product_id=\(transaction.productID, privacy: .public) transaction_id=\(Self.redactedIdentifier(String(transaction.id)), privacy: .public)"
                         )
                         NotificationCenter.default.post(name: .kabuyomiSubscriptionStateDidChange, object: nil)
                         continue
@@ -524,8 +530,7 @@ final class SubscriptionStore {
             productId: defaults.string(forKey: lastSyncedProductIdKey),
             transactionId: defaults.string(forKey: lastSyncedTransactionIdKey),
             originalTransactionId: defaults.string(forKey: lastSyncedOriginalTransactionIdKey),
-            signedTransactionInfo: nil,
-            active: defaults.bool(forKey: lastSyncedActiveKey)
+            signedTransactionInfo: nil
         )
     }
 
@@ -534,8 +539,7 @@ final class SubscriptionStore {
             productId: defaults.string(forKey: productIdKey),
             transactionId: defaults.string(forKey: transactionIdKey),
             originalTransactionId: defaults.string(forKey: originalTransactionIdKey),
-            signedTransactionInfo: defaults.string(forKey: signedTransactionInfoKey),
-            active: defaults.bool(forKey: activeKey)
+            signedTransactionInfo: defaults.string(forKey: signedTransactionInfoKey)
         )
     }
 
@@ -582,7 +586,7 @@ final class SubscriptionStore {
         subscriptionProductIDs.contains(productId)
     }
 
-    private static func redactedTransactionId(_ value: String) -> String {
+    private static func redactedIdentifier(_ value: String) -> String {
         guard value.count > 8 else { return "redacted" }
         return "\(value.prefix(4))...\(value.suffix(4))"
     }
@@ -657,7 +661,6 @@ struct PendingSubscriptionPurchase {
             originalTransactionId: String(transaction.originalID),
             transactionId: String(transaction.id),
             productId: transaction.productID,
-            active: true,
             signedTransactionInfo: signedTransactionInfo
         )
     }
@@ -672,13 +675,32 @@ private struct BillingSyncSnapshot: Equatable {
     let transactionId: String?
     let originalTransactionId: String?
     let signedTransactionInfo: String?
-    let active: Bool
+
+    var verifiedRequest: BillingSyncRequest? {
+        guard let productId = normalized(productId),
+              let transactionId = normalized(transactionId),
+              let originalTransactionId = normalized(originalTransactionId),
+              let signedTransactionInfo = normalized(signedTransactionInfo) else {
+            return nil
+        }
+
+        return BillingSyncRequest(
+            originalTransactionId: originalTransactionId,
+            transactionId: transactionId,
+            productId: productId,
+            signedTransactionInfo: signedTransactionInfo
+        )
+    }
 
     static func == (lhs: BillingSyncSnapshot, rhs: BillingSyncSnapshot) -> Bool {
         lhs.productId == rhs.productId
             && lhs.transactionId == rhs.transactionId
             && lhs.originalTransactionId == rhs.originalTransactionId
-            && lhs.active == rhs.active
+    }
+
+    private func normalized(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
     }
 }
 

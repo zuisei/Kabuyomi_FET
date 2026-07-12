@@ -1,0 +1,9 @@
+{
+  "version": "testbench-release-evidence-v2",
+  "status": "accepted",
+  "releaseDecision": "GO",
+  "releaseCandidateId": "07eae11ab99917fdc07d01045b9fda1b3b937b1b7966893a126a487abedb49ea",
+  "runPath": "testbench/runs/2026-07-12-full-product-remediation-v9-standard-r103.jsonl",
+  "humanReviewPacketPath": "testbench/runs/2026-07-12-full-product-remediation-v9-standard-r103-human-review.json",
+  "qualityGateEvidencePath": "testbench/runs/2026-07-12-full-product-remediation-v9-standard-r103-gate.json"
+}

@@ -9,3 +9,16 @@ DEBUG_UNLIMITED_ENABLED=true
 # GEMINI_MODEL=gemini-2.5-flash
 GEMINI_TIMEOUT_MS=12000
 SEC_FETCHER_TIMEOUT_MS=25000
+# Generate independent high-entropy values for local identity testing. Never
+# reuse these values across environments and never commit real values.
+INSTALLATION_TOKEN_HMAC_KEY_V1=replace-with-random-secret
+INSTALLATION_NETWORK_HMAC_KEY_V1=replace-with-different-random-secret
+ACCOUNT_PRINCIPAL_HMAC_KEY_V1=replace-with-different-random-secret
+ACCOUNT_SESSION_HMAC_KEY_V1=replace-with-different-random-secret
+# Defaults to APPLE_BUNDLE_ID when omitted for the native iOS client.
+APPLE_SIGN_IN_CLIENT_ID=app.kabuyomi.ios
+# Emergency gates are off when unset. Set one to true only for the bounded
+# operation named by the variable.
+EMERGENCY_DISABLE_SEC_REFRESH=false
+EMERGENCY_DISABLE_BACKGROUND_JOBS=false
+EMERGENCY_DISABLE_MIGRATIONS=false

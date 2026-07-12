@@ -1,6 +1,6 @@
 import { searchTickers } from "../clients/sec";
 import { SearchQuerySchema } from "../lib/contracts";
-import { logErrorEvent, logEvent } from "../lib/logging";
+import { hashForLog, logErrorEvent, logEvent } from "../lib/logging";
 import { badRequest, json } from "../lib/response";
 import type { RouteHandler } from "./types";
 
@@ -17,7 +17,8 @@ export const handleSearchRoute: RouteHandler = async ({ request, url, env }) => 
   try {
     const result = await searchTickers(parsed.data.q, env);
     logEvent("search_success", {
-      query: parsed.data.q,
+      queryHash: hashForLog(parsed.data.q),
+      queryLength: parsed.data.q.length,
       resultCount: result.items.length
     });
 
@@ -27,8 +28,9 @@ export const handleSearchRoute: RouteHandler = async ({ request, url, env }) => 
     });
   } catch (error) {
     logErrorEvent("search_failure", {
-      query: parsed.data.q,
-      reason: error instanceof Error ? error.message : String(error)
+      queryHash: hashForLog(parsed.data.q),
+      queryLength: parsed.data.q.length,
+      errorClass: error instanceof Error ? error.name : typeof error
     });
     throw error;
   }

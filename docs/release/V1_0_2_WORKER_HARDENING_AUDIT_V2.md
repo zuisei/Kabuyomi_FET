@@ -1,5 +1,7 @@
 # V1.0.2 Worker Hardening Audit v2
 
+> **Historical release evidence — not current shipping authority.** This point-in-time report preserves prior findings and may describe deployments, capabilities, or release decisions that have since changed. Use `CURRENT_SHIPPING_TRUTH.md`, `FEATURE_PARITY_COMPATIBILITY_REPORT.md`, `RELEASE_GATE_STATE.json`, and `FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md` for current decisions.
+
 ## 1. Executive summary
 
 This was a read-only Worker hardening audit before SEC Form Router / additional form support work. No source code, iOS files, model config, retrieval behavior, answer-quality logic, deploy state, branch state, or push state was changed. The only intended write is this report.
