@@ -160,7 +160,7 @@ jobs:
             | shasum -a 256 -c -
           ditto -x -k "${RUNNER_TEMP}/xcodegen.zip" "${RUNNER_TEMP}"
           echo "${RUNNER_TEMP}/xcodegen/bin" >> "${GITHUB_PATH}"
-          xcodegen --version
+          "${RUNNER_TEMP}/xcodegen/bin/xcodegen" --version
       - name: Generate Xcode project
         run: xcodegen generate
       - name: Select an available iPhone simulator
@@ -218,7 +218,7 @@ jobs:
             | shasum -a 256 -c -
           ditto -x -k "${RUNNER_TEMP}/xcodegen.zip" "${RUNNER_TEMP}"
           echo "${RUNNER_TEMP}/xcodegen/bin" >> "${GITHUB_PATH}"
-          xcodegen --version
+          "${RUNNER_TEMP}/xcodegen/bin/xcodegen" --version
       - name: Generate Xcode project
         run: xcodegen generate
       - name: Build unsigned Release
