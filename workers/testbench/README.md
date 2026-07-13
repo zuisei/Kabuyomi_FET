@@ -65,6 +65,14 @@ Check the final-run inputs without calling the Worker:
 npm run testbench:full-smoke -- --check-only
 ```
 
+Pull-request CI verifies exact-candidate accepted evidence by default. A prior accepted packet is permitted only when `RELEASE_GATE_STATE.json` records an owner-approved one-time waiver that binds the current candidate, the prior quality candidate, the release date, and the fact that the normal production deploy guard must continue failing until refreshed:
+
+```bash
+npm run testbench:full-smoke -- --verify-manifest-or-approved-waiver
+```
+
+This CI-only acknowledgement does not change `npm run deploy` or `npm run deploy:check`; both still require accepted evidence for the exact current candidate.
+
 `secrets:test:setup` prompts for an existing `OPENAI_API_KEY` and `CLOUDFLARE_API_TOKEN` without echoing them, writes them to ignored `workers/.dev.vars`, and uploads `OPENAI_API_KEY` to the test Worker secret store. If both variables are already exported in the shell, the command uses those values without prompting.
 
 `testbench:live-full-smoke` loads `workers/.dev.vars`, deploys the test Worker, runs the full-smoke input preflight, applies the automated gate, and writes a pending 150-row human-review packet. This generation phase is never release-complete by itself. Override the run id with `KABUYOMI_TESTBENCH_RUN_ID=...` when needed.

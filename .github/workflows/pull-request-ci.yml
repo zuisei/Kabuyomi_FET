@@ -86,8 +86,8 @@ jobs:
       - run: npm run testbench:validate
       - name: Validate the 150-row full-smoke fixture matrix
         run: npm run testbench:full-smoke -- --check-only
-      - name: Verify committed accepted release evidence when present
-        run: npm run testbench:full-smoke -- --verify-manifest-if-present
+      - name: Verify committed accepted release evidence or an exact approved waiver
+        run: npm run testbench:full-smoke -- --verify-manifest-or-approved-waiver
       - name: Validate the production-safe release smoke harness
         run: npm run smoke:production:release -- --check-only
       - name: Run local quality-gate unit tests

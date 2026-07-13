@@ -24,6 +24,10 @@ export async function verifyAcceptedReleaseEvidence(options) {
   const workersDir = resolve(options.workersDir);
   const repositoryDir = resolve(workersDir, "..");
   const expectedCandidate = assertReleaseCandidateId(options.releaseCandidateId, "local_release_candidate_id");
+  const authoritativeCandidate = assertReleaseCandidateId(
+    options.authoritativeReleaseCandidateId ?? expectedCandidate,
+    "authoritative_release_candidate_id"
+  );
   const manifestPath = resolve(options.manifestPath);
   const gateStatePath = resolve(options.releaseGateStatePath ?? resolve(repositoryDir, "docs/release/RELEASE_GATE_STATE.json"));
   const manifest = await readJson(manifestPath, "release_evidence_manifest");
@@ -82,7 +86,7 @@ export async function verifyAcceptedReleaseEvidence(options) {
 
   const gateState = await readJson(gateStatePath, "release_gate_state");
   if (gateState.releaseDecision !== "GO") errors.push("authoritative_release_decision_must_be_GO");
-  if (String(gateState.releaseCandidateId ?? "").toLowerCase() !== expectedCandidate) {
+  if (String(gateState.releaseCandidateId ?? "").toLowerCase() !== authoritativeCandidate) {
     errors.push("authoritative_release_candidate_id_mismatch");
   }
 
@@ -101,6 +105,80 @@ export async function verifyAcceptedReleaseEvidence(options) {
     reviewer: review.reviewer,
     signedAt: review.signedAt
   };
+}
+
+export async function verifyAcceptedReleaseEvidenceOrApprovedWaiver(options) {
+  try {
+    const evidence = await verifyAcceptedReleaseEvidence(options);
+    return { ...evidence, waiverApplied: false, evidenceCandidateId: evidence.releaseCandidateId };
+  } catch (error) {
+    if (
+      error?.code !== "PRODUCTION_RELEASE_GUARD_FAILED"
+      || error.errors?.length !== 1
+      || error.errors[0] !== "manifest_release_candidate_id_mismatch"
+    ) {
+      throw error;
+    }
+  }
+
+  const workersDir = resolve(options.workersDir);
+  const repositoryDir = resolve(workersDir, "..");
+  const currentCandidate = assertReleaseCandidateId(options.releaseCandidateId, "local_release_candidate_id");
+  const manifestPath = resolve(options.manifestPath);
+  const gateStatePath = resolve(options.releaseGateStatePath ?? resolve(repositoryDir, "docs/release/RELEASE_GATE_STATE.json"));
+  const manifest = await readJson(manifestPath, "release_evidence_manifest");
+  const gateState = await readJson(gateStatePath, "release_gate_state");
+  const evidenceCandidate = assertReleaseCandidateId(
+    manifest.releaseCandidateId,
+    "waived_quality_release_candidate_id"
+  );
+  const waiverErrors = validateOneTimeQualityRerunWaiver(gateState.oneTimeQualityRerunWaiver, {
+    currentCandidate,
+    evidenceCandidate,
+    approvedAt: gateState.asOf
+  });
+  if (waiverErrors.length > 0) {
+    throw releaseEvidenceError(waiverErrors.map((entry) => `quality_waiver:${entry}`));
+  }
+
+  const priorEvidence = await verifyAcceptedReleaseEvidence({
+    ...options,
+    releaseCandidateId: evidenceCandidate,
+    authoritativeReleaseCandidateId: currentCandidate
+  });
+  return {
+    ...priorEvidence,
+    releaseCandidateId: currentCandidate,
+    evidenceCandidateId: evidenceCandidate,
+    waiverApplied: true,
+    waiverScope: gateState.oneTimeQualityRerunWaiver.scope
+  };
+}
+
+export function validateOneTimeQualityRerunWaiver(waiver, expected) {
+  const errors = [];
+  if (waiver?.status !== "APPROVED_BY_RELEASE_OWNER") {
+    errors.push("status_must_be_approved_by_release_owner");
+  }
+  if (waiver?.approvedAt !== expected.approvedAt || !/^\d{4}-\d{2}-\d{2}$/u.test(waiver?.approvedAt ?? "")) {
+    errors.push("approved_at_must_match_release_gate_date");
+  }
+  if (String(waiver?.deployedCandidateId ?? "").toLowerCase() !== expected.currentCandidate) {
+    errors.push("deployed_candidate_id_mismatch");
+  }
+  if (String(waiver?.lastQualityCandidateId ?? "").toLowerCase() !== expected.evidenceCandidate) {
+    errors.push("last_quality_candidate_id_mismatch");
+  }
+  if (expected.currentCandidate === expected.evidenceCandidate) {
+    errors.push("waiver_requires_distinct_candidates");
+  }
+  if (typeof waiver?.scope !== "string" || waiver.scope.trim() === "") {
+    errors.push("scope_must_be_non_empty");
+  }
+  if (waiver?.normalDeployGuardExpectedToFailUntilRefreshed !== true) {
+    errors.push("normal_deploy_guard_failure_must_be_acknowledged");
+  }
+  return errors;
 }
 
 export function validateReleaseEvidenceManifest(manifest, expectedCandidate) {

@@ -127,6 +127,34 @@ describe("Worker release candidate binding", () => {
       "quality_gate_not_accepted"
     ]));
   });
+
+  it("accepts only an exact owner-approved one-time quality rerun waiver", () => {
+    const waiver = {
+      status: "APPROVED_BY_RELEASE_OWNER",
+      approvedAt: "2026-07-13",
+      deployedCandidateId: candidateB,
+      lastQualityCandidateId: candidateA,
+      scope: "identity-only App Attest invalid-key recovery hotfix",
+      normalDeployGuardExpectedToFailUntilRefreshed: true
+    };
+    const expected = {
+      currentCandidate: candidateB,
+      evidenceCandidate: candidateA,
+      approvedAt: "2026-07-13"
+    };
+
+    expect(evidenceModule.validateOneTimeQualityRerunWaiver(waiver, expected)).toEqual([]);
+    expect(evidenceModule.validateOneTimeQualityRerunWaiver({
+      ...waiver,
+      status: "PENDING",
+      deployedCandidateId: candidateA,
+      normalDeployGuardExpectedToFailUntilRefreshed: false
+    }, expected)).toEqual(expect.arrayContaining([
+      "status_must_be_approved_by_release_owner",
+      "deployed_candidate_id_mismatch",
+      "normal_deploy_guard_failure_must_be_acknowledged"
+    ]));
+  });
 });
 
 async function makeCandidateFixture(): Promise<string> {
