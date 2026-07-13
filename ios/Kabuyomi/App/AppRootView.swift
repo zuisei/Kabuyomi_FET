@@ -118,12 +118,12 @@ private struct InstallationAuthenticationStatusView: View {
                     .controlSize(.small)
                     .tint(KabuyomiTheme.accentDeep)
                     .accessibilityLabel("端末認証を再試行中")
-            } else if status.canRetry {
-                Button("再試行", action: retry)
+            } else if let retryActionTitle = status.retryActionTitle {
+                Button(retryActionTitle, action: retry)
                     .font(.system(.caption, design: .rounded, weight: .bold))
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .accessibilityHint("端末認証をもう一度確認します")
+                    .accessibilityHint("この状態から回復できるか、端末認証をもう一度確認します")
             }
         }
         .padding(.horizontal, 16)

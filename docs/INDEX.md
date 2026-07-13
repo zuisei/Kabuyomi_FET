@@ -1,6 +1,6 @@
 # Kabuyomi Documentation Index
 
-Last updated: 2026-07-11 JST
+Last updated: 2026-07-13 JST
 
 This index classifies docs and artifacts by release relevance. Current truth is [release/CURRENT_SHIPPING_TRUTH.md](./release/CURRENT_SHIPPING_TRUTH.md). If older docs disagree with that file or current runtime code, treat older docs as historical.
 
@@ -12,10 +12,11 @@ This index classifies docs and artifacts by release relevance. Current truth is 
 | active transfer prep | [release/SALE_LISTING_DRAFT_2026-06-06.md](./release/SALE_LISTING_DRAFT_2026-06-06.md) | Private buyer outreach/listing draft, buyer profile, included assets, proof points, and disclosure copy. |
 | active transfer prep | [release/SELLING_CHANNELS_RESEARCH_2026-06-07.md](./release/SELLING_CHANNELS_RESEARCH_2026-06-07.md) | Researched sell-side channels and ranked marketplaces for Kabuyomi: startup marketplaces, app brokers, Japan M&A platforms, and source-code fallbacks. |
 | historical v1.0.2 | [release/RELEASE_TRUTH.md](./release/RELEASE_TRUTH.md) | Historical pre-remediation snapshot; not authoritative for release claims. |
-| active | [release/CURRENT_SHIPPING_TRUTH.md](./release/CURRENT_SHIPPING_TRUTH.md) | Authoritative shipping snapshot: hardened identity, one-time welcome credit, server-authoritative subscriptions, externally gated account recovery, and explicit fail-closed monetization capabilities. |
+| active | [release/CURRENT_SHIPPING_TRUTH.md](./release/CURRENT_SHIPPING_TRUTH.md) | Authoritative shipping snapshot: hardened identity, current production capability exposure, explicit external-evidence gaps, and account-recovery state. |
 | active capability evidence | [release/FEATURE_PARITY_COMPATIBILITY_REPORT.md](./release/FEATURE_PARITY_COMPATIBILITY_REPORT.md) | Regression contract retaining monetization implementations while requiring complete typed production capabilities and explicit emergency/trust gates. |
 | active final evidence | [release/FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md](./release/FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md) | Complete repository discovery, 46-domain evidence matrix, remediation, deployments, validation, external gates, and final decision. |
 | active machine gate | [release/RELEASE_GATE_STATE.json](./release/RELEASE_GATE_STATE.json) | Machine-readable release state kept consistent with the authoritative final report. |
+| active runtime evidence | [release/PRODUCTION_CAPABILITY_ACTIVATION_2026_07_13.md](./release/PRODUCTION_CAPABILITY_ACTIVATION_2026_07_13.md) | July 13 Worker, KV/D1 capability activation, GitHub CI/protection evidence, and the remaining StoreKit/AdMob/App Attest verification debt. |
 | historical gate evidence | [release/FULL_REMEDIATION_RELEASE_GATE_REPORT.md](./release/FULL_REMEDIATION_RELEASE_GATE_REPORT.md) | Point-in-time PR00-PR14 snapshot superseded by the final discovery/remediation report. |
 | active operations | [release/REMOTE_CONFIG_LIFECYCLE_RUNBOOK.md](./release/REMOTE_CONFIG_LIFECYCLE_RUNBOOK.md) | Human-reviewed 14-day refresh cadence, age alerts, 45-day hard stop, and explicit KV publication/rollback workflow. |
 | historical test deployment evidence | [release/TEST_WORKER_DEPLOY_AND_SMOKE_REPORT_2026-07-11.md](./release/TEST_WORKER_DEPLOY_AND_SMOKE_REPORT_2026-07-11.md) | Superseded point-in-time test deployment evidence retained for audit history. |

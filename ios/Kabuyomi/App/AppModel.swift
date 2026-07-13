@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import Observation
+import Security
 
 struct PendingChatState: Equatable {
     let id: UUID
@@ -66,7 +67,9 @@ enum InstallationIdentityFailureKind: Equatable {
     case serverMaintenance
     case invalidCredentials
     case identityConflict
-    case secureStorageUnavailable
+    case secureStorageTemporarilyUnavailable
+    case invalidStoredCredential
+    case invalidAppSignature
     case permanentAuthenticationFailure
     case unknown
 }
@@ -76,10 +79,11 @@ struct InstallationIdentityFailure: Equatable {
 
     var isRetryable: Bool {
         switch kind {
-        case .networkUnavailable, .appAttestTemporarilyUnavailable, .serverMaintenance, .unknown:
+        case .networkUnavailable, .appAttestTemporarilyUnavailable, .serverMaintenance,
+             .secureStorageTemporarilyUnavailable, .unknown:
             return true
-        case .appAttestUnsupported, .invalidCredentials, .identityConflict, .secureStorageUnavailable,
-             .permanentAuthenticationFailure:
+        case .appAttestUnsupported, .invalidCredentials, .identityConflict, .invalidStoredCredential,
+             .invalidAppSignature, .permanentAuthenticationFailure:
             return false
         }
     }
@@ -98,8 +102,12 @@ struct InstallationIdentityFailure: Equatable {
             return "端末認証を確認できません"
         case .identityConflict:
             return "端末認証を更新できません"
-        case .secureStorageUnavailable:
-            return "安全な保存領域を確認できません"
+        case .secureStorageTemporarilyUnavailable:
+            return "安全な保存領域を一時的に確認できません"
+        case .invalidStoredCredential:
+            return "端末認証データを確認できません"
+        case .invalidAppSignature:
+            return "このアプリの署名を確認できません"
         case .permanentAuthenticationFailure:
             return "この端末の認証を利用できません"
         case .unknown:
@@ -121,8 +129,12 @@ struct InstallationIdentityFailure: Equatable {
             return "保存済みデータは閲覧できますが、端末の認証情報が無効なため認証が必要な操作を停止しています。"
         case .identityConflict:
             return "端末の認証情報が以前の登録と一致しません。保存済みデータは閲覧できますが、認証が必要な操作は利用できません。"
-        case .secureStorageUnavailable:
-            return "端末の安全な保存領域から認証情報を読み出せません。保存済みデータは閲覧できます。"
+        case .secureStorageTemporarilyUnavailable:
+            return "端末のロックを解除した状態で、もう一度確認してください。保存済みデータはそのまま閲覧できます。"
+        case .invalidStoredCredential:
+            return "保存済みの端末認証データと現在のアプリ形式が一致しません。保存済みデータはそのまま閲覧できます。"
+        case .invalidAppSignature:
+            return "Keychain を利用できないビルドです。正しく署名されたKabuyomiを再インストールしてください。保存済みデータはそのまま閲覧できます。"
         case .permanentAuthenticationFailure:
             return "保存済みデータは閲覧できますが、このインストールでは認証が必要な操作を利用できません。"
         case .unknown:
@@ -135,10 +147,15 @@ struct InstallationIdentityFailure: Equatable {
             switch identityError {
             case .appAttestUnavailable:
                 return InstallationIdentityFailure(kind: .appAttestUnsupported)
-            case .appAttestTemporarilyUnavailable, .expiredChallenge:
+            case .appAttestTemporarilyUnavailable, .appAttestKeyInvalid, .expiredChallenge:
                 return InstallationIdentityFailure(kind: .appAttestTemporarilyUnavailable)
-            case .keychainFailure, .invalidStoredCredential:
-                return InstallationIdentityFailure(kind: .secureStorageUnavailable)
+            case .keychainFailure(let status):
+                if status == errSecMissingEntitlement {
+                    return InstallationIdentityFailure(kind: .invalidAppSignature)
+                }
+                return InstallationIdentityFailure(kind: .secureStorageTemporarilyUnavailable)
+            case .invalidStoredCredential:
+                return InstallationIdentityFailure(kind: .invalidStoredCredential)
             case .attestationNotVerified, .replayedChallenge:
                 return InstallationIdentityFailure(kind: .permanentAuthenticationFailure)
             case .identityUnavailable:
@@ -201,7 +218,26 @@ struct InstallationAuthenticationStatus: Equatable {
     let failure: InstallationIdentityFailure
 
     var canRetry: Bool {
-        failure.kind != .appAttestUnsupported
+        retryActionTitle != nil
+    }
+
+    var retryActionTitle: String? {
+        guard failure.isRetryable else { return nil }
+        switch failure.kind {
+        case .networkUnavailable:
+            return "再接続"
+        case .appAttestTemporarilyUnavailable:
+            return "安全確認"
+        case .serverMaintenance:
+            return "再確認"
+        case .secureStorageTemporarilyUnavailable:
+            return "もう一度確認"
+        case .unknown:
+            return "再試行"
+        case .appAttestUnsupported, .invalidCredentials, .identityConflict, .invalidStoredCredential,
+             .invalidAppSignature, .permanentAuthenticationFailure:
+            return nil
+        }
     }
 }
 
@@ -270,7 +306,11 @@ private enum UsageUpdateSource {
 @Observable
 final class AppModel {
     private let minimumPendingChatDuration: TimeInterval = 1.0
-    private static let isRunningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestBundlePath"]?.hasSuffix("KabuyomiTests.xctest") == true
+            || NSClassFromString("XCTestCase") != nil
+            || NSClassFromString("XCTest.XCTestCase") != nil
+    }
 
     static let aiConsentKey = "kabuyomi.aiConsentGranted"
     static let aiConsentAlertMessage = """
@@ -336,6 +376,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         SubscriptionProduct(tier: $0, displayPrice: nil, isAvailable: false)
     }
     var creditPackProducts: [CreditPackProduct] = []
+    var creditPackProductLoadState: SubscriptionProductLoadState = .idle
     var creditPackProductLoadErrorMessage: String?
     var creditPackProductLoadInFlight = false
     var storeKitDiagnostics = StoreKitDiagnosticsSnapshot.initial(requestedProductIds: SubscriptionStore.creditPackProductIDs)
@@ -564,6 +605,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             return InstallationAuthenticationStatus(failure: failure)
         case .ready(let attestationStatus, _)
             where attestationStatus == .pending:
+            return InstallationAuthenticationStatus(
+                failure: InstallationIdentityFailure(kind: .appAttestTemporarilyUnavailable)
+            )
+        case .ready(let attestationStatus, _)
+            where attestationStatus == .unavailable && apiClient.canRetryFraudSensitiveAuthentication:
             return InstallationAuthenticationStatus(
                 failure: InstallationIdentityFailure(kind: .appAttestTemporarilyUnavailable)
             )
@@ -978,58 +1024,36 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     func loadSubscriptionProducts(showErrors: Bool = true) async {
-        guard isCreditBillingEnabled else {
-            subscriptionProductLoadState = .idle
-            subscriptionProductLoadErrorMessage = nil
-            return
-        }
         guard subscriptionProductLoadState != .loading else { return }
 
         subscriptionProductLoadState = .loading
         subscriptionProductLoadErrorMessage = nil
 
-        var lastError: Error?
-        let retryDelays: [UInt64] = [0, 800_000_000, 2_000_000_000]
+        do {
+            let products = try await subscriptionStore.subscriptionProducts()
+            subscriptionProducts = products
 
-        for delay in retryDelays {
-            if delay > 0 {
-                try? await Task.sleep(nanoseconds: delay)
+            if products.contains(where: \.isAvailable) {
+                subscriptionProductLoadState = .loaded
+                return
             }
 
-            do {
-                let products = try await subscriptionStore.subscriptionProducts()
-                subscriptionProducts = products
-
-                if products.contains(where: \.isAvailable) {
-                    subscriptionProductLoadState = .loaded
-                    return
-                }
-            } catch {
-                lastError = error
-            }
-        }
-
-        if let lastError {
-            subscriptionProductLoadState = .failed
-            subscriptionProductLoadErrorMessage = lastError.localizedDescription
-            if showErrors {
-                handle(lastError)
-            }
-        } else {
             subscriptionProductLoadState = .unavailable
-            subscriptionProductLoadErrorMessage = "App Storeの商品情報を取得できませんでした。通信状況を確認して再読み込みしてください。"
+            subscriptionProductLoadErrorMessage = "App Storeから月額プランの価格を取得できませんでした。再読み込みしてください。"
+        } catch {
+            subscriptionProductLoadState = .failed
+            subscriptionProductLoadErrorMessage = error.localizedDescription
+            if showErrors {
+                handle(error)
+            }
         }
     }
 
     func loadCreditPackProducts(showErrors: Bool = true) async {
-        guard isConsumableCreditPurchasingEnabled else {
-            creditPackProducts = []
-            creditPackProductLoadErrorMessage = nil
-            return
-        }
         guard !creditPackProductLoadInFlight else { return }
 
         creditPackProductLoadInFlight = true
+        creditPackProductLoadState = .loading
         creditPackProductLoadErrorMessage = nil
         defer { creditPackProductLoadInFlight = false }
 
@@ -1037,12 +1061,15 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             let products = try await subscriptionStore.creditPackProducts()
             creditPackProducts = products
             if products.contains(where: \.isAvailable) {
+                creditPackProductLoadState = .loaded
                 creditPackProductLoadErrorMessage = nil
             } else {
-                creditPackProductLoadErrorMessage = "クレジット商品を読み込めませんでした。少し時間をおいて再試行してください。"
+                creditPackProductLoadState = .unavailable
+                creditPackProductLoadErrorMessage = "App Storeから追加クレジットの価格を取得できませんでした。再読み込みしてください。"
             }
             refreshStoreKitDiagnostics()
         } catch {
+            creditPackProductLoadState = .failed
             creditPackProductLoadErrorMessage = error.localizedDescription
             refreshStoreKitDiagnostics()
             if showErrors {
@@ -1207,7 +1234,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             )
             return
         }
-        guard requireFraudSensitiveMutation() else {
+        guard await ensureFraudSensitiveAuthentication() else {
             setRewardedAdDebugReason("installation_authentication_unavailable")
             requestRewardedAdReturnDestinationRestore(reason: "installation_authentication_unavailable")
             return
@@ -1707,6 +1734,14 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     func sendChat(question: String, ticker: String) async -> Bool {
+        await sendChat(question: question, ticker: ticker, recoverMissingFilingOnce: true)
+    }
+
+    private func sendChat(
+        question: String,
+        ticker: String,
+        recoverMissingFilingOnce: Bool
+    ) async -> Bool {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         let normalized = normalizedTicker(ticker)
@@ -1796,10 +1831,69 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
                 await ensureMinimumPendingChatDuration(since: pendingStartedAt)
                 return false
             }
+            if recoverMissingFilingOnce,
+               isFilingCacheMiss(error),
+               await recoverCompanyAfterFilingCacheMiss(
+                   ticker: normalized,
+                   expectedStateGeneration: stateGeneration
+               ) {
+                clearRetryableChatOperation(ticker: normalized, operationId: operationId)
+                activeAlert = nil
+                return await sendChat(
+                    question: trimmed,
+                    ticker: normalized,
+                    recoverMissingFilingOnce: false
+                )
+            }
             handle(error)
             await ensureMinimumPendingChatDuration(since: pendingStartedAt)
             return false
         }
+    }
+
+    private func isFilingCacheMiss(_ error: Error) -> Bool {
+        guard case let APIError.routeMissing(_, path, _, message) = error else { return false }
+        let normalizedMessage = message.lowercased()
+        return path.lowercased() == "/v1/chat"
+            && (normalizedMessage.contains("filing cache not found")
+                || normalizedMessage.contains("filing_cache_not_found"))
+    }
+
+    private func recoverCompanyAfterFilingCacheMiss(
+        ticker: String,
+        expectedStateGeneration: Int
+    ) async -> Bool {
+        let normalized = normalizedTicker(ticker)
+
+        for attempt in 0..<3 {
+            guard expectedStateGeneration == stateGeneration else { return false }
+            do {
+                let response = try await (
+                    attempt == 0
+                        ? apiClient.refreshCompany(ticker: normalized)
+                        : apiClient.fetchCompany(ticker: normalized)
+                )
+                guard expectedStateGeneration == stateGeneration else { return false }
+
+                switch response {
+                case .company(let company):
+                    let canonicalTicker = normalizedTicker(company.ticker)
+                    activeConversationFilingKeys.removeValue(forKey: normalized)
+                    activeConversationFilingKeys.removeValue(forKey: canonicalTicker)
+                    try handleLoadedCompany(company, requestedTicker: normalized)
+                    return true
+
+                case .retryable(let state):
+                    guard attempt < 2 else { return false }
+                    let delaySeconds = min(max(state.retryAfterSeconds ?? 1, 1), 5)
+                    try await Task.sleep(for: .seconds(delaySeconds))
+                }
+            } catch {
+                return false
+            }
+        }
+
+        return false
     }
 
     private func recentChatContext(for ticker: String) -> [ChatContextMessage] {
@@ -2479,6 +2573,16 @@ credit残高に使う端末識別情報は維持されます。
         }
     }
 
+    @discardableResult
+    func ensureFraudSensitiveAuthentication() async -> Bool {
+        if !fraudSensitiveCreditActionsAvailable,
+           apiClient.canRetryFraudSensitiveAuthentication {
+            setRewardedAdDebugReason("installation_authentication_retry_started")
+            await retryInstallationAuthentication()
+        }
+        return requireFraudSensitiveMutation()
+    }
+
     private func deferCompanyLoadUntilAuthentication(ticker: String) {
         let normalized = normalizedTicker(ticker)
         guard companyCache[normalized] == nil else { return }
@@ -2644,6 +2748,29 @@ credit残高に使う端末識別情報は維持されます。
             return "通信に時間がかかりすぎています。少し待ってから、もう一度試してください。"
         }
 
+        if case let APIError.routeMissing(_, path, _, message) = error {
+            let normalizedPath = path.lowercased()
+            let normalizedRouteMessage = message.lowercased()
+
+            if normalizedPath == "/v1/chat",
+               normalizedRouteMessage.contains("filing cache not found")
+                || normalizedRouteMessage.contains("filing_cache_not_found") {
+                return "表示中の決算データが古くなりました。右上の更新ボタンで企業データを再読み込みしてから、もう一度お試しください。"
+            }
+
+            let purchaseRoutes = [
+                "/v1/billing/sync",
+                "/v1/ios/subscriptions/sync",
+                "/v1/ios/purchases/credits/complete",
+                "/v1/credits/purchase-grant"
+            ]
+            if purchaseRoutes.contains(normalizedPath) {
+                return "購入の同期先が見つかりません。しばらくしてからもう一度お試しください。"
+            }
+
+            return "この機能を現在利用できません。少し待ってから、もう一度お試しください。"
+        }
+
         let rawMessage = rawMessage(for: error)
         let normalizedMessage = rawMessage.lowercased()
 
@@ -2666,14 +2793,6 @@ credit残高に使う端末識別情報は維持されます。
             || rawMessage.contains("購入はキャンセルされました")
             || rawMessage.contains("購入は完了しましたが") {
             return rawMessage
-        }
-
-        if rawMessage.contains("route_missing") {
-            #if DEBUG
-            return "購入の同期先が見つかりません。しばらくしてからもう一度お試しください。\n\(rawMessage)"
-            #else
-            return "購入の同期先が見つかりません。しばらくしてからもう一度お試しください。"
-            #endif
         }
 
         if rawMessage.contains("Apple transaction verification") || rawMessage.contains("Apple transaction could not be verified") {
@@ -2729,8 +2848,9 @@ credit残高に使う端末識別情報は維持されます。
             return "現在チャット機能を一時停止しています。しばらくしてから再度お試しください。"
         }
 
-        if rawMessage.contains("Filing cache not found") {
-            return "表示中の決算データが古くなりました。企業画面を再読み込みしてから、もう一度お試しください。"
+        if normalizedMessage.contains("filing cache not found")
+            || normalizedMessage.contains("filing_cache_not_found") {
+            return "表示中の決算データが古くなりました。右上の更新ボタンで企業データを再読み込みしてから、もう一度お試しください。"
         }
 
         if rawMessage.contains("Device key is required") || rawMessage.contains("Client identity is unavailable") {

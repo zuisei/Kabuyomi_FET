@@ -92,30 +92,48 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(recorder.snapshot.accountHeader)
     }
 
-    func testConsumablePurchaseUIPreservesLegacyModeAndRequiresSignInOnlyAfterAccountRecoveryIsReady() {
-        XCTAssertTrue(ConsumableCreditReviewUI.isVisible(
+    func testConsumablePurchaseUIKeepsSurfaceVisibleButEnablesActionOnlyWhenEveryRuntimeGatePasses() {
+        XCTAssertTrue(ConsumableCreditReviewUI.canPurchase(
             creditBillingEnabled: true,
-            consumablePurchasesEnabled: true
-        ))
-        XCTAssertFalse(ConsumableCreditReviewUI.isVisible(
-            creditBillingEnabled: false,
-            consumablePurchasesEnabled: true
-        ))
-        XCTAssertFalse(ConsumableCreditReviewUI.isVisible(
-            creditBillingEnabled: true,
-            consumablePurchasesEnabled: false
-        ))
-        XCTAssertTrue(ConsumableCreditReviewUI.canShowProducts(
+            consumablePurchasesEnabled: true,
             accountRecoveryReady: false,
-            isAccountSignedIn: false
+            isAccountSignedIn: false,
+            authenticatedCreditActionsAvailable: true
         ))
-        XCTAssertFalse(ConsumableCreditReviewUI.canShowProducts(
-            accountRecoveryReady: true,
-            isAccountSignedIn: false
+        XCTAssertFalse(ConsumableCreditReviewUI.canPurchase(
+            creditBillingEnabled: false,
+            consumablePurchasesEnabled: true,
+            accountRecoveryReady: false,
+            isAccountSignedIn: false,
+            authenticatedCreditActionsAvailable: true
         ))
-        XCTAssertTrue(ConsumableCreditReviewUI.canShowProducts(
+        XCTAssertFalse(ConsumableCreditReviewUI.canPurchase(
+            creditBillingEnabled: true,
+            consumablePurchasesEnabled: false,
+            accountRecoveryReady: false,
+            isAccountSignedIn: false,
+            authenticatedCreditActionsAvailable: true
+        ))
+        XCTAssertFalse(ConsumableCreditReviewUI.canPurchase(
+            creditBillingEnabled: true,
+            consumablePurchasesEnabled: true,
+            accountRecoveryReady: false,
+            isAccountSignedIn: false,
+            authenticatedCreditActionsAvailable: false
+        ))
+        XCTAssertFalse(ConsumableCreditReviewUI.canPurchase(
+            creditBillingEnabled: true,
+            consumablePurchasesEnabled: true,
             accountRecoveryReady: true,
-            isAccountSignedIn: true
+            isAccountSignedIn: false,
+            authenticatedCreditActionsAvailable: true
+        ))
+        XCTAssertTrue(ConsumableCreditReviewUI.canPurchase(
+            creditBillingEnabled: true,
+            consumablePurchasesEnabled: true,
+            accountRecoveryReady: true,
+            isAccountSignedIn: true,
+            authenticatedCreditActionsAvailable: true
         ))
     }
 
@@ -834,8 +852,12 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(model.billingActionInFlight)
     }
 
-    func testDisabledCreditBillingGuardsSubscriptionProductsPurchaseAndRestore() async {
-        let model = makeAppModel()
+    func testDisabledCreditBillingStillLoadsSubscriptionMetadataButGuardsPurchaseAndRestore() async throws {
+        let suiteName = "AppModelTests.disabled-billing-product-metadata.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let subscriptionStore = SubscriptionStore(defaults: defaults, productLoader: { _ in [] })
+        let model = makeAppModel(subscriptionStore: subscriptionStore)
         model.usage = makeBillingUsage(
             creditBillingEnabled: false,
             consumablePurchasesEnabled: true
@@ -848,12 +870,12 @@ final class AppModelTests: XCTestCase {
         }
 
         await model.loadSubscriptionProducts(showErrors: true)
-        if case .idle = model.subscriptionProductLoadState {
-            // Expected: the disabled capability returns before StoreKit loading.
+        if case .unavailable = model.subscriptionProductLoadState {
+            // Product metadata is independent from the server-side purchase gate.
         } else {
-            XCTFail("Disabled billing must keep subscription product loading idle")
+            XCTFail("Disabled billing must still resolve StoreKit metadata to a terminal state")
         }
-        XCTAssertNil(model.subscriptionProductLoadErrorMessage)
+        XCTAssertNotNil(model.subscriptionProductLoadErrorMessage)
 
         await model.purchaseSubscription(productId: "kabuyomi.sub.pro.monthly")
         XCTAssertEqual(
@@ -870,8 +892,12 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(model.billingActionInFlight)
     }
 
-    func testDisabledConsumableCapabilityGuardsPackLoadPurchaseAndRecovery() async {
-        let model = makeAppModel()
+    func testDisabledConsumableCapabilityStillLoadsPackMetadataButGuardsPurchaseAndRecovery() async throws {
+        let suiteName = "AppModelTests.disabled-consumable-product-metadata.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let subscriptionStore = SubscriptionStore(defaults: defaults, productLoader: { _ in [] })
+        let model = makeAppModel(subscriptionStore: subscriptionStore)
         model.usage = makeBillingUsage(
             creditBillingEnabled: true,
             consumablePurchasesEnabled: false
@@ -894,8 +920,14 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.isCreditBillingEnabled)
         XCTAssertFalse(model.isConsumableCreditPurchasingEnabled)
         await model.loadCreditPackProducts(showErrors: true)
-        XCTAssertTrue(model.creditPackProducts.isEmpty)
-        XCTAssertNil(model.creditPackProductLoadErrorMessage)
+        XCTAssertEqual(model.creditPackProducts.count, 2)
+        XCTAssertTrue(model.creditPackProducts.allSatisfy { !$0.isAvailable })
+        if case .unavailable = model.creditPackProductLoadState {
+            // Product metadata is independent from the server-side purchase gate.
+        } else {
+            XCTFail("Disabled consumables must still resolve StoreKit metadata to a terminal state")
+        }
+        XCTAssertNotNil(model.creditPackProductLoadErrorMessage)
 
         await model.purchaseCreditPack(productId: SubscriptionStore.primaryCreditProductID)
         XCTAssertEqual(
@@ -924,6 +956,58 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(BillingCatalog.pro.monthlyCredits, 900)
         XCTAssertEqual(BillingCatalog.proMax.monthlyCredits, 2000)
         XCTAssertEqual(BillingCatalog.proMax.title, "Max")
+    }
+
+    func testSubscriptionProductLoadHasFiniteTimeout() async throws {
+        let suiteName = "AppModelTests.subscription-product-timeout.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SubscriptionStore(
+            defaults: defaults,
+            productLoadTimeoutNanoseconds: 1_000_000,
+            productLoader: { _ in
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                return []
+            }
+        )
+
+        do {
+            _ = try await store.subscriptionProducts()
+            XCTFail("Expected product loading to time out")
+        } catch let error as SubscriptionStoreError {
+            guard case .productLoadTimedOut = error else {
+                return XCTFail("Unexpected StoreKit error: \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testStoreProductPresentationStopsClaimingItIsLoadingAfterTerminalState() {
+        XCTAssertEqual(
+            StoreProductPresentation.priceText(displayPrice: nil, loadState: .loading),
+            "価格を確認中"
+        )
+        XCTAssertEqual(
+            StoreProductPresentation.unavailableActionTitle(loadState: .loading),
+            "App Storeに接続中"
+        )
+
+        for terminalState: SubscriptionProductLoadState in [.loaded, .unavailable, .failed] {
+            XCTAssertEqual(
+                StoreProductPresentation.priceText(displayPrice: nil, loadState: terminalState),
+                "価格を取得できません"
+            )
+            XCTAssertEqual(
+                StoreProductPresentation.unavailableActionTitle(loadState: terminalState),
+                "再読み込みできます"
+            )
+        }
+
+        XCTAssertEqual(
+            StoreProductPresentation.priceText(displayPrice: "¥980", loadState: .loaded),
+            "¥980"
+        )
     }
 
     func testSubscriptionStoreInactiveStateCannotCreateDemotingSyncRequest() async throws {
@@ -1511,6 +1595,99 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertFalse(sent)
         XCTAssertEqual(model.activeAlert?.message, "チャット応答を現在生成できません。少し待ってから、もう一度お試しください。")
+    }
+
+    func testSendChatFilingCacheMissRefreshesCompanyAndRetriesWithLatestFiling() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let oldCompany = TestFixtures.companyPayload(
+            filingKey: "v1:AAPL:0000320193-24-000001",
+            filedAt: "2024-11-01"
+        )
+        let newCompany = TestFixtures.companyPayload(
+            filingKey: "v1:AAPL:0000320193-25-000001",
+            filedAt: "2025-11-01"
+        )
+        try persistence.saveCompany(oldCompany, searchItem: nil)
+        let chatRequests = ThreadSafeCounter()
+        let filingKeys = StringRecorder()
+
+        let model = makeAppModel(persistence: persistence) { request, body in
+            guard request.url?.path == "/v1/chat" else { return }
+            let body = try XCTUnwrap(body)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            filingKeys.record(try XCTUnwrap(json["filingKey"] as? String))
+        }
+        model.setAIConsent(true)
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            if request.url?.path == "/v1/chat" {
+                if chatRequests.incrementAndGet() == 1 {
+                    let response = HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!
+                    let data = try TestFixtures.jsonData(["error": "filing_cache_not_found"])
+                    return (response, data)
+                }
+                return (
+                    HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    try Self.chatSuccessData(answer: "最新の決算データで回答しました。", chatsUsed: 1)
+                )
+            }
+
+            XCTAssertEqual(request.url?.path, "/v1/company/AAPL/refresh")
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.companyPayloadData(
+                    ticker: newCompany.ticker,
+                    cik: newCompany.cik,
+                    filingKey: newCompany.filingKey,
+                    filedAt: newCompany.filedAt
+                )
+            )
+        }
+
+        let sent = await model.sendChat(question: "売上成長の要因は？", ticker: "AAPL")
+
+        XCTAssertTrue(sent)
+        XCTAssertEqual(chatRequests.count, 2)
+        XCTAssertEqual(filingKeys.values, [oldCompany.filingKey, newCompany.filingKey])
+        XCTAssertEqual(model.companyPayload(for: "AAPL")?.filingKey, newCompany.filingKey)
+        XCTAssertNil(model.activeAlert)
+        XCTAssertEqual(model.chatHistory(for: "AAPL").last?.content, "最新の決算データで回答しました。")
+    }
+
+    func testSendChatFilingCacheMissWithFailedRefreshUsesSanitizedRecoveryCopy() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        try persistence.saveCompany(TestFixtures.companyPayload(), searchItem: nil)
+
+        let model = makeAppModel(persistence: persistence)
+        model.setAIConsent(true)
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            if request.url?.path == "/v1/chat" {
+                return (
+                    HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!,
+                    try TestFixtures.jsonData(["error": "Filing cache not found"])
+                )
+            }
+
+            XCTAssertEqual(request.url?.path, "/v1/company/AAPL/refresh")
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!,
+                try TestFixtures.jsonData(["error": "SEC data is temporarily unavailable"])
+            )
+        }
+
+        let sent = await model.sendChat(question: "売上成長の要因は？", ticker: "AAPL")
+
+        XCTAssertFalse(sent)
+        let message = try XCTUnwrap(model.activeAlert?.message)
+        XCTAssertEqual(
+            message,
+            "表示中の決算データが古くなりました。右上の更新ボタンで企業データを再読み込みしてから、もう一度お試しください。"
+        )
+        XCTAssertFalse(message.contains("購入"))
+        XCTAssertFalse(message.contains("route_missing"))
+        XCTAssertFalse(message.contains("workers.dev"))
+        XCTAssertFalse(message.contains("/v1/chat"))
     }
 
     func testSendChatPresentsLocalizedGenericHTTP503Failure() async throws {
@@ -3243,6 +3420,7 @@ final class AppModelTests: XCTestCase {
         rewardedAdService: RewardedAdServing = MockRewardedAdService(result: false),
         baseURL: URL = URL(string: "https://example.com")!,
         accountCredentialStore: (any AccountCredentialStoring)? = nil,
+        subscriptionStore: SubscriptionStore = .shared,
         encodedRequestObserver: ((URLRequest, Data?) throws -> Void)? = nil
     ) -> AppModel {
         if MockAppModelURLProtocol.requestHandler == nil {
@@ -3275,6 +3453,7 @@ final class AppModelTests: XCTestCase {
             ),
             persistence: persistence,
             deviceIdentity: deviceIdentity,
+            subscriptionStore: subscriptionStore,
             rewardedAdService: rewardedAdService,
             accountCredentialStore: accountCredentialStore
         )
@@ -3488,6 +3667,23 @@ private final class OperationIDRecorder: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return values
+    }
+}
+
+private final class StringRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValues: [String] = []
+
+    func record(_ value: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        storedValues.append(value)
+    }
+
+    var values: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedValues
     }
 }
 

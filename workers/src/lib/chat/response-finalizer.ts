@@ -1237,6 +1237,7 @@ function hasRevenueDriverSurfaceDefect(answer: string): boolean {
     /(?:バイオ医薬|提携収入|承認済み製品の需要|研究開発や販売体制).{0,100}(?:売上|要因|確認)/u.test(normalized);
   const genericOnly =
     /(?:会社固有の売上要因までは|売上区分や地域・セグメントの説明が近い材料|販売数量、セグメント構成が売上変化を見る軸|追加確認が必要な点)[^。]*。?$/u.test(normalized) ||
+    /追加確認としては[^。]{0,180}(?:評価|確認|分析)[^。]{0,60}(?:不足|必要)[^。]*。?$/u.test(normalized) ||
     /具体的な(?:売上)?(?:ドライバー|要因)[^。]{0,120}(?:含まれていません|確認できません|明示されていません)/u.test(normalized) ||
     /どの(?:製品カテゴリ|顧客セグメント)[^。]{0,120}(?:確認|追加情報|詳細)/u.test(normalized) ||
     (/一番大きい変化は売上高/u.test(normalized) && !/(?:主因|要因として|支えた|押し上げ|牽引|due to|driven by)/iu.test(normalized));

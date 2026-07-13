@@ -54,7 +54,7 @@ export function resolveBillingRuntimeCapabilities(
     env.APPLE_APP_STORE_PRIVATE_KEY,
     env.APPLE_BUNDLE_ID,
     env.SUBSCRIPTION_PRINCIPAL_HMAC_KEY_V1
-  ].every(nonEmpty);
+  ].every(nonEmpty) && appleVerificationEnvironmentReady(env);
   const accountSecretsReady = [
     env.ACCOUNT_PRINCIPAL_HMAC_KEY_V1,
     env.ACCOUNT_SESSION_HMAC_KEY_V1,
@@ -74,4 +74,20 @@ export function resolveBillingRuntimeCapabilities(
 
 function nonEmpty(value: string | undefined): boolean {
   return Boolean(value?.trim());
+}
+
+function positiveInteger(value: string | undefined): boolean {
+  const normalized = value?.trim();
+  if (!normalized || !/^\d+$/u.test(normalized)) return false;
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0;
+}
+
+function appleVerificationEnvironmentReady(env: Env): boolean {
+  const environment = env.APPLE_APP_STORE_SERVER_ENVIRONMENT?.trim().toLowerCase();
+  if (environment === "sandbox") return true;
+  if (environment === "production" || environment === "auto") {
+    return positiveInteger(env.APPLE_APP_ID);
+  }
+  return false;
 }

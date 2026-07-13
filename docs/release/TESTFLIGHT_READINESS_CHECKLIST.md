@@ -128,6 +128,8 @@ xcodebuild archive -project Kabuyomi.xcodeproj -scheme Kabuyomi -configuration R
 
 If the local simulator name or OS differs, adjust only the `xcodebuild test` destination.
 
+Do not install a product built with `CODE_SIGNING_ALLOWED=NO` into Simulator for UI or Keychain validation. That flag is valid only for compile-only CI gates; an installed unsigned product has no usable Keychain entitlement and will intentionally enter the degraded authentication state. Build the Simulator app with normal local signing before `simctl install` or visual review.
+
 ## 4. Release-Safety Checks In The iOS App
 
 - [ ] Settings copy for Privacy Policy / Terms / Support is present and readable.

@@ -744,6 +744,38 @@ describe("OpenAI quote translation provider", () => {
     )).rejects.toThrow("investment advice");
   });
 
+  it("does not mistake the ordinary word 売り上げ for investment advice", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  translatedText: "売り上げは増加しましたが、営業利益率は低下しました。"
+                })
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    ));
+
+    await expect(generateModelQuoteTranslation(
+      {
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key"
+      } as never,
+      {
+        text: "Revenue increased while operating margin declined.",
+        targetLanguage: "ja"
+      }
+    )).resolves.toMatchObject({
+      translatedText: "売り上げは増加しましたが、営業利益率は低下しました。"
+    });
+  });
+
   it("treats missing Gemini config as irrelevant when OpenAI is configured", () => {
     expect(isQuoteTranslationAvailable({
       LLM_PROVIDER: "openai",

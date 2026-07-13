@@ -151,6 +151,20 @@ struct InstallationIdentityState: Codable, Equatable {
     var consumedChallengeIds: [String]
     var consumedNonceDigests: [String]
 
+    init(
+        credential: InstallationCredential?,
+        appAttestKeyId: String?,
+        bootstrapOperationId: String?,
+        consumedChallengeIds: [String],
+        consumedNonceDigests: [String]
+    ) {
+        self.credential = credential
+        self.appAttestKeyId = appAttestKeyId
+        self.bootstrapOperationId = bootstrapOperationId
+        self.consumedChallengeIds = consumedChallengeIds
+        self.consumedNonceDigests = consumedNonceDigests
+    }
+
     static let empty = InstallationIdentityState(
         credential: nil,
         appAttestKeyId: nil,
@@ -158,6 +172,23 @@ struct InstallationIdentityState: Codable, Equatable {
         consumedChallengeIds: [],
         consumedNonceDigests: []
     )
+
+    private enum CodingKeys: String, CodingKey {
+        case credential
+        case appAttestKeyId
+        case bootstrapOperationId
+        case consumedChallengeIds
+        case consumedNonceDigests
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        credential = try container.decodeIfPresent(InstallationCredential.self, forKey: .credential)
+        appAttestKeyId = try container.decodeIfPresent(String.self, forKey: .appAttestKeyId)
+        bootstrapOperationId = try container.decodeIfPresent(String.self, forKey: .bootstrapOperationId)
+        consumedChallengeIds = try container.decodeIfPresent([String].self, forKey: .consumedChallengeIds) ?? []
+        consumedNonceDigests = try container.decodeIfPresent([String].self, forKey: .consumedNonceDigests) ?? []
+    }
 }
 
 enum AppAttestFallbackPolicy {
@@ -171,6 +202,7 @@ enum InstallationIdentityError: LocalizedError, Equatable {
     case identityUnavailable
     case appAttestUnavailable
     case appAttestTemporarilyUnavailable
+    case appAttestKeyInvalid
     case attestationNotVerified
     case replayedChallenge
     case expiredChallenge
@@ -187,6 +219,8 @@ enum InstallationIdentityError: LocalizedError, Equatable {
             "この端末では安全なアプリ認証を利用できないため、クレジット機能は利用できません。"
         case .appAttestTemporarilyUnavailable:
             "Apple の安全なアプリ認証を一時的に完了できませんでした。"
+        case .appAttestKeyInvalid:
+            "端末のアプリ認証キーを更新できませんでした。"
         case .attestationNotVerified:
             "アプリの正当性を確認できなかったため、この操作は実行できません。"
         case .replayedChallenge:

@@ -1640,6 +1640,7 @@ describe("worker routing", () => {
         APPLE_APP_STORE_KEY_ID: "key",
         APPLE_APP_STORE_PRIVATE_KEY: "private-key",
         APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+        APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox",
         SUBSCRIPTION_PRINCIPAL_HMAC_KEY_V1: "subscription-secret",
         KABUYOMI_CACHE: {
           get: vi.fn().mockResolvedValue(completeRemoteConfigEnvelope())

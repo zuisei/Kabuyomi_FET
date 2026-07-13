@@ -5,7 +5,7 @@ const root = new URL("../../", import.meta.url);
 const read = (path: string) => readFileSync(new URL(path, root), "utf8");
 
 describe("authoritative shipping truth contract", () => {
-  it("keeps current docs aligned with safe release capabilities", () => {
+  it("keeps current docs aligned with the live production capabilities", () => {
     const truth = read("docs/release/CURRENT_SHIPPING_TRUTH.md");
     const index = read("docs/INDEX.md");
     const review = read("docs/release/APP_STORE_SUBMISSION_NOTES.md");
@@ -13,7 +13,12 @@ describe("authoritative shipping truth contract", () => {
 
     expect(truth).toContain("50 credits once for a verified App Attest installation; never recurring");
     expect(truth).toContain("| Free | 0 monthly credits");
-    expect(truth).toContain("`creditBillingEnabled=false`");
+    expect(truth).toContain("`creditBillingEnabled=true`");
+    expect(truth).toContain("`consumablePurchasesEnabled=true`");
+    expect(truth).toContain("`rewardedCreditEnabled=true`");
+    expect(truth).toContain("`rewardedSsvReady=true`");
+    expect(truth).toContain("`accountRecoveryReady=false`");
+    expect(truth).toContain("external lifecycle evidence");
     expect(truth).toContain("Sign in with Apple account principals");
     expect(truth).toContain("complete, typed, dated envelope");
     expect(truth).toContain("Missing, malformed, partial, unsupported, or stale configuration");

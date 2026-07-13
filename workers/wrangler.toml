@@ -40,7 +40,16 @@ HARD_INTENT_TARGETED_RETRIEVAL_MODE = "diagnostic"
 ADMOB_REWARDED_AD_UNIT_ID = "ca-app-pub-1248492954379402/7202804414"
 SEC_FETCHER_TIMEOUT_MS = "25000"
 APPLE_BUNDLE_ID = "app.kabuyomi.ios"
+# Numeric App Store Connect app ID for production signed-data verification.
+# This is public application metadata, not a credential.
+APPLE_APP_ID = "6762764426"
 APPLE_APP_STORE_SERVER_ENVIRONMENT = "auto"
+APP_ATTEST_TEAM_ID = "UGCJZH9KG4"
+APP_ATTEST_BUNDLE_ID = "app.kabuyomi.ios"
+APP_ATTEST_ALLOWED_ENVIRONMENTS = "production"
+APP_ATTEST_ALLOWED_VALIDATION_CATEGORIES = "2,4"
+APP_ATTEST_ALLOWED_BUNDLE_VERSIONS = "6"
+APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS = "true"
 # Configure SEC_FETCHER_BASE_URL in .dev.vars for local wrangler dev
 # Optionally set DEV_DETACHED_ACCESS_DEVICE_KEYS in deployed environments to allow DEBUG-only detached access for specific x-device-key values
 # Configure SEC_FETCHER_BASE_URL, SEC_FETCHER_SHARED_SECRET, BACKFILL_SHARED_SECRET, and Apple App Store Server API secrets in deployed environments

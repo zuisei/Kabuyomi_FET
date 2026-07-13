@@ -60,11 +60,31 @@ export async function retryModelAnswer({
 
   return {
     contextPack,
-    modelResponse: {
-      ...modelResponse,
-      llmUsage: combineLlmUsage(previousModelResponse.llmUsage, modelResponse.llmUsage),
-      retryAttempt: modelResponse.retryAttempt ?? 1,
-      retryReason: modelResponse.retryReason ?? retryReason
-    }
+    modelResponse: mergeRetryModelResponse(previousModelResponse, modelResponse, retryReason)
+  };
+}
+
+export function mergeRetryModelResponse(
+  previousModelResponse: GeminiChatAnswer,
+  retryModelResponse: GeminiChatAnswer,
+  retryReason: ChatFallbackReason
+): GeminiChatAnswer {
+  const previousQualityControl = previousModelResponse.qualityControl;
+  const retryQualityControl = retryModelResponse.qualityControl;
+  const qualityControl = retryQualityControl
+    ? {
+        ...previousQualityControl,
+        ...retryQualityControl,
+        followupPreviousAnswer:
+          retryQualityControl?.followupPreviousAnswer ?? previousQualityControl?.followupPreviousAnswer ?? null
+      }
+    : previousQualityControl;
+
+  return {
+    ...retryModelResponse,
+    ...(qualityControl ? { qualityControl } : {}),
+    llmUsage: combineLlmUsage(previousModelResponse.llmUsage, retryModelResponse.llmUsage),
+    retryAttempt: retryModelResponse.retryAttempt ?? 1,
+    retryReason: retryModelResponse.retryReason ?? retryReason
   };
 }

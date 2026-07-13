@@ -1,4 +1,5 @@
 import Foundation
+import DeviceCheck
 
 struct QuotaRequestContext {
     let legacyDeviceKey: String?
@@ -147,6 +148,13 @@ struct APIClient {
         static let resource: TimeInterval = 75
     }
 
+    private static let appAttestServerUnavailableRetryDelaysNanoseconds: [UInt64] = [
+        0,
+        1_000_000_000,
+        2_000_000_000,
+        4_000_000_000
+    ]
+
     private enum RequestSecurity {
         case publicRoute
         case installationToken
@@ -287,6 +295,16 @@ struct APIClient {
         }
     }
 
+    var canRetryFraudSensitiveAuthentication: Bool {
+        guard appAttestClient?.isSupported == true else { return false }
+        do {
+            guard let credential = try currentCredential() else { return true }
+            return credential.attestationStatus != .verified || credential.creditMode != .full
+        } catch {
+            return false
+        }
+    }
+
     var authenticatedActionUnavailableError: InstallationIdentityError {
         do {
             if try currentCredential()?.attestationStatus == .unavailable {
@@ -300,11 +318,15 @@ struct APIClient {
     }
 
     func bootstrapInstallationIdentity() async throws -> InstallationCredential {
-        try await bootstrapInstallationIdentity(allowSimulatorConflictRecovery: true)
+        try await bootstrapInstallationIdentity(
+            allowSimulatorConflictRecovery: true,
+            allowAppAttestKeyRecovery: true
+        )
     }
 
     private func bootstrapInstallationIdentity(
-        allowSimulatorConflictRecovery: Bool
+        allowSimulatorConflictRecovery: Bool,
+        allowAppAttestKeyRecovery: Bool
     ) async throws -> InstallationCredential {
         if let credential = requestContext?.installationCredential {
             return credential
@@ -330,6 +352,13 @@ struct APIClient {
                     state.credential = nil
                     try installationIdentityStore.saveState(state)
                     return try await bootstrapInstallationIdentity(
+                        allowSimulatorConflictRecovery: allowSimulatorConflictRecovery,
+                        allowAppAttestKeyRecovery: allowAppAttestKeyRecovery
+                    )
+                } catch InstallationIdentityError.appAttestKeyInvalid where allowAppAttestKeyRecovery {
+                    return try await recoverInvalidAppAttestKey(
+                        state: state,
+                        store: installationIdentityStore,
                         allowSimulatorConflictRecovery: allowSimulatorConflictRecovery
                     )
                 }
@@ -363,6 +392,7 @@ struct APIClient {
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
+                    Self.logAppAttestFailure("generate_key_failed", error: error)
                     throw InstallationIdentityError.appAttestTemporarilyUnavailable
                 }
                 try installationIdentityStore.saveState(state)
@@ -406,7 +436,8 @@ struct APIClient {
                 try installationIdentityStore.clear()
                 deviceIdentity.reset()
                 return try await bootstrapInstallationIdentity(
-                    allowSimulatorConflictRecovery: false
+                    allowSimulatorConflictRecovery: false,
+                    allowAppAttestKeyRecovery: allowAppAttestKeyRecovery
                 )
             }
             #endif
@@ -417,11 +448,19 @@ struct APIClient {
         try installationIdentityStore.saveState(state)
 
         if response.attestationRequired {
-            return try await completeAppAttestation(
-                credential: response.credential,
-                state: state,
-                store: installationIdentityStore
-            )
+            do {
+                return try await completeAppAttestation(
+                    credential: response.credential,
+                    state: state,
+                    store: installationIdentityStore
+                )
+            } catch InstallationIdentityError.appAttestKeyInvalid where allowAppAttestKeyRecovery {
+                return try await recoverInvalidAppAttestKey(
+                    state: state,
+                    store: installationIdentityStore,
+                    allowSimulatorConflictRecovery: allowSimulatorConflictRecovery
+                )
+            }
         }
 
         if appAttestCapability == .unavailable,
@@ -429,6 +468,22 @@ struct APIClient {
             throw InstallationIdentityError.attestationNotVerified
         }
         return response.credential
+    }
+
+    private func recoverInvalidAppAttestKey(
+        state: InstallationIdentityState,
+        store: any InstallationIdentityStateStoring,
+        allowSimulatorConflictRecovery: Bool
+    ) async throws -> InstallationCredential {
+        var recoveredState = state
+        recoveredState.credential = nil
+        recoveredState.appAttestKeyId = nil
+        try store.saveState(recoveredState)
+        RewardedAdDiagnostics.log("app_attest_invalid_key_rotating")
+        return try await bootstrapInstallationIdentity(
+            allowSimulatorConflictRecovery: allowSimulatorConflictRecovery,
+            allowAppAttestKeyRecovery: false
+        )
     }
 
     @discardableResult
@@ -734,7 +789,8 @@ struct APIClient {
         for security: RequestSecurity,
         method: String,
         url: URL,
-        bodyData: Data?
+        bodyData: Data?,
+        allowAppAttestKeyRecovery: Bool = true
     ) async throws -> [String: String] {
         guard security != .publicRoute else {
             return [:]
@@ -798,6 +854,27 @@ struct APIClient {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
+            Self.logAppAttestFailure("generate_assertion_failed", error: error)
+            if allowAppAttestKeyRecovery,
+               Self.isAppAttestInvalidKey(error),
+               let installationIdentityStore {
+                let state = try installationIdentityStore.loadState()
+                _ = try await recoverInvalidAppAttestKey(
+                    state: state,
+                    store: installationIdentityStore,
+                    allowSimulatorConflictRecovery: true
+                )
+                return try await identityHeaders(
+                    for: security,
+                    method: method,
+                    url: url,
+                    bodyData: bodyData,
+                    allowAppAttestKeyRecovery: false
+                )
+            }
+            if Self.isAppAttestInvalidKey(error) {
+                throw InstallationIdentityError.appAttestKeyInvalid
+            }
             throw InstallationIdentityError.appAttestTemporarilyUnavailable
         }
 
@@ -836,17 +913,11 @@ struct APIClient {
             installationPrincipal: credential.principal,
             tokenReference: credential.tokenReference
         )
-        let attestationObject: Data
-        do {
-            attestationObject = try await appAttestClient.attestKey(
-                keyId,
-                clientDataHash: clientDataHash
-            )
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            throw InstallationIdentityError.appAttestTemporarilyUnavailable
-        }
+        let attestationObject = try await attestKeyWithServerUnavailableRetry(
+            appAttestClient: appAttestClient,
+            keyId: keyId,
+            clientDataHash: clientDataHash
+        )
         let response: AppAttestCompleteResponse = try await sendIdentityRequest(
             path: Self.identityAttestCompletePath,
             method: "POST",
@@ -867,6 +938,74 @@ struct APIClient {
         updatedState.appAttestKeyId = keyId
         try store.saveState(updatedState)
         return response.credential
+    }
+
+    private func attestKeyWithServerUnavailableRetry(
+        appAttestClient: any AppAttestClient,
+        keyId: String,
+        clientDataHash: Data
+    ) async throws -> Data {
+        let retryDelays = Self.appAttestServerUnavailableRetryDelaysNanoseconds
+
+        for attempt in 0...retryDelays.count {
+            if attempt > 0 {
+                let delay = retryDelays[attempt - 1]
+                if delay > 0 {
+                    try await Task.sleep(nanoseconds: delay)
+                }
+            }
+
+            do {
+                return try await appAttestClient.attestKey(
+                    keyId,
+                    clientDataHash: clientDataHash
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                Self.logAppAttestFailure("attest_key_failed", error: error)
+                if Self.isAppAttestInvalidKey(error) {
+                    throw InstallationIdentityError.appAttestKeyInvalid
+                }
+                guard Self.isAppAttestServerUnavailable(error),
+                      attempt < retryDelays.count else {
+                    throw InstallationIdentityError.appAttestTemporarilyUnavailable
+                }
+                RewardedAdDiagnostics.log(
+                    "attest_key_retry_scheduled",
+                    fields: [
+                        "attempt": String(attempt + 2),
+                        "delayMilliseconds": String(retryDelays[attempt] / 1_000_000)
+                    ]
+                )
+            }
+        }
+
+        throw InstallationIdentityError.appAttestTemporarilyUnavailable
+    }
+
+    private static func isAppAttestServerUnavailable(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == DCError.errorDomain
+            && nsError.code == DCError.Code.serverUnavailable.rawValue
+    }
+
+    private static func isAppAttestInvalidKey(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == DCError.errorDomain
+            && nsError.code == DCError.Code.invalidKey.rawValue
+    }
+
+    private static func logAppAttestFailure(_ event: String, error: Error) {
+        let nsError = error as NSError
+        RewardedAdDiagnostics.log(
+            event,
+            fields: [
+                "domain": nsError.domain,
+                "code": String(nsError.code),
+                "description": nsError.localizedDescription
+            ]
+        )
     }
 
     private func fetchAppAttestChallenge(

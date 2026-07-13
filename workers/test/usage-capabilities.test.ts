@@ -7,6 +7,8 @@ const readyEnv = {
   APPLE_APP_STORE_KEY_ID: "key",
   APPLE_APP_STORE_PRIVATE_KEY: "private-key",
   APPLE_BUNDLE_ID: "app.kabuyomi.ios",
+  APPLE_APP_ID: "6762764426",
+  APPLE_APP_STORE_SERVER_ENVIRONMENT: "auto",
   SUBSCRIPTION_PRINCIPAL_HMAC_KEY_V1: "subscription-secret",
   ACCOUNT_PRINCIPAL_HMAC_KEY_V1: "account-principal-secret",
   ACCOUNT_SESSION_HMAC_KEY_V1: "account-session-secret"
@@ -34,6 +36,49 @@ describe("usage billing runtime capabilities", () => {
       accountRecoveryReady: false
     });
   });
+
+  it.each([undefined, "", "not-numeric", "0", "-1"])(
+    "hides billing and consumables when the production Apple app id is invalid: %s",
+    (appleAppId) => {
+      expect(resolveBillingRuntimeCapabilities({
+        ...readyEnv,
+        APPLE_APP_ID: appleAppId
+      } as never, {
+        ...DEFAULT_REMOTE_CONFIG,
+        accountRecoveryReady: false
+      })).toEqual({
+        creditBillingEnabled: false,
+        consumablePurchasesEnabled: false,
+        accountRecoveryReady: false
+      });
+    }
+  );
+
+  it("allows sandbox verification without a production Apple app id", () => {
+    expect(resolveBillingRuntimeCapabilities({
+      ...readyEnv,
+      APPLE_APP_ID: undefined,
+      APPLE_APP_STORE_SERVER_ENVIRONMENT: "sandbox"
+    } as never, DEFAULT_REMOTE_CONFIG)).toEqual({
+      creditBillingEnabled: true,
+      consumablePurchasesEnabled: true,
+      accountRecoveryReady: false
+    });
+  });
+
+  it.each([undefined, "", "unsupported"])(
+    "hides billing when the Apple verification environment is invalid: %s",
+    (environment) => {
+      expect(resolveBillingRuntimeCapabilities({
+        ...readyEnv,
+        APPLE_APP_STORE_SERVER_ENVIRONMENT: environment
+      } as never, DEFAULT_REMOTE_CONFIG)).toEqual({
+        creditBillingEnabled: false,
+        consumablePurchasesEnabled: false,
+        accountRecoveryReady: false
+      });
+    }
+  );
 
   it("does not expose account-bound consumables when account recovery secrets are missing", () => {
     expect(resolveBillingRuntimeCapabilities({

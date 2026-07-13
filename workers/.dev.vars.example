@@ -15,6 +15,17 @@ INSTALLATION_TOKEN_HMAC_KEY_V1=replace-with-random-secret
 INSTALLATION_NETWORK_HMAC_KEY_V1=replace-with-different-random-secret
 ACCOUNT_PRINCIPAL_HMAC_KEY_V1=replace-with-different-random-secret
 ACCOUNT_SESSION_HMAC_KEY_V1=replace-with-different-random-secret
+# Public Apple application metadata required when production signed-data
+# verification is exercised locally. Keep the bundle and numeric app ID paired.
+APPLE_BUNDLE_ID=app.kabuyomi.ios
+APPLE_APP_ID=6762764426
+APP_ATTEST_TEAM_ID=UGCJZH9KG4
+APP_ATTEST_BUNDLE_ID=app.kabuyomi.ios
+APP_ATTEST_ALLOWED_ENVIRONMENTS=development
+APP_ATTEST_ALLOWED_VALIDATION_CATEGORIES=3
+APP_ATTEST_ALLOWED_BUNDLE_VERSIONS=6
+APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS=true
+APPLE_APP_STORE_SERVER_ENVIRONMENT=auto
 # Defaults to APPLE_BUNDLE_ID when omitted for the native iOS client.
 APPLE_SIGN_IN_CLIENT_ID=app.kabuyomi.ios
 # Emergency gates are off when unset. Set one to true only for the bounded

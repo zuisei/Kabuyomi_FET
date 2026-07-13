@@ -2,7 +2,7 @@
 
 Status: authoritative companion to `CURRENT_SHIPPING_TRUTH.md`
 
-As of: 2026-07-12 JST
+As of: 2026-07-13 JST
 
 ## Outcome
 
@@ -18,11 +18,11 @@ The remediation preserves the existing core SEC-reading product and existing cre
 | Quote translation | Preserved at 1 credit | Same metering and replay boundary as chat; no billing-flag free path | Hardened production path deployed |
 | Existing paid balances | Preserved | Durable Object balance and ledger remain server authority | Spendable |
 | Welcome grant | No recurring Free grant | Exactly 50 once, only after verified App Attest; arbitrary device-key rotation cannot grant | Disabled without real attestation |
-| New consumable purchase | Product IDs preserved | Requires complete trusted config, Apple transaction verification, idempotent grant, and no paid-grant emergency disable | Disabled |
-| Subscription purchase/restore | Lite/Pro/Max catalog preserved | Requires complete trusted config and Apple verification; client state is never authority | Disabled pending external validation |
+| New consumable purchase | Product IDs preserved | Requires complete trusted config, Apple transaction verification, idempotent grant, and no paid-grant emergency disable | Production-enabled with `APPLE_APP_ID` and Apple signature verification configured; external StoreKit/TestFlight lifecycle evidence remains incomplete |
+| Subscription purchase/restore | Lite/Pro/Max catalog preserved | Requires complete trusted config and Apple verification; client state is never authority | Production-enabled with complete verifier metadata; real two-device, restore, and transition evidence remains incomplete |
 | Existing subscription state | No blind client grant | Stable HMAC principal, period identity, read-time expiry, terminal revocation, and dedupe | Server state preserved; externally unverified candidate transitions stay disabled |
 | Account recovery | No claim of cross-device recovery before proof | Sign in with Apple principal, account session, matching `appAccountToken`, audited migration | Disabled |
-| Rewarded ads | Existing code preserved | UI requires ads + reward + SSV readiness, production ad unit/environment, App Attest, and no emergency disable; SSV is sole grant authority | Disabled |
+| Rewarded ads | Existing code preserved | UI requires ads + reward + SSV readiness, production ad unit/environment, App Attest, and no emergency disable; SSV is sole grant authority | Production-enabled; physical App Attest and one genuine production AdMob SSV +2 grant verified, with duplicate/late/cap scenarios still open |
 | App Store notifications | Endpoint implementation preserved | Verified JWS/certificate/bundle/environment, notification UUID dedupe, per-entitlement ordering | Disabled/unverified externally |
 | Legal pages | Routes and local July content preserved | Live Pages revision/hash must match local validated source | Live revision and all five hashes match |
 
@@ -83,11 +83,11 @@ Old Worker code cannot parse the new nested envelope. The rollout therefore requ
 
 ## UI and App Review consistency
 
-The candidate copy consistently states one-time welcome credit and zero recurring Free monthly credit. StoreKit localized prices are authoritative. Disabled purchase, subscription, reward, and account-recovery capabilities are hidden or show an unavailable state before any external transaction work.
+The candidate copy consistently states one-time welcome credit and zero recurring Free monthly credit. StoreKit localized prices are authoritative. Monthly-plan, consumable-purchase, and restore surfaces remain visible while capability, connection, or device authentication is pending; StoreKit product metadata loads independently of the server mutation gates, while only the purchase/restore controls remain disabled until their exact runtime gates pass. Product loading has a shared 10-second bound and ends in a localized price or an explicit retryable unavailable/failed state. Reward surfaces follow their server and environment gates; on an App-Attest-capable physical device, tapping the reward action automatically retries same-principal authentication recovery before creating the reward intent. Account recovery remains hidden until its capability is advertised. Deployed candidate `ff298a10` also rotates an Apple-invalid App Attest key once for the same strict bootstrap identity. Production App Attest, reward intent, advertisement, Google SSV, return navigation, and exact +2 grant passed; StoreKit/TestFlight evidence remains open.
 
 The app preserves cached read-only startup, uses non-blocking authentication status, and removes the startup alert regression. Recent conversations have an explicit empty state, and the company drawer routes search through `SearchView` only.
 
-App Review notes must describe the exact capability state of the uploaded build. They must not promise rewarded ads, consumable purchases, account recovery, or cross-device restore while those capabilities are disabled.
+App Review notes must describe the exact capability state of the uploaded build. They may describe currently enabled rewarded ads and consumable purchases only as implemented runtime behavior, without claiming the missing external lifecycle checks passed. They must not promise account recovery or cross-device recovery while that capability remains disabled.
 
 ## Activation gates
 
@@ -101,10 +101,10 @@ App Review notes must describe the exact capability state of the uploaded build.
 | Rewarded credits | Production ad unit plus genuine Google SSV, duplicate/late/cap behavior, return navigation |
 | Remote config | Daily monitor/alert, reviewed hash approval, KV/D1 outage drill, expiry alert evidence |
 
-Until a row is complete, its capability remains disabled and cannot be advertised as user-available.
+The July 13 production activation departed from the prior "disabled until complete" posture for consumables/subscriptions and rewarded credits. The deployed Worker now has `APPLE_APP_ID` and reaches Apple signature verification, but the physical StoreKit lifecycle rows remain incomplete evidence gates. Account recovery remains disabled. Do not rewrite an incomplete row as externally verified merely because configuration exposes it.
 
 ## Validation contract
 
-The repository gate requires Worker, iOS, SEC-fetcher, legal, migration, test deployment, production deployment, smoke, balance-preservation, and documentation-consistency evidence. Current evidence is Worker 75 files / 1,113 tests, iOS 192 tests, SEC fetcher 15 tests, legal validation and live hash parity, test Worker identity/release smokes, the balanced 150-row final-candidate quality gate with complete human review, production migrations `0010`-`0017`, production Worker `0e6ebcdb-3305-4aa9-b9d5-bf714457dff7` at 100%, strict KV/D1 LKG config parity, billing-safe smoke, and exact balance reconciliation.
+The repository gate requires Worker, iOS, SEC-fetcher, legal, migration, test deployment, production deployment, smoke, balance-preservation, and documentation-consistency evidence. Candidate `ff298a10` passes Worker 77 files / 1,130 tests, focused invalid-key recovery, signed physical-device Release build, production App Attest/AdMob canary, production smoke, backup, binding readback, and balance reconciliation. Production Worker `e60580e7-e7f5-449d-97b2-d36854c24896` serves it at 100%. The prior 150-row/150-review packet remains bound to `56c0c209`; the release owner waived rerunning it once for this identity-only hotfix, and the normal deploy guard remains blocked until fresh exact-candidate evidence exists.
 
-Release decision: `GO` for the core release. Every activation-gate row above remains disabled until its external evidence is complete.
+Release decision: `GO` for the core release. Rewarded credits and consumables/subscriptions are production-enabled; production-device App Attest and one genuine AdMob SSV +2 grant are verified. StoreKit/TestFlight and Apple notification lifecycle evidence remain incomplete. Account recovery remains disabled. The one-time answer-quality waiver for candidate `ff298a10` remains explicit and does not alter the normal deploy guard.

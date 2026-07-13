@@ -16,7 +16,9 @@ final class SubscriptionStore {
     static let legacyCreditProductID = "kabuyomi.credits.100"
     static let miniCreditProductID = primaryCreditProductID
     static let creditPackProductIDs = [primaryCreditProductID, legacyCreditProductID]
-    private static let creditPackProductLoadTimeoutNanoseconds: UInt64 = 10_000_000_000
+    private static let productLoadTimeoutNanoseconds: UInt64 = 10_000_000_000
+
+    typealias ProductLoader = @Sendable ([String]) async throws -> [Product]
 
     private let quotaSubjectKey = "kabuyomi.quotaSubject"
     private let planKey = "kabuyomi.plan"
@@ -30,6 +32,8 @@ final class SubscriptionStore {
     private let lastSyncedTransactionIdKey = "kabuyomi.subscription.lastSynced.transactionId"
 
     private let defaults: UserDefaults
+    private let productLoadTimeoutNanoseconds: UInt64
+    private let productLoader: ProductLoader
     private let logger = Logger(subsystem: "app.kabuyomi.ios", category: "subscription")
 
     private var updatesTask: Task<Void, Never>?
@@ -37,8 +41,16 @@ final class SubscriptionStore {
     private var cachedCreditPackProducts: [Product] = []
     private var diagnostics = StoreKitDiagnosticsSnapshot.initial(requestedProductIds: creditPackProductIDs)
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        productLoadTimeoutNanoseconds: UInt64 = SubscriptionStore.productLoadTimeoutNanoseconds,
+        productLoader: @escaping ProductLoader = { productIDs in
+            try await Product.products(for: productIDs)
+        }
+    ) {
         self.defaults = defaults
+        self.productLoadTimeoutNanoseconds = productLoadTimeoutNanoseconds
+        self.productLoader = productLoader
     }
 
     var quotaSubject: String? {
@@ -390,7 +402,10 @@ final class SubscriptionStore {
             return cachedProducts
         }
 
-        let products = try await Product.products(for: Self.subscriptionProductIDs)
+        let products = try await productsWithTimeout(
+            for: Self.subscriptionProductIDs,
+            timeoutNanoseconds: productLoadTimeoutNanoseconds
+        )
         cachedProducts = products
         return products
     }
@@ -444,7 +459,7 @@ final class SubscriptionStore {
         do {
             products = try await productsWithTimeout(
                 for: Self.creditPackProductIDs,
-                timeoutNanoseconds: Self.creditPackProductLoadTimeoutNanoseconds
+                timeoutNanoseconds: productLoadTimeoutNanoseconds
             )
         } catch SubscriptionStoreError.productLoadTimedOut {
             diagnostics.markProductLoadFailed(SubscriptionStoreError.productLoadTimedOut)
@@ -483,9 +498,10 @@ final class SubscriptionStore {
     }
 
     private func productsWithTimeout(for productIDs: [String], timeoutNanoseconds: UInt64) async throws -> [Product] {
-        try await withThrowingTaskGroup(of: [Product].self) { group in
+        let productLoader = self.productLoader
+        return try await withThrowingTaskGroup(of: [Product].self) { group in
             group.addTask {
-                try await Product.products(for: productIDs)
+                try await productLoader(productIDs)
             }
             group.addTask {
                 try await Task.sleep(nanoseconds: timeoutNanoseconds)

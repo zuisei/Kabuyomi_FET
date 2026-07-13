@@ -26,15 +26,17 @@ private enum RewardedCreditReviewUI {
 }
 
 enum ConsumableCreditReviewUI {
-    static func isVisible(
+    static func canPurchase(
         creditBillingEnabled: Bool?,
-        consumablePurchasesEnabled: Bool?
+        consumablePurchasesEnabled: Bool?,
+        accountRecoveryReady: Bool?,
+        isAccountSignedIn: Bool,
+        authenticatedCreditActionsAvailable: Bool
     ) -> Bool {
-        creditBillingEnabled == true && consumablePurchasesEnabled == true
-    }
-
-    static func canShowProducts(accountRecoveryReady: Bool?, isAccountSignedIn: Bool) -> Bool {
-        accountRecoveryReady != true || isAccountSignedIn
+        creditBillingEnabled == true
+            && consumablePurchasesEnabled == true
+            && authenticatedCreditActionsAvailable
+            && (accountRecoveryReady != true || isAccountSignedIn)
     }
 }
 
@@ -96,12 +98,13 @@ struct CreditView: View {
                             insufficientCreditRecoveryCard(requiredCredits: recoveryRequiredCredits)
                         }
                         balanceCard
+                        if let billingAvailabilityMessage {
+                            billingAvailabilityCard(message: billingAvailabilityMessage)
+                        }
                         if shouldShowPaidCreditAccountRecovery {
                             paidCreditAccountCard
                         }
-                        if shouldShowConsumablePurchases && canShowConsumableProducts {
-                            addCreditsCard
-                        }
+                        addCreditsCard
                         purchaseManagementCard
                         if shouldShowRewardedCreditUI {
                             rewardCard
@@ -120,34 +123,27 @@ struct CreditView: View {
             }
         }
         .task {
-            if requestsPlanSheetAfterUsageRefresh, appModel.isCreditBillingEnabled {
+            if requestsPlanSheetAfterUsageRefresh {
                 activeSheet = .plans
                 requestsPlanSheetAfterUsageRefresh = false
             }
             await appModel.refreshCreditUsage()
-            if requestsPlanSheetAfterUsageRefresh {
-                if appModel.isCreditBillingEnabled {
-                    activeSheet = .plans
-                }
-                requestsPlanSheetAfterUsageRefresh = false
-            }
-            if appModel.isCreditBillingEnabled {
-                await appModel.loadSubscriptionProducts(showErrors: false)
-            }
-            if shouldShowConsumablePurchases && canShowConsumableProducts {
-                await appModel.loadCreditPackProducts(showErrors: false)
-            }
+            async let subscriptionProducts: Void = appModel.loadSubscriptionProducts(showErrors: false)
+            async let creditPackProducts: Void = appModel.loadCreditPackProducts(showErrors: false)
+            _ = await (subscriptionProducts, creditPackProducts)
         }
         .onChange(of: appModel.isCreditBillingEnabled) { _, isEnabled in
-            guard !isEnabled else { return }
-            if case .plans? = activeSheet {
-                activeSheet = nil
+            if isEnabled {
+                Task {
+                    await appModel.loadSubscriptionProducts(showErrors: false)
+                }
             }
         }
         .onChange(of: appModel.isConsumableCreditPurchasingEnabled) { _, isEnabled in
-            guard !isEnabled else { return }
-            if case .morePacks? = activeSheet {
-                activeSheet = nil
+            if isEnabled {
+                Task {
+                    await appModel.loadCreditPackProducts(showErrors: false)
+                }
             }
         }
         .sheet(item: $activeSheet) { sheet in
@@ -186,9 +182,7 @@ struct CreditView: View {
                 .accessibilityLabel("クレジット画面を閉じる")
             }
 
-            Text(appModel.isCreditBillingEnabled
-                ? "残高、プラン、追加購入をひとつの画面で確認"
-                : "残高とクレジットの内訳を確認")
+            Text("残高、月額プラン、追加購入をひとつの画面で確認")
                 .font(.system(.footnote, design: .rounded, weight: .semibold))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -286,15 +280,13 @@ struct CreditView: View {
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
-                if appModel.isCreditBillingEnabled {
-                    Divider()
-                        .overlay(KabuyomiTheme.inkMuted.opacity(0.18))
+                Divider()
+                    .overlay(KabuyomiTheme.inkMuted.opacity(0.18))
 
-                    HStack(alignment: .center, spacing: 12) {
-                        currentPlanSummary
-                        Spacer()
-                        planComparisonButton
-                    }
+                HStack(alignment: .center, spacing: 12) {
+                    currentPlanSummary
+                    Spacer()
+                    planComparisonButton
                 }
             }
         }
@@ -339,8 +331,11 @@ struct CreditView: View {
                     ForEach(appModel.subscriptionProducts) { product in
                         SubscriptionPlanRow(
                             product: product,
+                            loadState: appModel.subscriptionProductLoadState,
                             isCurrent: isCurrentSubscription(product),
                             isPurchasing: appModel.billingActionInFlight,
+                            isPurchaseEnabled: billingActionsCanRun,
+                            disabledActionTitle: subscriptionDisabledActionTitle,
                             purchase: { productId in
                                 Task {
                                     await appModel.purchaseSubscription(productId: productId)
@@ -360,7 +355,8 @@ struct CreditView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(AccountStatusActionButtonStyle())
-                    .disabled(appModel.billingActionInFlight)
+                    .disabled(appModel.billingActionInFlight || !billingActionsCanRun)
+                    .opacity(billingActionsCanRun ? 1 : 0.62)
                 }
                 .padding(20)
                 .padding(.bottom, 28)
@@ -414,9 +410,12 @@ struct CreditView: View {
                 if let primaryCreditPackProduct {
                     CreditPackRow(
                         product: primaryCreditPackProduct,
+                        loadState: appModel.creditPackProductLoadState,
                         chatCreditCost: appModel.chatCreditCost,
                         isPrimary: true,
                         isPurchasing: appModel.billingActionInFlight,
+                        isPurchaseEnabled: consumablePurchaseActionsCanRun,
+                        disabledActionTitle: consumableDisabledActionTitle,
                         purchase: { productId in
                             Task {
                                 await appModel.purchaseCreditPack(productId: productId)
@@ -522,7 +521,7 @@ struct CreditView: View {
                     .frame(height: 50)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                    Text("追加クレジットの購入は、復元用アカウントへの接続後に表示されます。")
+                    Text("追加クレジットの購入は、復元用アカウントへの接続後に利用できます。")
                         .font(.caption)
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
@@ -582,39 +581,38 @@ struct CreditView: View {
                         }
                     }
 
-                    if shouldShowConsumablePurchases && canShowConsumableProducts {
+                    if let primaryCreditPackProduct {
                         recoveryActionButton(
                             title: "50 creditsを購入",
                             systemImage: "plus.circle.fill",
                             isLoading: appModel.billingActionInFlight || appModel.creditPackProductLoadInFlight,
-                            isDisabled: appModel.billingActionInFlight || primaryCreditPackProduct?.isAvailable != true
+                            isDisabled: appModel.billingActionInFlight
+                                || !consumablePurchaseActionsCanRun
+                                || !primaryCreditPackProduct.isAvailable
                         ) {
-                            guard let productId = primaryCreditPackProduct?.id else { return }
                             Task {
-                                await appModel.purchaseCreditPack(productId: productId)
+                                await appModel.purchaseCreditPack(productId: primaryCreditPackProduct.id)
                             }
                         }
                     }
 
-                    if appModel.isCreditBillingEnabled {
-                        recoveryActionButton(
-                            title: "サブスクを見る",
-                            systemImage: "crown.fill",
-                            isLoading: appModel.subscriptionProductLoadState == .loading,
-                            isDisabled: false
-                        ) {
-                            activeSheet = .plans
-                        }
+                    recoveryActionButton(
+                        title: "サブスクを見る",
+                        systemImage: "crown.fill",
+                        isLoading: appModel.subscriptionProductLoadState == .loading,
+                        isDisabled: false
+                    ) {
+                        activeSheet = .plans
+                    }
 
-                        recoveryActionButton(
-                            title: "購入を復元",
-                            systemImage: "arrow.triangle.2.circlepath",
-                            isLoading: appModel.billingActionInFlight,
-                            isDisabled: appModel.billingActionInFlight
-                        ) {
-                            Task {
-                                await appModel.restorePurchases()
-                            }
+                    recoveryActionButton(
+                        title: "購入を復元",
+                        systemImage: "arrow.triangle.2.circlepath",
+                        isLoading: appModel.billingActionInFlight,
+                        isDisabled: appModel.billingActionInFlight || !billingActionsCanRun
+                    ) {
+                        Task {
+                            await appModel.restorePurchases()
                         }
                     }
                 }
@@ -629,9 +627,12 @@ struct CreditView: View {
                     ForEach(secondaryCreditPackProducts) { product in
                         CreditPackRow(
                             product: product,
+                            loadState: appModel.creditPackProductLoadState,
                             chatCreditCost: appModel.chatCreditCost,
                             isPrimary: product.id == SubscriptionStore.primaryCreditProductID,
                             isPurchasing: appModel.billingActionInFlight,
+                            isPurchaseEnabled: consumablePurchaseActionsCanRun,
+                            disabledActionTitle: consumableDisabledActionTitle,
                             purchase: { productId in
                                 Task {
                                     await appModel.purchaseCreditPack(productId: productId)
@@ -662,23 +663,20 @@ struct CreditView: View {
                     Text("管理")
                         .font(.system(.headline, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.ink)
-                    Text(appModel.isCreditBillingEnabled
-                        ? "購入同期、利用状況、クレジットの扱いを確認できます。"
-                        : "利用状況とクレジットの扱いを確認できます。")
+                    Text("購入同期、利用状況、クレジットの扱いを確認できます。")
                         .font(.footnote)
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
-                if appModel.isCreditBillingEnabled {
-                    ManagementButton(
-                        title: "購入を復元 / 同期",
-                        subtitle: "App Storeの権利情報をサーバーへ同期",
-                        systemImage: "arrow.triangle.2.circlepath",
-                        isLoading: appModel.billingActionInFlight
-                    ) {
-                        Task {
-                            await appModel.restorePurchases()
-                        }
+                ManagementButton(
+                    title: "購入を復元 / 同期",
+                    subtitle: "App Storeの権利情報をサーバーへ同期",
+                    systemImage: "arrow.triangle.2.circlepath",
+                    isLoading: appModel.billingActionInFlight,
+                    isEnabled: billingActionsCanRun
+                ) {
+                    Task {
+                        await appModel.restorePurchases()
                     }
                 }
                 ManagementButton(title: "利用状況", subtitle: "残高、次回更新、同期状態を表示", systemImage: "person.text.rectangle", isLoading: false) {
@@ -815,18 +813,17 @@ struct CreditView: View {
                     }
                     #endif
 
-                    if appModel.isCreditBillingEnabled {
-                        Button {
-                            Task {
-                                await appModel.restorePurchases()
-                            }
-                        } label: {
-                            Text("購入を復元 / 同期")
-                            .frame(maxWidth: .infinity)
+                    Button {
+                        Task {
+                            await appModel.restorePurchases()
                         }
-                        .buttonStyle(AccountStatusActionButtonStyle())
-                        .disabled(appModel.billingActionInFlight)
+                    } label: {
+                        Text("購入を復元 / 同期")
+                            .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(AccountStatusActionButtonStyle())
+                    .disabled(appModel.billingActionInFlight || !billingActionsCanRun)
+                    .opacity(billingActionsCanRun ? 1 : 0.62)
 
                     #if DEBUG
                     Button {
@@ -890,28 +887,97 @@ struct CreditView: View {
     }
 
     private var shouldShowRewardedCreditUI: Bool {
-        appModel.isCreditBillingEnabled
-            && RewardedCreditReviewUI.isVisible(capability: appModel.usage?.capabilities?.rewardedCredit)
+        RewardedCreditReviewUI.isVisible(capability: appModel.usage?.capabilities?.rewardedCredit)
     }
 
-    private var shouldShowConsumablePurchases: Bool {
-        ConsumableCreditReviewUI.isVisible(
+    private var billingActionsCanRun: Bool {
+        appModel.isCreditBillingEnabled
+            && appModel.authenticatedCreditActionsAvailable
+    }
+
+    private var consumablePurchaseActionsCanRun: Bool {
+        ConsumableCreditReviewUI.canPurchase(
             creditBillingEnabled: appModel.usage?.creditBillingEnabled,
-            consumablePurchasesEnabled: appModel.usage?.capabilities?.consumablePurchasesEnabled
+            consumablePurchasesEnabled: appModel.usage?.capabilities?.consumablePurchasesEnabled,
+            accountRecoveryReady: appModel.usage?.capabilities?.accountRecoveryReady,
+            isAccountSignedIn: appModel.isPaidCreditAccountSignedIn,
+            authenticatedCreditActionsAvailable: appModel.authenticatedCreditActionsAvailable
         )
     }
 
     private var shouldShowPaidCreditAccountRecovery: Bool {
-        shouldShowConsumablePurchases
-            && appModel.fraudSensitiveCreditActionsAvailable
-            && appModel.usage?.capabilities?.accountRecoveryReady == true
+        appModel.usage?.capabilities?.accountRecoveryReady == true
     }
 
-    private var canShowConsumableProducts: Bool {
-        ConsumableCreditReviewUI.canShowProducts(
-            accountRecoveryReady: appModel.usage?.capabilities?.accountRecoveryReady,
-            isAccountSignedIn: appModel.isPaidCreditAccountSignedIn
-        )
+    private var billingAvailabilityMessage: String? {
+        guard appModel.usage != nil else {
+            return "購入機能の接続状態を確認中です。月額プランと追加購入は、この画面に表示したまま同期します。"
+        }
+        guard appModel.isCreditBillingEnabled else {
+            return "価格とプランは確認できますが、購入サーバーが現在利用できないため、月額プラン・追加購入・購入復元の操作を停止しています。"
+        }
+        guard appModel.authenticatedCreditActionsAvailable else {
+            return "端末認証を確認できないため購入操作を停止しています。購入メニューと価格はそのまま確認できます。"
+        }
+        guard appModel.isConsumableCreditPurchasingEnabled else {
+            return "追加クレジットの購入は現在利用できません。月額プランと購入復元は利用できます。"
+        }
+        if appModel.requiresPaidCreditAccount && !appModel.isPaidCreditAccountSignedIn {
+            return "追加クレジットを端末変更後も復元できるよう、先にAppleアカウントで続けてください。月額プランはそのまま利用できます。"
+        }
+        return nil
+    }
+
+    private var billingAvailabilityTitle: String {
+        guard appModel.usage != nil else { return "購入機能を確認中" }
+        guard appModel.isCreditBillingEnabled else { return "現在購入できません" }
+        guard appModel.authenticatedCreditActionsAvailable else { return "端末認証が必要です" }
+        guard appModel.isConsumableCreditPurchasingEnabled else { return "追加購入は現在利用できません" }
+        return "Appleアカウントが必要です"
+    }
+
+    private var billingAvailabilityIcon: String {
+        appModel.usage == nil
+            ? "arrow.triangle.2.circlepath.circle.fill"
+            : "exclamationmark.circle.fill"
+    }
+
+    private var subscriptionDisabledActionTitle: String {
+        guard appModel.usage != nil else { return "接続確認中" }
+        guard appModel.isCreditBillingEnabled else { return "現在購入できません" }
+        guard appModel.authenticatedCreditActionsAvailable else { return "端末認証が必要" }
+        return "現在購入できません"
+    }
+
+    private var consumableDisabledActionTitle: String {
+        guard appModel.usage != nil else { return "接続確認中" }
+        guard appModel.isCreditBillingEnabled else { return "現在購入できません" }
+        guard appModel.authenticatedCreditActionsAvailable else { return "端末認証が必要" }
+        guard appModel.isConsumableCreditPurchasingEnabled else { return "現在購入できません" }
+        if appModel.requiresPaidCreditAccount && !appModel.isPaidCreditAccountSignedIn {
+            return "Appleで続けてください"
+        }
+        return "現在購入できません"
+    }
+
+    private func billingAvailabilityCard(message: String) -> some View {
+        card {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: billingAvailabilityIcon)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(billingAvailabilityTitle)
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -1033,12 +1099,18 @@ private struct PlanSheetHeader: View {
 private struct SubscriptionPlanRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let product: SubscriptionProduct
+    let loadState: SubscriptionProductLoadState
     let isCurrent: Bool
     let isPurchasing: Bool
+    let isPurchaseEnabled: Bool
+    let disabledActionTitle: String
     let purchase: (String) -> Void
 
     private var displayPrice: String {
-        product.displayPrice ?? "価格確認中"
+        StoreProductPresentation.priceText(
+            displayPrice: product.displayPrice,
+            loadState: loadState
+        )
     }
 
     private var isRecommended: Bool {
@@ -1072,7 +1144,7 @@ private struct SubscriptionPlanRow: View {
                 .stroke((isCurrent || isRecommended) ? KabuyomiTheme.accentDeep.opacity(0.26) : KabuyomiTheme.stroke(for: .muted), lineWidth: 1)
         )
         .buttonStyle(.plain)
-        .disabled(isPurchasing || !product.isAvailable || isCurrent)
+        .disabled(isPurchasing || !product.isAvailable || !isPurchaseEnabled || isCurrent)
     }
 
     private var planSummary: some View {
@@ -1105,10 +1177,19 @@ private struct SubscriptionPlanRow: View {
             Text(displayPrice)
                 .font(.system(.subheadline, design: .rounded, weight: .bold))
                 .foregroundStyle(KabuyomiTheme.accentDeep)
-            Text(isCurrent ? "現在のプラン" : (product.isAvailable ? "変更 / 購読" : "App Store確認中"))
+            Text(planActionTitle)
                 .font(.system(.caption, design: .rounded, weight: .bold))
-                .foregroundStyle(product.isAvailable ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative)
+                .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative)
         }
+    }
+
+    private var planActionTitle: String {
+        if isCurrent { return "現在のプラン" }
+        if !product.isAvailable {
+            return StoreProductPresentation.unavailableActionTitle(loadState: loadState)
+        }
+        if !isPurchaseEnabled { return disabledActionTitle }
+        return "変更 / 購読"
     }
 
     private var limitSummary: String {
@@ -1201,13 +1282,19 @@ private struct LegalLink: View {
 private struct CreditPackRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let product: CreditPackProduct
+    let loadState: SubscriptionProductLoadState
     let chatCreditCost: Int
     let isPrimary: Bool
     let isPurchasing: Bool
+    let isPurchaseEnabled: Bool
+    let disabledActionTitle: String
     let purchase: (String) -> Void
 
     private var displayPrice: String {
-        product.displayPrice ?? "価格確認中"
+        StoreProductPresentation.priceText(
+            displayPrice: product.displayPrice,
+            loadState: loadState
+        )
     }
 
     var body: some View {
@@ -1233,8 +1320,8 @@ private struct CreditPackRow: View {
                     .fill(KabuyomiTheme.fill(for: .muted))
             )
         .buttonStyle(.plain)
-        .disabled(isPurchasing || !product.isAvailable)
-        .opacity(product.isAvailable ? 1 : 0.72)
+        .disabled(isPurchasing || !product.isAvailable || !isPurchaseEnabled)
+        .opacity(product.isAvailable && isPurchaseEnabled ? 1 : 0.72)
     }
 
     private var packSummary: some View {
@@ -1263,16 +1350,51 @@ private struct CreditPackRow: View {
             Text(displayPrice)
                 .font(.system(.subheadline, design: .rounded, weight: .bold))
                 .foregroundStyle(KabuyomiTheme.accentDeep)
-            Text(product.isAvailable ? "購入する" : "App Store確認中")
+            Text(packActionTitle)
                 .font(.system(.caption, design: .rounded, weight: .bold))
-                .foregroundStyle(product.isAvailable ? KabuyomiTheme.paper : KabuyomiTheme.negative)
-                .padding(.horizontal, product.isAvailable ? 10 : 0)
-                .padding(.vertical, product.isAvailable ? 6 : 0)
+                .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.paper : KabuyomiTheme.negative)
+                .padding(.horizontal, product.isAvailable && isPurchaseEnabled ? 10 : 0)
+                .padding(.vertical, product.isAvailable && isPurchaseEnabled ? 6 : 0)
                 .background {
-                    if product.isAvailable {
+                    if product.isAvailable && isPurchaseEnabled {
                         Capsule().fill(KabuyomiTheme.accentDeep)
                     }
                 }
+        }
+    }
+
+    private var packActionTitle: String {
+        if !product.isAvailable {
+            return StoreProductPresentation.unavailableActionTitle(loadState: loadState)
+        }
+        if !isPurchaseEnabled { return disabledActionTitle }
+        return "購入する"
+    }
+}
+
+enum StoreProductPresentation {
+    static func priceText(
+        displayPrice: String?,
+        loadState: SubscriptionProductLoadState
+    ) -> String {
+        if let displayPrice, !displayPrice.isEmpty {
+            return displayPrice
+        }
+
+        switch loadState {
+        case .idle, .loading:
+            return "価格を確認中"
+        case .loaded, .unavailable, .failed:
+            return "価格を取得できません"
+        }
+    }
+
+    static func unavailableActionTitle(loadState: SubscriptionProductLoadState) -> String {
+        switch loadState {
+        case .idle, .loading:
+            return "App Storeに接続中"
+        case .loaded, .unavailable, .failed:
+            return "再読み込みできます"
         }
     }
 }
@@ -1455,13 +1577,22 @@ private struct ManagementButton: View {
     let subtitle: String?
     let systemImage: String
     let isLoading: Bool
+    let isEnabled: Bool
     let action: () -> Void
 
-    init(title: String, subtitle: String? = nil, systemImage: String, isLoading: Bool, action: @escaping () -> Void) {
+    init(
+        title: String,
+        subtitle: String? = nil,
+        systemImage: String,
+        isLoading: Bool,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) {
         self.title = title
         self.subtitle = subtitle
         self.systemImage = systemImage
         self.isLoading = isLoading
+        self.isEnabled = isEnabled
         self.action = action
     }
 
@@ -1502,7 +1633,8 @@ private struct ManagementButton: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(isLoading)
+        .disabled(isLoading || !isEnabled)
+        .opacity(isEnabled ? 1 : 0.62)
     }
 }
 

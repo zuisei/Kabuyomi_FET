@@ -15,9 +15,7 @@ enum RewardedAdDiagnostics {
             .joined(separator: " ")
         let line = details.isEmpty ? event : "\(event) \(details)"
         logger.info("\(line, privacy: .public)")
-        #if DEBUG
         print("[rewarded_ad] \(line)")
-        #endif
     }
 
     static func redact(_ value: String, visibleCount: Int = 4) -> String {
