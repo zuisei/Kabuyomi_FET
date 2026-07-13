@@ -891,7 +891,6 @@ struct CreditView: View {
 
     private var shouldShowRewardedCreditUI: Bool {
         appModel.isCreditBillingEnabled
-            && appModel.fraudSensitiveCreditActionsAvailable
             && RewardedCreditReviewUI.isVisible(capability: appModel.usage?.capabilities?.rewardedCredit)
     }
 
