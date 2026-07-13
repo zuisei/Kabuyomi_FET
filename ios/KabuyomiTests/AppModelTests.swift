@@ -1632,6 +1632,13 @@ final class AppModelTests: XCTestCase {
                 )
             }
 
+            if request.url?.path == "/v1/usage" {
+                return (
+                    HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30)
+                )
+            }
+
             XCTAssertEqual(request.url?.path, "/v1/company/AAPL/refresh")
             return (
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
@@ -1666,6 +1673,13 @@ final class AppModelTests: XCTestCase {
                 return (
                     HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!,
                     try TestFixtures.jsonData(["error": "Filing cache not found"])
+                )
+            }
+
+            if request.url?.path == "/v1/usage" {
+                return (
+                    HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    try Self.creditUsageData(rewardedAdRemaining: 0, totalRemaining: 30)
                 )
             }
 
