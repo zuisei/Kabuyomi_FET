@@ -2,9 +2,9 @@
   "version": "testbench-quality-gate-evidence-v2",
   "status": "RELEASE_QUALITY_PASS",
   "generatedAt": "2026-07-13T08:04:01.742Z",
-  "runPath": "/Users/0xt4/t4dano/Kabuyomi/workers/testbench/runs/2026-07-13-app-attest-reward-release-r3.jsonl",
+  "runPath": "testbench/runs/2026-07-13-app-attest-reward-release-r3.jsonl",
   "runSha256": "e951d458e4849e584c6f5ce8dd9428c544dec927f7550649542d62c39c3d88ac",
-  "humanReviewPacketPath": "/Users/0xt4/t4dano/Kabuyomi/workers/testbench/runs/2026-07-13-app-attest-reward-release-r3-human-review.json",
+  "humanReviewPacketPath": "testbench/runs/2026-07-13-app-attest-reward-release-r3-human-review.json",
   "releaseCandidateId": "56c0c2090f26e087b6890534e1ff28dd23843671f84842f4b880f80adad1e049",
   "releaseCandidate": {
     "ok": true,
@@ -26,7 +26,7 @@
     "signedAt": "2026-07-13T08:03:51.506Z"
   },
   "humanReview": {
-    "packetPath": "/Users/0xt4/t4dano/Kabuyomi/workers/testbench/runs/2026-07-13-app-attest-reward-release-r3-human-review.json",
+    "packetPath": "testbench/runs/2026-07-13-app-attest-reward-release-r3-human-review.json",
     "ok": true,
     "reviewedRows": 150,
     "reviewer": "0xt4",

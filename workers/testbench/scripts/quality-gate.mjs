@@ -1,10 +1,14 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import { dirname, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildBenchmarkSummary, collectQualityIssueRows, evaluateQualityGate, qualityGateThresholdsFromEnv } from "./benchmark-quality.mjs";
 import { evaluateHumanReviewPacket, verifySourceRunDigest } from "./human-review-gate.mjs";
 import { runMetadataLines } from "./run-output-metadata.mjs";
 import { applyStandardReleaseProfile, STANDARD_RELEASE_PROFILE } from "./standard-release-profile.mjs";
 import { evaluateReleaseCandidateRows } from "./release-candidate-evidence.mjs";
+
+const workersDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 const args = process.argv.slice(2);
 const runPath = positionalArguments(args)[0];
@@ -184,20 +188,22 @@ function sourceResultForOutput(source) {
 }
 
 async function writeGateEvidence(status) {
+  const portableRunPath = portableEvidencePath(runPath);
+  const portableHumanReviewPacketPath = portableEvidencePath(humanReviewPacketPath);
   const evidence = {
     version: "testbench-quality-gate-evidence-v2",
     status,
     generatedAt: new Date().toISOString(),
-    runPath,
+    runPath: portableRunPath,
     runSha256,
-    humanReviewPacketPath,
+    humanReviewPacketPath: portableHumanReviewPacketPath,
     releaseCandidateId: releaseCandidate?.expectedReleaseCandidateId ?? null,
     releaseCandidate: releaseCandidate ?? null,
     evaluationCoverageMode: summary.evaluationCoverageMode,
     releaseProfile: standardReleaseProfile ? STANDARD_RELEASE_PROFILE.version : "diagnostic",
     calibratedAlternative: summary.calibratedAlternative,
     humanReview: humanReview ? {
-      packetPath: humanReview.packetPath,
+      packetPath: portableHumanReviewPacketPath,
       ok: humanReview.review.ok && humanReview.source.ok,
       reviewedRows: humanReview.review.reviewedRows,
       reviewer: humanReview.review.reviewer,
@@ -209,6 +215,20 @@ async function writeGateEvidence(status) {
   };
   await writeFile(gateEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
   console.log(`gateEvidence: ${gateEvidencePath}`);
+}
+
+function portableEvidencePath(path) {
+  if (!path) return null;
+  const absolutePath = resolve(path);
+  const repositoryRelativePath = relative(workersDir, absolutePath);
+  if (
+    !repositoryRelativePath
+    || repositoryRelativePath === ".."
+    || repositoryRelativePath.startsWith(`..${sep}`)
+  ) {
+    return absolutePath;
+  }
+  return repositoryRelativePath.split(sep).join("/");
 }
 
 function printIssueExamples(rows, failures) {
