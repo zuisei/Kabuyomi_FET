@@ -890,6 +890,20 @@ function hasDurabilityFollowupLostPriorDriver(row) {
     return true;
   }
   const answer = String(row.answer ?? "");
+  if (
+    (row.templateId === "Q04" || row.intent === "driver_durability_followup") &&
+    /利益率要因候補/u.test(answer) &&
+    !/売上要因候補/u.test(answer)
+  ) {
+    return true;
+  }
+  if (
+    (row.templateId === "Q06" || row.intent === "margin_durability_followup") &&
+    /売上要因候補/u.test(answer) &&
+    !/利益率要因候補/u.test(answer)
+  ) {
+    return true;
+  }
   return /前問の具体的な要因を十分に特定できていない|具体的な(?:売上|利益率)?要因は十分に特定できません/.test(answer);
 }
 

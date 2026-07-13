@@ -1,3 +1,5 @@
+import DeviceCheck
+import Security
 import XCTest
 @testable import Kabuyomi
 
@@ -75,7 +77,15 @@ final class StartupAuthenticationTests: XCTestCase {
         )
         XCTAssertEqual(
             InstallationIdentityFailure.classify(InstallationIdentityError.invalidStoredCredential).kind,
-            .secureStorageUnavailable
+            .invalidStoredCredential
+        )
+        XCTAssertEqual(
+            InstallationIdentityFailure.classify(InstallationIdentityError.keychainFailure(errSecMissingEntitlement)).kind,
+            .invalidAppSignature
+        )
+        XCTAssertEqual(
+            InstallationIdentityFailure.classify(InstallationIdentityError.keychainFailure(errSecInteractionNotAllowed)).kind,
+            .secureStorageTemporarilyUnavailable
         )
         XCTAssertEqual(
             InstallationIdentityFailure.classify(APIError.serverStatus(statusCode: 403, message: "disabled")).kind,
@@ -223,10 +233,52 @@ final class StartupAuthenticationTests: XCTestCase {
         guard case .degraded(let failure, let attemptCount) = model.installationIdentityLoadState else {
             return XCTFail("Expected secure-storage degradation")
         }
-        XCTAssertEqual(failure.kind, .secureStorageUnavailable)
+        XCTAssertEqual(failure.kind, .invalidStoredCredential)
         XCTAssertEqual(attemptCount, 1)
         XCTAssertEqual(controller.bootstrapCount, 0)
         XCTAssertNil(model.activeAlert)
+        XCTAssertNil(model.installationAuthenticationStatus?.retryActionTitle)
+    }
+
+    func testAuthenticationStatusOffersOnlyActionableRetryLabels() {
+        XCTAssertEqual(
+            InstallationAuthenticationStatus(
+                failure: InstallationIdentityFailure(kind: .networkUnavailable)
+            ).retryActionTitle,
+            "再接続"
+        )
+        XCTAssertEqual(
+            InstallationAuthenticationStatus(
+                failure: InstallationIdentityFailure(kind: .secureStorageTemporarilyUnavailable)
+            ).retryActionTitle,
+            "もう一度確認"
+        )
+        XCTAssertNil(
+            InstallationAuthenticationStatus(
+                failure: InstallationIdentityFailure(kind: .invalidStoredCredential)
+            ).retryActionTitle
+        )
+        XCTAssertNil(
+            InstallationAuthenticationStatus(
+                failure: InstallationIdentityFailure(kind: .invalidAppSignature)
+            ).retryActionTitle
+        )
+    }
+
+    func testInstallationIdentityStateDecodesOlderPayloadWithoutReplayArrays() throws {
+        let data = try TestFixtures.jsonData([
+            "credential": Self.credentialObject(attestationStatus: "verified", creditMode: "full"),
+            "appAttestKeyId": "legacy-app-attest-key",
+            "bootstrapOperationId": "legacy-bootstrap-operation"
+        ])
+
+        let state = try JSONDecoder().decode(InstallationIdentityState.self, from: data)
+
+        XCTAssertEqual(state.credential?.attestationStatus, .verified)
+        XCTAssertEqual(state.appAttestKeyId, "legacy-app-attest-key")
+        XCTAssertEqual(state.bootstrapOperationId, "legacy-bootstrap-operation")
+        XCTAssertEqual(state.consumedChallengeIds, [])
+        XCTAssertEqual(state.consumedNonceDigests, [])
     }
 
     func testUnsupportedAppAttestAllowsCoreMutationButKeepsFraudSensitiveActionsGated() async throws {
@@ -322,6 +374,84 @@ final class StartupAuthenticationTests: XCTestCase {
             "/v1/identity/app-attest/complete"
         ])
         XCTAssertEqual(appAttest.attestCallCount, 1)
+    }
+
+    func testInvalidAppAttestKeyRotatesOnceAndPreservesInstallationBinding() async throws {
+        let store = StartupIdentityStore()
+        let invalidKey = NSError(
+            domain: DCError.errorDomain,
+            code: DCError.Code.invalidKey.rawValue
+        )
+        let appAttest = StartupAppAttestClient(
+            isSupported: true,
+            attestErrors: [invalidKey]
+        )
+        let recorder = StartupPathRecorder()
+        StartupAuthenticationURLProtocol.requestHandler = { request in
+            let path = request.url?.path ?? "missing"
+            let pathOccurrence = recorder.record(path)
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            switch path {
+            case "/v1/identity/bootstrap":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "credential": Self.credentialObject(
+                            tokenVersion: pathOccurrence,
+                            attestationStatus: "pending",
+                            creditMode: "none"
+                        ),
+                        "attestationRequired": true
+                    ])
+                )
+            case "/v1/identity/app-attest/challenge":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "challengeId": "invalid-key-recovery-challenge-\(pathOccurrence)",
+                        "nonce": "invalid-key-recovery-nonce-\(pathOccurrence)",
+                        "expiresAt": "2099-01-01T00:00:00.000Z"
+                    ])
+                )
+            case "/v1/identity/app-attest/complete":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "credential": Self.credentialObject(
+                            tokenVersion: 2,
+                            attestationStatus: "verified",
+                            creditMode: "full"
+                        )
+                    ])
+                )
+            default:
+                throw URLError(.badURL)
+            }
+        }
+        let client = makeClient(identityStore: store, appAttestClient: appAttest)
+
+        let credential = try await client.bootstrapInstallationIdentity()
+
+        XCTAssertEqual(credential.attestationStatus, .verified)
+        XCTAssertEqual(credential.creditMode, .full)
+        XCTAssertEqual(appAttest.generateKeyCallCount, 2)
+        XCTAssertEqual(appAttest.attestCallCount, 2)
+        XCTAssertEqual(recorder.paths, [
+            "/v1/identity/bootstrap",
+            "/v1/identity/app-attest/challenge",
+            "/v1/identity/bootstrap",
+            "/v1/identity/app-attest/challenge",
+            "/v1/identity/app-attest/complete"
+        ])
+        let recovered = try store.loadState()
+        XCTAssertEqual(recovered.bootstrapOperationId?.isEmpty, false)
+        XCTAssertEqual(recovered.appAttestKeyId, "startup-test-app-attest-key-2")
+        XCTAssertEqual(recovered.credential, credential)
     }
 
     func testPendingCredential401RebootstrapsWithoutDiscardingStableBinding() async throws {
@@ -497,6 +627,105 @@ final class StartupAuthenticationTests: XCTestCase {
         XCTAssertEqual(state.credential?.tokenVersion, 2)
     }
 
+    func testFraudSensitiveAuthenticationRetriesUnavailableCredentialOnSupportedDevice() async throws {
+        let unavailable = Self.credential(
+            expiresAt: "2099-01-01T00:00:00.000Z",
+            attestationStatus: .unavailable,
+            creditMode: .none
+        )
+        let store = StartupIdentityStore(state: InstallationIdentityState(
+            credential: unavailable,
+            appAttestKeyId: "stable-app-attest-key",
+            bootstrapOperationId: "stable-bootstrap-operation",
+            consumedChallengeIds: [],
+            consumedNonceDigests: []
+        ))
+        let recorder = StartupPathRecorder()
+        StartupAuthenticationURLProtocol.requestHandler = { request in
+            let path = request.url?.path ?? "missing"
+            recorder.record(path)
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            switch path {
+            case "/v1/identity/bootstrap":
+                let body = try XCTUnwrap(Self.requestBodyData(from: request))
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(object["bootstrapOperationId"] as? String, "stable-bootstrap-operation")
+                XCTAssertEqual(object["appAttestKeyId"] as? String, "stable-app-attest-key")
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "credential": Self.credentialObject(
+                            tokenVersion: 2,
+                            attestationStatus: "pending",
+                            creditMode: "none"
+                        ),
+                        "attestationRequired": true
+                    ])
+                )
+            case "/v1/identity/app-attest/challenge":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "challengeId": "upgrade-challenge",
+                        "nonce": "upgrade-nonce",
+                        "expiresAt": "2099-01-01T00:00:00.000Z"
+                    ])
+                )
+            case "/v1/identity/app-attest/complete":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "credential": Self.credentialObject(
+                            tokenVersion: 2,
+                            attestationStatus: "verified",
+                            creditMode: "full"
+                        )
+                    ])
+                )
+            case "/v1/usage":
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "free",
+                        "chatsUsed": 0,
+                        "chatLimit": 10,
+                        "stocksUsed": 0,
+                        "stockLimit": 3,
+                        "dateJST": "2026-07-13"
+                    ])
+                )
+            default:
+                throw URLError(.badURL)
+            }
+        }
+        let appAttest = StartupAppAttestClient(isSupported: true)
+        let model = makeModel(identityStore: store, appAttestClient: appAttest)
+
+        let didAuthenticate = await model.ensureFraudSensitiveAuthentication()
+
+        XCTAssertTrue(didAuthenticate)
+        XCTAssertTrue(model.fraudSensitiveCreditActionsAvailable)
+        XCTAssertNil(model.installationAuthenticationStatus)
+        XCTAssertEqual(appAttest.attestCallCount, 1)
+        XCTAssertEqual(recorder.paths, [
+            "/v1/identity/bootstrap",
+            "/v1/identity/app-attest/challenge",
+            "/v1/identity/app-attest/complete",
+            "/v1/usage"
+        ])
+        let upgraded = try store.loadState()
+        XCTAssertEqual(upgraded.credential?.attestationStatus, .verified)
+        XCTAssertEqual(upgraded.credential?.creditMode, .full)
+        XCTAssertEqual(upgraded.credential?.principal, unavailable.principal)
+        XCTAssertEqual(upgraded.bootstrapOperationId, "stable-bootstrap-operation")
+        XCTAssertEqual(upgraded.appAttestKeyId, "stable-app-attest-key")
+    }
+
     private func makeModel(
         persistence: PersistenceController = PersistenceController(inMemory: true),
         requestContext: QuotaRequestContext? = nil,
@@ -632,20 +861,29 @@ private final class StartupAppAttestClient: AppAttestClient {
     private(set) var attestCallCount = 0
     private(set) var generateKeyCallCount = 0
     private let generateKeyError: Error?
+    private var attestErrors: [Error]
 
-    init(isSupported: Bool, generateKeyError: Error? = nil) {
+    init(
+        isSupported: Bool,
+        generateKeyError: Error? = nil,
+        attestErrors: [Error] = []
+    ) {
         self.isSupported = isSupported
         self.generateKeyError = generateKeyError
+        self.attestErrors = attestErrors
     }
 
     func generateKey() async throws -> String {
         generateKeyCallCount += 1
         if let generateKeyError { throw generateKeyError }
-        return "startup-test-app-attest-key"
+        return "startup-test-app-attest-key-\(generateKeyCallCount)"
     }
 
     func attestKey(_ keyId: String, clientDataHash: Data) async throws -> Data {
         attestCallCount += 1
+        if !attestErrors.isEmpty {
+            throw attestErrors.removeFirst()
+        }
         return Data("attestation".utf8)
     }
 

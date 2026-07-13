@@ -2,7 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, relative, resolve } from "node:path";
 import { computeReleaseCandidate } from "../../scripts/release-candidate.mjs";
-import { verifyAcceptedReleaseEvidence } from "../../scripts/release-evidence.mjs";
+import {
+  verifyAcceptedReleaseEvidence,
+  verifyAcceptedReleaseEvidenceOrApprovedWaiver
+} from "../../scripts/release-evidence.mjs";
 
 const workersDir = resolve(new URL("../..", import.meta.url).pathname);
 const defaultBaseURL = "https://kabuyomi-api-test.dznqjmctk7.workers.dev";
@@ -10,6 +13,7 @@ const args = process.argv.slice(2);
 const checkOnly = args.includes("--check-only") || /^(1|true|yes)$/i.test(process.env.KABUYOMI_TESTBENCH_FULL_SMOKE_CHECK_ONLY ?? "");
 const releaseVerify = args.includes("--release-verify");
 const verifyManifestIfPresent = args.includes("--verify-manifest-if-present");
+const verifyManifestOrApprovedWaiver = args.includes("--verify-manifest-or-approved-waiver");
 const runId = process.env.KABUYOMI_TESTBENCH_RUN_ID?.trim() || buildRunId();
 const runPath = optionValue(args, "--run-path")
   ? resolveWorkersPath(optionValue(args, "--run-path"))
@@ -43,6 +47,20 @@ const env = {
 
 if (verifyManifestIfPresent) {
   await verifyCommittedReleaseManifestIfPresent(releaseEvidenceManifestPath);
+  process.exit(0);
+}
+
+if (verifyManifestOrApprovedWaiver) {
+  const evidence = await verifyAcceptedReleaseEvidenceOrApprovedWaiver({
+    workersDir,
+    manifestPath: releaseEvidenceManifestPath,
+    releaseCandidateId: localCandidate.releaseCandidateId
+  });
+  console.log(
+    evidence.waiverApplied
+      ? `[full-smoke] accepted prior quality candidate ${evidence.evidenceCandidateId} under the exact documented waiver for ${evidence.releaseCandidateId}`
+      : `[full-smoke] accepted release evidence for ${evidence.releaseCandidateId}`
+  );
   process.exit(0);
 }
 

@@ -3235,7 +3235,7 @@ describe("Japanese-only final answer guard", () => {
       filing,
       question: "売上成長、または減収の主な要因は？",
       response: {
-        answer: "一番大きい変化は売上高の大幅増加です。具体的なドライバーを直接明示した記述はこの要約には含まれていません。どの製品カテゴリが最も寄与したかの詳細なブリースを確認する必要があります。",
+        answer: "追加確認としてはマージンや費用構造の影響、長期的な需要動向の持続性の評価が不足している。",
         sources: [sourceToEvidence(filing.sourceChunks[0])]
       },
       responsePath: "openai",
@@ -3259,8 +3259,7 @@ describe("Japanese-only final answer guard", () => {
 
     expect(response.responsePath).toBe("deterministic");
     expect(response.answer).toContain("データセンター向けAI製品");
-    expect(response.answer).not.toContain("含まれていません");
-    expect(response.answer).not.toContain("ブリース");
+    expect(response.answer).not.toContain("評価が不足");
   });
 
   it("does not treat taxes or expenses as revenue drivers", async () => {

@@ -64,6 +64,7 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
         ITSAppUsesNonExemptEncryption: false
+        KABUYOMI_API_BASE_URL: $(KABUYOMI_API_BASE_URL)
         LSApplicationCategoryType: public.app-category.finance
         GADApplicationIdentifier: ca-app-pub-1248492954379402~7909080109
         SKAdNetworkItems:
@@ -77,8 +78,10 @@ targets:
       configs:
         Debug:
           APP_ATTEST_ENVIRONMENT: development
+          KABUYOMI_API_BASE_URL: https://kabuyomi-api-test.dznqjmctk7.workers.dev
         Release:
           APP_ATTEST_ENVIRONMENT: production
+          KABUYOMI_API_BASE_URL: https://kabuyomi-api.dznqjmctk7.workers.dev
     postBuildScripts:
       - name: Generate Ad SDK dSYMs for Archive
         basedOnDependencyAnalysis: false

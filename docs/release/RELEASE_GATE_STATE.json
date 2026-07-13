@@ -1,13 +1,14 @@
 {
   "schemaVersion": 1,
   "phase": "FULL_PRODUCT_REMEDIATION",
-  "asOf": "2026-07-12",
+  "asOf": "2026-07-13",
   "auditSnapshot": "b61602ef55e2499cccd46e32f53e29bb61c83aa7",
   "releaseDecision": "GO",
-  "releaseCandidateId": "07eae11ab99917fdc07d01045b9fda1b3b937b1b7966893a126a487abedb49ea",
+  "releaseCandidateId": "ff298a1053695e2df4399177be2a28d4c148a4594c9d12dfbc1d0d71c071b7ea",
   "openP0Ids": [],
-  "lastValidatedCommit": "b61602ef55e2499cccd46e32f53e29bb61c83aa7",
-  "validationScope": "Exact release candidate 07eae11a: local Worker/iOS/SEC/legal validation, dedicated test Worker smokes and balanced 150-row human-reviewed quality gate, production backup/migrations/100-percent Worker deployment/strict config readback/billing-safe smoke/balance reconciliation, and live legal hash verification. Physical-device Apple/Google/TestFlight checks remain unclaimed and their capabilities remain disabled.",
+  "nextLocalReleaseCandidateId": "ff298a1053695e2df4399177be2a28d4c148a4594c9d12dfbc1d0d71c071b7ea",
+  "lastValidatedCommit": "4a2e8bf6e64c0179f3027dd3449ebd62b4c51eb0",
+  "validationScope": "Release candidate ff298a10 is deployed to production as Worker version e60580e7-e7f5-449d-97b2-d36854c24896. It preserves the prior verifier/migration/UI repair and adds one-time App Attest invalid-key rotation for the same strict bootstrap identity. Worker typecheck, 77 files and 1130 tests, iOS 201/201, signed Release build, production smoke, physical production App Attest attestation/assertion, genuine AdMob SSV, and exact +2 balance application pass. The release owner explicitly waived rerunning the 150-row answer-quality suite once for this identity-only hotfix; the accepted quality manifest remains bound to candidate 56c0c209 and must be refreshed before the next normal guarded deploy. StoreKit/TestFlight and App Store notification lifecycles remain open. Account recovery remains disabled.",
   "authoritativeDocuments": [
     "docs/release/CURRENT_SHIPPING_TRUTH.md",
     "docs/release/FEATURE_PARITY_COMPATIBILITY_REPORT.md",
@@ -21,12 +22,12 @@
     },
     "workerUnit": {
       "status": "PASS",
-      "testFilesPassed": 75,
+      "testFilesPassed": 77,
       "testFilesFailed": 0,
-      "testFilesTotal": 75,
-      "testsPassed": 1113,
+      "testFilesTotal": 77,
+      "testsPassed": 1130,
       "testsFailed": 0,
-      "testsTotal": 1113
+      "testsTotal": 1130
     },
     "workerQualityGateUnit": {
       "status": "PASS",
@@ -54,7 +55,7 @@
       "existingBalancesPreservedByDesign": true,
       "newPaidGrantsEnabled": false,
       "accountRecoveryReady": false,
-      "rewardedSsvReady": false,
+      "rewardedSsvReady": true,
       "externalValidationRequired": true
     },
     "testD1Migration": {
@@ -67,22 +68,23 @@
         "0014",
         "0015",
         "0016",
-        "0017"
+        "0017",
+        "0018"
       ],
       "pendingAfterApply": 0
     },
     "migrationFilenameOrder": {
       "status": "PASS",
-      "files": 17,
+      "files": 18,
       "first": "0001",
-      "last": "0017"
+      "last": "0018"
     },
     "testWorkerDeploy": {
       "status": "PASS_FINAL_CANDIDATE",
-      "versionId": "6756d037-cdf1-45df-87a0-1babbb8ec9da",
+      "versionId": "3f377477-74f2-419b-b4cf-cc703d8ffc84",
       "url": "https://kabuyomi-api-test.dznqjmctk7.workers.dev",
       "finalCandidateParity": true,
-      "releaseCandidateId": "07eae11ab99917fdc07d01045b9fda1b3b937b1b7966893a126a487abedb49ea"
+      "releaseCandidateId": "56c0c2090f26e087b6890534e1ff28dd23843671f84842f4b880f80adad1e049"
     },
     "testWorkerIdentitySmoke": {
       "status": "PASS_FINAL_CANDIDATE",
@@ -91,6 +93,7 @@
       "search": true,
       "company": true,
       "appAttestFailClosed": true,
+      "physicalDevelopmentAttestation": true,
       "finalCandidateRerunRequired": false
     },
     "testWorkerReleaseSmoke": {
@@ -135,12 +138,12 @@
     },
     "iosUnit": {
       "status": "PASS",
-      "testsPassed": 192,
+      "testsPassed": 201,
       "testsFailed": 0,
-      "testsTotal": 192,
-      "simulator": "iPhone 17 Pro / iOS 26.4",
+      "testsTotal": 201,
+      "simulator": "iPhone 17 Pro / iOS 26.2",
       "parallelTesting": false,
-      "resultBundle": "/tmp/KabuyomiFinalPostDeploy.xcresult"
+      "resultBundle": "/Users/0xt4/Library/Developer/Xcode/DerivedData/Kabuyomi-ahctpktmhjduiffpqsutjzsixstg/Logs/Test/Test-Kabuyomi-2026.07.13_5-39-18-+0900.xcresult"
     },
     "iosUnsignedReleaseBuild": {
       "status": "PASS",
@@ -151,8 +154,8 @@
     "preRolloutWorkerVersionId": "78971adf-324f-4d27-8f06-b18fd95d81ae",
     "backup": {
       "status": "PASS",
-      "path": "/Users/0xt4/.codex/backups/Kabuyomi/2026-07-12-production-remediation/kabuyomi-history-before.sql",
-      "sha256": "e04e8d209c810b55fc641e8472c94ea28d3ece3c063bc0e5ef1c53bbf4dc50d5"
+      "path": "/Users/0xt4/.codex/backups/Kabuyomi/2026-07-13-app-attest-release/kabuyomi-history-before-0018.sql",
+      "sha256": "cd0407e6107e95f7d82af0687059311b164df2ccb6a0d6ef1a30c0a084738386"
     },
     "migrations": {
       "status": "PASS",
@@ -164,48 +167,75 @@
         "0014",
         "0015",
         "0016",
-        "0017"
+        "0017",
+        "0018"
       ],
       "pendingAfterApply": 0,
       "schemaProbe": "PASS"
     },
     "workerDeployment": {
       "status": "PASS_100_PERCENT",
-      "versionId": "0e6ebcdb-3305-4aa9-b9d5-bf714457dff7",
-      "releaseCandidateId": "07eae11ab99917fdc07d01045b9fda1b3b937b1b7966893a126a487abedb49ea",
-      "startupTimeMs": 25
+      "versionId": "e60580e7-e7f5-449d-97b2-d36854c24896",
+      "releaseCandidateId": "ff298a1053695e2df4399177be2a28d4c148a4594c9d12dfbc1d0d71c071b7ea",
+      "previousValidatedVersionId": "6cfa680f-1a92-4806-b561-91d5d08adbd0",
+      "appleAppIdBinding": "CONFIGURED_6762764426",
+      "billingRuntimeStatus": "ACTIVE_APPLE_SIGNATURE_VERIFIER_REACHED"
     },
     "smoke": {
-      "status": "PASS_WITH_CAPABILITY_DISABLED",
+      "status": "PASS_ACTIVE_CAPABILITY_GUARDRAILS",
+      "evidenceScope": "POST_0018_POST_DEPLOY_ACTIVE_CAPABILITY_SMOKE",
       "chargeableModelRequestsAllowed": false,
       "customerIdentitiesAllowed": false,
       "balanceProjectionBeforeAfterEqual": true,
-      "principals": 140,
-      "totalBalance": 7602,
+      "principals": 141,
+      "totalBalance": 8507,
       "monthlyBalance": 6390,
-      "purchasedBalance": 1188,
-      "rewardedBalance": 24,
-      "ledgerRows": 742,
+      "purchasedBalance": 2088,
+      "rewardedBalance": 26,
+      "ledgerRows": 746,
       "purchaseRows": 11,
       "purchasedCreditsGranted": 1000
     },
     "strictRemoteConfig": {
       "status": "PASS_FRESH_KV_AND_D1_LKG",
-      "version": "production-safe-release-20260711-v3",
-      "configSha256": "aab7ec76878c3a400c6c08a29e7be7d83cc65aee130901022574eac6266825b3",
+      "version": "production-capabilities-restored-20260713-v1",
+      "updatedAt": "2026-07-13T01:20:28.597Z",
+      "d1LkgStoredAt": "2026-07-13T01:48:13.372Z",
       "legacyBridgeExpiresAt": "2026-08-11T14:14:00.000Z",
-      "newPaidGrantsEnabled": false,
+      "newPaidGrantsEnabled": true,
+      "consumablePurchasesEnabled": true,
       "accountRecoveryReady": false,
-      "rewardedSsvReady": false
+      "rewardedCreditEnabled": true,
+      "rewardedSsvReady": true,
+      "emergencyPaidGrantsDisabled": false,
+      "externalLifecycleEvidence": "INCOMPLETE"
     },
     "legalPages": {
       "status": "PASS_DEPLOYED_AND_HASH_MATCHED",
       "expectedRevision": "2026-07-11",
       "verifiedUrls": 5
+    },
+    "physicalProductionAppAttest": {
+      "status": "PASS",
+      "environment": "production",
+      "storedProductionKeys": 1,
+      "invalidKeyRotation": "PASS_SAME_PRINCIPAL",
+      "attestation": "PASS",
+      "assertionProtectedRewardIntent": "PASS"
+    },
+    "genuineRewardedAdCanary": {
+      "status": "PASS",
+      "googleSsv": "PASS",
+      "creditsGranted": 2,
+      "installationBalanceBefore": 903,
+      "installationBalanceAfter": 905,
+      "dailyRemainingBefore": 3,
+      "dailyRemainingAfter": 2,
+      "returnNavigation": "PASS"
     }
   },
   "lastBenchmarkArtifactIds": [
-    "2026-07-12-full-product-remediation-v9-standard-r103"
+    "2026-07-13-app-attest-reward-release-r3"
   ],
   "lastBenchmarkGate": {
     "status": "RELEASE_QUALITY_PASS",
@@ -214,10 +244,18 @@
     "tickers": 15,
     "templates": 10,
     "fallbackRate": 0,
-    "p95LatencyMs": 5049,
+    "p95LatencyMs": 7425,
     "humanReview": "PASS_150_OF_150",
-    "sourceRunSha256": "5a356c74b86f632fade30a4ac1de2117b83f300fe5105f3fc1420fc510728bbd",
-    "reviewContentSha256": "2a6ba39ff622459f9e9a4babd042d3026cdbdc3f8a44a52c61970d9dc90a73b8"
+    "sourceRunSha256": "e951d458e4849e584c6f5ce8dd9428c544dec927f7550649542d62c39c3d88ac",
+    "reviewContentSha256": "da2b21169fd0f4164cc97901ceb83347126af098f22da5c1463a925ad9156857"
+  },
+  "oneTimeQualityRerunWaiver": {
+    "status": "APPROVED_BY_RELEASE_OWNER",
+    "approvedAt": "2026-07-13",
+    "deployedCandidateId": "ff298a1053695e2df4399177be2a28d4c148a4594c9d12dfbc1d0d71c071b7ea",
+    "lastQualityCandidateId": "56c0c2090f26e087b6890534e1ff28dd23843671f84842f4b880f80adad1e049",
+    "scope": "identity-only App Attest invalid-key recovery hotfix",
+    "normalDeployGuardExpectedToFailUntilRefreshed": true
   },
   "completionCriteria": {
     "workerFullTestFailures": 0,
@@ -230,14 +268,47 @@
     "productionMigrationFailures": 0,
     "testWorkerSmokeFailuresOnFinalCandidate": 0,
     "productionWorkerSmokeFailures": 0,
+    "productionWorkerSmokeOnCurrentActiveConfig": "PASS_ACTIVE_CAPABILITY_GUARDRAILS",
+    "openProductionRuntimeConfigurationDefects": 0,
     "shippingTruthContradictionsWithinAuthoritativeSet": 0
   },
+  "preparedRepairs": {
+    "appleVerifierBinding": {
+      "status": "PRODUCTION_DEPLOYED_AND_SMOKE_VERIFIED",
+      "releaseCandidateId": "ff298a1053695e2df4399177be2a28d4c148a4594c9d12dfbc1d0d71c071b7ea",
+      "appleAppId": "6762764426",
+      "capabilityReadinessRequiresAppleAppId": true,
+      "productionSmokeProfile": "ACTIVE_CAPABILITY_GUARDRAILS",
+      "builtInAppAttestVerifier": true,
+      "applePublishedValidationVector": "PASS",
+      "appAttestPublicKeyMigration": "0018",
+      "localMigrationApplyThrough0018": "PASS",
+      "legacyVerifiedIdentityUpgrade": "SAME_PRINCIPAL_REBOOTSTRAP_AND_REATTEST",
+      "invalidAppAttestKeyRecovery": "SAME_STRICT_BOOTSTRAP_IDENTITY_ROTATE_ONCE",
+      "staleFilingChatAutoRecovery": "REFRESH_AND_RETRY_ONCE",
+      "debugApiIsolation": "test",
+      "releaseApiIsolation": "production"
+    }
+  },
+  "githubEvidence": {
+    "status": "PASS",
+    "latestMergedPr": 16,
+    "latestValidatedHeadSha": "2a9cd0808993d8ce75756eb2657b036ab48f3f0a",
+    "latestPrCiRunId": 29217494685,
+    "latestPrCiConclusion": "SUCCESS_9_OF_9",
+    "mainProtection": {
+      "strictRequiredChecks": true,
+      "requiredCheckCount": 9,
+      "requiredApprovingReviews": 1,
+      "enforceAdmins": true,
+      "requiredConversationResolution": true,
+      "allowForcePushes": false,
+      "allowDeletions": false
+    }
+  },
   "missingHardGates": [
-    "GitHub CI run, required checks, and main ruleset",
-    "physical-device App Attest matrix before welcome-credit activation",
-    "StoreKit sandbox and two-device subscription/purchase lifecycle before billing activation",
+    "StoreKit sandbox and two-device subscription/purchase lifecycle evidence for the now-active billing capability",
     "App Store Server Notifications console delivery before notification activation",
-    "Sign in with Apple recovery and appAccountToken two-device evidence before account recovery activation",
-    "production AdMob SSV callback before rewarded-credit activation"
+    "Sign in with Apple recovery and appAccountToken two-device evidence before account recovery activation"
   ]
 }

@@ -1,6 +1,11 @@
 import type { Env } from "../env";
 import { AppError } from "./errors";
 import { hashForLog, logEvent, logWarnEvent } from "./logging";
+import {
+  isBuiltInAppAttestVerifierConfigured,
+  verifyBuiltInAssertion,
+  verifyBuiltInAttestation
+} from "./app-attest-verifier";
 
 export type InstallationAttestationStatus = "pending" | "verified" | "unavailable";
 export type InstallationCreditMode = "full" | "reduced" | "none";
@@ -40,6 +45,8 @@ interface InstallationIdentityRow {
   token_expires_at?: string | null;
   revoked_at?: string | null;
   last_assertion_counter?: number;
+  app_attest_public_key_spki?: ArrayBuffer | Uint8Array | null;
+  app_attest_environment?: string | null;
 }
 
 interface AppAttestChallengeRow {
@@ -63,11 +70,18 @@ type AppAttestVerifier = (input: {
   clientDataHash: string;
   artifact: string;
   principal: string;
-}) => Promise<boolean | { verified: boolean; assertionCounter?: number }>;
+}) => Promise<boolean | {
+  verified: boolean;
+  assertionCounter?: number;
+  publicKeySpki?: Uint8Array;
+  environment?: "development" | "production";
+}>;
 
 interface AppAttestVerificationResult {
   verified: boolean;
   assertionCounter?: number;
+  publicKeySpki?: Uint8Array;
+  environment?: "development" | "production";
 }
 
 const INSTALLATION_CREDENTIAL_TTL_MS = 90 * 24 * 60 * 60 * 1_000;
@@ -80,7 +94,7 @@ export function setAppAttestVerifierForTests(verifier?: AppAttestVerifier): void
 }
 
 export function isAppAttestVerificationConfigured(env: Env): boolean {
-  return Boolean(
+  return isBuiltInAppAttestVerifierConfigured(env) || Boolean(
     env.APP_ATTEST_VERIFIER_URL?.trim() &&
     env.APP_ATTEST_VERIFIER_SHARED_SECRET?.trim()
   );
@@ -395,7 +409,8 @@ export async function resolveInstallationCredential(request: Request, env: Env):
   const row = await env.DB.prepare(
     `SELECT principal, token_reference, token_version, attestation_status, credit_mode,
             app_attest_key_hash, legacy_device_key_hash, bootstrap_operation_hash,
-            issued_at, token_expires_at, revoked_at, last_assertion_counter
+            issued_at, token_expires_at, revoked_at, last_assertion_counter,
+            app_attest_public_key_spki, app_attest_environment
      FROM installation_identities WHERE principal = ? AND token_reference = ?`
   ).bind(payload.p, payload.r).first<InstallationIdentityRow>();
   if (!row) throw new AppError(401, "Installation credential is not recognized");
@@ -413,6 +428,10 @@ export async function resolveInstallationCredential(request: Request, env: Env):
     // A pending token is intentionally replaced after attestation and cannot
     // be used as an assertion credential.
     throw new AppError(401, "Installation credential has been replaced");
+  }
+  if (row.attestation_status === "verified" && isBuiltInAppAttestVerifierConfigured(env)
+      && !hasCurrentBuiltInVerificationMaterial(env, row)) {
+    throw new AppError(401, "Installation credential requires App Attest rebootstrap");
   }
   return { token, principal: row.principal, tokenReference: row.token_reference, tokenVersion: row.token_version,
     issuedAt: row.issued_at, expiresAt: resolveTokenExpiry(row),
@@ -497,16 +516,20 @@ export async function completeAppAttestation(env: Env, credential: InstallationC
     `UPDATE installation_identities
      SET attestation_status = 'verified', credit_mode = 'full', attested_at = ?, last_seen_at = ?,
          token_reference = ?, token_version = token_version + 1, issued_at = ?, token_expires_at = ?,
-         revoked_at = NULL, last_assertion_counter = 0
+         revoked_at = NULL, last_assertion_counter = 0,
+         app_attest_public_key_spki = COALESCE(?, app_attest_public_key_spki),
+         app_attest_environment = COALESCE(?, app_attest_environment)
      WHERE principal = ? AND token_reference = ?`
   ).bind(attestedAt, attestedAt, tokenReference, attestedAt, tokenExpiresAt,
+    verification.publicKeySpki ?? null, verification.environment ?? null,
     credential.principal, credential.tokenReference).run();
   if (Number(update.meta?.changes ?? 0) !== 1) throw new AppError(409, "Installation credential was replaced");
   await markChallengeResult(env.DB, challenge.challenge_id, "verified");
   const row = await env.DB.prepare(
     `SELECT principal, token_reference, token_version, attestation_status, credit_mode,
             app_attest_key_hash, legacy_device_key_hash, bootstrap_operation_hash,
-            issued_at, token_expires_at, revoked_at, last_assertion_counter
+            issued_at, token_expires_at, revoked_at, last_assertion_counter,
+            app_attest_public_key_spki, app_attest_environment
      FROM installation_identities WHERE principal = ?`
   ).bind(credential.principal).first<InstallationIdentityRow>();
   if (!row) throw new AppError(503, "Installation identity update failed");
@@ -538,9 +561,23 @@ export async function verifyAppAttestAssertionForRequest(request: Request, env: 
     await markChallengeResult(env.DB, challenge.challenge_id, "binding_mismatch");
     throw new AppError(403, "App Attest request binding mismatch");
   }
+  const identity = await env.DB.prepare(`${installationIdentitySelect()} WHERE principal = ? AND token_reference = ?`)
+    .bind(credential.principal, credential.tokenReference).first<InstallationIdentityRow>();
+  if (!identity) throw new AppError(401, "Installation credential is not recognized");
+  if (isBuiltInAppAttestVerifierConfigured(env)) {
+    const allowedEnvironments = (env.APP_ATTEST_ALLOWED_ENVIRONMENTS ?? "")
+      .split(",").map((value) => value.trim()).filter(Boolean);
+    if (!identity.app_attest_environment || !allowedEnvironments.includes(identity.app_attest_environment)) {
+      await markChallengeResult(env.DB, challenge.challenge_id, "environment_mismatch");
+      throw new AppError(403, "App Attest environment is not allowed");
+    }
+  }
+  const publicKeySpki = identity.app_attest_public_key_spki
+    ? boundedBytes(identity.app_attest_public_key_spki)
+    : undefined;
   const verification = await verifyWithConfiguredService(env, {
     kind: "assertion", keyId, clientDataHash, artifact: assertion, principal: credential.principal
-  });
+  }, publicKeySpki);
   if (!verification.verified) {
     await markChallengeResult(env.DB, challenge.challenge_id, "rejected");
     throw new AppError(403, "App Attest assertion failed");
@@ -597,9 +634,29 @@ async function claimChallenge(
 
 async function verifyWithConfiguredService(
   env: Env,
-  input: Parameters<AppAttestVerifier>[0]
+  input: Parameters<AppAttestVerifier>[0],
+  publicKeySpki?: Uint8Array
 ): Promise<AppAttestVerificationResult> {
   if (testVerifier) return normalizeVerifierResult(await testVerifier(input));
+  if (isBuiltInAppAttestVerifierConfigured(env)) {
+    try {
+      if (input.kind === "attestation") {
+        const result = await verifyBuiltInAttestation(env, input);
+        return { verified: true, publicKeySpki: result.publicKeySpki, environment: result.environment };
+      }
+      if (!publicKeySpki) throw new Error("app_attest_public_key_missing");
+      return {
+        verified: true,
+        assertionCounter: await verifyBuiltInAssertion(env, { ...input, publicKeySpki })
+      };
+    } catch (error) {
+      logWarnEvent("app_attest_verification_rejected", {
+        kind: input.kind,
+        failureClass: builtInVerificationFailureClass(error)
+      });
+      return { verified: false };
+    }
+  }
   const url = env.APP_ATTEST_VERIFIER_URL?.trim();
   const secret = env.APP_ATTEST_VERIFIER_SHARED_SECRET?.trim();
   if (!url || !secret) throw new AppError(503, "App Attest verification is not configured");
@@ -617,7 +674,12 @@ async function verifyWithConfiguredService(
 }
 
 function normalizeVerifierResult(
-  result: boolean | { verified: boolean; assertionCounter?: number }
+  result: boolean | {
+    verified: boolean;
+    assertionCounter?: number;
+    publicKeySpki?: Uint8Array;
+    environment?: "development" | "production";
+  }
 ): AppAttestVerificationResult {
   return typeof result === "boolean" ? { verified: result } : result;
 }
@@ -662,7 +724,8 @@ async function findIdentityByAppAttestKeyHash(db: D1Database, keyHash: string) {
 function installationIdentitySelect(): string {
   return `SELECT principal, token_reference, token_version, attestation_status, credit_mode,
                  app_attest_key_hash, legacy_device_key_hash, bootstrap_operation_hash,
-                 issued_at, token_expires_at, revoked_at, last_assertion_counter
+                 issued_at, token_expires_at, revoked_at, last_assertion_counter,
+                 app_attest_public_key_spki, app_attest_environment
           FROM installation_identities`;
 }
 
@@ -671,11 +734,21 @@ async function refreshExistingBootstrapIdentity(
   row: InstallationIdentityRow,
   requestedKeyHash: string | null
 ): Promise<InstallationIdentityRow> {
-  if (requestedKeyHash && row.app_attest_key_hash && requestedKeyHash !== row.app_attest_key_hash) {
-    throw new AppError(409, "Installation bootstrap App Attest key mismatch");
-  }
+  // App Attest keys can become invalid after an environment transition or an
+  // Apple-side key loss. This function is reached only after both the opaque
+  // bootstrap operation and legacy installation key resolve to the same
+  // principal, so that strict pair may rotate its own App Attest key without
+  // minting a new principal or moving balances.
+  const rotatesBoundKey = Boolean(
+    requestedKeyHash && row.app_attest_key_hash && requestedKeyHash !== row.app_attest_key_hash
+  );
   const upgradesUnavailable = row.attestation_status === "unavailable" && Boolean(requestedKeyHash);
-  if (upgradesUnavailable) {
+  const upgradesLegacyVerified = row.attestation_status === "verified"
+    && Boolean(requestedKeyHash)
+    && isBuiltInAppAttestVerifierConfigured(env)
+    && !hasCurrentBuiltInVerificationMaterial(env, row);
+  const requiresAttestationUpgrade = upgradesUnavailable || upgradesLegacyVerified || rotatesBoundKey;
+  if (requiresAttestationUpgrade) {
     const keyOwner = await findIdentityByAppAttestKeyHash(env.DB, requestedKeyHash!);
     if (keyOwner && keyOwner.principal !== row.principal) {
       throw new AppError(409, "App Attest key is already registered");
@@ -683,7 +756,7 @@ async function refreshExistingBootstrapIdentity(
   }
   const expiryMs = Date.parse(resolveTokenExpiry(row));
   const rotatesSoon = !Number.isFinite(expiryMs) || expiryMs <= Date.now() + INSTALLATION_CREDENTIAL_ROTATION_WINDOW_MS;
-  if (!upgradesUnavailable && !rotatesSoon) return row;
+  if (!requiresAttestationUpgrade && !rotatesSoon) return row;
 
   const issuedAt = new Date().toISOString();
   const tokenExpiresAt = new Date(Date.parse(issuedAt) + INSTALLATION_CREDENTIAL_TTL_MS).toISOString();
@@ -694,21 +767,49 @@ async function refreshExistingBootstrapIdentity(
          last_seen_at = ?, app_attest_key_hash = COALESCE(?, app_attest_key_hash),
          attestation_status = CASE WHEN ? IS NULL THEN attestation_status ELSE 'pending' END,
          credit_mode = CASE WHEN ? IS NULL THEN credit_mode ELSE 'none' END,
-         last_assertion_counter = CASE WHEN ? IS NULL THEN last_assertion_counter ELSE 0 END
+         last_assertion_counter = CASE WHEN ? IS NULL THEN last_assertion_counter ELSE 0 END,
+         app_attest_public_key_spki = CASE WHEN ? IS NULL THEN app_attest_public_key_spki ELSE NULL END,
+         app_attest_environment = CASE WHEN ? IS NULL THEN app_attest_environment ELSE NULL END
      WHERE principal = ? AND token_reference = ? AND revoked_at IS NULL`
   ).bind(
     tokenReference, issuedAt, tokenExpiresAt, issuedAt,
-    upgradesUnavailable ? requestedKeyHash : null,
-    upgradesUnavailable ? requestedKeyHash : null,
-    upgradesUnavailable ? requestedKeyHash : null,
-    upgradesUnavailable ? requestedKeyHash : null,
+    requiresAttestationUpgrade ? requestedKeyHash : null,
+    requiresAttestationUpgrade ? requestedKeyHash : null,
+    requiresAttestationUpgrade ? requestedKeyHash : null,
+    requiresAttestationUpgrade ? requestedKeyHash : null,
+    requiresAttestationUpgrade ? requestedKeyHash : null,
+    requiresAttestationUpgrade ? requestedKeyHash : null,
     row.principal, row.token_reference
   ).run();
   if (Number(result.meta?.changes ?? 0) !== 1) throw new AppError(409, "Installation credential was replaced");
   const refreshed = await env.DB.prepare(`${installationIdentitySelect()} WHERE principal = ?`)
     .bind(row.principal).first<InstallationIdentityRow>();
   if (!refreshed) throw new AppError(503, "Installation identity refresh failed");
+  if (rotatesBoundKey) {
+    logEvent("installation_app_attest_key_rotated", { principalHash: hashForLog(row.principal) });
+  }
   return refreshed;
+}
+
+function boundedBytes(value: ArrayBuffer | Uint8Array): Uint8Array {
+  if (value instanceof Uint8Array) return value.slice();
+  return new Uint8Array(value);
+}
+
+function hasCurrentBuiltInVerificationMaterial(env: Env, row: InstallationIdentityRow): boolean {
+  const publicKeyLength = row.app_attest_public_key_spki
+    ? boundedBytes(row.app_attest_public_key_spki).byteLength
+    : 0;
+  const allowedEnvironments = (env.APP_ATTEST_ALLOWED_ENVIRONMENTS ?? "")
+    .split(",").map((value) => value.trim()).filter(Boolean);
+  return publicKeyLength >= 80 && publicKeyLength <= 120
+    && Boolean(row.app_attest_environment)
+    && allowedEnvironments.includes(row.app_attest_environment!);
+}
+
+function builtInVerificationFailureClass(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  return /^[a-z0-9_]{1,80}$/.test(message) ? message : "cryptographic_verification_failed";
 }
 
 async function incrementBootstrapWindow(db: D1Database, networkKey: string): Promise<number> {

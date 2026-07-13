@@ -162,7 +162,7 @@ function containsJapanese(text: string): boolean {
 }
 
 function containsInvestmentAdvice(text: string): boolean {
-  return /(買い|売り|購入|売却|投資判断|推奨|目標株価|株価予想|buy|sell|target price|forecast)/i.test(text);
+  return /(?:株|銘柄|証券|投資).{0,12}(?:買い|売り|購入|売却|推奨)|(?:買い|売り)(?:推奨|判断|シグナル)|(?:買う|売る)べき|投資判断|目標株価|株価予想|\b(?:buy|sell|target price|forecast)\b/i.test(text);
 }
 
 function repairResidualEnglishTerms(text: string): string {

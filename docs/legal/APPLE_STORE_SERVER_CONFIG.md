@@ -12,12 +12,14 @@ Set these in the deployed Worker environment:
 | `APPLE_APP_STORE_KEY_ID` | Wrangler secret | App Store Connect API key ID | The key must have App Store Server API access for this app. |
 | `APPLE_APP_STORE_PRIVATE_KEY` | Wrangler secret | Downloaded `.p8` private key contents | Store the full PEM text, including begin/end lines. Do not commit it. |
 | `APPLE_BUNDLE_ID` | Wrangler var | App Store Connect app bundle ID | For v1 this is `app.kabuyomi.ios`. |
+| `APPLE_APP_ID` | Wrangler var | Numeric App Store Connect app ID | For Kabuyomi this is `6762764426`; required by Apple's production signed-data verifier. |
 | `APPLE_APP_STORE_SERVER_ENVIRONMENT` | Wrangler var | Kabuyomi deployment choice | Use `auto` for production release. Use `sandbox` only for TestFlight-only verification. |
 
 `workers/wrangler.toml` contains the non-secret defaults:
 
 ```toml
 APPLE_BUNDLE_ID = "app.kabuyomi.ios"
+APPLE_APP_ID = "6762764426"
 APPLE_APP_STORE_SERVER_ENVIRONMENT = "auto"
 ```
 
@@ -29,6 +31,7 @@ For the current v1 App Store Connect In-App Purchase key, the expected non-secre
 APPLE_APP_STORE_ISSUER_ID=33b3d98d-ad68-4d93-874a-b9bc38db405d
 APPLE_APP_STORE_KEY_ID=QT2X2QH4G6
 APPLE_BUNDLE_ID=app.kabuyomi.ios
+APPLE_APP_ID=6762764426
 APPLE_APP_STORE_SERVER_ENVIRONMENT=auto
 ```
 
@@ -90,8 +93,9 @@ If present, the log lists missing names among:
 - `APPLE_APP_STORE_KEY_ID`
 - `APPLE_APP_STORE_PRIVATE_KEY`
 - `APPLE_BUNDLE_ID`
+- `APPLE_APP_ID` when the environment is `production` or `auto`
 
-If the missing-config log is absent but the public error is still `Apple transaction verification is not configured`, Apple likely returned `401`; re-check issuer ID, key ID, private key, key permissions, and bundle ID.
+If the missing-config log is absent but the public error is still `Apple transaction verification is not configured`, confirm the deployed version includes numeric `APPLE_APP_ID=6762764426`. If it does, Apple likely returned `401`; re-check issuer ID, key ID, private key, key permissions, and bundle ID.
 
 For Apple `401`, the Worker logs non-secret JWT context in `apple_transaction_verification_failed`:
 

@@ -66,7 +66,7 @@ function createEnv() {
             row.consumed_at = args[0];
             return { meta: { changes: 1 } };
           } else if (sql.includes("SET attestation_status = 'verified'")) {
-            const row = identities.find((item) => item.principal === args[5] && item.token_reference === args[6]);
+            const row = identities.find((item) => item.principal === args[7] && item.token_reference === args[8]);
             if (!row) return { meta: { changes: 0 } };
             row.attestation_status = "verified";
             row.credit_mode = "full";
@@ -76,8 +76,10 @@ function createEnv() {
             row.issued_at = args[3];
             row.token_expires_at = args[4];
             row.last_assertion_counter = 0;
+            row.app_attest_public_key_spki = args[5] ?? row.app_attest_public_key_spki ?? null;
+            row.app_attest_environment = args[6] ?? row.app_attest_environment ?? null;
           } else if (sql.includes("SET token_reference = ?")) {
-            const row = identities.find((item) => item.principal === args[8] && item.token_reference === args[9]);
+            const row = identities.find((item) => item.principal === args[10] && item.token_reference === args[11]);
             if (!row || row.revoked_at) return { meta: { changes: 0 } };
             row.token_reference = args[0];
             row.token_version += 1;
@@ -89,6 +91,8 @@ function createEnv() {
               row.attestation_status = "pending";
               row.credit_mode = "none";
               row.last_assertion_counter = 0;
+              row.app_attest_public_key_spki = null;
+              row.app_attest_environment = null;
             }
           } else if (sql.includes("SET last_assertion_counter = ?")) {
             const row = identities.find((item) => item.principal === args[2] && item.token_reference === args[3]);
@@ -265,16 +269,90 @@ describe("server installation identity and App Attest", () => {
       method: null, path: null, bodySHA256: null,
       installationPrincipal: pending!.principal, tokenReference: pending!.tokenReference
     });
-    setAppAttestVerifierForTests(async () => true);
+    const verifiedPublicKey = new Uint8Array([1, 2, 3, 4]);
+    setAppAttestVerifierForTests(async () => ({
+      verified: true,
+      publicKeySpki: verifiedPublicKey,
+      environment: "development"
+    }));
     const verified = await completeAppAttestation(env, pending!, {
       challengeId: challenge.challengeId, keyId: "app-attest-key-1234567890",
       clientDataHash, attestationObject: "verified-attestation-object"
     });
     expect(verified).toMatchObject({ attestationStatus: "verified", creditMode: "full" });
+    expect(env.__identities[0].app_attest_public_key_spki).toEqual(verifiedPublicKey);
+    expect(env.__identities[0].app_attest_environment).toBe("development");
     await expect(completeAppAttestation(env, pending!, {
       challengeId: challenge.challengeId, keyId: "app-attest-key-1234567890",
       clientDataHash, attestationObject: "verified-attestation-object"
     })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("rebootstraps a legacy verified identity when the built-in verifier needs persisted key material", async () => {
+    const env = createEnv();
+    const request = new Request("https://api.test/v1/identity/bootstrap", {
+      headers: { "cf-connecting-ip": "203.0.113.33" }
+    });
+    const input = bootstrapRequest("operation-built-in-upgrade-0001", "legacy-built-in-upgrade-0001");
+    const boot = await bootstrapInstallationIdentity(env, request, input);
+    const pending = (await resolveInstallationCredential(
+      authRequest("https://api.test/v1/usage", boot.credential), env
+    ))!;
+    const challenge = await issueAppAttestChallenge(env, pending, {
+      purpose: "attestation",
+      keyId: "app-attest-key-1234567890",
+      installationPrincipal: pending.principal,
+      tokenReference: pending.tokenReference
+    });
+    const clientDataHash = await buildExpectedAppAttestClientDataHash({
+      purpose: "attestation",
+      nonce: challenge.nonce,
+      keyId: "app-attest-key-1234567890",
+      method: null,
+      path: null,
+      bodySHA256: null,
+      installationPrincipal: pending.principal,
+      tokenReference: pending.tokenReference
+    });
+    setAppAttestVerifierForTests(async () => true);
+    const legacyVerified = await completeAppAttestation(env, pending, {
+      challengeId: challenge.challengeId,
+      keyId: "app-attest-key-1234567890",
+      clientDataHash,
+      attestationObject: "legacy-external-verifier-object"
+    });
+    expect(env.__identities[0]).toMatchObject({
+      attestation_status: "verified",
+      app_attest_public_key_spki: null,
+      app_attest_environment: null
+    });
+
+    Object.assign(env, {
+      APP_ATTEST_TEAM_ID: "UGCJZH9KG4",
+      APP_ATTEST_BUNDLE_ID: "app.kabuyomi.ios",
+      APP_ATTEST_ALLOWED_ENVIRONMENTS: "production",
+      APP_ATTEST_ALLOWED_BUNDLE_VERSIONS: "6"
+    });
+    await expect(resolveInstallationCredential(
+      authRequest("https://api.test/v1/usage", legacyVerified), env
+    )).rejects.toMatchObject({ status: 401 });
+
+    const upgraded = await bootstrapInstallationIdentity(env, request, input);
+    expect(upgraded).toMatchObject({
+      attestationRequired: true,
+      credential: {
+        principal: legacyVerified.principal,
+        tokenVersion: 3,
+        attestationStatus: "pending",
+        creditMode: "none"
+      }
+    });
+    expect(upgraded.credential.tokenReference).not.toBe(legacyVerified.tokenReference);
+    expect(env.__identities).toHaveLength(1);
+    expect(env.__identities[0]).toMatchObject({
+      app_attest_public_key_spki: null,
+      app_attest_environment: null
+    });
   });
 
   it("rejects assertion path/body mismatch and consumes the challenge", async () => {
@@ -360,6 +438,55 @@ describe("server installation identity and App Attest", () => {
     expect(upgraded.credential.tokenReference).not.toBe(unavailable.credential.tokenReference);
     expect(env.__identities).toHaveLength(1);
     expect(env.__migrationCalls.map((call: any) => call.body.action)).toEqual(["export", "unlock"]);
+  });
+
+  it("rotates an invalid App Attest key only for the same strict bootstrap identity", async () => {
+    const env = createEnv();
+    const request = new Request("https://api.test/v1/identity/bootstrap", {
+      headers: { "cf-connecting-ip": "203.0.113.29" }
+    });
+    const operationId = "operation-key-rotation-0001";
+    const legacyKey = "legacy-key-rotation-0001";
+    const first = await bootstrapInstallationIdentity(
+      env,
+      request,
+      bootstrapRequest(operationId, legacyKey)
+    );
+    const firstKeyHash = env.__identities[0].app_attest_key_hash;
+
+    const rotated = await bootstrapInstallationIdentity(env, request, {
+      ...bootstrapRequest(operationId, legacyKey),
+      appAttestKeyId: "replacement-app-attest-key-1234567890"
+    });
+
+    expect(rotated).toMatchObject({
+      attestationRequired: true,
+      credential: {
+        principal: first.credential.principal,
+        tokenVersion: 2,
+        attestationStatus: "pending",
+        creditMode: "none"
+      }
+    });
+    expect(rotated.credential.tokenReference).not.toBe(first.credential.tokenReference);
+    expect(env.__identities).toHaveLength(1);
+    expect(env.__identities[0].app_attest_key_hash).not.toBe(firstKeyHash);
+    expect(env.__identities[0]).toMatchObject({
+      principal: first.credential.principal,
+      app_attest_public_key_spki: null,
+      app_attest_environment: null
+    });
+
+    await expect(bootstrapInstallationIdentity(
+      env,
+      request,
+      bootstrapRequest("operation-key-rotation-attacker", legacyKey)
+    )).rejects.toMatchObject({ status: 409 });
+    await expect(bootstrapInstallationIdentity(
+      env,
+      request,
+      bootstrapRequest(operationId, "legacy-key-rotation-attacker")
+    )).rejects.toMatchObject({ status: 409 });
   });
 
   it("treats client-reported support as unavailable until both verifier settings exist, then re-negotiates once", async () => {

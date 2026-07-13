@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 const DEFAULT_PRODUCTION_BASE_URL = "https://kabuyomi-api.dznqjmctk7.workers.dev";
 const PRODUCTION_HOSTNAME = "kabuyomi-api.dznqjmctk7.workers.dev";
-const REVIEWED_CONFIG_VERSION = "production-safe-release-20260711-v3";
+const REVIEWED_CONFIG_VERSION = "production-capabilities-restored-20260713-v1";
 const SMOKE_UUID_NAMESPACE = "713f632d-4c5c-5d90-9e9c-11d8fc7f6750";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const CHECK_ONLY = process.argv.includes("--check-only");
@@ -183,28 +183,28 @@ async function main() {
   });
   checks.installationQuoteNoModelExecution = "PASS";
 
-  await runStep("paid and account routes fail before Apple work", async () => {
-    await expectCapabilityDisabled(
+  await runStep("active paid routes reach Apple signature verification", async () => {
+    await expectAppleVerificationRejected(
       "/v1/billing/sync",
       {
         originalTransactionId: identifiers.billingOriginalTransactionId,
         signedTransactionInfo: "invalid.invalid.invalid"
       },
       installationHeaders,
-      "Subscription billing is temporarily unavailable",
+      "Apple transaction signature verification failed",
       "billing_sync"
     );
-    await expectCapabilityDisabled(
+    await expectAppleVerificationRejected(
       "/v1/ios/subscriptions/sync",
       {
         originalTransactionId: identifiers.subscriptionOriginalTransactionId,
         signedTransactionInfo: "invalid.invalid.invalid"
       },
       installationHeaders,
-      "Subscription billing is temporarily unavailable",
+      "Apple transaction signature verification failed",
       "subscription_sync"
     );
-    await expectCapabilityDisabled(
+    await expectAppleVerificationRejected(
       "/v1/ios/purchases/credits/complete",
       {
         productId: "kabuyomi.credits.100",
@@ -212,9 +212,15 @@ async function main() {
         signedTransactionInfo: "invalid.invalid.invalid"
       },
       installationHeaders,
-      "Credit purchases are temporarily unavailable",
+      "Apple transaction signature verification failed",
       "consumable_purchase"
     );
+  });
+  checks.billingEnabledAppleVerification = "PASS";
+  checks.subscriptionEnabledAppleVerification = "PASS";
+  checks.consumableEnabledAppleVerification = "PASS";
+
+  await runStep("account recovery remains disabled before Apple identity work", async () => {
     await expectCapabilityDisabled(
       "/v1/account/apple/session",
       { identityToken: "invalid.invalid.invalid" },
@@ -223,9 +229,6 @@ async function main() {
       "account_session"
     );
   });
-  checks.billingDisabledBeforeApple = "PASS";
-  checks.subscriptionDisabledBeforeApple = "PASS";
-  checks.consumableDisabledBeforeApple = "PASS";
   checks.accountDisabledBeforeApple = "PASS";
 
   await runStep("invalid SSV rejected without grant", async () => {
@@ -235,29 +238,20 @@ async function main() {
   });
   checks.invalidSsvNoGrant = "PASS";
 
-  const appleNotificationRejection = await runStep("invalid Apple notification rejected without grant", async () => {
+  await runStep("configured Apple notification verifier rejects invalid signature", async () => {
     const response = await requestJson("/v1/apple/notifications/v2", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ signedPayload: "invalid.invalid.invalid" })
     });
-    if (response.status === 400) {
-      expectError(
-        response,
-        "Apple notification signature verification failed",
-        "invalid_apple_notification_error"
-      );
-      return "PASS_INVALID_SIGNATURE_REJECTED";
-    }
-    expectStatus(response, 503, "invalid_apple_notification_status");
+    expectStatus(response, 400, "invalid_apple_notification_status");
     expectError(
       response,
-      "Apple transaction verification is not configured",
-      "invalid_apple_notification_fail_closed_error"
+      "Apple notification signature verification failed",
+      "invalid_apple_notification_error"
     );
-    return "PASS_FAIL_CLOSED_NOT_CONFIGURED";
   });
-  checks.invalidAppleNotificationNoGrant = appleNotificationRejection;
+  checks.invalidAppleNotificationNoGrant = "PASS";
 
   const finalLegacyUsage = await runStep("final legacy balance remains zero", async () => {
     const response = await requestJson("/v1/usage", { headers: legacyHeaders });
@@ -281,13 +275,24 @@ async function main() {
   );
   checks.finalInstallationBalanceZero = "PASS";
 
-  const appleNotificationsReady = appleNotificationRejection === "PASS_INVALID_SIGNATURE_REJECTED";
   printSummary({
-    status: appleNotificationsReady ? "PASS" : "PASS_WITH_CAPABILITY_DISABLED",
+    status: "PASS_ACTIVE_CAPABILITY_GUARDRAILS",
     targetClass: "PRODUCTION_WORKER_ONLY",
     checks,
-    disabledCapabilities: appleNotificationsReady ? [] : ["app_store_server_notifications"],
-    outstandingExternalActions: appleNotificationsReady ? [] : ["configure_numeric_apple_app_id_and_verify_live_delivery"],
+    enabledCapabilitiesVerifiedWithoutGrant: [
+      "billing",
+      "consumable_purchases",
+      "rewarded_credit",
+      "rewarded_ssv",
+      "apple_notification_signature_verifier"
+    ],
+    disabledCapabilities: ["account_recovery"],
+    outstandingExternalActions: [
+      "storekit_testflight_lifecycle",
+      "app_store_server_notification_delivery",
+      "genuine_admob_ssv_lifecycle",
+      "physical_device_app_attest_matrix"
+    ],
     chargeableModelRequests: "NONE",
     customerIdentitiesUsed: "NONE",
     credentialsPrinted: "NONE",
@@ -348,6 +353,16 @@ async function expectCapabilityDisabled(path, body, headers, expectedError, labe
   expectError(response, expectedError, `${label}_error`);
 }
 
+async function expectAppleVerificationRejected(path, body, headers, expectedError, label) {
+  const response = await requestJson(path, {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  expectStatus(response, 400, `${label}_status`);
+  expectError(response, expectedError, `${label}_error`);
+}
+
 function expectInsufficientCredits(response, creditsRequired, label) {
   expectStatus(response, 402, `${label}_status`);
   expectError(response, "insufficient_credits", `${label}_error`);
@@ -376,15 +391,17 @@ function assertProductionCapabilities(value, label) {
   assert(["kv", "d1_lkg"].includes(value?.capabilities?.configSource), `${label}_config_source_untrusted`);
   assert(value?.capabilities?.configVersion === REVIEWED_CONFIG_VERSION, `${label}_config_version_mismatch`);
   assert(value?.capabilities?.chatEnabled === true, `${label}_chat_disabled`);
-  assert(value?.creditBillingEnabled === false, `${label}_billing_not_disabled`);
-  assert(value?.capabilities?.consumablePurchasesEnabled === false, `${label}_consumables_not_disabled`);
+  assert(value?.creditBillingEnabled === true, `${label}_billing_not_enabled`);
+  assert(value?.capabilities?.consumablePurchasesEnabled === true, `${label}_consumables_not_enabled`);
   assert(value?.capabilities?.accountRecoveryReady === false, `${label}_account_not_disabled`);
-  assert(value?.capabilities?.rewardedCredit?.enabled === false, `${label}_reward_capability_enabled`);
+  assert(value?.capabilities?.rewardedCredit?.enabled === true, `${label}_reward_capability_not_enabled`);
   assert(
-    value?.capabilities?.rewardedCredit?.rewardedCreditEnabled === false,
-    `${label}_reward_config_enabled`
+    value?.capabilities?.rewardedCredit?.rewardedCreditEnabled === true,
+    `${label}_reward_config_not_enabled`
   );
-  assert(value?.capabilities?.rewardedCredit?.ssvReady === false, `${label}_reward_ssv_ready`);
+  assert(value?.capabilities?.rewardedCredit?.ssvReady === true, `${label}_reward_ssv_not_ready`);
+  assert(value?.capabilities?.rewardedCredit?.environment === "production", `${label}_reward_environment_mismatch`);
+  assert(value?.capabilities?.rewardedCredit?.emergencyDisabled === false, `${label}_reward_emergency_disabled`);
 }
 
 function assertUsageShape(value, code) {

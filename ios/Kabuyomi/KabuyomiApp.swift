@@ -6,6 +6,7 @@ struct KabuyomiApp: App {
     @State private var appModel = AppModel.live()
 
     init() {
+        guard !AppModel.isRunningTests else { return }
         let testDeviceIdentifiers = AdMobConfig.testDeviceIdentifiers
         if !testDeviceIdentifiers.isEmpty {
             MobileAds.shared.requestConfiguration.testDeviceIdentifiers = testDeviceIdentifiers
@@ -25,9 +26,13 @@ struct KabuyomiApp: App {
 
     var body: some Scene {
         WindowGroup {
-            AppRootView()
-                .environment(appModel)
-                .environment(\.managedObjectContext, appModel.persistence.viewContext)
+            if AppModel.isRunningTests {
+                Color.clear
+            } else {
+                AppRootView()
+                    .environment(appModel)
+                    .environment(\.managedObjectContext, appModel.persistence.viewContext)
+            }
         }
     }
 }

@@ -2,11 +2,17 @@
 
 Status: authoritative implementation and release evidence
 
-As of: 2026-07-12 JST
+As of: 2026-07-13 JST
 
 Evidence boundary: exact release candidate, local validation, recorded test runtime, completed production rollout evidence, and explicitly excluded physical-device/external-console checks
 
 Authoritative companions: `CURRENT_SHIPPING_TRUTH.md`, `FEATURE_PARITY_COMPATIBILITY_REPORT.md`, and `RELEASE_GATE_STATE.json`
+
+## Post-audit current-state update
+
+The guarded July 12 rollout evidence remains valid as a point-in-time baseline. Production changed again on July 13: Worker `e60580e7-e7f5-449d-97b2-d36854c24896` now serves candidate `ff298a10` at 100%, and config `production-capabilities-restored-20260713-v1` enables billing, consumable purchases, rewarded credits, and rewarded SSV while leaving account recovery disabled. KV and D1 LKG readback agree. The deployed bindings include numeric `APPLE_APP_ID=6762764426`, and invalid Apple signed data reaches configured signature verification.
+
+Candidate `ff298a10` extends the verifier/migration repair with one-time invalid-key rotation for the same strict bootstrap identity. A physical production Release canary completed attestation, assertion, reward intent, genuine AdMob SSV, return navigation, and exact +2 balance application. StoreKit/TestFlight and App Store notification-delivery remain open. Its identity-only delta has 77/77 Worker files and 1,130/1,130 tests green; the release owner explicitly waived rerunning answer quality once, so the accepted 150-row/150-review packet remains bound to `56c0c209` and the normal deploy guard stays blocked until refreshed.
 
 ## 1. Starting commit
 
@@ -24,7 +30,7 @@ Inspection covered:
 
 - `ios/`: app startup, identity storage, API signing, StoreKit, account recovery, credit/subscription/reward UI, company/search/conversation surfaces, local persistence, entitlements, privacy manifest, project generation, unit tests, and exact Simulator evidence;
 - `workers/`: routing, identity, App Attest, Durable Objects, request execution, quotas, credit ledger/repair, billing, subscriptions, Apple verification/notifications, AdMob SSV, remote config, SEC ingestion/caching, AI orchestration, numeric/source validation, logging, scripts, smoke tests, testbench, Wrangler configuration, and all unit tests;
-- `workers/d1/migrations/`: ordered schema history `0001` through `0017` plus remote apply state;
+- `workers/d1/migrations/`: ordered schema history `0001` through `0018` plus remote apply state;
 - `sec-fetcher/`: SEC retrieval and parsing tests;
 - `legal-site/`: privacy, terms, support, commercial disclosure, index, app-ads, validation, and live revision drift;
 - `shared/`: product catalog and cross-surface copy/limit authority;
@@ -53,39 +59,39 @@ The matrix describes the post-rollout evidence state. “Production” means the
 | 11 | quote translation | USER_AVAILABLE_PRODUCTION | `routes/translate-quote.ts`, provider fallback | quote translation/provider tests | Request state in Durable Object | Model/chat emergency gate | Company quote action | Test release smoke covers | Existing production route | User feature exists | Deploy corrected always-metered path |
 | 12 | request idempotency | USER_AVAILABLE_PRODUCTION | `request-execution.ts`, `request-fingerprint.ts`, chat/quote routes | fingerprint, route, user-quota concurrency | Durable Object schema-less state | None beyond route gates | Stable operation IDs | Test release smoke replay/conflict/concurrency pass | Exact candidate deployed | Adversarial local and remote evidence green | Monitor conflict/pending rates |
 | 13 | model-result replay | USER_AVAILABLE_PRODUCTION | immutable execution result/cache and route replay | response-loss, duplicate begin/complete tests | Durable Object state | Model config independent after completion | Transparent to UI | Exact replay passes remotely | Exact candidate deployed | Stable stored result and current usage verified | Monitor replay cache expiry |
-| 14 | credit reservations | TESTED_ONLY | `user-quota.ts`, request execution, credit operation | 10-way concurrency, exact allocations, commit/release | Durable Object state | Metering independent of StoreKit flags | Credits UI consumes authoritative usage | Final test deploy pending | Not current remediation in prod | Local atomicity proven | Deploy and billing-safe canary |
-| 15 | reservation expiry and recovery | TESTED_ONLY | alarm/lazy expiry in `user-quota.ts` | orphan, expiry, duplicate release/commit tests | Durable Object state | Fixed reservation TTL | Recovery messaging | Local tests | Not final deployed | No permanent local orphan in tests | Verify metrics after deploy |
-| 16 | free welcome credits | IMPLEMENTED_CAPABILITY_DISABLED | installation bootstrap/attest and quota grant | identity, index, user-quota, catalog tests | `0012`, `0015`, `0016` | App Attest + free-grant emergency switch | Credit onboarding/copy | Unsupported identity gets zero | Final config keeps grant disabled without verifier | No real-device proof | Enable only after real App Attest; never monthly |
-| 17 | paid credits | USER_AVAILABLE_PRODUCTION | quota buckets, purchase records, refund debt | user-quota, liability, purchase/refund tests | `0017` plus existing purchases | New grants disabled; spending remains metered | Credits balance UI | Existing balance paths plus tests | Existing balances are production liabilities | Existing credits remain spendable | Apply migration and prove balance parity |
-| 18 | subscription credits | PARTIALLY_IMPLEMENTED | entitlement DO, billing sync, stable principal | entitlement, billing, principal tests | `0010` | Billing disabled until Apple proof | Subscription/credit UI gated | Simulation/local evidence | Existing state exists; candidate grant path disabled | No two-device current-candidate proof | Keep grants disabled; validate StoreKit lifecycle |
-| 19 | rewarded-ad credits | IMPLEMENTED_CAPABILITY_DISABLED | reward intents/status, SSV, quota lots | AdMob duplicate/signature/cap/expiry tests | Existing reward records | Ads + reward + SSV + App Attest + no emergency | Reward card hidden when unavailable | Test-only simulation path | Production capability disabled | No genuine production SSV | Enable only after Google callback evidence |
-| 20 | purchase verification | IMPLEMENTED_CAPABILITY_DISABLED | credit purchase route, Apple server client/signed data | Apple server/signed-data/purchase tests | Purchase tables + `0017` | Billing/consumable flags and Apple credentials | StoreKit completion gated | Invalid/simulated paths | Disabled before Apple work | No current sandbox/TestFlight purchase | Validate Apple then enable deliberately |
-| 21 | refunds and revocations | IMPLEMENTED_CAPABILITY_DISABLED | notification transitions, entitlement and refund accounting | notification, entitlement, user-quota refund debt tests | `0011`, `0017` | Billing/notification readiness | Usage reflects server state | Local simulation | Final capability disabled | No real refund/reversal delivery | Exercise sandbox/console and reconcile ledger |
-| 22 | App Store Server Notifications | IMPLEMENTED_CAPABILITY_DISABLED | `apple-notifications-v2.ts`, signed-data verifier | notification ordering/replay/JWS tests | `0011` | Apple environment/credentials and endpoint | No direct surface | Invalid JWS controlled rejection | Endpoint code not final deployed | No real console delivery | Configure endpoint and validate signed events |
+| 14 | credit reservations | DEPLOYED_NOT_EXTERNALLY_VERIFIED | `user-quota.ts`, request execution, credit operation | 10-way concurrency, exact allocations, commit/release | Durable Object state | Metering independent of StoreKit flags | Credits UI consumes authoritative usage | Full Worker suite green | Candidate `ff298a10` deployed | Production smoke preserves aggregate balances; live contention drill remains open | Monitor reservation metrics and run a controlled contention canary |
+| 15 | reservation expiry and recovery | DEPLOYED_NOT_EXTERNALLY_VERIFIED | alarm/lazy expiry in `user-quota.ts` | orphan, expiry, duplicate release/commit tests | Durable Object state | Fixed reservation TTL | Recovery messaging | Full Worker suite green | Candidate `ff298a10` deployed | No permanent local orphan in tests; live expiry drill remains open | Verify alarm/lazy-expiry metrics in production |
+| 16 | free welcome credits | DEPLOYED_NOT_EXTERNALLY_VERIFIED | installation bootstrap/attest and quota grant | identity, index, user-quota, catalog tests | `0012`, `0015`, `0016`, `0018` | Verified App Attest installation + free-grant emergency switch | Credit onboarding/copy | Unsupported identity gets zero | App Attest verifier and key storage deployed | Physical attestation/assertion passed; a fresh welcome-grant canary remains open | Verify exactly-once 50-credit grant on a fresh production installation |
+| 17 | paid credits | USER_AVAILABLE_PRODUCTION | quota buckets, purchase records, refund debt | user-quota, liability, purchase/refund tests | `0017` plus existing purchases | New grants enabled only through Apple verification; spending remains metered | Credits balance UI and purchase surface | Existing balance paths plus tests | Existing balances are production liabilities; purchase route is active | Existing credits remain spendable and pre/post liability projection is equal | Complete StoreKit transaction and refund lifecycle evidence |
+| 18 | subscription credits | DEPLOYED_NOT_EXTERNALLY_VERIFIED | entitlement DO, billing sync, stable principal | entitlement, billing, principal tests | `0010` | Billing enabled; Apple proof still required | Subscription/credit UI exposed by capability | Simulation/local evidence | Grant path production-enabled | No two-device current-candidate proof | Complete StoreKit lifecycle evidence and reconcile results |
+| 19 | rewarded-ad credits | USER_AVAILABLE_PRODUCTION | reward intents/status, SSV, quota lots | AdMob duplicate/signature/cap/expiry tests | Existing reward records | Ads + reward + SSV + App Attest + no emergency | Reward card visible when runtime prerequisites pass | Test simulation plus signed physical Release canary | Production capability enabled | Genuine Google SSV granted exactly +2; duplicate, late, and cap canaries remain open | Run the remaining adversarial Google callback scenarios |
+| 20 | purchase verification | IMPLEMENTED_EXTERNAL_EVIDENCE_OPEN | credit purchase route, Apple server client/signed data | Apple server/signed-data/purchase tests | Purchase tables + `0017` | Billing/consumable flags, credentials, bundle ID, numeric Apple app ID | StoreKit completion exposed | Invalid/simulated paths | Production Apple signature verifier active | Candidate `ff298a10` deployed; no current sandbox/TestFlight packet | Validate Apple lifecycle and reconcile grants/refunds |
+| 21 | refunds and revocations | DEPLOYED_NOT_EXTERNALLY_VERIFIED | notification transitions, entitlement and refund accounting | notification, entitlement, user-quota refund debt tests | `0011`, `0017` | Billing/notification readiness | Usage reflects server state | Local simulation | Runtime deployed for active billing | No real refund/reversal delivery packet | Exercise sandbox/console and reconcile ledger |
+| 22 | App Store Server Notifications | DEPLOYED_NOT_EXTERNALLY_VERIFIED | `apple-notifications-v2.ts`, signed-data verifier | notification ordering/replay/JWS tests | `0011` | Apple environment/credentials, numeric Apple app ID, and endpoint | No direct surface | Invalid JWS controlled rejection | Endpoint deployed with `APPLE_APP_ID` and signature verification | Configured verifier rejects invalid JWS; no real console delivery yet | Confirm App Store Connect delivery and reconcile valid signed events |
 | 23 | appAccountToken ownership | IMPLEMENTED_CAPABILITY_DISABLED | account recovery, purchase binding, API client/StoreKit | account recovery/purchase mismatch tests | `0014` | `accountRecoveryReady` + account HMACs | StoreKit supplies stable token only when ready | Local tests | Disabled | No real StoreKit token proof | Validate matching/mismatch on two devices |
 | 24 | Sign in with Apple recovery | IMPLEMENTED_CAPABILITY_DISABLED | account session/recovery and migration routes | account recovery/principal migration/API tests | `0014` | Apple identity/JWKS, account HMACs, capability false | Recovery card hidden | Local/test-disabled rejection | Disabled | Capabilities/profiles/device A-B absent | Complete account/deletion and recovery evidence |
-| 25 | installation identity | USER_AVAILABLE_PRODUCTION | `installation-identity.ts`, bootstrap/challenge routes | installation identity/index/API tests | `0012`, `0016` | Five independent HMAC secrets | `DeviceIdentityStore`, `APIClient` | Final identity smoke passes | Five production HMAC authorities installed; candidate deployed | Unavailable-attest bootstrap gets zero and core access | Verify physical-device App Attest separately |
+| 25 | installation identity | USER_AVAILABLE_PRODUCTION | `installation-identity.ts`, bootstrap/challenge routes | installation identity/index/API tests | `0012`, `0016`, `0018` | Five independent HMAC secrets | `DeviceIdentityStore`, `APIClient` | Final identity smoke passes | Five production HMAC authorities installed; candidate deployed | Physical production App Attest and same-principal invalid-key recovery pass | Expand reinstall, reset, and replay coverage |
 | 26 | Keychain persistence | TESTED_ONLY | `DeviceIdentityStore.swift` | API/startup/AppModel tests | Local Keychain only | Release vs DEBUG behavior | Credential retained across local reset | iOS local tests | App binary candidate not shipped | Simulator unit evidence | Verify physical reinstall/reset expectations |
-| 27 | App Attest | IMPLEMENTED_CAPABILITY_DISABLED | challenge, attestation/assertion verification | identity replay/path/body/counter tests | `0012`, `0016` | External verifier and production Apple service | Automatic, non-blocking degradation | Test automation cannot impersonate prod | No real final proof | Real-device verification absent | Keep grants hidden until matrix passes |
-| 28 | challenge and assertion replay protection | DEPLOYED_NOT_EXTERNALLY_VERIFIED | consumed challenge, expected client-data hash, assertion counter | replay, expiry, wrong path/body, counter tests | `0012`, `0016` | App Attest verifier | API client binds method/path/body | Local focused tests | Final candidate deployed; capability gated | Adversarial local proof only | Remote real-device canary required |
-| 29 | legacy identity migration | DEPLOYED_NOT_EXTERNALLY_VERIFIED | installation/account/principal migration code | repeated migration/conflict/tombstone tests | `0010`, `0014`, `0015`, `0016` | Internal auth plus grant emergency controls | Automatic after bootstrap/sign-in | Test smoke green | Production schema applied; grants disabled | Balance projection unchanged; no physical-device migration proof | Keep grants disabled pending real device |
+| 27 | App Attest | USER_AVAILABLE_PRODUCTION | challenge, built-in Apple-root attestation/assertion verifier | identity replay/path/body/counter, synthetic assertion, and official Apple vector tests | `0012`, `0016`, `0018` | Apple App Attest service plus exact Team/App/build/environment metadata | Debug targets test; Release targets production | Signed artifacts, synthetic ECDSA assertion, and Apple's published attestation vector pass | Candidate `ff298a10` and verifier key storage deployed | Physical production attestation/assertion and one stored production key pass | Expand fresh-install, reinstall, and adversarial replay matrix |
+| 28 | challenge and assertion replay protection | USER_AVAILABLE_PRODUCTION | consumed challenge, expected client-data hash, Apple public-key verification, assertion counter | replay, expiry, wrong path/body, signature, App ID, counter tests | `0012`, `0016`, `0018` | Built-in App Attest verifier | API client binds method/path/body | Local focused and cryptographic tests pass | Candidate `ff298a10` deployed | Assertion-protected production reward intent passed; broader replay canary remains open | Run remote replay/path/body/counter adversarial checks |
+| 29 | legacy identity migration | DEPLOYED_NOT_EXTERNALLY_VERIFIED | installation/account/principal migration code | repeated migration/conflict/tombstone tests | `0010`, `0014`, `0015`, `0016`, `0018` | Internal auth plus grant emergency controls | Automatic after bootstrap/sign-in | Test smoke green | Production schema and same-principal key rotation deployed | Invalid App Attest key rotation preserved principal and balances; broader account migration remains open | Exercise the remaining physical legacy/account migration matrix |
 | 30 | remote config | USER_AVAILABLE_PRODUCTION | strict envelope, KV/D1 LKG, inspector/refresh script | config/lifecycle/index tests | `0013` | Reviewed typed envelope, 14/35/45 lifecycle | Usage capabilities gate UI | Test envelope read back | Production KV/D1 LKG hash-match and fresh | Mixed-version cutover completed | Operate daily lifecycle monitor |
-| 31 | emergency kill switches | DEPLOYED_NOT_EXTERNALLY_VERIFIED | index route gate, config overrides, scheduled gates | emergency controls/index/internal eval tests | None | Environment overrides + remote flags | Disabled states | Local/test coverage | Final candidate deployed with paid grants disabled | No full production incident drill | Drill each affected class without grants |
+| 31 | emergency kill switches | DEPLOYED_NOT_EXTERNALLY_VERIFIED | index route gate, config overrides, scheduled gates | emergency controls/index/internal eval tests | None | Environment overrides + remote flags | Disabled states | Local/test coverage | Candidate deployed with active paid/reward flags and emergency overrides available | No full production incident drill | Drill each affected class and prove grants stop without balance loss |
 | 32 | fail-closed behavior | DEPLOYED_NOT_EXTERNALLY_VERIFIED | `SAFE_FAIL_CLOSED_CONFIG`, capability rejection | missing/malformed/stale/type tests | `0013` LKG | Complete strict envelope required | UI hides/blocks mutation | Local/test failure evidence | Final strict code deployed; invalid billing paths smoke green | KV/D1 outage drill not run live | Schedule controlled outage/stale drill |
 | 33 | production logging and redaction | DEPLOYED_NOT_EXTERNALLY_VERIFIED | logging/metrics and route diagnostics | logging, chat diagnostics, Apple/index redaction tests | Audit tables store digests only | Production compact diagnostics | Local logs avoid content | Test evidence | Final candidate deployed | Smoke prints no credentials, identifiers, content, JWS, or signatures | Inspect sampled retained logs operationally |
 | 34 | iOS startup behavior | TESTED_ONLY | `AppModel`, `AppRootView`, API/identity store | `StartupAuthenticationTests`, AppModel/API tests | None | Server capability and auth status | Local-first, bounded retry, manual retry | Uses public/search and identity routes | Corrected client not shipped | Simulator behavior/tests and screenshots | Ship build; physical offline/maintenance pass |
-| 35 | credits UI | TESTED_ONLY | `CreditView`, usage models, subscription store | AppModel/API/copy tests | None | Billing/reward/account capabilities | Correct buckets and disabled states | Reads test usage | Corrected candidate not shipped | Simulator visual evidence | Verify TestFlight StoreKit-disabled state |
-| 36 | subscription UI | IMPLEMENTED_CAPABILITY_DISABLED | `CreditView`, `SubscriptionStore` | AppModel/StoreKit diagnostics tests | None | `creditBillingEnabled=false` | Product loading/purchase/restore gated | Disabled response tested | Final config keeps hidden/disabled | No current sandbox proof | Enable only with StoreKit evidence |
-| 37 | rewarded-ad UI | IMPLEMENTED_CAPABILITY_DISABLED | reward service/config and `CreditView` | AppModel reward visibility/return tests | None | ads/reward/SSV/App Attest/environment | Card hidden unless full path usable | Test simulations only | Disabled | No production SSV | Validate real callback before visibility |
+| 35 | credits UI | IMPLEMENTED_EXTERNAL_EVIDENCE_OPEN | `CreditView`, usage models, subscription store | AppModel/API/copy tests | None | Billing/reward/account capabilities plus complete verifier metadata | Purchase, subscription, restore, and reward surfaces exposed by live capabilities | Reads test usage | Live payload and executable Apple verifier agree | Candidate deployed; no TestFlight transaction packet | Verify signed-build transactions |
+| 36 | subscription UI | DEPLOYED_NOT_EXTERNALLY_VERIFIED | `CreditView`, `SubscriptionStore` | AppModel/StoreKit diagnostics tests | None | `creditBillingEnabled=true` | Product loading/purchase/restore enabled | Disabled-response tests still preserved | Production capability enabled | No current sandbox proof | Complete StoreKit/TestFlight evidence without hiding the active surface |
+| 37 | rewarded-ad UI | USER_AVAILABLE_PRODUCTION | reward service/config and `CreditView` | AppModel reward visibility/return tests | None | ads/reward/SSV/App Attest/environment | Card remains visible through temporary attestation recovery; action remains server-gated | Test simulations plus signed physical Release canary | Production capability enabled | Genuine ad display, Google SSV, return navigation, and exact +2 refresh pass | Validate duplicate, late, cap, and additional device states |
 | 38 | recent conversation UI | TESTED_ONLY | `CompanyLibraryDrawer`, timeline/context card | `ConversationPromptTests`, AppModel tests | Local persistence | None | Explicit empty/recent state | Client-only | Corrected client not shipped | Simulator screenshot `13-recent-conversation-empty.png` | Ship and manual TestFlight review |
 | 39 | drawer search | TESTED_ONLY | drawer cleanup + `SearchView` | AppModel/navigation tests | None | None | One dedicated search path | Client-only | Corrected client not shipped | Simulator screenshot evidence | Ship and manual navigation review |
 | 40 | legal pages | USER_AVAILABLE_PRODUCTION | local July HTML and validator | legal `npm run validate` | None | Pages deployment | In-app legal links | Local pages validate | Pages deployment `cf7a3e20` | Five live URLs match local hashes | Keep revision synchronized |
-| 41 | App Review consistency | TESTED_ONLY | submission notes, catalog/legal/privacy copy | shipping truth/catalog/legal validation | None | Must match actual enabled flags | Copy aligned with disabled capabilities | Local artifact only | No submitted build evidence | No reviewer session | Update notes from observed uploaded build |
-| 42 | CI and required checks | IMPLEMENTED_NOT_CONNECTED | three workflows and gate scripts | Local workflow/script checks | None | GitHub secrets/ruleset required | Build/test jobs defined | Live benchmark protected by secret | Not a runtime feature | No GitHub CI run/ruleset yet | Push branch, run CI, require checks on `main` |
-| 43 | test migrations | USER_AVAILABLE_TEST_ONLY | ordered SQL `0010`-`0017` | D1 migration validator/tests | `0010`-`0017` applied | Test D1 binding | Indirect | No pending reported after apply | Not production | Remote test schema evidence | Recheck immediately before final test deploy |
-| 44 | production migrations | USER_AVAILABLE_PRODUCTION | ordered SQL `0010`-`0017` | migration tests/validator | `0010`-`0017` applied | Maintenance bridge used | Indirect | Test schema compatible | Production no-pending and schema probes pass | Pre/post balances equal | Retain backup and forward-repair only |
-| 45 | test deployment parity | USER_AVAILABLE_TEST_ONLY | final Worker candidate and test config | 75/1,113 local; smoke scripts | Test `0010`-`0017` applied | Test strict envelope | iOS points to test in debug | Version `6756d037...`; identity/release smokes and r103 pass | Not applicable | Exact candidate parity | Preserve dedicated test isolation |
-| 46 | production deployment parity | USER_AVAILABLE_PRODUCTION | final Worker + production smoke/runbook | guarded deploy and smoke | Production `0010`-`0017` applied | Flat bridge then strict nested config | Expiring released-client bridge | Exact test candidate green | Version `0e6ebcdb...` at 100% | Billing-safe smoke and balance parity pass | Monitor; keep external grants disabled |
+| 41 | App Review consistency | PARTIALLY_IMPLEMENTED | submission notes, catalog/legal/privacy copy | shipping truth/catalog/legal validation | None | Must match actual enabled flags | Runtime surfaces are enabled but older notes still describe disabled state | Local artifact only | No submitted build evidence | No reviewer session | Update submission packet from the exact uploaded build and active config |
+| 42 | CI and required checks | USER_AVAILABLE_PRODUCTION | three workflows and gate scripts | PR #16 passed all nine required jobs | None | GitHub branch protection active | Build/test jobs defined | Live benchmark protected by secret | Not a runtime feature | `main` requires nine checks, one approval, conversation resolution, admin enforcement | Keep checks current and retain force-push/deletion blocks |
+| 43 | test migrations | USER_AVAILABLE_TEST_ONLY | ordered SQL `0010`-`0018` | D1 migration validator/tests | `0010`-`0018` applied | Test D1 binding | Indirect | No pending reported after apply | Not production | Remote test schema evidence | Recheck immediately before the next test deploy |
+| 44 | production migrations | USER_AVAILABLE_PRODUCTION | ordered SQL `0010`-`0018` | migration tests/validator | `0010`-`0018` applied | Maintenance bridge used | Indirect | Test schema compatible | Production no-pending and App Attest key schema probe pass | Pre/post balances equal | Retain backup and forward-repair only |
+| 45 | test deployment parity | PASS_PRIOR_QUALITY_CANDIDATE | candidate `56c0c209` and test config | 77/1,129 local; smoke scripts | Test `0010`-`0018` applied | Test strict envelope | iOS Debug is build-pinned to test | Version `3f377477...`; identity/release and physical development attestation pass | Not applicable | Prior quality candidate deployed and verified | Production hotfix `ff298a10` validated by unit/physical production canary under the documented waiver |
+| 46 | production deployment parity | PASS_WITH_DOCUMENTED_ONE_TIME_QUALITY_WAIVER | final Worker + production smoke/runbook | 77/1,130 and active-capability smoke | Production `0010`-`0018` applied | Strict nested config plus required runtime vars | Expiring released-client bridge | Identity hotfix green; prior quality candidate retained | Version `e60580e7...` at 100% with `APPLE_APP_ID` and App Attest verifier | App Attest and genuine SSV canary pass | Complete StoreKit/notification lifecycles and refresh exact-candidate quality |
 
 ## 5. User-available production features
 
@@ -101,23 +107,20 @@ The final working-tree candidate is deployed to the dedicated test Worker and pa
 
 ## 7. Disabled capabilities
 
-The reviewed release posture keeps the following implemented capabilities disabled until external proof exists:
+The current runtime keeps the following implemented capabilities disabled or unavailable:
 
 - new welcome grants without verified App Attest;
-- new consumable purchases;
-- subscription purchase/sync/restore grant paths;
-- rewarded-credit intent/UI and SSV grants;
 - Sign in with Apple recovery and account migration;
 - `appAccountToken` ownership mode;
 - production internal evaluation grants;
 - web supplement and scheduled refresh unless explicitly enabled;
 - any billing/account/reward path during `emergencyPaidGrantsDisabled`.
 
-Disabled means unavailable before external work, not “silently permitted with reduced verification.”
+Paid consumables/subscriptions and rewarded-credit intent/UI/SSV are no longer on this disabled list. They are production-enabled with incomplete external lifecycle evidence. Disabled means unavailable at runtime, not merely missing a test packet.
 
 ## 8. Disconnected implementations
 
-No remaining disconnected implementation is intentionally presented to users. Apple account recovery, notification processing, StoreKit ownership, App Attest welcome grant, and AdMob SSV are connected to routes and tests but deliberately disconnected from user exposure by fail-closed runtime capability flags. GitHub CI workflows still require live branch-check evidence. Legal Pages are live and hash-matched.
+No remaining disconnected implementation is intentionally presented to users. Apple account recovery and `appAccountToken` recovery ownership remain disconnected from user exposure. StoreKit purchasing/subscription remains connected and production-enabled with its external lifecycle open. App Attest and one genuine AdMob SSV grant are physically verified; broader replay/duplicate/late/cap matrices remain follow-up coverage. GitHub CI and branch protection now have live evidence. Legal Pages are live and hash-matched.
 
 ## 9. Defects discovered
 
@@ -157,7 +160,8 @@ The working tree fixes the code-addressable defects:
 - strict remote config requires a complete dated envelope, bounded LKG, emergency precedence, and lifecycle monitoring;
 - numeric claims are reconciled against typed facts including unit, scale, sign, currency, and period;
 - Recent has an explicit empty state and drawer search uses `SearchView` only;
-- authoritative docs now distinguish implemented, deployed, externally verified, and user-available states.
+- authoritative docs now distinguish implemented, deployed, externally verified, and user-available states;
+- GitHub now enforces the nine required CI checks, one approval, conversation resolution, and admin protection on `main`.
 
 ## 11. Architecture changes
 
@@ -222,7 +226,7 @@ Public search does not require identity. Safe company/read paths accept the new 
 
 Supported devices register an App Attest key, obtain a short-lived purpose-specific challenge, and bind the assertion to nonce, method, path, body SHA-256, credential, and monotonically increasing assertion counter. Challenges are one-use and expiry-bound; wrong path/body, replay, expired challenge, duplicate key binding, and counter regression fail closed.
 
-Unsupported App Attest receives safe core access with zero welcome credit. Temporary Apple/service failure degrades startup but never silently grants. Real-device production App Attest remains externally unverified, so verified-installation grants stay disabled.
+Unsupported App Attest receives safe core access with zero welcome credit. Temporary Apple/service failure degrades startup but never silently grants. Real-device production App Attest remains externally unverified; only a successfully verified installation can reach grant-producing paths.
 
 ## 17. Startup UX behavior
 
@@ -256,9 +260,9 @@ Supported events propagate verified renewal, expiry, revoke/refund, refund rever
 
 ## 22. Rewarded-ad behavior
 
-The card and reward intent require trusted `adsEnabled`, `rewardedCreditEnabled`, and `rewardedSsvReady`, the production environment and ad unit, verified identity/App Attest, and no emergency disable. Google AdMob SSV is the sole grant authority.
+The card and reward intent require trusted `adsEnabled`, `rewardedCreditEnabled`, and `rewardedSsvReady`, the production environment and ad unit, verified identity/App Attest, and no emergency disable. Those config capabilities are currently enabled. Google AdMob SSV remains the sole grant authority.
 
-Custom data binds the intent, principal, ad unit, and environment. Signature failure, wrong custom data, duplicate transaction, expired intent, or daily cap cannot grant. A valid grant is 2 credits, capped at 3 per JST day, expiring after 30 days. Late SSV can still update authoritative status within its valid window; completing a client ad alone grants nothing. Production SSV remains disabled pending a genuine callback.
+Custom data binds the intent, principal, ad unit, and environment. Signature failure, wrong custom data, duplicate transaction, expired intent, or daily cap cannot grant. A valid grant is 2 credits, capped at 3 per JST day, expiring after 30 days. Late SSV can still update authoritative status within its valid window; completing a client ad alone grants nothing. Production SSV is enabled, but a genuine callback/duplicate/late/cap evidence packet remains missing.
 
 ## 23. Numeric-validation behavior
 
@@ -272,7 +276,7 @@ Deployed config must be complete, typed, dated, and catalog-compatible. Missing 
 
 The lifecycle is review-due at 14 days, critical at 35, and hard fail-closed at 45. Legacy compatibility independently expires in at most 30 days. Environment emergency overrides disable chat/model, free grants, paid/subscription grants, rewards, external context, SEC refresh, background work, and migration/evaluation grants.
 
-The rollout followed the mixed-version guard: complete dated flat maintenance bridge, observed live 503, schema apply, new Worker at 100%, then strict nested envelope. Config `production-safe-release-20260711-v3` is fresh in KV and D1 LKG; reviewed config hash is `aab7ec76878c3a400c6c08a29e7be7d83cc65aee130901022574eac6266825b3`. Legacy compatibility expires at `2026-08-11T14:14:00.000Z`.
+The rollout followed the mixed-version guard: complete dated flat maintenance bridge, observed live 503, schema apply, new Worker at 100%, then strict nested envelope. Current config `production-capabilities-restored-20260713-v1` is fresh and identical in KV and D1 LKG; it enables billing, consumables, rewarded credits, and rewarded SSV, leaves account recovery disabled, and turns the paid-grant emergency stop off. Legacy compatibility expires at `2026-08-11T14:14:00.000Z`.
 
 ## 25. iOS and UI corrections
 
@@ -296,16 +300,16 @@ The exact serial Simulator suite passed on iPhone 17 Pro / iOS 26.4, and 13 curr
 
 | Gate | Result |
 |---|---|
-| Worker full suite | PASS, 75/75 files and 1,113/1,113 tests; 0 failed |
+| Worker full suite | PASS, 77/77 files and 1,130/1,130 tests; 0 failed |
 | Worker typecheck | PASS, 0 errors |
 | Worker quality-gate unit suite | PASS, 25/25 |
-| D1 migration validation | PASS, 17 ordered files (`0001`-`0017`) |
+| D1 migration validation | PASS, 18 ordered files (`0001`-`0018`); remote test/production current with no pending migration |
 | Testbench fixture validation | PASS, 5 default tickers / 12 templates |
-| Final candidate quality gate | PASS, 15 tickers / Q01-Q10 / 150 rows / 0% fallback / 150/150 human review |
+| Last accepted quality candidate `56c0c209` | PASS, 15 tickers / Q01-Q10 / 150 rows / 0% fallback / 150/150 release-owner review. Candidate `ff298a10` used a documented one-time release-owner waiver for its identity-only delta; normal deploy guard remains blocked until refreshed. |
 | Production release-smoke check-only | PASS target/credential/redaction preflight, no network |
 | SEC fetcher | PASS, 15/15 |
 | Legal source/live validation | PASS, revision `2026-07-11`, five live hashes match |
-| iOS serial suite | PASS, 192/192, iPhone 17 Pro / iOS 26.4, result `/tmp/KabuyomiFinalPostDeploy.xcresult` |
+| iOS serial suite | PASS, 195/195, iPhone 17 Pro / iOS 26.4.1, result `Test-Kabuyomi-2026.07.13_0-51-10-+0900.xcresult` |
 | iOS unsigned generic Release build | PASS |
 | Git diff whitespace check | PASS at the last local gate checkpoint |
 
@@ -313,13 +317,13 @@ The accepted release artifact is `2026-07-12-full-product-remediation-v9-standar
 
 ## 27. Test Worker deployment
 
-Test D1 is schema-current through `0017`, and the reviewed strict test config readback passed. Worker version `6756d037-cdf1-45df-87a0-1babbb8ec9da` serves exact candidate `07eae11a` at 100%. Identity smoke passes unverified-zero-credit bootstrap, search/company reads, App Attest fail-closed mutation gating, and controlled Apple rejection. Full release smoke passes remote config, legacy rejection, replay/conflict/concurrency, quote translation, disabled billing/account routes, invalid notification/SSV no-grant, reward strict gating, and zero-credit postconditions.
+Test D1 is schema-current through `0018`, and the reviewed strict test config readback passed. Worker version `3f377477-74f2-419b-b4cf-cc703d8ffc84` serves exact candidate `56c0c209` at 100%. Identity/release smoke and physical development App Attest attestation pass.
 
 ## 28. Production Worker deployment
 
-Production Worker `0e6ebcdb-3305-4aa9-b9d5-bf714457dff7` serves exact candidate `07eae11a` at 100%; startup time was 25 ms. Rollback Worker is `78971adf-324f-4d27-8f06-b18fd95d81ae`, and rollback config is the backed-up flat payload.
+Production Worker `e60580e7-e7f5-449d-97b2-d36854c24896` serves candidate `ff298a10` at 100%. Active-capability production smoke passes, migration `0018` is applied, production App Attest and genuine SSV pass, and paid-credit liability remains 2,088 credits / ¥4,176.
 
-The strict envelope and D1 LKG agree on `production-safe-release-20260711-v3`, reviewed config hash `aab7ec...25b3`, with paid/account/reward capabilities disabled and emergency paid grants disabled. Credential-free production smoke is `PASS_WITH_CAPABILITY_DISABLED`: public and compatibility reads work, fresh legacy and installation identities remain at zero, model-backed calls fail before execution for insufficient credits, paid/account routes fail before Apple work, invalid SSV/notification cannot grant, no customer identity or chargeable model request was used, and no sensitive value was printed.
+The strict envelope and D1 LKG agree on `production-capabilities-restored-20260713-v1`, authored at `2026-07-13T01:20:28.597Z`, with billing, consumables, rewarded credits, and rewarded SSV enabled, account recovery disabled, and the paid-grant emergency stop off. The deployed binding list contains `APPLE_APP_ID=6762764426`. Active-capability smoke passes; a genuine AdMob callback granted exactly two credits, and read-only D1 evidence confirmed one production App Attest key with zero rows written by the verification query.
 
 Pages deployment `cf7a3e20` completed. Index, privacy, terms, support, and commercial-disclosure URLs all serve revision `2026-07-11` and match local SHA-256 values.
 
@@ -337,6 +341,9 @@ Evidence actually recorded:
 - final production Worker version and 100% deployment evidence;
 - legal Pages deployment and five live hash matches;
 - controlled rejection paths for invalid Apple JWS/SSV and disabled billing/account capabilities in code/tests and safe smoke design.
+- PR #16 passing all nine GitHub CI jobs and enforced `main` protection requiring those checks, one approval, conversation resolution, and admin enforcement while blocking force-push and deletion;
+- current production Worker and KV/D1 LKG readback for the July 13 capability activation.
+- App Store Connect readback identifying Kabuyomi numeric app ID `6762764426`, full Worker suite, App Attest validation and same-principal invalid-key rotation coverage, test/production D1 application, signed physical-device build inspection, production App Attest/AdMob canary, and production deploy/smoke for candidate `ff298a10`; exact-candidate answer quality is the documented one-time waiver described above.
 
 Not counted as external success: mocked Apple/Google callbacks, code existence, unit-test names, check-only smoke, prior quality runs against another Worker version, or disabled capability UI.
 
@@ -351,10 +358,10 @@ The available CLI/Simulator environment cannot itself produce or complete:
 - genuine production AdMob rewarded impression and Google SSV callback;
 - signed archive, TestFlight installation, App Review session, and physical-device UI/accessibility checks.
 
-These capabilities may remain disabled for the core release. Their code paths, gates, user messaging, and activation procedures are present; they must not be enabled or advertised until their specific evidence is attached.
+Account recovery may remain disabled for the core release. Paid consumables/subscriptions and rewarded credits are already enabled, so their missing evidence is an active verification debt rather than a future activation gate. Their code paths, gates, and user messaging are present, but they must not be described as externally lifecycle-verified until their specific evidence is attached.
 
 ## 31. Final release decision
 
 `releaseDecision: GO`
 
-The core release may advance: local, test, balanced quality/human-review, production migration/deployment/config/smoke/balance, and legal gates are green. GitHub CI/ruleset evidence and physical-device/external-console checks remain follow-up evidence. The latter do not block the core release because welcome grants, StoreKit purchases/subscriptions, account recovery, notifications, and rewarded credit remain hidden and fail-closed. This decision does not authorize enabling or advertising those capabilities.
+The core release may advance: candidate `ff298a10` is deployed with local/unit, production migration/config/smoke/balance, physical App Attest, and genuine AdMob SSV evidence green. The exact-candidate answer-quality rerun was explicitly waived once and remains intentionally unsatisfied in the normal deploy guard. StoreKit/TestFlight and notification delivery remain follow-up evidence; account recovery remains disabled. This decision records the active runtime truth without converting those missing lifecycles into a pass.
