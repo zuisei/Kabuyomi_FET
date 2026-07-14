@@ -4,45 +4,47 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
     @State private var presentedLegalDocument: LegalDocumentKind?
+    let showsDismissButton: Bool
+
+    init(showsDismissButton: Bool = true) {
+        self.showsDismissButton = showsDismissButton
+    }
 
     var body: some View {
         ZStack {
-            Rectangle()
-                .fill(KabuyomiTheme.paper.opacity(0.001))
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture {}
-
             KabuyomiTheme.background
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
             VStack(spacing: 0) {
-                HStack(alignment: .center) {
-                    Text("設定")
-                        .font(.system(.largeTitle, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
+                if showsDismissButton {
+                    HStack(alignment: .center) {
+                        Text("設定")
+                            .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                            .foregroundStyle(KabuyomiTheme.ink)
 
-                    Spacer()
+                        Spacer()
 
-                    Button("閉じる") {
-                        dismiss()
+                        Button("閉じる") {
+                            dismiss()
+                        }
+                        .font(.system(.body, design: .rounded, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 12)
+                        .kabuyomiCard(.secondary, radius: 22)
                     }
-                    .font(.system(.body, design: .rounded, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 12)
-                    .kabuyomiCard(.secondary, radius: 22)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+                    .padding(.bottom, 14)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 14)
 
                 ScrollView {
                     VStack(spacing: 16) {
                         #if DEBUG
                         devCard
                         #endif
+                        deviceInfoCard
                         aiCard
                         linksCard
                         #if DEBUG
@@ -62,6 +64,46 @@ struct SettingsView: View {
             appModel.refreshStoreKitDiagnostics()
             #endif
         }
+        .navigationTitle(showsDismissButton ? "" : "端末情報とサポート")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+    }
+
+    private var deviceInfoCard: some View {
+        let displayModel = SettingsDeviceInfoDisplayModel(
+            deviceKeySuffix: appModel.currentDeviceKeySuffixDisplay,
+            isAuthenticated: appModel.fraudSensitiveCreditActionsAvailable,
+            authenticationIssueTitle: appModel.installationAuthenticationStatus?.failure.title,
+            appVersion: appModel.currentAppVersionDisplay
+        )
+
+        return card {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("端末情報", systemImage: "iphone.gen3")
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Text("App Store 配布版や TestFlight でも確認できる、個人を特定しないサポート情報です。")
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(spacing: 0) {
+                    DeviceInfoRow(title: "サポートコード", value: displayModel.supportCode, usesMonospacedDigits: true)
+                    Divider()
+                    DeviceInfoRow(title: "端末認証", value: displayModel.authenticationStatus)
+                    Divider()
+                    DeviceInfoRow(title: "App", value: displayModel.appVersion)
+                }
+
+                Text("お問い合わせではサポートコードのみを共有してください。完全な端末ID、認証情報、App Attest資料は送信しないでください。")
+                    .font(.caption)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityIdentifier("settings.deviceInfo")
     }
 
     #if DEBUG
@@ -510,6 +552,36 @@ struct SettingsView: View {
     }
 }
 
+struct SettingsDeviceInfoDisplayModel: Equatable {
+    let supportCode: String
+    let authenticationStatus: String
+    let appVersion: String
+
+    init(
+        deviceKeySuffix: String,
+        isAuthenticated: Bool,
+        authenticationIssueTitle: String?,
+        appVersion: String
+    ) {
+        let normalizedSuffix = deviceKeySuffix.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedSuffix.isEmpty || normalizedSuffix == "unknown" {
+            supportCode = "準備中"
+        } else {
+            supportCode = "…\(normalizedSuffix.suffix(6))"
+        }
+
+        if isAuthenticated {
+            authenticationStatus = "確認済み"
+        } else if let authenticationIssueTitle,
+                  !authenticationIssueTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            authenticationStatus = authenticationIssueTitle
+        } else {
+            authenticationStatus = "確認中"
+        }
+        self.appVersion = appVersion
+    }
+}
+
 enum LegalDocumentKind: String, Identifiable {
     case privacy
     case terms
@@ -577,6 +649,30 @@ private struct SettingsLinkRow: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .kabuyomiCard(.secondary, radius: 18)
+    }
+}
+
+private struct DeviceInfoRow: View {
+    let title: String
+    let value: String
+    var usesMonospacedDigits = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+
+            Spacer(minLength: 16)
+
+            Text(value)
+                .font(usesMonospacedDigits ? .system(.subheadline, design: .monospaced, weight: .semibold) : .subheadline.weight(.semibold))
+                .foregroundStyle(KabuyomiTheme.ink)
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
+        }
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
     }
 }
 

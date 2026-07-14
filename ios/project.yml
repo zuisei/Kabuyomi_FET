@@ -35,6 +35,9 @@ schemes:
         - name: KabuyomiTests
           parallelizable: true
           randomExecutionOrder: true
+        - name: KabuyomiUITests
+          parallelizable: false
+          randomExecutionOrder: false
     analyze:
       config: Debug
     profile:
@@ -42,12 +45,39 @@ schemes:
     archive:
       config: Release
       revealArchiveInOrganizer: false
+  KabuyomiUITests:
+    build:
+      targets:
+        Kabuyomi: all
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - name: KabuyomiUITests
+          parallelizable: false
+          randomExecutionOrder: false
+  KabuyomiStoreKitUITests:
+    build:
+      targets:
+        Kabuyomi: all
+    run:
+      config: Debug
+      storeKitConfiguration: Kabuyomi/StoreKit/KabuyomiTest.storekit
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - name: KabuyomiUITests
+          parallelizable: false
+          randomExecutionOrder: false
 targets:
   Kabuyomi:
     type: application
     platform: iOS
     sources:
       - path: Kabuyomi
+        excludes:
+          - StoreKit/KabuyomiTest.storekit
     dependencies:
       - package: GoogleMobileAds
         product: GoogleMobileAds
@@ -118,8 +148,11 @@ targets:
     platform: iOS
     sources:
       - path: KabuyomiTests
+      - path: Kabuyomi/StoreKit/KabuyomiTest.storekit
+        buildPhase: resources
     dependencies:
       - target: Kabuyomi
+      - sdk: StoreKitTest.framework
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
@@ -128,3 +161,20 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Kabuyomi.app/Kabuyomi"
         BUNDLE_LOADER: "$(TEST_HOST)"
+  KabuyomiUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: KabuyomiUITests
+      - path: Kabuyomi/StoreKit/KabuyomiTest.storekit
+        buildPhase: resources
+    dependencies:
+      - target: Kabuyomi
+      - sdk: StoreKitTest.framework
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: app.kabuyomi.ios.uitests
+        PRODUCT_NAME: KabuyomiUITests
+        TARGETED_DEVICE_FAMILY: "1"
+        TEST_TARGET_NAME: Kabuyomi

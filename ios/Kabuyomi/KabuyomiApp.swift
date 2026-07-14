@@ -26,6 +26,17 @@ struct KabuyomiApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if DEBUG
+            if StoreKitCancellationHarnessView.isEnabled {
+                StoreKitCancellationHarnessView()
+            } else if AppModel.isRunningTests {
+                Color.clear
+            } else {
+                AppRootView()
+                    .environment(appModel)
+                    .environment(\.managedObjectContext, appModel.persistence.viewContext)
+            }
+            #else
             if AppModel.isRunningTests {
                 Color.clear
             } else {
@@ -33,6 +44,7 @@ struct KabuyomiApp: App {
                     .environment(appModel)
                     .environment(\.managedObjectContext, appModel.persistence.viewContext)
             }
+            #endif
         }
     }
 }

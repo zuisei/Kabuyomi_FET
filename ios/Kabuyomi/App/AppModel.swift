@@ -636,8 +636,12 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     var currentDeviceKeySuffixDisplay: String {
-        let key = currentDeviceKeyDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else { return "unknown" }
+        Self.deviceKeySuffixDisplay(from: currentDeviceKeyDisplay)
+    }
+
+    static func deviceKeySuffixDisplay(from value: String?) -> String {
+        let key = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !key.isEmpty, key != "not_bootstrapped" else { return "unknown" }
         return String(key.suffix(6))
     }
 
