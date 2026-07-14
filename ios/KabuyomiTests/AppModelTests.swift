@@ -1203,7 +1203,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(SubscriptionStoreError.purchaseUnverified.errorDescription, "購入を確認できませんでした。購入を復元してください。")
     }
 
-    func testProjectVersionMetadataIsV102Build6() throws {
+    func testProjectVersionMetadataIsV12Build6() throws {
         let testFile = URL(fileURLWithPath: #filePath)
         let repoRoot = testFile
             .deletingLastPathComponent()
@@ -1212,9 +1212,9 @@ final class AppModelTests: XCTestCase {
         let projectYML = try String(contentsOf: repoRoot.appendingPathComponent("ios/project.yml"), encoding: .utf8)
         let pbxproj = try String(contentsOf: repoRoot.appendingPathComponent("ios/Kabuyomi.xcodeproj/project.pbxproj"), encoding: .utf8)
 
-        XCTAssertTrue(projectYML.contains("MARKETING_VERSION: 1.0.2"))
+        XCTAssertTrue(projectYML.contains("MARKETING_VERSION: 1.2"))
         XCTAssertTrue(projectYML.contains("CURRENT_PROJECT_VERSION: 6"))
-        XCTAssertTrue(pbxproj.contains("MARKETING_VERSION = 1.0.2;"))
+        XCTAssertTrue(pbxproj.contains("MARKETING_VERSION = 1.2;"))
         XCTAssertTrue(pbxproj.contains("CURRENT_PROJECT_VERSION = 6;"))
     }
 
