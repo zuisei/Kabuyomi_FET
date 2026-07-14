@@ -78,6 +78,8 @@ Discovery, specification, parity, state, execution, audit, validation, and compl
 
 StoreKit service scenarios passed 4/4 and real Xcode purchase-sheet UI scenarios passed 2/2. Success, cancellation, pending, unfinished transaction, finish boundary, and restore are covered. The five product IDs and existing quantities are unchanged. Local placeholder prices are test-only; production UI remains StoreKit-price-authoritative.
 
+The four `StoreKitEndToEndTests` remain a dedicated local StoreKit Test gate. They are explicitly excluded from the general GitHub-hosted `iOS unit tests` job because StoreKitTest purchase execution can remain pending indefinitely on that hosted runner; the CI job continues to run the complete non-StoreKit unit target, while StoreKit service and purchase-sheet evidence is retained separately.
+
 ## 11. Accessibility results
 
 The earlier representative accessibility audit and light/dark/Dynamic Type review remain recorded. Per user direction, the July 14 structural follow-up did not use the separate accessibility audit as its priority gate; it kept touch targets, readable labels, semantic text, scrollability, and system navigation as guardrails. No additional accessibility-only visual redesign was performed.
