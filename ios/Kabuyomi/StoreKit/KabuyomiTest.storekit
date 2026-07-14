@@ -1,0 +1,200 @@
+{
+  "appPolicies" : {
+    "eula" : "",
+    "policies" : [
+      {
+        "locale" : "ja_JP",
+        "policyText" : "",
+        "policyURL" : ""
+      }
+    ]
+  },
+  "identifier" : "4B42594D",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "0.49",
+      "familyShareable" : false,
+      "internalID" : "43524535",
+      "localizations" : [
+        {
+          "description" : "50 paid credits",
+          "displayName" : "50クレジット",
+          "locale" : "ja_JP"
+        }
+      ],
+      "productID" : "kabuyomi.credits.50",
+      "referenceName" : "Kabuyomi Credits 50 (Local Test)",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "0.99",
+      "familyShareable" : false,
+      "internalID" : "43523130",
+      "localizations" : [
+        {
+          "description" : "100 paid credits",
+          "displayName" : "100クレジット",
+          "locale" : "ja_JP"
+        }
+      ],
+      "productID" : "kabuyomi.credits.100",
+      "referenceName" : "Kabuyomi Credits 100 (Local Test)",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_askToBuyEnabled" : false,
+    "_billingGracePeriodEnabled" : false,
+    "_billingIssuesEnabled" : false,
+    "_disableDialogs" : false,
+    "_failTransactionsEnabled" : false,
+    "_locale" : "ja_JP",
+    "_renewalBillingIssuesEnabled" : false,
+    "_storefront" : "JPN",
+    "_storeKitErrors" : [
+      {
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ],
+    "_timeRate" : 0
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "4B425953",
+      "localizations" : [
+        {
+          "description" : "Kabuyomiの月額プラン",
+          "displayName" : "Kabuyomi月額プラン",
+          "locale" : "ja_JP"
+        }
+      ],
+      "name" : "Kabuyomi Monthly Plans (Local Test)",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "2.99",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "4C495445",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "月次400クレジット",
+              "displayName" : "Lite",
+              "locale" : "ja_JP"
+            }
+          ],
+          "productID" : "kabuyomi.sub.lite.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Kabuyomi Lite Monthly (Local Test)",
+          "subscriptionGroupID" : "4B425953",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "5.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "50524F30",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "月次900クレジット",
+              "displayName" : "Pro",
+              "locale" : "ja_JP"
+            }
+          ],
+          "productID" : "kabuyomi.sub.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Kabuyomi Pro Monthly (Local Test)",
+          "subscriptionGroupID" : "4B425953",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "4D415830",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "月次2,000クレジット",
+              "displayName" : "Max",
+              "locale" : "ja_JP"
+            }
+          ],
+          "productID" : "kabuyomi.sub.max.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Kabuyomi Max Monthly (Local Test)",
+          "subscriptionGroupID" : "4B425953",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

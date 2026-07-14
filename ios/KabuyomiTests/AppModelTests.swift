@@ -332,6 +332,24 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(preview.contains("i Phone"))
     }
 
+    func testSourceListPreviewUsesExcerptInsteadOfRepeatedSectionHeading() {
+        let preview = sourceListPreviewText(
+            text: "Management Discussion and Analysis. Revenue increased 15.7% year over year due to stronger demand.",
+            sectionTitle: "Management Discussion and Analysis",
+            fallback: "10-Q Item 2",
+            limit: 180
+        )
+
+        XCTAssertEqual(preview, "Revenue increased 15.7% year over year due to stronger demand.")
+    }
+
+    func testSourceListPreviewFallsBackWhenExcerptIsEmpty() {
+        XCTAssertEqual(
+            sourceListPreviewText(text: "  ", sectionTitle: "Part I, Item 2", fallback: "10-Q Item 2"),
+            "10-Q Item 2"
+        )
+    }
+
     func testResetLocalDataRestoresConversationEntryState() throws {
         let persistence = PersistenceController(inMemory: true)
         let company = TestFixtures.companyPayload()
@@ -1121,12 +1139,41 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(rows["ウェルカム"], "50")
         XCTAssertEqual(rows["広告分"], "未提供")
         XCTAssertEqual(rows["購入分"], "100")
+        XCTAssertEqual(normalRows["端末情報"], "…abc123")
         XCTAssertNil(normalRows["Device"])
         XCTAssertNil(normalRows["API"])
         XCTAssertNil(normalRows["Route detail"])
         XCTAssertFalse(viewModel.rows.contains { $0.value.contains("https://example.com") })
-        XCTAssertEqual(debugRows["端末ID末尾"], "…abc123")
+        XCTAssertNil(debugRows["端末ID末尾"])
         XCTAssertNil(debugRows["API"])
+    }
+
+    func testSettingsDeviceInfoUsesOnlyRedactedReleaseSafeValues() {
+        XCTAssertEqual(AppModel.deviceKeySuffixDisplay(from: nil), "unknown")
+        XCTAssertEqual(AppModel.deviceKeySuffixDisplay(from: "not_bootstrapped"), "unknown")
+        XCTAssertEqual(AppModel.deviceKeySuffixDisplay(from: "installation:private-abc123"), "abc123")
+
+        let ready = SettingsDeviceInfoDisplayModel(
+            deviceKeySuffix: "private-installation-abc123",
+            isAuthenticated: true,
+            authenticationIssueTitle: nil,
+            appVersion: "1.0.2(6)"
+        )
+
+        XCTAssertEqual(ready.supportCode, "…abc123")
+        XCTAssertEqual(ready.authenticationStatus, "確認済み")
+        XCTAssertEqual(ready.appVersion, "1.0.2(6)")
+        XCTAssertFalse(ready.supportCode.contains("private-installation"))
+
+        let unavailable = SettingsDeviceInfoDisplayModel(
+            deviceKeySuffix: "unknown",
+            isAuthenticated: false,
+            authenticationIssueTitle: "端末認証を確認できません",
+            appVersion: "1.0.2(6)"
+        )
+
+        XCTAssertEqual(unavailable.supportCode, "準備中")
+        XCTAssertEqual(unavailable.authenticationStatus, "端末認証を確認できません")
     }
 
     func testAccountStatusDisplayModelHidesRouteMissingDetailsFromDisplayRows() {

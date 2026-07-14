@@ -51,8 +51,10 @@ struct CreditView: View {
     @State private var activeSheet: CreditSheet?
     @State private var recoveryRequiredCredits: Int?
     @State private var requestsPlanSheetAfterUsageRefresh: Bool
+    let showsDismissButton: Bool
 
-    init(initialSheet: CreditInitialSheet? = nil) {
+    init(initialSheet: CreditInitialSheet? = nil, showsDismissButton: Bool = true) {
+        self.showsDismissButton = showsDismissButton
         _activeSheet = State(initialValue: {
             switch initialSheet {
             case .plans:
@@ -79,12 +81,6 @@ struct CreditView: View {
 
     var body: some View {
         ZStack {
-            Rectangle()
-                .fill(KabuyomiTheme.paper.opacity(0.001))
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture {}
-
             KabuyomiTheme.background
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
@@ -158,28 +154,40 @@ struct CreditView: View {
                 creditRulesSheet
             }
         }
+        .navigationTitle(showsDismissButton ? "" : "クレジット")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
     }
 
+    @ViewBuilder
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 12) {
-                Text("クレジット")
-                    .font(.system(.title2, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.ink)
+                if showsDismissButton {
+                    Text("クレジット")
+                        .font(.system(.title2, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                } else {
+                    Text("残高と購入")
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                }
 
                 Spacer(minLength: 8)
 
-                Button {
-                    closeCredits()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
-                        .frame(width: 44, height: 44)
-                        .kabuyomiCard(.secondary, radius: 16)
+                if showsDismissButton {
+                    Button {
+                        closeCredits()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(KabuyomiTheme.accentDeep)
+                            .frame(width: 44, height: 44)
+                            .kabuyomiCard(.secondary, radius: 16)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("クレジット画面を閉じる")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("クレジット画面を閉じる")
             }
 
             Text("残高、月額プラン、追加購入をひとつの画面で確認")
@@ -188,7 +196,7 @@ struct CreditView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 20)
-        .padding(.top, 20)
+        .padding(.top, showsDismissButton ? 20 : 12)
         .padding(.bottom, 14)
     }
 
@@ -1118,19 +1126,17 @@ private struct SubscriptionPlanRow: View {
     }
 
     var body: some View {
-        Button {
-            purchase(product.id)
-        } label: {
+        Group {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 10) {
                     planSummary
-                    planAction
+                    purchaseButton
                 }
             } else {
                 HStack(alignment: .center, spacing: 12) {
                     planSummary
                     Spacer()
-                    planAction
+                    purchaseButton
                 }
             }
         }
@@ -1143,8 +1149,6 @@ private struct SubscriptionPlanRow: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke((isCurrent || isRecommended) ? KabuyomiTheme.accentDeep.opacity(0.26) : KabuyomiTheme.stroke(for: .muted), lineWidth: 1)
         )
-        .buttonStyle(.plain)
-        .disabled(isPurchasing || !product.isAvailable || !isPurchaseEnabled || isCurrent)
     }
 
     private var planSummary: some View {
@@ -1172,15 +1176,22 @@ private struct SubscriptionPlanRow: View {
         }
     }
 
-    private var planAction: some View {
-        VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 5) {
-            Text(displayPrice)
-                .font(.system(.subheadline, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.accentDeep)
-            Text(planActionTitle)
-                .font(.system(.caption, design: .rounded, weight: .bold))
-                .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative)
+    private var purchaseButton: some View {
+        Button {
+            purchase(product.id)
+        } label: {
+            VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 5) {
+                Text(displayPrice)
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                Text(planActionTitle)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative)
+            }
+            .frame(minWidth: 96, minHeight: 44, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
         }
+        .buttonStyle(.plain)
+        .disabled(isPurchasing || !product.isAvailable || !isPurchaseEnabled || isCurrent)
     }
 
     private var planActionTitle: String {
@@ -1298,30 +1309,25 @@ private struct CreditPackRow: View {
     }
 
     var body: some View {
-        Button {
-            purchase(product.id)
-        } label: {
+        Group {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 10) {
                     packSummary
-                    packAction
+                    purchaseButton
                 }
             } else {
                 HStack(alignment: .center, spacing: 12) {
                     packSummary
                     Spacer()
-                    packAction
+                    purchaseButton
                 }
             }
         }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(KabuyomiTheme.fill(for: .muted))
-            )
-        .buttonStyle(.plain)
-        .disabled(isPurchasing || !product.isAvailable || !isPurchaseEnabled)
-        .opacity(product.isAvailable && isPurchaseEnabled ? 1 : 0.72)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(KabuyomiTheme.fill(for: .muted))
+        )
     }
 
     private var packSummary: some View {
@@ -1345,22 +1351,29 @@ private struct CreditPackRow: View {
         }
     }
 
-    private var packAction: some View {
-        VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 5) {
-            Text(displayPrice)
-                .font(.system(.subheadline, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.accentDeep)
-            Text(packActionTitle)
-                .font(.system(.caption, design: .rounded, weight: .bold))
-                .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.paper : KabuyomiTheme.negative)
-                .padding(.horizontal, product.isAvailable && isPurchaseEnabled ? 10 : 0)
-                .padding(.vertical, product.isAvailable && isPurchaseEnabled ? 6 : 0)
-                .background {
-                    if product.isAvailable && isPurchaseEnabled {
-                        Capsule().fill(KabuyomiTheme.accentDeep)
+    private var purchaseButton: some View {
+        Button {
+            purchase(product.id)
+        } label: {
+            VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 5) {
+                Text(displayPrice)
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                Text(packActionTitle)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.paper : KabuyomiTheme.negative)
+                    .padding(.horizontal, product.isAvailable && isPurchaseEnabled ? 10 : 0)
+                    .padding(.vertical, product.isAvailable && isPurchaseEnabled ? 6 : 0)
+                    .background {
+                        if product.isAvailable && isPurchaseEnabled {
+                            Capsule().fill(KabuyomiTheme.accentDeep)
+                        }
                     }
-                }
+            }
+            .frame(minWidth: 96, minHeight: 44, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
         }
+        .buttonStyle(.plain)
+        .disabled(isPurchasing || !product.isAvailable || !isPurchaseEnabled)
     }
 
     private var packActionTitle: String {
@@ -1723,12 +1736,12 @@ struct AccountStatusDisplayModel: Equatable {
             Row(title: "次回更新", value: renewal ?? "未提供"),
             Row(title: "最終利用同期", value: Self.format(date: lastUsageRefreshAt)),
             Row(title: "最終購入同期", value: Self.billingStatus(status: lastBillingSyncStatus, at: lastBillingSyncAt)),
+            Row(title: "端末情報", value: deviceKeySuffix == "unknown" ? "準備中" : "…\(deviceKeySuffix.suffix(6))"),
             Row(title: "App", value: appVersion)
         ]
 
         #if DEBUG
         var debugRows = [
-            Row(title: "端末ID末尾", value: "…\(deviceKeySuffix)"),
             Row(title: "購入同期", value: Self.billingStatus(status: lastBillingSyncStatus, at: lastBillingSyncAt))
         ]
 
