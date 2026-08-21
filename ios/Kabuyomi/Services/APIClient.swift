@@ -704,6 +704,21 @@ struct APIClient {
         )
     }
 
+    /// Dev モードのときだけ `x-device-key` を補う。
+    /// Worker の detached access は device key が無いと即座に拒否するが、
+    /// 通常の quota リクエストは `requestContext` を持たないため
+    /// このヘッダが付かず、allowlist に何を登録しても Dev モードが通らなかった。
+    /// 本番の挙動は変えない(DEBUG かつ Dev モード ON のときだけ付ける)。
+    private func detachedAccessDeviceKeyForDevMode() -> String? {
+        #if DEBUG
+        guard detachedAccessStore?.requestDetachedAccessMode != nil else { return nil }
+        let key = deviceIdentity?.legacyDeviceKeyForMigration() ?? ""
+        return key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : key
+        #else
+        return nil
+        #endif
+    }
+
     private func requestMetadataHeaders() -> [String: String] {
         let originalTransactionId =
             requestContext?.originalTransactionId
@@ -1086,6 +1101,8 @@ struct APIClient {
         if let legacyDeviceKey = requestContext?.legacyDeviceKey,
            !legacyDeviceKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             headers["x-device-key"] = legacyDeviceKey
+        } else if let devDeviceKey = detachedAccessDeviceKeyForDevMode() {
+            headers["x-device-key"] = devDeviceKey
         }
         return headers
     }
