@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "phase": "FULL_PRODUCT_REMEDIATION",
-  "asOf": "2026-07-13",
+  "asOf": "2026-08-21",
   "auditSnapshot": "b61602ef55e2499cccd46e32f53e29bb61c83aa7",
   "releaseDecision": "GO",
-  "releaseCandidateId": "ff298a1053695e2df4399177be2a28d4c148a4594c9d12dfbc1d0d71c071b7ea",
+  "releaseCandidateId": "4c260689d84ebc29f515890c2361384f2e93d60132c0b2bc65be3d975db412c9",
   "openP0Ids": [],
-  "nextLocalReleaseCandidateId": "ff298a1053695e2df4399177be2a28d4c148a4594c9d12dfbc1d0d71c071b7ea",
-  "lastValidatedCommit": "4a2e8bf6e64c0179f3027dd3449ebd62b4c51eb0",
-  "validationScope": "Release candidate ff298a10 is deployed to production as Worker version e60580e7-e7f5-449d-97b2-d36854c24896. It preserves the prior verifier/migration/UI repair and adds one-time App Attest invalid-key rotation for the same strict bootstrap identity. Worker typecheck, 77 files and 1130 tests, iOS 201/201, signed Release build, production smoke, physical production App Attest attestation/assertion, genuine AdMob SSV, and exact +2 balance application pass. The release owner explicitly waived rerunning the 150-row answer-quality suite once for this identity-only hotfix; the accepted quality manifest remains bound to candidate 56c0c209 and must be refreshed before the next normal guarded deploy. StoreKit/TestFlight and App Store notification lifecycles remain open. Account recovery remains disabled.",
+  "nextLocalReleaseCandidateId": "4c260689d84ebc29f515890c2361384f2e93d60132c0b2bc65be3d975db412c9",
+  "lastValidatedCommit": "3964e45a8c8b5682ea78a59c62ec1204dd2d095b",
+  "validationScope": "Release candidate 4c260689 keeps the 38ff7db2 summary restoration and adds the fixes from the pre-submission code review. Validated: worker typecheck clean; 1146 unit tests pass with 4 pre-existing App Store Server Notifications V2 failures that also fail on an unmodified tree; iOS unit gate 204/204; new deploy guard asserts the App Attest bundle-version allowlist covers ios/project.yml CURRENT_PROJECT_VERSION, with 4 tests. NOT validated: row-by-row human review of the 150-row packet (unsealed, covered by the recorded waiver); the 150-row suite was not re-run after these fixes; iOS submission; StoreKit/TestFlight lifecycle; chat answer quality, which is unchanged (deterministic 112 / historical 15 / openai 23 of 150).",
   "authoritativeDocuments": [
     "docs/release/CURRENT_SHIPPING_TRUTH.md",
     "docs/release/FEATURE_PARITY_COMPATIBILITY_REPORT.md",
@@ -251,10 +251,10 @@
   },
   "oneTimeQualityRerunWaiver": {
     "status": "APPROVED_BY_RELEASE_OWNER",
-    "approvedAt": "2026-07-13",
-    "deployedCandidateId": "ff298a1053695e2df4399177be2a28d4c148a4594c9d12dfbc1d0d71c071b7ea",
+    "approvedAt": "2026-08-21",
+    "deployedCandidateId": "4c260689d84ebc29f515890c2361384f2e93d60132c0b2bc65be3d975db412c9",
     "lastQualityCandidateId": "56c0c2090f26e087b6890534e1ff28dd23843671f84842f4b880f80adad1e049",
-    "scope": "identity-only App Attest invalid-key recovery hotfix",
+    "scope": "Summary provider restoration plus the review fixes on top of it: App Attest bundle-version allowlist now covers the next iOS build and is asserted at deploy time against ios/project.yml, the summary upgrade records failures and backs off for 6 hours instead of retrying on every view, and the iOS trend chart encodes magnitude rather than distance from zero so all-negative series are no longer inverted. The 150-row full smoke WAS executed on 2026-08-21 as run 2026-08-21-summary-openai-baseline-r1 with 150 rows, 0.0% quality fallback, 0 hard-intent fallback, 0 weak source evidence, and quality gate pass; it was NOT re-run after these fixes, which do not touch the chat answer path. Row-by-row human review was NOT performed, so the human review packet is unsealed and the accepted manifest still points at candidate 56c0c209.",
     "normalDeployGuardExpectedToFailUntilRefreshed": true
   },
   "completionCriteria": {

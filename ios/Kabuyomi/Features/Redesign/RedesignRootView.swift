@@ -434,6 +434,10 @@ private struct RedesignCompanyWorkspace: View {
     let openSources: () -> Void
     let openSource: (LocalMessageSourceRef) -> Void
     @State private var question = ""
+    /// コンポーザを開いているか。`RedesignComposer` 側の @State に持たせると
+    /// safeAreaInset の再生成で毎回初期値に戻り、開いた直後に畳まれてしまう。
+    @State private var composerExpanded = false
+    @State private var surface: CompanySurface = .document
     @State private var deferredConsentQuestion: String?
     @State private var pendingNewFiling: CompanyPayload?
     @FocusState private var composerFocused: Bool
@@ -454,53 +458,112 @@ private struct RedesignCompanyWorkspace: View {
         appModel.pendingChat(for: normalizedTicker)
     }
 
+    private var hasConversation: Bool {
+        !messages.isEmpty || pendingChat != nil
+    }
+
+    private var surfacePicker: some View {
+        Picker("表示", selection: $surface) {
+            Text("資料").tag(CompanySurface.document)
+            Text("会話").tag(CompanySurface.conversation)
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 10)
+        .background(KabuyomiTheme.paper)
+        .accessibilityIdentifier("redesign.company.surface")
+    }
+
+    private func documentSurface(company: CompanyPayload) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                RedesignResearchOverview(company: company) { source in
+                    openSource(source)
+                }
+
+                if !hasConversation {
+                    Divider().padding(.horizontal, 20)
+                    RedesignQuestionStarters(company: company) { prompt in
+                        question = prompt
+                        composerExpanded = true
+                        composerFocused = true
+                    }
+                }
+
+                Color.clear.frame(height: 12)
+            }
+            .frame(maxWidth: 760)
+            .frame(maxWidth: .infinity)
+            .background(KabuyomiTheme.paper)
+        }
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    private func conversationSurface(company: CompanyPayload) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    conversationSection(company: company)
+                    Color.clear
+                        .frame(height: 12)
+                        .id("research-end")
+                }
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity)
+                .background(KabuyomiTheme.paper)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            // 最新に貼りつくのは会話の面だけ。資料の読み位置は動かさない。
+            .onChange(of: pendingChat?.id) { _, _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("research-end", anchor: .bottom)
+                }
+            }
+            .onChange(of: messages.count) { _, _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("research-end", anchor: .bottom)
+                }
+            }
+        }
+    }
+
     var body: some View {
         Group {
             if let company {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            RedesignWorkspaceContextHeader(
-                                company: company,
-                                isOlderFiling: appModel.isViewingOlderFilingConversation(ticker: normalizedTicker),
-                                openSources: openSources,
-                                openLatest: { appModel.openLatestConversation(for: normalizedTicker) }
-                            )
+                VStack(spacing: 0) {
+                    RedesignWorkspaceContextHeader(
+                        company: company,
+                        isOlderFiling: appModel.isViewingOlderFilingConversation(ticker: normalizedTicker),
+                        openSources: openSources,
+                        openLatest: { appModel.openLatestConversation(for: normalizedTicker) }
+                    )
+                    .frame(maxWidth: 760)
+                    .frame(maxWidth: .infinity)
+                    .background(KabuyomiTheme.paper)
 
-                            RedesignResearchOverview(company: company) { source in
-                                openSource(source)
-                            }
-
-                            if messages.isEmpty, pendingChat == nil {
-                                Divider().padding(.horizontal, 20)
-                                RedesignQuestionStarters(company: company) { prompt in
-                                    question = prompt
-                                    composerFocused = true
-                                }
-                            } else {
-                                Divider().padding(.horizontal, 20)
-                                conversationSection(company: company)
-                            }
-
-                            Color.clear
-                                .frame(height: 12)
-                                .id("research-end")
-                        }
-                        .frame(maxWidth: 760)
-                        .frame(maxWidth: .infinity)
-                        .background(KabuyomiTheme.paper)
+                    if hasConversation {
+                        surfacePicker
                     }
-                    .scrollDismissesKeyboard(.interactively)
-                    .onChange(of: pendingChat?.id) { _, _ in
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("research-end", anchor: .bottom)
+
+                    // 資料と会話は読み方が逆。資料は据え置きで参照したいが、
+                    // 会話は下へ伸び最新に貼りつきたい。1本のスクロールに入れると
+                    // 回答が増えるほど業績が上へ押し流され、数字を見るたびに
+                    // 会話を全部遡ることになる。面を分けて横で行き来する。
+                    TabView(selection: $surface) {
+                        documentSurface(company: company)
+                            .tag(CompanySurface.document)
+                        if hasConversation {
+                            conversationSurface(company: company)
+                                .tag(CompanySurface.conversation)
                         }
                     }
-                    .onChange(of: messages.count) { _, _ in
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("research-end", anchor: .bottom)
-                        }
-                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                }
+                .onChange(of: hasConversation) { _, exists in
+                    // 最初の質問を送ったら回答の面へ連れていく。
+                    // 逆に会話が消えたら資料へ戻す。選択したまま会話タグが外れると
+                    // TabView に対応するページが無くなり、空の面から戻れなくなる。
+                    surface = exists ? .conversation : .document
                 }
             } else if let state = appModel.companyLoadState(for: normalizedTicker) {
                 RedesignCompanyLoadState(state: state) {
@@ -562,6 +625,7 @@ private struct RedesignCompanyWorkspace: View {
             if company != nil {
                 RedesignComposer(
                     question: $question,
+                    isExpandedByUser: $composerExpanded,
                     isFocused: $composerFocused,
                     creditText: appModel.chatCreditStatusText,
                     disabledReason: composerDisabledReason,
@@ -787,53 +851,67 @@ private struct RedesignResearchOverview: View {
         orderedInvestorMetrics(for: company)
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 32) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("概要")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .textCase(.uppercase)
-                Text(company.summary.verdict)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                    .lineSpacing(5)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+    /// 指標タイルのスパークライン用に、同じ論理名の系列を古い順で取り出す。
+    private func history(for metric: MetricPayload) -> [Double] {
+        guard let series = company.historicalOverview?.series.first(where: { $0.logicalName == metric.logicalName }) else {
+            return []
+        }
+        return series.points
+            .sorted(by: { $0.periodEnd < $1.periodEnd })
+            .suffix(4)
+            .map(\.value)
+    }
 
-            if !company.summary.highlights.isEmpty {
-                RedesignEvidenceList(
-                    title: "重要なポイント",
-                    lines: company.summary.highlights,
-                    company: company,
-                    openSource: openSource
-                )
-            }
+    /// 結論 → 数値 → なぜ → 確認点 → 詳細 の順に読ませる。
+    /// 以前は同じ粒度の見出しが5つ縦に並び、長い「推移」が
+    /// 「変化と確認論点」を画面外まで押し下げていた。
+    var body: some View {
+        VStack(alignment: .leading, spacing: 30) {
+            // 「概要」というラベルは中身を説明していないので置かない。
+            // 直上のヘッダに会社名・書類種別・提出日が出ており、文脈は足りている。
+            Text(company.summary.verdict)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(KabuyomiTheme.ink)
+                .lineSpacing(5)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("redesign.company.verdict")
 
             if !metrics.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("主要数値")
-                        .font(.title3.weight(.bold))
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 142), spacing: 16)], alignment: .leading, spacing: 18) {
                         ForEach(metrics) { metric in
-                            RedesignMetricView(metric: metric)
+                            RedesignMetricView(metric: metric, history: history(for: metric))
                         }
                     }
                 }
             }
 
-            if let historicalOverview = company.historicalOverview,
-               !historicalOverview.series.isEmpty {
-                RedesignHistoricalOverview(overview: historicalOverview)
+            if !company.summary.highlights.isEmpty {
+                RedesignEvidenceList(
+                    title: "ポイント",
+                    lines: company.summary.highlights,
+                    company: company,
+                    emphasis: .primary,
+                    openSource: openSource
+                )
             }
 
             if !company.summary.changes.isEmpty {
                 RedesignEvidenceList(
-                    title: "変化と確認論点",
+                    title: "確認したい点",
                     lines: company.summary.changes,
                     company: company,
+                    emphasis: .secondary,
                     openSource: openSource
                 )
+            }
+
+            if let historicalOverview = company.historicalOverview,
+               !historicalOverview.series.isEmpty {
+                RedesignHistoricalOverview(overview: historicalOverview)
             }
         }
         .padding(.horizontal, 22)
@@ -843,16 +921,24 @@ private struct RedesignResearchOverview: View {
 }
 
 private struct RedesignEvidenceList: View {
+    /// 「ポイント」と「確認したい点」は役割が違う。
+    /// 同じ見出しの重さで並べると、どちらが本筋か読み手に伝わらない。
+    enum Emphasis {
+        case primary
+        case secondary
+    }
+
     let title: String
     let lines: [SummaryLinePayload]
     let company: CompanyPayload
+    var emphasis: Emphasis = .primary
     let openSource: (LocalMessageSourceRef) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: emphasis == .primary ? 16 : 12) {
             Text(title)
-                .font(.headline.weight(.bold))
-                .foregroundStyle(KabuyomiTheme.ink)
+                .font(emphasis == .primary ? .headline.weight(.bold) : .subheadline.weight(.bold))
+                .foregroundStyle(emphasis == .primary ? KabuyomiTheme.ink : KabuyomiTheme.inkSoft)
 
             ForEach(lines) { line in
                 VStack(alignment: .leading, spacing: 10) {
@@ -863,8 +949,8 @@ private struct RedesignEvidenceList: View {
                             .padding(.top, 3)
                             .accessibilityHidden(true)
                         Text(line.text)
-                            .font(.body)
-                            .foregroundStyle(KabuyomiTheme.ink)
+                            .font(emphasis == .primary ? .body : .subheadline)
+                            .foregroundStyle(emphasis == .primary ? KabuyomiTheme.ink : KabuyomiTheme.inkSoft)
                             .lineSpacing(5)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -882,10 +968,12 @@ private struct RedesignEvidenceList: View {
                                         Image(systemName: "doc.text.magnifyingglass")
                                             .font(.caption.weight(.semibold))
                                         VStack(alignment: .leading, spacing: 1) {
-                                            Text(investorFacingSourceLabel(for: chunk, in: company))
+                                            let label = investorFacingSourceLabel(for: chunk, in: company)
+                                            Text(label)
                                                 .font(.caption.weight(.bold))
-                                            if !chunk.sectionTitle.isEmpty {
-                                                Text(chunk.sectionTitle)
+                                            // 「売上高 / 売上高」の重複も、英語のままの節見出しも出さない。
+                                            if let subtitle = japaneseFacingSubtitle(chunk.sectionTitle, matching: label) {
+                                                Text(subtitle)
                                                     .font(.caption)
                                                     .foregroundStyle(KabuyomiTheme.inkSoft)
                                             }
@@ -919,22 +1007,39 @@ private struct RedesignEvidenceList: View {
 
 private struct RedesignMetricView: View {
     let metric: MetricPayload
+    /// 同じ指標の履歴があれば、点の値だけでなく向きも一目で分かるようにする。
+    var history: [Double] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(MetricLabeler.title(for: metric.logicalName))
                 .font(.caption)
                 .foregroundStyle(KabuyomiTheme.inkSoft)
-            Text(formattedMetricValue(metric))
-                .font(.title3.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(KabuyomiTheme.ink)
+            HStack(alignment: .bottom, spacing: 10) {
+                Text(formattedMetricValue(metric))
+                    .font(.title3.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(KabuyomiTheme.ink)
+                    // 「1,111.8 / 億ドル」と割れると桁が読み取りにくい。
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Spacer(minLength: 4)
+                if history.count >= 2 {
+                    RedesignSparkline(
+                        values: history,
+                        isPositive: (metric.yoyPercent ?? 0) >= 0
+                    )
+                    .frame(width: 32, height: 16)
+                }
+            }
             if let display = metricYoYDisplay(for: metric) {
                 Label(display.text, systemImage: display.direction == .positive ? "arrow.up.right" : display.direction == .negative ? "arrow.down.right" : "minus")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(KabuyomiTheme.inkSoft)
             } else {
-                Text(metric.periodEnd)
+                // 前年同期比が無い指標だけ ISO 日付が生で出ており、他のタイルと揃っていなかった。
+                // 何の日付か分かる形にして、表記もアプリ内の他の日付と合わせる。
+                Text("期末 \(formattedFilingDate(metric.periodEnd))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -956,47 +1061,54 @@ private struct RedesignMetricView: View {
         if let display = metricYoYDisplay(for: metric) {
             return "\(title)、\(value)、前年同期比 \(display.text)"
         }
-        return "\(title)、\(value)、\(metric.periodEnd)"
+        return "\(title)、\(value)、期末 \(formattedFilingDate(metric.periodEnd))"
     }
 }
 
 private struct RedesignHistoricalOverview: View {
     let overview: HistoricalOverviewPayload
+    /// 4指標 × 4期を常に開いておくと、この1節だけで画面2〜3枚分を占める。
+    /// 結論と数値を先に読ませるため、詳細は必要なときだけ開く。
+    @State private var isExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("推移")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(KabuyomiTheme.ink)
-            Text("過去\(overview.years)期 ・ \(overview.comparisonBasis)")
-                .font(.subheadline)
-                .foregroundStyle(KabuyomiTheme.inkSoft)
-                .fixedSize(horizontal: false, vertical: true)
-
-            ForEach(overview.series.prefix(4)) { series in
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(series.label.isEmpty ? MetricLabeler.title(for: series.logicalName) : series.label)
-                        .font(.headline)
-
-                    ForEach(series.points.sorted(by: { $0.periodEnd > $1.periodEnd }).prefix(4)) { point in
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text(formattedFilingDate(point.periodEnd))
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(formattedMetricValue(point.value, logicalName: series.logicalName, unit: point.unit))
-                                .font(.body.weight(.semibold))
-                                .monospacedDigit()
-                            if let yoy = point.yoyPercent {
-                                Text(formattedSignedYoY(yoy))
-                                    .font(.caption.weight(.semibold))
-                                    .monospacedDigit()
-                            }
-                        }
-                        .accessibilityElement(children: .combine)
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { isExpanded.toggle() }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("推移")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(KabuyomiTheme.ink)
+                        Text("過去\(overview.years)期 ・ \(historicalBasisTitle(overview.comparisonBasis))")
+                            .font(.subheadline)
+                            .foregroundStyle(KabuyomiTheme.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    Spacer(minLength: 8)
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
                 }
-                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("redesign.company.historical.toggle")
+            .accessibilityLabel(isExpanded ? "推移を閉じる" : "推移を開く")
+
+            if isExpanded {
+                historicalSeries
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var historicalSeries: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            ForEach(overview.series.prefix(4)) { series in
+                RedesignTrendChart(series: series)
                 if series.id != overview.series.prefix(4).last?.id {
                     Divider()
                 }
@@ -1051,6 +1163,7 @@ private struct RedesignQuestionStarters: View {
 private struct RedesignComposer: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var question: String
+    @Binding var isExpandedByUser: Bool
     var isFocused: FocusState<Bool>.Binding
     let creditText: String
     let disabledReason: String?
@@ -1058,7 +1171,77 @@ private struct RedesignComposer: View {
     let send: () -> Void
     let openCredits: () -> Void
 
+    /// 読んでいる間まで入力欄とクレジット表示を出し続けると、
+    /// 本文の上に常時110pt の板が乗り、しかも「クレジットが必要です」を
+    /// ずっと突きつけることになる。触れるまでは1行の入り口に畳む。
+    /// 折りたたみ中は TextField 自体が階層に無いため、FocusState を立てても
+    /// 束ねる先が無く SwiftUI に戻される。開くかどうかは別の状態で持つ。
+    private var isExpanded: Bool {
+        isExpandedByUser
+            || isFocused.wrappedValue
+            || isSending
+            || !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
+        Group {
+            if isExpanded {
+                expandedComposer
+                    .task(id: isExpandedByUser) {
+                        // 欄が現れてからでないとフォーカスを渡せない。
+                        if isExpandedByUser { isFocused.wrappedValue = true }
+                    }
+                    // 一度開いたら畳み直さない。フォーカスが外れるたびに閉じると、
+                    // キーボードを下げただけで入力欄が消えて書きかけを見失う。
+            } else {
+                collapsedEntry
+            }
+        }
+
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+        // 半透明だと本文が板の裏に透けて、読む面と聞く面の境目が消える。
+        .background(KabuyomiTheme.paper)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(KabuyomiTheme.separator)
+                .frame(height: 0.5)
+        }
+    }
+
+    private var collapsedEntry: some View {
+        Button {
+            isExpandedByUser = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .accessibilityHidden(true)
+                Text("この資料について質問する")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+            }
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            .background(KabuyomiTheme.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(KabuyomiTheme.separator, lineWidth: 0.75)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("redesign.composer.expand")
+        .accessibilityLabel("この資料について質問する")
+    }
+
+    private var expandedComposer: some View {
         VStack(spacing: 7) {
             HStack(spacing: 8) {
                 if disabledReason == "残高不足" {
@@ -1126,15 +1309,6 @@ private struct RedesignComposer: View {
                 .accessibilityIdentifier("redesign.composer.send")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .padding(.bottom, 6)
-        .background(KabuyomiTheme.paper.opacity(0.97))
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(KabuyomiTheme.separator)
-                .frame(height: 0.5)
-        }
     }
 }
 
@@ -1153,6 +1327,21 @@ private struct RedesignResearchMessage: View {
 
     private var sources: [LocalMessageSourceRef] {
         displayableMessageSources(message.sources, in: company)
+    }
+
+    /// 結論は1文とは限らない。列挙型の回答("1つ目は…2つ目は…")では
+    /// `structureAssistantMessage` が複数文を意図的に結論へまとめる仕様のため、
+    /// 常に .title3 で描くと見出しサイズの塊が数行続いて読みにくくなる。
+    /// 長さで段階的に落とし、短い結論だけを見出しとして立てる。
+    private var conclusionFont: Font {
+        switch structuredAnswer.conclusion.count {
+        case ..<65:
+            return .title3.weight(.medium)
+        case ..<141:
+            return .body.weight(.semibold)
+        default:
+            return .body
+        }
     }
 
     var body: some View {
@@ -1184,7 +1373,7 @@ private struct RedesignResearchMessage: View {
                 }
 
                 Text(structuredAnswer.conclusion)
-                    .font(.title3.weight(.medium))
+                    .font(conclusionFont)
                     .foregroundStyle(KabuyomiTheme.ink)
                     .lineSpacing(6)
                     .textSelection(.enabled)
@@ -1926,4 +2115,10 @@ private struct SettingsDestinationRow: View {
         .frame(minHeight: 48)
         .contentShape(Rectangle())
     }
+}
+
+/// 会社ワークスペースの2つの面。資料は参照用で据え置き、会話は最新に貼りつく。
+private enum CompanySurface: Hashable {
+    case document
+    case conversation
 }

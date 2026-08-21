@@ -19,3 +19,9 @@ CURRENT_SLICE.md
 WORKERS_AGENT_CHAT_RECOVERY.md
 docs/current_shipping_truth.md
 docs/codex/
+
+# 認証情報を置いたファイル(中身は読まない・コミットしない)
+claude api.txt
+*.key
+*.pem
+*api*.txt

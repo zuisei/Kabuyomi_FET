@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>米国株の決算書(10-K / 10-Q)を日本語で読む — Kabuyomi</title>
+<meta name="description" content="米国株のSEC提出書類(10-K・10-Q)を日本語で読むためのiOSアプリ。事業内容・収益源・利益率・キャッシュフロー・リスク要因を確認し、疑問はそのままAIに質問できます。回答には必ず根拠の参照が付きます。">
+<link rel="canonical" href="https://kabuyomi-legal-site.pages.dev/lp/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="米国株の決算書(10-K / 10-Q)を日本語で読む — Kabuyomi">
+<meta property="og:description" content="英語のSEC提出書類を日本語で確認。疑問はAIに質問でき、回答には根拠の参照が付きます。">
+<meta property="og:url" content="https://kabuyomi-legal-site.pages.dev/lp/">
+<style>
+  :root{
+    --bg:#faf8f5; --fg:#241f1a; --muted:#6b6259; --line:#e6ded4;
+    --accent:#b4600f; --card:#fffdfa;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#17140f; --fg:#f2ece4; --muted:#a99e91; --line:#332c24;
+           --accent:#e08b2e; --card:#1f1a14; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+    line-height:1.75;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:720px;margin:0 auto;padding:0 20px}
+  header{padding:64px 0 40px;border-bottom:1px solid var(--line)}
+  h1{font-size:clamp(26px,5.2vw,38px);line-height:1.4;margin:0 0 16px;letter-spacing:-.01em}
+  .lead{font-size:17px;color:var(--muted);margin:0 0 28px}
+  .cta{display:inline-block;background:var(--accent);color:#fff;text-decoration:none;
+    padding:13px 26px;border-radius:10px;font-weight:600}
+  .cta:hover{opacity:.9}
+  .note{font-size:13px;color:var(--muted);margin-top:12px}
+  section{padding:40px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:20px;margin:0 0 18px}
+  h3{font-size:16px;margin:0 0 6px}
+  .item{padding:16px 18px;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;margin-bottom:12px}
+  .item p{margin:0;color:var(--muted);font-size:15px}
+  .q{font-weight:600;margin:22px 0 6px}
+  .a{margin:0;color:var(--muted)}
+  footer{padding:36px 0 64px;font-size:14px;color:var(--muted)}
+  footer a{color:var(--muted)}
+  .disc{background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:16px 18px;font-size:14px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>米国株の決算書を、日本語で読む。</h1>
+  <p class="lead">
+    SECに提出された <strong>10-K(年次報告書)</strong> と <strong>10-Q(四半期報告書)</strong> を
+    日本語で確認できる iPhone アプリです。事業内容・収益源・利益率・キャッシュフロー・リスク要因を追い、
+    分からないところはそのまま質問できます。
+  </p>
+  <a class="cta" href="https://apps.apple.com/jp/app/kabuyomi/id6762764426">App Store で入手(無料)</a>
+  <p class="note">iOS 17.0 以降 / 日本語 · 無料で試せます</p>
+</header>
+
+<section>
+  <h2>英語の決算書で、こんなところで止まりませんか</h2>
+  <div class="item">
+    <h3>そもそも何百ページもある</h3>
+    <p>10-K は本文だけで100ページを超えることが珍しくありません。どこを読めばいいか分からないまま閉じてしまう。</p>
+  </div>
+  <div class="item">
+    <h3>翻訳しても専門用語で止まる</h3>
+    <p>機械翻訳にかけても、会計と業界の用語が混ざった文は意味が通らないままになりがちです。</p>
+  </div>
+  <div class="item">
+    <h3>要約は読めるが、根拠が分からない</h3>
+    <p>まとめ記事は読みやすい一方、その数字がどの書類のどこから来たのかは辿れません。</p>
+  </div>
+</section>
+
+<section>
+  <h2>Kabuyomi でできること</h2>
+  <div class="item">
+    <h3>銘柄を選ぶだけで、資料が開く</h3>
+    <p>ティッカーで検索し、その企業の 10-K / 10-Q を選んで開きます。過去の提出分にも遡れ、最大3年分を並べて比較できます。</p>
+  </div>
+  <div class="item">
+    <h3>日本語で読み、そのまま質問できる</h3>
+    <p>資料の内容を日本語で確認し、気になった点はチャットで追加の質問ができます。会話の履歴は残ります。</p>
+  </div>
+  <div class="item">
+    <h3>回答には根拠の参照が付く</h3>
+    <p>答えの元になった箇所への参照と、SEC の原文へのリンクを表示します。数字の出どころを自分で確認できます。</p>
+  </div>
+  <div class="item">
+    <h3>引用の翻訳</h3>
+    <p>原文の一節をそのまま日本語で確認できます。</p>
+  </div>
+</section>
+
+<section>
+  <h2>よくある質問</h2>
+  <p class="q">無料で使えますか</p>
+  <p class="a">無料で始められます。継続して多く使う場合のために、月額プランと追加クレジットを用意しています。</p>
+  <p class="q">対応している書類は</p>
+  <p class="a">米国 SEC に提出された 10-K と 10-Q です。8-K や日本株の書類には対応していません。</p>
+  <p class="q">投資の助言をしてくれますか</p>
+  <p class="a">いいえ。売買の推奨、株価の予測、目標株価の提示は行いません。資料を読むための道具です。</p>
+  <p class="q">回答は正確ですか</p>
+  <p class="a">回答は提出書類に基づいて生成し、根拠箇所への参照を付けています。ただし生成された文章に誤りが含まれる可能性は残るため、重要な判断の前には表示される原文リンクでご確認ください。</p>
+</section>
+
+<section>
+  <div class="disc">
+    本アプリは投資助言、売買推奨、株価予測、目標株価の提示を目的としたものではありません。
+    投資判断はご自身の責任で行ってください。
+  </div>
+</section>
+
+<footer>
+  <p>
+    <a href="../terms/">利用条件</a> ·
+    <a href="../privacy/">プライバシーポリシー</a> ·
+    <a href="../support/">サポート</a> ·
+    <a href="../tokushoho/">特定商取引法に基づく表記</a>
+  </p>
+  <p>Kabuyomi</p>
+</footer>
+
+</div>
+</body>
+</html>

@@ -6,8 +6,8 @@ vi.mock("../src/clients/sec", () => ({
   fetchMetricSnapshots: vi.fn()
 }));
 
-vi.mock("../src/clients/gemini", () => ({
-  generateSummary: vi.fn(async () => ({
+vi.mock("../src/clients/llm/provider", () => ({
+  generateModelSummary: vi.fn(async () => ({
     summary: {
       verdict: "metrics only",
       highlights: [],
@@ -18,7 +18,7 @@ vi.mock("../src/clients/gemini", () => ({
 }));
 
 import type { FilingReference, MetricSnapshot } from "../src/env";
-import { generateSummary } from "../src/clients/gemini";
+import { generateModelSummary } from "../src/clients/llm/provider";
 import { buildPrimaryDocumentUrl, fetchFilingAssets, fetchMetricSnapshots } from "../src/clients/sec";
 import { ingestFiling } from "../src/lib/filings/ingest";
 
@@ -70,7 +70,9 @@ describe("ingestFiling metrics-only mode", () => {
     expect(fetchMetricSnapshots).toHaveBeenCalledTimes(1);
     expect(fetchFilingAssets).not.toHaveBeenCalled();
     expect(buildPrimaryDocumentUrl).toHaveBeenCalledTimes(1);
-    expect(generateSummary).toHaveBeenCalledTimes(1);
+    expect(generateModelSummary).toHaveBeenCalledTimes(1);
+    // metrics_only の初回取り込みは、プロバイダを呼ばずテンプレートを返す意図を引数で示す。
+    expect(vi.mocked(generateModelSummary).mock.calls[0]?.[2]).toEqual({ forceFallback: true });
     expect(record.mdaText).toBe("");
     expect(record.mdaTokenCount).toBe(0);
     expect(record.sourceChunks.every((chunk) => chunk.sectionType === "xbrl_metric")).toBe(true);

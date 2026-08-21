@@ -166,7 +166,10 @@ async function seedConsumablePurchase(
   options: { transactionId: string; productId: string; credits: number }
 ) {
   const quotaSubject = "account:notification-owner";
-  const now = "2026-07-10T00:00:00.000Z";
+  // サブスクの期限判定は実時刻と突き合わせるため、近い将来の日付を置くと
+  // その日を境にテストが落ちる(2026-08-01 の expiresDate で実際に起きた)。
+  // シナリオ全体を相対関係を保ったまま遠い将来へ移してある。
+  const now = "2099-07-10T00:00:00.000Z";
   test.purchases.set(options.transactionId, {
     user_id: quotaSubject,
     product_id: options.productId,
@@ -195,7 +198,7 @@ async function seedConsumablePurchase(
       action: "grantPurchasedCredit",
       quotaSubject,
       plan: "free",
-      dateJST: "2026-07-11",
+      dateJST: "2099-07-11",
       chatLimit: 3,
       stockLimit: 3,
       monthlyCreditLimit: 0,
@@ -215,8 +218,8 @@ describe("App Store Server Notifications V2", () => {
   let productId = "kabuyomi.sub.pro.monthly";
   let notificationTypeOverride: string | null = null;
   let transactionIdOverride: string | null = null;
-  let purchaseDate = Date.parse("2026-07-01T00:00:00Z");
-  let notificationSignedDate = Date.parse("2026-07-11T00:00:00Z");
+  let purchaseDate = Date.parse("2099-07-01T00:00:00Z");
+  let notificationSignedDate = Date.parse("2099-07-11T00:00:00Z");
   let transactionFailuresRemaining = 0;
   beforeEach(() => {
     revoked = false;
@@ -224,15 +227,15 @@ describe("App Store Server Notifications V2", () => {
     productId = "kabuyomi.sub.pro.monthly";
     notificationTypeOverride = null;
     transactionIdOverride = null;
-    purchaseDate = Date.parse("2026-07-01T00:00:00Z");
-    notificationSignedDate = Date.parse("2026-07-11T00:00:00Z");
+    purchaseDate = Date.parse("2099-07-01T00:00:00Z");
+    notificationSignedDate = Date.parse("2099-07-11T00:00:00Z");
     transactionFailuresRemaining = 0;
     setAppleSignedDataVerifierFactoryForTests((_env, environment) => ({
       verifyAndDecodeNotification: async () => ({
         notificationUUID: uuid,
         notificationType: notificationTypeOverride ?? (revoked ? "REFUND" : "DID_RENEW"),
         version: "2.0",
-        signedDate: revoked ? Date.parse("2026-07-12T00:00:00Z") : notificationSignedDate,
+        signedDate: revoked ? Date.parse("2099-07-12T00:00:00Z") : notificationSignedDate,
         environment: Environment.SANDBOX,
         data: { signedTransactionInfo: "transaction-jws" }
       }),
@@ -247,9 +250,9 @@ describe("App Store Server Notifications V2", () => {
           productId,
           bundleId: "app.kabuyomi.ios",
           purchaseDate,
-          expiresDate: Date.parse("2026-08-01T00:00:00Z"),
-          revocationDate: revoked ? Date.parse("2026-07-12T00:00:00Z") : undefined,
-          signedDate: revoked ? Date.parse("2026-07-12T00:00:00Z") : notificationSignedDate,
+          expiresDate: Date.parse("2099-08-01T00:00:00Z"),
+          revocationDate: revoked ? Date.parse("2099-07-12T00:00:00Z") : undefined,
+          signedDate: revoked ? Date.parse("2099-07-12T00:00:00Z") : notificationSignedDate,
           environment: environment === "sandbox" ? Environment.SANDBOX : Environment.PRODUCTION
         };
       },
@@ -280,7 +283,7 @@ describe("App Store Server Notifications V2", () => {
     uuid = "notification-uuid-2";
     const response = await handleAppleNotificationsV2Route({ ...base, request: request() } as never);
     expect(response?.status).toBe(200);
-    expect(test.entitlementState.values.get("current:v2")).toMatchObject({ status: "revoked", revokedAt: "2026-07-12T00:00:00.000Z" });
+    expect(test.entitlementState.values.get("current:v2")).toMatchObject({ status: "revoked", revokedAt: "2099-07-12T00:00:00.000Z" });
     expect(test.quotaState.values.get("credit_state")).toMatchObject({ monthlyRemaining: 900 });
   });
 
@@ -334,8 +337,8 @@ describe("App Store Server Notifications V2", () => {
 
     uuid = "notification-uuid-upgrade";
     productId = "kabuyomi.sub.pro.monthly";
-    purchaseDate = Date.parse("2026-07-15T00:00:00Z");
-    notificationSignedDate = Date.parse("2026-07-15T00:05:00Z");
+    purchaseDate = Date.parse("2099-07-15T00:00:00Z");
+    notificationSignedDate = Date.parse("2099-07-15T00:05:00Z");
     const upgrade = await handleAppleNotificationsV2Route({ ...base, request: request("notification-upgrade-jws") } as never);
     expect(upgrade?.status).toBe(200);
 
@@ -344,8 +347,8 @@ describe("App Store Server Notifications V2", () => {
       .map(([, value]) => value as { creditsGranted: number });
     expect(monthlyGrants.map((grant) => grant.creditsGranted).sort((a, b) => a - b)).toEqual([400, 500]);
     expect(test.quotaState.values.get("credit_state")).toMatchObject({
-      periodStart: "2026-07-01T00:00:00.000Z",
-      periodEnd: "2026-08-01T00:00:00.000Z",
+      periodStart: "2099-07-01T00:00:00.000Z",
+      periodEnd: "2099-08-01T00:00:00.000Z",
       monthlyLimit: 900,
       monthlyRemaining: 900
     });
@@ -368,7 +371,7 @@ describe("App Store Server Notifications V2", () => {
         action: "consumeCredit",
         quotaSubject,
         plan: "free",
-        dateJST: "2026-07-11",
+        dateJST: "2099-07-11",
         chatLimit: 3,
         stockLimit: 3,
         monthlyCreditLimit: 0,
