@@ -1,5 +1,7 @@
 # v1.2 提出シート(2026-08-21)
 
+> **Historical release evidence — not current shipping authority.** This point-in-time report preserves prior findings and may describe deployments, capabilities, or release decisions that have since changed. Use `CURRENT_SHIPPING_TRUTH.md`, `FEATURE_PARITY_COMPATIBILITY_REPORT.md`, `RELEASE_GATE_STATE.json`, and `FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md` for current decisions.
+
 App Store Connect にそのまま貼れる形にまとめたもの。根拠は `ASO_PROPOSAL_2026-08.md`、診断は `../../HANDOFF_2026-08-21.md`。
 
 ## 1. ストア情報(名称・サブタイトル・キーワードは新バージョン提出時にしか変更できない)
