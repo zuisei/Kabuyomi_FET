@@ -685,3 +685,61 @@ A: 売上高は 1,111.8億ドル で、前年同期比 16.6%増 です。売上�
 **13件は設定1つで挙動が変わる位置にいる。** ただしこれは品質の実験であってバグ修正ではなく、
 A/B で測ってから決めるべきものなので**今回は触っていない**。
 「112問を直す」のではなく「この13件を active で測る」が次の一手として具体的。
+
+---
+
+# 現在地(2026-08-22 時点・再開用)
+
+## 本番
+
+- **`remote_config` は再発行済みで健全。** 失効は **2026-10-05T13:20:25Z**(JST 10/05 22:20)。
+  KV / D1 LKG とも同一バージョン。**時間の圧はもう無い。**
+- `dailyRefreshEnabled=true` が稼働中。8/21 18:00 UTC の cron で銘柄スナップショットが
+  10,387件に更新された(6週間ぶり)。SEC ブロックは無し。
+- **Worker のコードは 2026-07-13 の candidate `ff298a10` のまま。** 下記の修正は入っていない。
+
+## 手元(未push・未デプロイ)
+
+`main` にローカル4コミット(origin/main より4つ先)。**意図的に push していない。**
+
+```
+f0f4b0d fix(ios): show the subscription renewal date instead of a raw ISO string
+09e9bf5 docs(quality): record the post-change verification and the LKG evidence
+a9a8565 fix(worker): charge the SEC rate limiter once per real HTTP request
+0eedad2 fix: close the audit findings that break production on a clock
+```
+
+PR #20 は**既にマージ済み**。上記4件はそのマージ後に main へ直接積んだもの。
+レビューを通したい場合はブランチに移し替えてから push すること。
+
+## デプロイを再開するときに必ず出るエラー
+
+```
+$ cd workers && npm run deploy:check
+Error: production_release_guard_failed:quality_waiver:deployed_candidate_id_mismatch
+```
+
+原因は明快で、**修正でツリーが変わり candidate ハッシュが動いたため**、
+`docs/release/RELEASE_GATE_STATE.json` に記録された waiver(candidate
+`4c260689…` / `lastValidatedCommit: 3964e45`)と一致しなくなっている。故障ではない。
+
+解除の道は2つ:
+
+1. **証跡を録り直す** — test にデプロイ → `npm run testbench:run` で150行を再実行 →
+   `RELEASE_GATE_STATE.json` を新 candidate で更新 → 本番デプロイ。筋は通るが実費と時間がかかる
+2. **waiver を新 candidate に向けて再記録** — 早い。単体テストは全緑
+   (Worker 1154 / iOS 206 / sec-fetcher 15、typecheck クリーン)なので根拠はあるが、
+   150行の再測定はしないことになる
+
+## 私の手が届かない残件
+
+- **App Store 提出**: スクリーンショット差し替え(画像は `artifacts/appstore-2026-08/out/` に作成済み・
+  1320×2868)と ASO 文字列の設定。どちらも App Store Connect の UI 操作
+- **ビルド番号を上げる場合**: `project.yml` / `AppModelTests.swift` / `wrangler.toml` の3点を
+  揃えて更新し、**Worker をデプロイしてから提出**(でないと新規インストールが無言で落ちる)
+
+## 測ってから決める枠(未着手・バグではない)
+
+`HARD_INTENT_TARGETED_RETRIEVAL_MODE` が `diagnostic` のため、
+150行中 **13件** が `retry_blocked:hard_intent_retry_disabled` で追加検索を実行していない。
+`active` にすると最大3ソース/3000字を足せる。**A/B で測ってから判断する話。**
