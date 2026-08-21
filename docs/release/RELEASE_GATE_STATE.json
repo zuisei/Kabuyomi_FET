@@ -4,11 +4,11 @@
   "asOf": "2026-08-21",
   "auditSnapshot": "b61602ef55e2499cccd46e32f53e29bb61c83aa7",
   "releaseDecision": "GO",
-  "releaseCandidateId": "38ff7db2b60043e71608e6780696abc3afa7650ab90b095c9eee85df0ea9014a",
+  "releaseCandidateId": "4c260689d84ebc29f515890c2361384f2e93d60132c0b2bc65be3d975db412c9",
   "openP0Ids": [],
-  "nextLocalReleaseCandidateId": "38ff7db2b60043e71608e6780696abc3afa7650ab90b095c9eee85df0ea9014a",
-  "lastValidatedCommit": "519b8fac5e62ba6225d4662cbbc776af5112f99a",
-  "validationScope": "Release candidate 38ff7db2 restores AI filing summaries. Production v9 filings were 30/30 summaryProvider=fallback since the 2026-05-02 switch to LLM_PROVIDER=openai: generateSummary had no OpenAI implementation and isFilingSummaryUpgradeAvailable was pinned to gemini-legacy, so the deliberate first-ingest fallback template was never replaced. Summaries now route through a provider-aware generateModelSummary with one schema-retry, the upgrade gate follows the selected provider's own key, and the summary prompt enforces the app's number formatting. Validated: worker typecheck clean; 1142 unit tests pass with 4 pre-existing App Store Server Notifications V2 failures that also fail on an unmodified tree; 150-row full smoke run 2026-08-21-summary-openai-baseline-r1 with 0.0% quality fallback, 0 hard-intent fallback, 0 weak source evidence, p95 5003ms, gate pass; test-worker end-to-end confirmation that a filing regenerates with summaryProvider=openai and real Japanese content. NOT validated: row-by-row human review of the 150-row packet (unsealed, covered by the recorded oneTimeQualityRerunWaiver); iOS submission; StoreKit/TestFlight lifecycle; chat answer quality, which is unchanged (deterministic 112 / historical 15 / openai 23 of 150, matching the 2026-07-13 baseline).",
+  "nextLocalReleaseCandidateId": "4c260689d84ebc29f515890c2361384f2e93d60132c0b2bc65be3d975db412c9",
+  "lastValidatedCommit": "3964e45a8c8b5682ea78a59c62ec1204dd2d095b",
+  "validationScope": "Release candidate 4c260689 keeps the 38ff7db2 summary restoration and adds the fixes from the pre-submission code review. Validated: worker typecheck clean; 1146 unit tests pass with 4 pre-existing App Store Server Notifications V2 failures that also fail on an unmodified tree; iOS unit gate 204/204; new deploy guard asserts the App Attest bundle-version allowlist covers ios/project.yml CURRENT_PROJECT_VERSION, with 4 tests. NOT validated: row-by-row human review of the 150-row packet (unsealed, covered by the recorded waiver); the 150-row suite was not re-run after these fixes; iOS submission; StoreKit/TestFlight lifecycle; chat answer quality, which is unchanged (deterministic 112 / historical 15 / openai 23 of 150).",
   "authoritativeDocuments": [
     "docs/release/CURRENT_SHIPPING_TRUTH.md",
     "docs/release/FEATURE_PARITY_COMPATIBILITY_REPORT.md",
@@ -252,9 +252,9 @@
   "oneTimeQualityRerunWaiver": {
     "status": "APPROVED_BY_RELEASE_OWNER",
     "approvedAt": "2026-08-21",
-    "deployedCandidateId": "38ff7db2b60043e71608e6780696abc3afa7650ab90b095c9eee85df0ea9014a",
+    "deployedCandidateId": "4c260689d84ebc29f515890c2361384f2e93d60132c0b2bc65be3d975db412c9",
     "lastQualityCandidateId": "56c0c2090f26e087b6890534e1ff28dd23843671f84842f4b880f80adad1e049",
-    "scope": "Summary provider restoration (production v9 filings were 30/30 summaryProvider=fallback; summaries now route through OpenAI and the upgrade path is no longer gated to gemini-legacy). The 150-row full smoke WAS executed on 2026-08-21 as run 2026-08-21-summary-openai-baseline-r1 with 150 rows, 0.0% quality fallback, 0 hard-intent fallback, 0 weak source evidence, and quality gate pass. Row-by-row human review was NOT performed, so the human review packet is unsealed and the accepted manifest still points at candidate 56c0c209.",
+    "scope": "Summary provider restoration plus the review fixes on top of it: App Attest bundle-version allowlist now covers the next iOS build and is asserted at deploy time against ios/project.yml, the summary upgrade records failures and backs off for 6 hours instead of retrying on every view, and the iOS trend chart encodes magnitude rather than distance from zero so all-negative series are no longer inverted. The 150-row full smoke WAS executed on 2026-08-21 as run 2026-08-21-summary-openai-baseline-r1 with 150 rows, 0.0% quality fallback, 0 hard-intent fallback, 0 weak source evidence, and quality gate pass; it was NOT re-run after these fixes, which do not touch the chat answer path. Row-by-row human review was NOT performed, so the human review packet is unsealed and the accepted manifest still points at candidate 56c0c209.",
     "normalDeployGuardExpectedToFailUntilRefreshed": true
   },
   "completionCriteria": {
