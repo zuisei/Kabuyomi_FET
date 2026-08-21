@@ -561,7 +561,9 @@ private struct RedesignCompanyWorkspace: View {
                 }
                 .onChange(of: hasConversation) { _, exists in
                     // 最初の質問を送ったら回答の面へ連れていく。
-                    if exists { surface = .conversation }
+                    // 逆に会話が消えたら資料へ戻す。選択したまま会話タグが外れると
+                    // TabView に対応するページが無くなり、空の面から戻れなくなる。
+                    surface = exists ? .conversation : .document
                 }
             } else if let state = appModel.companyLoadState(for: normalizedTicker) {
                 RedesignCompanyLoadState(state: state) {

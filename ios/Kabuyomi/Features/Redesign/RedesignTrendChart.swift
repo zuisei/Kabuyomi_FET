@@ -1,19 +1,45 @@
 import SwiftUI
 
 /// 推移は本質的に視覚的な情報だが、これまで日付と数値の表として描かれていた。
-/// `historicalChartScale` / `historicalChartY` は用意されテストもあったのに、
-/// それを使うビューが存在しなかった。ここでその穴を埋める。
 ///
 /// 棒で描くのは、四半期・年次の離散した提出データを線で結ぶと
 /// 期間の間を補間しているように見えてしまうため。
+///
+/// 高さはゼロ基線ではなく絶対値の比で決める(`TrendBarGeometry`)。
+/// ゼロ基線だと全期間が赤字の系列で上下が反転するため。
+
+
+/// ゼロ基線からの高さで描くと、全期間が赤字の系列で上下が反転する。
+/// 例: -10億と-50億なら、scale は min=-50億 / max=0 になり、
+/// 「0 に近い -10億」のほうが高い棒になって「大きいほど良い」と読めてしまう。
+/// 棒の高さは絶対値の比で決め、符号は色で示す。
+struct TrendBarGeometry {
+    let magnitudeRatio: Double
+    let isNegative: Bool
+
+    init(value: Double, values: [Double]) {
+        let peak = values.map(abs).max() ?? 0
+        self.magnitudeRatio = peak > 0 ? abs(value) / peak : 0
+        self.isNegative = value < 0
+    }
+
+    func height(in available: CGFloat, minimum: CGFloat) -> CGFloat {
+        max(CGFloat(magnitudeRatio) * available, minimum)
+    }
+}
 
 /// 指標タイルに添える極小の推移。値の大小ではなく「向き」を伝えるためのもの。
 struct RedesignSparkline: View {
     let values: [Double]
     let isPositive: Bool
 
-    private var scale: HistoricalChartScale {
-        historicalChartScale(values: values)
+    private func barTint(isLatest: Bool, isNegative: Bool) -> Color {
+        if isNegative {
+            return isLatest ? KabuyomiTheme.ink.opacity(0.75) : KabuyomiTheme.ink.opacity(0.22)
+        }
+        return isLatest
+            ? (isPositive ? KabuyomiTheme.accentDeep : KabuyomiTheme.ink).opacity(0.85)
+            : KabuyomiTheme.inkMuted.opacity(0.28)
     }
 
     var body: some View {
@@ -23,13 +49,10 @@ struct RedesignSparkline: View {
             let barWidth = max((proxy.size.width - spacing * CGFloat(max(count - 1, 0))) / CGFloat(max(count, 1)), 1)
             HStack(alignment: .bottom, spacing: spacing) {
                 ForEach(Array(values.enumerated()), id: \.offset) { index, value in
-                    let top = historicalChartY(value: value, scale: scale, height: proxy.size.height)
-                    let height = max(proxy.size.height - top, 1.5)
+                    let bar = TrendBarGeometry(value: value, values: values)
                     RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                        .fill(index == count - 1
-                              ? (isPositive ? KabuyomiTheme.accentDeep : KabuyomiTheme.ink).opacity(0.85)
-                              : KabuyomiTheme.inkMuted.opacity(0.28))
-                        .frame(width: barWidth, height: height)
+                        .fill(barTint(isLatest: index == count - 1, isNegative: bar.isNegative))
+                        .frame(width: barWidth, height: bar.height(in: proxy.size.height, minimum: 1.5))
                 }
             }
             .frame(maxHeight: .infinity, alignment: .bottom)
@@ -47,9 +70,7 @@ struct RedesignTrendChart: View {
         Array(series.points.sorted(by: { $0.periodEnd < $1.periodEnd }).suffix(4))
     }
 
-    private var scale: HistoricalChartScale {
-        historicalChartScale(values: orderedPoints.map(\.value))
-    }
+    private var values: [Double] { orderedPoints.map(\.value) }
 
     private var latest: HistoricalMetricPointPayload? { orderedPoints.last }
 
@@ -80,13 +101,10 @@ struct RedesignTrendChart: View {
                 let barWidth = max((proxy.size.width - spacing * CGFloat(max(count - 1, 0))) / CGFloat(max(count, 1)), 1)
                 HStack(alignment: .bottom, spacing: spacing) {
                     ForEach(Array(orderedPoints.enumerated()), id: \.element.id) { index, point in
-                        let top = historicalChartY(value: point.value, scale: scale, height: proxy.size.height)
-                        let height = max(proxy.size.height - top, 2)
+                        let bar = TrendBarGeometry(value: point.value, values: values)
                         RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .fill(index == count - 1
-                                  ? KabuyomiTheme.accentDeep.opacity(0.85)
-                                  : KabuyomiTheme.inkMuted.opacity(0.25))
-                            .frame(width: barWidth, height: height)
+                            .fill(barTint(isLatest: index == count - 1, isNegative: bar.isNegative))
+                            .frame(width: barWidth, height: bar.height(in: proxy.size.height, minimum: 2))
                     }
                 }
                 .frame(maxHeight: .infinity, alignment: .bottom)
@@ -104,6 +122,14 @@ struct RedesignTrendChart: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilitySummary)
+    }
+
+    /// 赤字の期は色で区別する。高さは絶対値なので、色が無いと符号が読めない。
+    private func barTint(isLatest: Bool, isNegative: Bool) -> Color {
+        if isNegative {
+            return isLatest ? KabuyomiTheme.ink.opacity(0.75) : KabuyomiTheme.ink.opacity(0.22)
+        }
+        return isLatest ? KabuyomiTheme.accentDeep.opacity(0.85) : KabuyomiTheme.inkMuted.opacity(0.25)
     }
 
     private var accessibilitySummary: String {

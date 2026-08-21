@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { computeReleaseCandidate } from "./release-candidate.mjs";
@@ -32,11 +33,44 @@ export function buildWranglerDeployArgs({ target, dryRun, releaseCandidateId }) 
   ];
 }
 
+/// iOS のビルド番号が Worker の App Attest allowlist に入っているか照合する。
+/// 入っていないと、提出は通るのに新規インストールだけが黙って
+/// restricted_installation に落ちる(エラーは表示されない)。
+export function assertAppAttestBundleVersionCovered(allowlist, iosBuildNumber) {
+  const allowed = String(allowlist ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  const build = String(iosBuildNumber ?? "").trim();
+  if (!build) throw new Error("ios_build_number_unreadable");
+  if (!allowed.includes(build)) {
+    throw new Error(
+      `app_attest_bundle_version_not_covered:ios_build=${build},allowlist=${allowed.join("|") || "empty"}`
+    );
+  }
+}
+
+function readIosBuildNumber(repositoryDir) {
+  const projectPath = join(repositoryDir, "ios/project.yml");
+  const match = readFileSync(projectPath, "utf8").match(/^\s*CURRENT_PROJECT_VERSION:\s*(\S+)/mu);
+  return match?.[1];
+}
+
+function readWranglerBundleVersions(workersDirPath, target) {
+  const configPath = join(workersDirPath, target === "test" ? "wrangler.test.toml" : "wrangler.toml");
+  const match = readFileSync(configPath, "utf8").match(/^APP_ATTEST_ALLOWED_BUNDLE_VERSIONS\s*=\s*"([^"]*)"/mu);
+  return match?.[1];
+}
+
 export async function prepareDeploy(request, options = {}) {
   const candidate = await computeReleaseCandidate({ workersDir: options.workersDir ?? workersDir });
   let releaseEvidence = null;
   if (request.target === "production" && !request.dryRun) {
     const localWorkersDir = resolve(options.workersDir ?? workersDir);
+    assertAppAttestBundleVersionCovered(
+      readWranglerBundleVersions(localWorkersDir, request.target),
+      readIosBuildNumber(resolve(localWorkersDir, ".."))
+    );
     const manifestPath = resolve(
       options.manifestPath ??
       process.env.KABUYOMI_RELEASE_EVIDENCE_MANIFEST?.trim() ??

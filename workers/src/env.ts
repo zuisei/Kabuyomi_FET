@@ -226,6 +226,9 @@ export interface FilingCacheRecord {
   sourceChunks: SourceChunkRecord[];
   summary: SummaryRecord;
   summaryProvider?: "gemini" | "openai" | "fallback";
+  /// 要約の差し替えに失敗した時刻(ISO)。恒久的に失敗する資料を
+  /// 閲覧のたびに再試行してモデル呼び出しを浪費しないための目印。
+  summaryUpgradeFailedAt?: string;
   contentMode?: "full" | "metrics_only";
   generatedAt: string;
   extractorVersion: string;

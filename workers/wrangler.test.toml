@@ -48,7 +48,11 @@ APP_ATTEST_TEAM_ID = "UGCJZH9KG4"
 APP_ATTEST_BUNDLE_ID = "app.kabuyomi.ios"
 APP_ATTEST_ALLOWED_ENVIRONMENTS = "development"
 APP_ATTEST_ALLOWED_VALIDATION_CATEGORIES = "3"
-APP_ATTEST_ALLOWED_BUNDLE_VERSIONS = "6"
+# ios/project.yml の CURRENT_PROJECT_VERSION と一致させること。
+# 一致しないビルドは attestation_bundle_version_not_allowed で拒否され、
+# 新規インストールが黙って restricted_installation に落ちる。
+# deploy-worker.mjs が本番デプロイ時に照合する。
+APP_ATTEST_ALLOWED_BUNDLE_VERSIONS = "6,7"
 APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS = "true"
 
 [observability]
