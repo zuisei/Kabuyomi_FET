@@ -434,6 +434,9 @@ private struct RedesignCompanyWorkspace: View {
     let openSources: () -> Void
     let openSource: (LocalMessageSourceRef) -> Void
     @State private var question = ""
+    /// コンポーザを開いているか。`RedesignComposer` 側の @State に持たせると
+    /// safeAreaInset の再生成で毎回初期値に戻り、開いた直後に畳まれてしまう。
+    @State private var composerExpanded = false
     @State private var deferredConsentQuestion: String?
     @State private var pendingNewFiling: CompanyPayload?
     @FocusState private var composerFocused: Bool
@@ -562,6 +565,7 @@ private struct RedesignCompanyWorkspace: View {
             if company != nil {
                 RedesignComposer(
                     question: $question,
+                    isExpandedByUser: $composerExpanded,
                     isFocused: $composerFocused,
                     creditText: appModel.chatCreditStatusText,
                     disabledReason: composerDisabledReason,
@@ -956,13 +960,16 @@ private struct RedesignMetricView: View {
                     .font(.title3.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(KabuyomiTheme.ink)
+                    // 「1,111.8 / 億ドル」と割れると桁が読み取りにくい。
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 Spacer(minLength: 4)
                 if history.count >= 2 {
                     RedesignSparkline(
                         values: history,
                         isPositive: (metric.yoyPercent ?? 0) >= 0
                     )
-                    .frame(width: 40, height: 18)
+                    .frame(width: 32, height: 16)
                 }
             }
             if let display = metricYoYDisplay(for: metric) {
@@ -1096,6 +1103,7 @@ private struct RedesignQuestionStarters: View {
 private struct RedesignComposer: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var question: String
+    @Binding var isExpandedByUser: Bool
     var isFocused: FocusState<Bool>.Binding
     let creditText: String
     let disabledReason: String?
@@ -1103,7 +1111,77 @@ private struct RedesignComposer: View {
     let send: () -> Void
     let openCredits: () -> Void
 
+    /// 読んでいる間まで入力欄とクレジット表示を出し続けると、
+    /// 本文の上に常時110pt の板が乗り、しかも「クレジットが必要です」を
+    /// ずっと突きつけることになる。触れるまでは1行の入り口に畳む。
+    /// 折りたたみ中は TextField 自体が階層に無いため、FocusState を立てても
+    /// 束ねる先が無く SwiftUI に戻される。開くかどうかは別の状態で持つ。
+    private var isExpanded: Bool {
+        isExpandedByUser
+            || isFocused.wrappedValue
+            || isSending
+            || !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
+        Group {
+            if isExpanded {
+                expandedComposer
+                    .task(id: isExpandedByUser) {
+                        // 欄が現れてからでないとフォーカスを渡せない。
+                        if isExpandedByUser { isFocused.wrappedValue = true }
+                    }
+                    // 一度開いたら畳み直さない。フォーカスが外れるたびに閉じると、
+                    // キーボードを下げただけで入力欄が消えて書きかけを見失う。
+            } else {
+                collapsedEntry
+            }
+        }
+
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+        // 半透明だと本文が板の裏に透けて、読む面と聞く面の境目が消える。
+        .background(KabuyomiTheme.paper)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(KabuyomiTheme.separator)
+                .frame(height: 0.5)
+        }
+    }
+
+    private var collapsedEntry: some View {
+        Button {
+            isExpandedByUser = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .accessibilityHidden(true)
+                Text("この資料について質問する")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+            }
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            .background(KabuyomiTheme.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(KabuyomiTheme.separator, lineWidth: 0.75)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("redesign.composer.expand")
+        .accessibilityLabel("この資料について質問する")
+    }
+
+    private var expandedComposer: some View {
         VStack(spacing: 7) {
             HStack(spacing: 8) {
                 if disabledReason == "残高不足" {
@@ -1170,15 +1248,6 @@ private struct RedesignComposer: View {
                 .accessibilityLabel("質問を送信")
                 .accessibilityIdentifier("redesign.composer.send")
             }
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .padding(.bottom, 6)
-        .background(KabuyomiTheme.paper.opacity(0.97))
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(KabuyomiTheme.separator)
-                .frame(height: 0.5)
         }
     }
 }
