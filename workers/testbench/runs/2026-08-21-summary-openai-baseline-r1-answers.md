@@ -5006,4 +5006,3 @@ Sources:
 - S15: XBRL 1年内返済予定の長期債務 (LongTermDebtCurrent) (xbrl_metric)
 - S17: XBRL 長期債務（非流動） (LongTermDebtNoncurrent) (xbrl_metric)
 - S13: XBRL 営業CF (NetCashProvidedByUsedInOperatingActivities) (xbrl_metric)
-
