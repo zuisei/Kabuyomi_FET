@@ -258,11 +258,13 @@ async function fetchFromCloudflareInternalSecFetcher(
   payload: Record<string, unknown>
 ): Promise<unknown> {
   try {
-    // 経路の入口で1回。ここで払うのは「この呼び出しを始めてよいか」の分。
-    await waitForSecRateLimit(env, path);
-    // そのうえで、実際に SEC を叩くたび(再試行を含む)に1トークン払う。
-    // 入口の1回だけだと、429/5xx が続いたときに 1トークンで
-    // retryCount+1 回まで SEC を叩けてしまい、予算を静かに超える。
+    // 課金は「実際に SEC を叩く直前」の1点だけに寄せる。1 HTTP リクエスト = 1トークン。
+    //
+    // 以前は経路の入口で 1〜2トークンをまとめて払っていたが、
+    // (a) `fetchWithRetry` の再試行が1トークンも払わずに SEC を叩けてしまい、
+    // (b) 逆にキャッシュヒットで SEC を叩かない場合でも払っていた。
+    // どちらも実リクエスト数とずれる。入口の課金は残さない
+    // (残すと1リクエストに2トークン払うことになり、予算が実質半分になる)。
     const service = createCloudflareSecFetcherService(env, {
       beforeAttempt: () => waitForSecRateLimit(env, path, 1)
     });
