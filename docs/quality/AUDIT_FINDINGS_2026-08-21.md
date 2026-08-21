@@ -416,10 +416,19 @@ test には `GEMINI_API_KEY` が無い既知の非対称もあるため、
 
 # 未検証(正直に)
 
-- **D1 の LKG の実値**は読めていない。`wrangler d1 execute --remote` が
-  `code: 7403 (not authorized)` で失敗した(`d1 list` は成功するので権限の一部欠落と思われる)。
-  ただし P0-1 の結論は**コードから確定**する: `persistLkg` が保存するのは KV エンベロープの
-  `updatedAt` そのものなので、LKG が KV より新しい `updatedAt` を持つことは**構造的にありえない**。
+- ~~**D1 の LKG の実値**は読めていない~~ → **2026-08-22 に読めた**(7403 は一過性だった)。
+  コードからの予測どおりの値が入っていることを確認:
+
+  ```
+  version   : production-config-refresh-20260821-v1
+  updated_at: 2026-08-21T13:20:25.774Z   ← エンベロープの authored 時刻
+  stored_at : 2026-08-21T18:00:44.263Z   ← 実際に D1 へ書いた時刻(cron 実行時)
+  ```
+
+  `updated_at` と `stored_at` が**4時間半ずれている**ことが、
+  「LKG は書き込み時刻ではなくエンベロープ自身の時刻で失効判定される」ことの直接の証拠。
+  **KV と D1 の失効はどちらも 2026-10-05T13:20:25Z で一致**しており、
+  P0-1 で述べた「LKG は救いにならない」は実測で裏付けられた。
 - **チャット回答の品質**(150問中112問がテンプレート)は今回の対象外。手を付けていない。
 - `response-finalizer.ts`(3,498行)/ `deterministic.ts`(2,031行)/ `gemini/fallback.ts`(1,838行)は
   **呼び出し関係と numeric-alignment 連携のみ確認**。全行は読めていない。
@@ -526,3 +535,38 @@ D1 の LKG は、次に config を読むリクエストで `persistLkg` が自�
 - `numeric-alignment` の `requiredSourceIds` が出典チップに反映されるかは未追跡
 - チャット回答の品質(150問中112問がテンプレート)は対象外
 - `CreditView.swift` は未読
+
+---
+
+# 事後確認(2026-08-22)
+
+config 再発行と `dailyRefreshEnabled=true` の後、最初の cron(18:00 UTC)が回った結果。
+
+| 確認項目 | 実測 |
+|---|---|
+| 銘柄スナップショット | `updatedAt` **2026-08-21T18:00:46.263Z** / 10,387件。**2026-07-11 から約6週間ぶりに更新された** |
+| SEC からのブロック | **無し**。日次更新は最後まで完走している |
+| KV config | `production-config-refresh-20260821-v1` / 失効 2026-10-05T13:20:25Z |
+| D1 LKG | 同一バージョンに更新済み。`stored_at` 2026-08-21T18:00:44.263Z |
+
+**リリース所有者の判断により、SEC レート修正のデプロイを待たずに日次更新を有効のまま走らせた。**
+旧リミッタ(10/s・再試行未計上)で 30銘柄のバッチが通ったことになるが、結果としては無事だった。
+ただしこれは1回分の観測にすぎず、**レート修正のデプロイは引き続き必要**。
+
+## SEC トークン計上の訂正(同日)
+
+最初の修正では経路入口の `waitForSecRateLimit` を残したまま `beforeAttempt` を足したため、
+**1 SEC リクエストにつき2トークン**払う形になっていた(`MAX_REQUESTS` を 8 に下げたことと重なり、
+実効スループットが意図の半分以下)。課金を「実際に SEC を叩く直前」の1点に寄せて修正済み
+(コミット `a9a8565`)。キャッシュヒットで SEC を叩かない場合は課金しない。
+
+## 次にビルド番号を上げるときの注意
+
+`testProjectVersionMetadataIsV12Build6` は**意図的に build 6 を固定**している(リリースメタデータの検証)。
+今回追加した `testBundleVersionIsCoveredByProductionAppAttestAllowlist` と合わせて、
+**ビルド番号を上げると2件が同時に落ちる**。これは回帰ではなく設計どおりの通知なので、
+- `ios/project.yml` の `CURRENT_PROJECT_VERSION`
+- `AppModelTests.swift` の期待値
+- `workers/wrangler.toml` の `APP_ATTEST_ALLOWED_BUNDLE_VERSIONS`
+
+の3点を揃えて更新し、**Worker をデプロイしてから提出**すること。
