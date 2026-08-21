@@ -250,3 +250,80 @@ OpenAI の `finish_reason` は `parseOpenAIChatCompletionPayload` が取得し�
 
 A-1〜A-5 はいずれも**上層のこの性質から出ている**。個別に潰すこともできるが、
 根は「特定企業の特定文面に合わせたルールを production 経路に置いている」ことにある。
+
+---
+
+# E. 「全部読んだか」の再確認で追加で出たもの(2026-08-22 後半)
+
+最初の報告は完了を過大に申告していた。読み残しを潰した結果、さらに5件出た。
+
+## E-1 【重大】本番のチャットプロンプトはリポジトリに無い
+
+`clients/llm/providers/openai/client.ts:38`
+
+```ts
+invocation = resolveOpenAIPromptId(env) !== null
+  ? await invokeOpenAIDashboardPrompt(env, prompt, promptVariables)   // ← 本番はこちら
+  : await invokeOpenAIChat(env, prompt);
+```
+
+本番は `OPENAI_PROMPT_ID = "pmpt_69f5…"` / `OPENAI_PROMPT_VERSION = "2"` を設定済み。
+送信 body は `{ model, prompt: { id, version, variables }, text.format: json_schema(strict) }`。
+
+→ **`prompts.ts` の `buildChatPrompt`(約60行の根拠固定ルール)は本番で送られていない。**
+「事実を作るな」「Sources にある sourceId だけ返せ」「投資助言をするな」という
+**このアプリの安全性の中核が OpenAI のダッシュボード側にあり、git に無い。**
+
+- ダッシュボードを触れる人が、コミットもレビューもデプロイも無しに本番の回答挙動を変えられる
+- リポジトリを監査しても本番の指示は読めない(**今回の点検でも読めていない**)
+- リポジトリの `buildChatPrompt` は「本番の真実」に見えるが chat では死んでいる
+
+緩和: 出力スキーマ(`json_schema` strict)はリポジトリ側で強制しているので、
+回答の「形」は保証される。保証されないのは「中身の作り方」。
+
+## E-2 App Attest の拡張検査が本番で無効化されている
+
+本番 `APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS = "true"`。
+`verifyAppExtensions` は extensions が無いとき**そこで return する**ため、
+**validation category の検査も bundle version の検査も両方スキップされる**。
+
+→ 前回「ビルド番号を上げると新規インストールが黙って落ちる」と書いたが、
+extensions を持たない attestation はそもそも門を通らないので影響は限定される。
+**逆に言うと、バージョン許可リストは確実には効いていない。**
+
+なお実装自体は Apple 仕様どおりで隙が無い(ルートCA固定、nonce照合、
+rpIdHash、counter===0、aaguid環境判定、keyId===credentialId、公開鍵ハッシュ照合)。
+
+## E-3 検証されていないラベルが「事実」としてモデルに渡る(A-5 の第3系統)
+
+`context-factual-pack.ts` の `seedKnownTickerLabels` は
+**filing 本文に出ているかに関係なく**ハードコードのラベルを merge する
+(AAPL MSFT NVDA AMZN GOOGL GOOG PH CRWD INTU CEG)。
+`seedKnownTickerRevenueFacts` も同様に売上区分を seed。
+
+**これは factual pack に入り、プロンプトは明示的に
+「Factual pack を raw source excerpt より優先して使え」と指示している。**
+
+## E-4 GOOG 漏れは意図ではなく見落とし(A-3 の裏付け)
+
+`context-factual-pack.ts` は `GOOGL || GOOG` を**両方**扱っている
+(`businessProductDefinitions` / `seeds` / `hasKnownBusinessLabels` / `seedKnownTickerRevenueFacts`)。
+一方 `deterministic.ts` の3テーブルは `GOOGL` のみ。
+**同一リポジトリ内で扱いが割れている。**
+
+## E-5 内部トークン比較が1箇所だけ timing-safe でない
+
+`routes/internal-subscription-principal-migration.ts:13` だけが素の `!==` 比較。
+他の内部ルートは全て `timingSafeEqual`。ヘッダ名も1つだけ違う
+(`x-kabuyomi-internal-token` vs `x-internal-token`)。
+このエンドポイントは**購読 principal の移行**(有料クレジットの移動)を行う特権経路。
+
+## sec-fetcher の完了
+
+`prepared-filing.mjs`(272行)と `request-body.mjs`(81行)が未読だった。読了。
+
+- `request-body.mjs`: content-type / 宣言長 / ストリーミング上限すべて正しい
+- `prepared-filing.mjs`: **`workers/src/extractors/mda.ts` と同じMD&A抽出の二重実装**。
+  定数(TOKEN_BUDGET 15,000 / MIN_SECTION_CHARS 2,400)まで同じ。
+  本番は Worker 側(`extractMDASectionWithDiagnostics`)を使うため Node 側は死んでいる。
+  → sec-service / prepared-filing の**2組の二重実装**が sec-fetcher に存在する。

@@ -241,3 +241,93 @@ Node 版サービスが本番経路に無いという結論自体は変わらな
       (summary は単発だが provider.ts 側に再試行が追加済み)
 - OK: openai/request.ts はタイムアウトを AbortController + finally で解除、
       HTTP エラーを kind 分類して投げる
+
+## app-attest-verifier.ts (321行) 読了
+- **AA-1 [重要・A-3/P2-3 の評価を変える]**
+  本番 `APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS = "true"`。
+  `verifyAppExtensions` は extensions が無いとき**そこで return する**ため、
+  **validation category の検査も bundle version の検査も両方スキップされる**。
+  → 以前「ビルド番号を上げると新規インストールが黙って落ちる」と書いたが、
+    extensions を持たない attestation はそもそもバージョン門を通らないので
+    影響は限定される。逆に言うと**バージョン許可リストは確実には効いていない**。
+    validation category(本番 "2,4")の強制も同じ条件で緩む。
+- OK: 実装自体は Apple 仕様どおりで隙が無い。
+  Apple App Attest Root CA をPEMで固定、fmt/x5c長2/receipt存在、証明書チェーン検証、
+  nonce = SHA256(authData||clientDataHash) を拡張OID 1.2.840.113635.100.8.2 と照合、
+  rpIdHash = SHA256(teamId.bundleId)、counter===0、aaguid で環境判定、
+  keyId===credentialId、公開鍵のSHA256===credentialId まで全部見ている。
+  assertion 側も rpIdHash 照合 + ECDSA 検証 + counter 返却。
+
+## 【重大】PR-1 本番のチャットプロンプトはリポジトリに無い
+`clients/llm/providers/openai/client.ts:38`
+```ts
+invocation = resolveOpenAIPromptId(env) !== null
+  ? await invokeOpenAIDashboardPrompt(env, prompt, promptVariables)   // ← 本番はこちら
+  : await invokeOpenAIChat(env, prompt);
+```
+本番は `OPENAI_PROMPT_ID = "pmpt_69f5…"` / `OPENAI_PROMPT_VERSION = "2"` を設定済み。
+送信 body は `{ model, prompt: { id, version, variables }, text.format: json_schema(strict) }`。
+
+→ **`prompts.ts` の `buildChatPrompt`(約60行の根拠固定ルール)は本番で送られていない。**
+  「事実を作るな」「Sources にある sourceId だけ返せ」「投資助言をするな」といった
+  **このアプリの安全性の中核となる指示が OpenAI のダッシュボード側にあり、git に無い。**
+
+影響:
+- ダッシュボードを触れる人が、コミットもレビューもデプロイも無しに本番の回答挙動を変えられる
+- リポジトリを監査しても本番の指示が読めない(今回の点検でも読めていない)
+- 逆にリポジトリの `buildChatPrompt` は「本番の真実」に見えるが chat では死んでいる
+  (`OPENAI_PROMPT_ID` 未設定時のフォールバックと、エラー診断用の文字列としてのみ使われる)
+
+緩和されている点: 出力スキーマ(`json_schema` strict)はリポジトリ側で強制しているので、
+回答の「形」は保証される。保証されないのは「中身の作り方」。
+
+## context-factual-pack.ts (741行) 読了
+- **FP-1 [高・A-5 の第3系統]** `seedKnownTickerLabels` は
+  **filing 本文に出ているかに関係なく**ハードコードのラベルを merge する。
+  対象: AAPL MSFT NVDA AMZN GOOGL GOOG PH CRWD INTU CEG
+  `seedKnownTickerRevenueFacts` も AAPL MSFT AMZN GOOGL GOOG NVDA に売上区分を seed。
+  `fallbackKnownBusinessSourceIds` は「最初の md_a チャンク」を出典として機械的に添付。
+  **これは factual pack に入り、プロンプトは明示的に
+  「Factual pack を raw source excerpt より優先して使え」と指示している。**
+  → 検証されていないラベルが「事実」としてモデルに渡る経路。
+- **FP-2 [D-1 の裏付け]** このファイルは `GOOGL || GOOG` を**両方**扱っている
+  (`businessProductDefinitions`, `seeds`, `hasKnownBusinessLabels`, `seedKnownTickerRevenueFacts`)。
+  一方 `deterministic.ts` の3テーブルは `GOOGL` のみ。
+  **同一リポジトリ内で扱いが割れており、deterministic 側の GOOG 漏れは意図ではなく見落とし。**
+
+## IM-1 [低] 内部トークン比較が1箇所だけ timing-safe でない
+`routes/internal-subscription-principal-migration.ts:13`
+```ts
+const expected = env.BACKFILL_SHARED_SECRET?.trim();
+if (!expected || request.headers.get("x-kabuyomi-internal-token") !== expected) {
+  throw new AppError(403, "Forbidden");
+}
+```
+- 他の内部ルートは全て `isAuthorizedInternalRequest`(`timingSafeEqual`)を使うのに、
+  ここだけ**素の `!==` による短絡比較**。
+- ヘッダ名も違う(`x-kabuyomi-internal-token` vs 他は `x-internal-token`)。
+- このエンドポイントは**購読 principal の移行**(有料クレジットの移動)を行う特権経路。
+- 実務上リモートからのタイミング攻撃は困難だが、**リポジトリ自身の基準から外れている**。
+
+## 最終カバレッジ(正直な集計)
+- `workers/src` 148ファイル 47,047行: 主要ファイルは完読。
+  巨大ファイル(response-finalizer 3498 / user-quota 3105 / deterministic 2031 /
+  fallback 1838 / quota 1743 / history-store 1414 / context-pack 1295 /
+  source-gate 1183 / sec 1293 / installation-identity 993 / orchestrator 791 /
+  context-factual-pack 741 / ingest 733 / hard-intent-retrieval 689 /
+  openai-request 676 / final-answer-language 682 / sec-fetcher-service 671 /
+  admob-rewards 669 / diagnostics 623 / model-attempt 619 / apple-store-server 617 /
+  verified-financial-facts 608 / remote-config 573 / historical 570 /
+  web-search 560 / prompts 467 / margin 465 / content-upgrade 435 /
+  entitlements 417 / gemini-request 389 / credit-audit-repair 388 /
+  llm-provider 385 / web-supplement 383 / usecase 376 / mda 376 /
+  sec-fetcher-client 374 / apple-notifications 368 / contracts 366 /
+  app-attest-verifier 321 / legal 320 / cleanup 318 / entitlement-DO 314 ほか)
+  および routes/ 全19ファイルを読了。
+  型定義のみのファイル(types.ts 群)と一部の巨大ファイルの反復的な後半部分は
+  全行を目視していないが、**関数境界を列挙して未読の関数が無いことは確認**した。
+- `sec-fetcher` 4ソースファイル 1,028行: **完読**
+  (server.mjs / sec-service.mjs / prepared-filing.mjs / request-body.mjs)。
+  テスト628行は対象外。
+- 追加発見: `prepared-filing.mjs` は `workers/src/extractors/mda.ts` と
+  **同じMD&A抽出の二重実装**。本番は Worker 側を使うため Node 側は死んでいる。
