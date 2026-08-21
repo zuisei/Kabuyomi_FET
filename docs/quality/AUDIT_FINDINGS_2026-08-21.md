@@ -743,3 +743,91 @@ Error: production_release_guard_failed:quality_waiver:deployed_candidate_id_mism
 `HARD_INTENT_TARGETED_RETRIEVAL_MODE` が `diagnostic` のため、
 150行中 **13件** が `retry_blocked:hard_intent_retry_disabled` で追加検索を実行していない。
 `active` にすると最大3ソース/3000字を足せる。**A/B で測ってから判断する話。**
+
+---
+
+# sec-fetcher の読み直し(2026-08-22)
+
+前回の報告で「sec-fetcher の認証・レート制限・タイムアウト」を確認したと書いたが、
+**実際に読んでいたのは全体の3〜4割程度**で、パース処理の本体は未読だった。
+しかも本番で動くのは Node 版ではなく **Worker 内の複製**(`workers/src/lib/sec-fetcher-service.ts`)
+なので、読むべき対象を取り違えていた。読み直した結果を記録する。
+
+## 新たに見つかった2件(いずれも**現時点では発火していない**)
+
+### S-1. レスポンスキャッシュの寿命が2実装で違う(バイト数で制限されていない)
+
+**Node 版** — `createSecService` の**内側**でキャッシュを作る = インスタンス毎:
+
+```js
+export function createSecService(config = readConfig()) {
+  const limiter = createRateLimiter(config.rateLimitPerSecond);
+  const responseCache = new Map();      // ← 関数スコープ
+```
+
+**Worker 版** — **モジュールレベル**。isolate が生きている限り残り、全リクエストで共有:
+
+```ts
+const responseCache = new Map<string, CacheEntry>();   // ← モジュールスコープ
+
+export function createCloudflareSecFetcherService(env, options = {}) {
+```
+
+移植のときに寿命の意味が変わっている。**「片方だけ移行した」型**。
+
+そして `pruneCache`(491行)が見ているのは**エントリ数だけ**:
+
+```ts
+if (cache.size <= MAX_RESPONSE_CACHE_ENTRIES) return;   // MAX = 512
+```
+
+**バイト数の上限が無い。** キャッシュされるものには XBRL の `companyfacts` が含まれ(214行)、
+これは実測で **Apple 1社あたり 3.6 MB の JSON**(転送は gzip で272 KB)。
+パース後の JS オブジェクトは通常その2〜6倍を占める。
+`CACHE_TTL.companyFacts` は6時間、`filing`(10-K の HTML)は24時間。
+
+Cloudflare Workers の isolate メモリ上限は 128 MB。
+**512エントリまで貯め放題という設計は、その上限と噛み合っていない。**
+
+**ただし実測では問題が出ていない。** 8/21 18:00 UTC の cron(30銘柄)は完走しており、
+D1 で `filings` が **同時刻に23件再生成**されているのを確認した。
+現在の規模では落ちない。**追跡銘柄を増やすか資料が大きくなると効いてくる、規模依存の潜在リスク。**
+
+### S-2. `submissions` の配列長が揃っているか検証していない
+
+`normalizeSubmissionRecent`(507行)は5つのフィールドが**配列であること**は確認するが、
+**長さが同じであることは見ていない**:
+
+```ts
+return Array.isArray(recent.form) &&
+  Array.isArray(recent.accessionNumber) &&
+  Array.isArray(recent.primaryDocument) &&
+  Array.isArray(recent.filingDate) &&
+  Array.isArray(recent.reportDate)
+  ? recent : null;
+```
+
+`toSubmissionEntries`(527行)は `recent.form.length` を基準に回し、他は `?? ""` で埋める。
+SEC が**途中で切れた配列**を返した場合(依頼にあった「部分応答」)、
+足りない分は空文字になり、`primaryDocument: ""` の資料は URL を組み立てても 404 になる。
+
+より悪い形は**ズレ**で、`form[i]` と `accessionNumber[i]` が別の資料の組になると
+**種別と実体が食い違った資料を掴む**。ただし SEC の submissions.json は
+列指向で長さが揃っているのが前提の形式であり、崩れたものが
+「JSON としては妥当」なまま返る確率は低い。**低確率だが、ガードは1行で足せる位置にある。**
+
+## 読んで問題が無かったところ
+
+| 対象 | 判定 |
+|---|---|
+| Node 版の内部認証 | 問題なし。`timingSafeEqual` + 長さ事前チェック + 起動時必須 + **ボディ読取前**に検証(`server.mjs:26`) |
+| `withCache` の失敗時挙動 | 妥当。ロード失敗時は**直前の値があればそれを返して復元**し、無ければキャッシュを消す。`pending` を共有するので同一URLの同時要求は1回に畳まれる |
+| `fetchWithRetry` のタイムアウト | `AbortController` + `finally` で確実に `clearTimeout`。リークしない |
+| 重複排除 | `toSubmissionEntries` / `toSubmissionRecent` の両方で `accessionNumber` による dedup がある |
+| `expandSubmissionHistory` | 2実装で構造は同一。`cutoff` を超えたら `break` するので過去ファイルを無制限に辿らない |
+
+## 判断
+
+S-1・S-2 とも**現時点では発火していない**ため、
+「今はデプロイしない」方針を踏まえて**コードは変更していない**。
+直すならバイト数上限の追加(S-1)と配列長の一致チェック(S-2)で、どちらも小さい。
