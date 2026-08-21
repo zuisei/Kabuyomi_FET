@@ -64,7 +64,10 @@ final class AppModelTests: XCTestCase {
             accountPrincipal: "account:v1:opaque",
             appAccountToken: "43fbd3f0-78b1-4d65-9968-0f5bc42aab47",
             issuedAt: "2026-07-11T00:00:00.000Z",
-            expiresAt: "2026-08-10T00:00:00.000Z"
+            // 有効な資格情報を表すため、実時刻に追い越されない遠い将来を使う。
+            // AccountCredential.isExpired は Date() と比較するので、
+            // 固定の近い日付を置くとその日を境にテストが落ちる。
+            expiresAt: "2099-01-01T00:00:00.000Z"
         ))
         let recorder = AccountSignOutRequestRecorder()
         MockAppModelURLProtocol.requestHandler = { request in

@@ -300,6 +300,12 @@ func historicalMetricSummaryText(for series: [HistoricalMetricSeriesPayload]) ->
     return series.count > 2 ? "表示指標: \(labels) ほか \(series.count - 2) 件" : "表示指標: \(labels)"
 }
 
+/// `comparisonBasis` は Worker 側で `"annual" | "quarterly"` の閉じた union
+/// (`workers/src/lib/history-store.ts`)。生の値を画面に出さないための唯一の変換点。
+func historicalBasisTitle(_ comparisonBasis: String) -> String {
+    comparisonBasis == "quarterly" ? "同四半期" : "年次"
+}
+
 func historicalBoardCopy(
     comparisonBasis: String,
     requestedYears: Int,
@@ -307,7 +313,7 @@ func historicalBoardCopy(
     singleSeriesLabel: String?
 ) -> HistoricalBoardCopy {
     let isQuarterly = comparisonBasis == "quarterly"
-    let basisTitle = isQuarterly ? "同四半期" : "年次"
+    let basisTitle = historicalBasisTitle(comparisonBasis)
     let basisNote = isQuarterly ? "同四半期ベース" : "年次ベース"
     let safeAvailableCount = max(availablePeriodCount, 0)
     let safeRequestedYears = max(requestedYears, safeAvailableCount)

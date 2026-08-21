@@ -742,6 +742,10 @@ struct LocalMessageSourceRef: Identifiable, Hashable {
 }
 
 enum MetricLabeler {
+    /// Worker の `metricLabel`(`workers/src/lib/metrics.ts`)と同じ 8 指標を網羅する。
+    /// `MetricSnapshot.logicalName` は Worker 側で閉じた union なので default には来ない想定だが、
+    /// 指標が追加されたときに `currentDebt` のような API のキー名が
+    /// そのまま日本語画面に出ないよう、単語に分解して返す。
     static func title(for logicalName: String) -> String {
         switch logicalName {
         case "revenue":
@@ -754,8 +758,32 @@ enum MetricLabeler {
             "営業利益"
         case "operatingCashFlow":
             "営業CF"
+        case "cashAndCashEquivalents":
+            "現金及び現金同等物"
+        case "currentDebt":
+            "1年内返済予定の長期債務"
+        case "longTermDebt":
+            "長期債務(非流動)"
         default:
-            logicalName
+            humanizedFallback(for: logicalName)
         }
+    }
+
+    /// "grossProfit" -> "Gross Profit"。訳語が無いことは分かるが、
+    /// 少なくとも API のキー名がそのまま露出するのは避ける。
+    private static func humanizedFallback(for logicalName: String) -> String {
+        guard !logicalName.isEmpty else { return "指標" }
+        var words: [String] = []
+        var current = ""
+        for character in logicalName {
+            if character.isUppercase, !current.isEmpty {
+                words.append(current)
+                current = String(character)
+            } else {
+                current.append(character)
+            }
+        }
+        if !current.isEmpty { words.append(current) }
+        return words.map(\.capitalized).joined(separator: " ")
     }
 }

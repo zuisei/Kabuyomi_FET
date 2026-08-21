@@ -968,7 +968,7 @@ private struct RedesignHistoricalOverview: View {
             Text("推移")
                 .font(.title3.weight(.bold))
                 .foregroundStyle(KabuyomiTheme.ink)
-            Text("過去\(overview.years)期 ・ \(overview.comparisonBasis)")
+            Text("過去\(overview.years)期 ・ \(historicalBasisTitle(overview.comparisonBasis))")
                 .font(.subheadline)
                 .foregroundStyle(KabuyomiTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
