@@ -1155,6 +1155,21 @@ private struct RedesignResearchMessage: View {
         displayableMessageSources(message.sources, in: company)
     }
 
+    /// 結論は1文とは限らない。列挙型の回答("1つ目は…2つ目は…")では
+    /// `structureAssistantMessage` が複数文を意図的に結論へまとめる仕様のため、
+    /// 常に .title3 で描くと見出しサイズの塊が数行続いて読みにくくなる。
+    /// 長さで段階的に落とし、短い結論だけを見出しとして立てる。
+    private var conclusionFont: Font {
+        switch structuredAnswer.conclusion.count {
+        case ..<65:
+            return .title3.weight(.medium)
+        case ..<141:
+            return .body.weight(.semibold)
+        default:
+            return .body
+        }
+    }
+
     var body: some View {
         if message.role == "user" {
             VStack(alignment: .leading, spacing: 8) {
@@ -1184,7 +1199,7 @@ private struct RedesignResearchMessage: View {
                 }
 
                 Text(structuredAnswer.conclusion)
-                    .font(.title3.weight(.medium))
+                    .font(conclusionFont)
                     .foregroundStyle(KabuyomiTheme.ink)
                     .lineSpacing(6)
                     .textSelection(.enabled)

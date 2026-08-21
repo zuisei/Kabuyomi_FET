@@ -537,8 +537,20 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     #if DEBUG
+    /// 実際に解決された baseURL から導出する。
+    /// `APIBaseURLResolver.resolve` はビルド設定の `configuredBaseURL()` を
+    /// UserDefaults のトグル(`usesTestAPI`)より優先するため、トグルの値から
+    /// 表示名を作ると実際の接続先と食い違う(2026-08-21 に実機で確認: ラベルが
+    /// "Production API" のまま URL は kabuyomi-api-test を指していた)。
     var currentAPIEnvironmentDisplayName: String {
-        (usesTestAPI ? APIEnvironment.test : APIEnvironment.production).displayName
+        switch apiClient.baseURLKindDisplayString {
+        case "prod":
+            return APIEnvironment.production.displayName
+        case "test":
+            return APIEnvironment.test.displayName
+        default:
+            return "カスタム API"
+        }
     }
 
     var rewardedAdTestDeviceModeConfigured: Bool {
