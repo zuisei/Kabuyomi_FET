@@ -647,6 +647,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         apiClient.installationPrincipalDisplayString ?? "not_bootstrapped"
     }
 
+    /// allowlist 照合に使われるのは installation principal ではなくこちら。
+    var currentLegacyDeviceKeyDisplay: String {
+        apiClient.legacyDeviceKeyDisplayString ?? "not_available"
+    }
+
     var currentDeviceKeySuffixDisplay: String {
         Self.deviceKeySuffixDisplay(from: currentDeviceKeyDisplay)
     }

@@ -166,13 +166,28 @@ struct SettingsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("device key suffix")
+                    Text("device key")
                         .font(.system(.footnote, design: .rounded, weight: .bold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
-                    Text("…\(appModel.currentDeviceKeySuffixDisplay)")
+                    // Worker 側の DEV_DETACHED_ACCESS_DEVICE_KEYS は前方一致で照合するため、
+                    // 末尾6文字だけでは allowlist に登録できず Dev モードを有効にできなかった。
+                    // この節は DEBUG 専用でリリースには出ないので全体を出す。
+                    Text(appModel.currentDeviceKeyDisplay)
                         .font(.system(.footnote, design: .monospaced, weight: .medium))
                         .foregroundStyle(KabuyomiTheme.ink)
                         .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("x-device-key (allowlist 照合用)")
+                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                    Text(appModel.currentLegacyDeviceKeyDisplay)
+                        .font(.system(.footnote, design: .monospaced, weight: .medium))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {

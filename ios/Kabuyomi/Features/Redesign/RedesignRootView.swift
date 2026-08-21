@@ -437,6 +437,7 @@ private struct RedesignCompanyWorkspace: View {
     /// コンポーザを開いているか。`RedesignComposer` 側の @State に持たせると
     /// safeAreaInset の再生成で毎回初期値に戻り、開いた直後に畳まれてしまう。
     @State private var composerExpanded = false
+    @State private var surface: CompanySurface = .document
     @State private var deferredConsentQuestion: String?
     @State private var pendingNewFiling: CompanyPayload?
     @FocusState private var composerFocused: Bool
@@ -457,53 +458,110 @@ private struct RedesignCompanyWorkspace: View {
         appModel.pendingChat(for: normalizedTicker)
     }
 
+    private var hasConversation: Bool {
+        !messages.isEmpty || pendingChat != nil
+    }
+
+    private var surfacePicker: some View {
+        Picker("表示", selection: $surface) {
+            Text("資料").tag(CompanySurface.document)
+            Text("会話").tag(CompanySurface.conversation)
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 10)
+        .background(KabuyomiTheme.paper)
+        .accessibilityIdentifier("redesign.company.surface")
+    }
+
+    private func documentSurface(company: CompanyPayload) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                RedesignResearchOverview(company: company) { source in
+                    openSource(source)
+                }
+
+                if !hasConversation {
+                    Divider().padding(.horizontal, 20)
+                    RedesignQuestionStarters(company: company) { prompt in
+                        question = prompt
+                        composerExpanded = true
+                        composerFocused = true
+                    }
+                }
+
+                Color.clear.frame(height: 12)
+            }
+            .frame(maxWidth: 760)
+            .frame(maxWidth: .infinity)
+            .background(KabuyomiTheme.paper)
+        }
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    private func conversationSurface(company: CompanyPayload) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    conversationSection(company: company)
+                    Color.clear
+                        .frame(height: 12)
+                        .id("research-end")
+                }
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity)
+                .background(KabuyomiTheme.paper)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            // 最新に貼りつくのは会話の面だけ。資料の読み位置は動かさない。
+            .onChange(of: pendingChat?.id) { _, _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("research-end", anchor: .bottom)
+                }
+            }
+            .onChange(of: messages.count) { _, _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("research-end", anchor: .bottom)
+                }
+            }
+        }
+    }
+
     var body: some View {
         Group {
             if let company {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            RedesignWorkspaceContextHeader(
-                                company: company,
-                                isOlderFiling: appModel.isViewingOlderFilingConversation(ticker: normalizedTicker),
-                                openSources: openSources,
-                                openLatest: { appModel.openLatestConversation(for: normalizedTicker) }
-                            )
+                VStack(spacing: 0) {
+                    RedesignWorkspaceContextHeader(
+                        company: company,
+                        isOlderFiling: appModel.isViewingOlderFilingConversation(ticker: normalizedTicker),
+                        openSources: openSources,
+                        openLatest: { appModel.openLatestConversation(for: normalizedTicker) }
+                    )
+                    .frame(maxWidth: 760)
+                    .frame(maxWidth: .infinity)
+                    .background(KabuyomiTheme.paper)
 
-                            RedesignResearchOverview(company: company) { source in
-                                openSource(source)
-                            }
-
-                            if messages.isEmpty, pendingChat == nil {
-                                Divider().padding(.horizontal, 20)
-                                RedesignQuestionStarters(company: company) { prompt in
-                                    question = prompt
-                                    composerFocused = true
-                                }
-                            } else {
-                                Divider().padding(.horizontal, 20)
-                                conversationSection(company: company)
-                            }
-
-                            Color.clear
-                                .frame(height: 12)
-                                .id("research-end")
-                        }
-                        .frame(maxWidth: 760)
-                        .frame(maxWidth: .infinity)
-                        .background(KabuyomiTheme.paper)
+                    if hasConversation {
+                        surfacePicker
                     }
-                    .scrollDismissesKeyboard(.interactively)
-                    .onChange(of: pendingChat?.id) { _, _ in
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("research-end", anchor: .bottom)
+
+                    // 資料と会話は読み方が逆。資料は据え置きで参照したいが、
+                    // 会話は下へ伸び最新に貼りつきたい。1本のスクロールに入れると
+                    // 回答が増えるほど業績が上へ押し流され、数字を見るたびに
+                    // 会話を全部遡ることになる。面を分けて横で行き来する。
+                    TabView(selection: $surface) {
+                        documentSurface(company: company)
+                            .tag(CompanySurface.document)
+                        if hasConversation {
+                            conversationSurface(company: company)
+                                .tag(CompanySurface.conversation)
                         }
                     }
-                    .onChange(of: messages.count) { _, _ in
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("research-end", anchor: .bottom)
-                        }
-                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                }
+                .onChange(of: hasConversation) { _, exists in
+                    // 最初の質問を送ったら回答の面へ連れていく。
+                    if exists { surface = .conversation }
                 }
             } else if let state = appModel.companyLoadState(for: normalizedTicker) {
                 RedesignCompanyLoadState(state: state) {
@@ -2055,4 +2113,10 @@ private struct SettingsDestinationRow: View {
         .frame(minHeight: 48)
         .contentShape(Rectangle())
     }
+}
+
+/// 会社ワークスペースの2つの面。資料は参照用で据え置き、会話は最新に貼りつく。
+private enum CompanySurface: Hashable {
+    case document
+    case conversation
 }

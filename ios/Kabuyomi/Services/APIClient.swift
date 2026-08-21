@@ -268,6 +268,13 @@ struct APIClient {
         try? currentCredential()?.principal
     }
 
+    /// `x-device-key` として実際に送っている値。Worker の
+    /// `DEV_DETACHED_ACCESS_DEVICE_KEYS` はこの値と突き合わせるため、
+    /// installation principal を見て allowlist に登録しても一致しない。
+    var legacyDeviceKeyDisplayString: String? {
+        deviceIdentity?.legacyDeviceKeyForMigration()
+    }
+
     var hasInstallationCredential: Bool {
         do {
             return try currentCredential() != nil
