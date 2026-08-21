@@ -1,4 +1,4 @@
-import { generateSummary } from "../../clients/gemini";
+import { generateModelSummary } from "../../clients/llm/provider";
 import { fetchFilingHtml } from "../../clients/sec";
 import type { Env, FilingCacheRecord, FilingReference } from "../../env";
 import { extractMDASectionWithDiagnostics, normalizeFilingText } from "../../extractors/mda";
@@ -131,7 +131,7 @@ export async function upgradeMetricsOnlyRecord(record: FilingCacheRecord, env: E
       marginDriverSearchText: normalizeFilingText(html),
       primaryDocumentUrl: current.primaryDocumentUrl
     });
-    const generated = await generateSummary(env, {
+    const generated = await generateModelSummary(env, {
       filingKey: current.filingKey,
       ticker: current.ticker,
       companyName: current.companyName,

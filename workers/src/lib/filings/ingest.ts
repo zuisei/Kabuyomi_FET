@@ -1,5 +1,5 @@
 import type { Env, FilingCacheRecord, FilingReference, MetricSnapshot, SourceChunkRecord } from "../../env";
-import { generateSummary } from "../../clients/gemini";
+import { generateModelSummary } from "../../clients/llm/provider";
 import { buildPrimaryDocumentUrl, fetchFilingAssets, fetchMetricSnapshots, fetchPreparedFiling } from "../../clients/sec";
 import { extractMDASectionWithDiagnostics, normalizeFilingText } from "../../extractors/mda";
 import { AppError } from "../errors";
@@ -124,9 +124,10 @@ export async function ingestFiling(
     marginDriverSearchText: html ? normalizeFilingText(html) : extractedText,
     primaryDocumentUrl
   });
-  const summaryEnv = summaryMode === "fallback_only" ? ({ ...env, GEMINI_API_KEY: undefined } as Env) : env;
   const summaryStartedAt = Date.now();
-  const generatedSummary = await generateSummary(summaryEnv, {
+  // 以前は GEMINI_API_KEY を undefined にしてフォールバックへ落としていたが、
+  // プロバイダが増えると成立しないため意図を引数で表す。
+  const generatedSummary = await generateModelSummary(env, {
     filingKey,
     ticker: filing.ticker,
     companyName: filing.companyName,
@@ -135,7 +136,7 @@ export async function ingestFiling(
     periodOfReport: filing.periodOfReport,
     metrics,
     sourceChunks
-  });
+  }, { forceFallback: summaryMode === "fallback_only" });
   logLlmUsage(generatedSummary.llmUsage, {
     aiTask: "summary",
     route: "filing_ingest",

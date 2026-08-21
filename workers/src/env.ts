@@ -18,6 +18,8 @@ export interface Env {
   OPENAI_TIMEOUT_MS?: string;
   OPENAI_REASONING_EFFORT?: "none" | "minimal" | "low" | "medium" | "high";
   OPENAI_MAX_COMPLETION_TOKENS?: string;
+  OPENAI_SUMMARY_TIMEOUT_MS?: string;
+  OPENAI_SUMMARY_MAX_COMPLETION_TOKENS?: string;
   HARD_INTENT_TARGETED_RETRIEVAL_MODE?: "off" | "diagnostic" | "active";
   ADMOB_REWARDED_AD_UNIT_ID?: string;
   ADMOB_SSV_PUBLIC_KEYS_URL?: string;
@@ -223,7 +225,7 @@ export interface FilingCacheRecord {
   metrics: MetricSnapshot[];
   sourceChunks: SourceChunkRecord[];
   summary: SummaryRecord;
-  summaryProvider?: "gemini" | "fallback";
+  summaryProvider?: "gemini" | "openai" | "fallback";
   contentMode?: "full" | "metrics_only";
   generatedAt: string;
   extractorVersion: string;

@@ -1,14 +1,42 @@
-import type { Env } from "../../env";
-import { generateQuoteTranslation as generateGeminiQuoteTranslation } from "../gemini";
-import { buildQuoteTranslationPrompt } from "../gemini/prompts";
-import { normalizeQuoteTranslationResponse, polishJapaneseText, stripAnswerFormattingArtifacts } from "../gemini/normalize";
-import type { ChatPromptInput, GeminiChatAnswer, GeminiInvocationUsage, QuoteTranslationPromptInput } from "../gemini/types";
+import type { Env, SummaryRecord } from "../../env";
+import { logEvent } from "../../lib/logging";
+import { generateQuoteTranslation as generateGeminiQuoteTranslation, generateSummary as generateGeminiSummary } from "../gemini";
+import { localSummaryFallback } from "../gemini/fallback-summary";
+import { buildQuoteTranslationPrompt, buildSummaryPrompt } from "../gemini/prompts";
+import {
+  normalizeQuoteTranslationResponse,
+  normalizeSummaryResponse,
+  polishJapaneseText,
+  stripAnswerFormattingArtifacts,
+  stripEnglishParentheticals
+} from "../gemini/normalize";
+import type {
+  ChatPromptInput,
+  GeminiChatAnswer,
+  GeminiInvocationUsage,
+  QuoteTranslationPromptInput,
+  SummaryPromptInput
+} from "../gemini/types";
 import {
   generateDisabledProviderFallback,
   generateGeminiLegacyChatAnswer
 } from "./providers/gemini-legacy";
-import { generateOpenAIChatAnswer, invokeOpenAIQuoteTranslation, resolveOpenAIChatModel } from "./providers/openai";
+import {
+  classifyOpenAIError,
+  generateOpenAIChatAnswer,
+  invokeOpenAIQuoteTranslation,
+  invokeOpenAISummary,
+  resolveOpenAIChatModel
+} from "./providers/openai";
 import type { LlmProviderName } from "./types";
+
+export type SummaryProviderName = "gemini" | "openai" | "fallback";
+
+export interface ModelSummaryResult {
+  summary: SummaryRecord;
+  provider: SummaryProviderName;
+  llmUsage?: GeminiInvocationUsage[];
+}
 
 export function resolveLlmProvider(env: Env): LlmProviderName {
   const raw = env.LLM_PROVIDER?.trim().toLowerCase();
@@ -41,6 +69,123 @@ export function isQuoteTranslationAvailable(env: Env): boolean {
     return false;
   }
   return Boolean(env.GEMINI_API_KEY);
+}
+
+/// 要約が実際に生成できる構成かどうか。差し替え(upgrade)を回すかの判定に使う。
+/// `isQuoteTranslationAvailable` と同じ形で、プロバイダごとに必要な鍵を見る。
+export function isModelSummaryAvailable(env: Env): boolean {
+  const provider = resolveLlmProvider(env);
+  if (provider === "openai") {
+    return Boolean(env.OPENAI_API_KEY?.trim());
+  }
+  if (provider === "disabled") {
+    return false;
+  }
+  return Boolean(env.GEMINI_API_KEY?.trim());
+}
+
+/// 決算要約の生成をプロバイダごとに振り分ける。
+/// 失敗しても例外は投げず、必ずローカルのテンプレート要約に落として返す。
+/// `forceFallback` は初回取り込みでテンプレートを即返す用途(`summaryMode: "fallback_only"`)。
+export async function generateModelSummary(
+  env: Env,
+  input: SummaryPromptInput,
+  options: { forceFallback?: boolean } = {}
+): Promise<ModelSummaryResult> {
+  if (options.forceFallback) {
+    return { summary: localSummaryFallback(input), provider: "fallback" };
+  }
+
+  const provider = resolveLlmProvider(env);
+  if (provider === "openai") {
+    return generateOpenAISummary(env, input);
+  }
+  if (provider === "disabled") {
+    logEvent("gemini_fallback_used", { kind: "summary", reason: "provider_disabled" });
+    return { summary: localSummaryFallback(input), provider: "fallback" };
+  }
+  return generateGeminiSummary(env, input);
+}
+
+const OPENAI_SUMMARY_MAX_ATTEMPTS = 2;
+
+async function generateOpenAISummary(env: Env, input: SummaryPromptInput): Promise<ModelSummaryResult> {
+  if (!env.OPENAI_API_KEY?.trim()) {
+    logEvent("gemini_fallback_used", { kind: "summary", reason: "missing_api_key" });
+    return { summary: localSummaryFallback(input), provider: "fallback" };
+  }
+
+  const basePrompt = buildSummaryPrompt(input);
+  const usages: GeminiInvocationUsage[] = [];
+
+  for (let attempt = 0; attempt < OPENAI_SUMMARY_MAX_ATTEMPTS; attempt += 1) {
+    let invocation: Awaited<ReturnType<typeof invokeOpenAISummary>>;
+    try {
+      invocation = await invokeOpenAISummary(env, attempt === 0 ? basePrompt : retrySummaryPrompt(basePrompt));
+    } catch (error) {
+      const diagnostics = classifyOpenAIError(error);
+      logEvent("gemini_fallback_used", {
+        kind: "summary",
+        reason: "request_failed",
+        attempt,
+        errorKind: diagnostics.modelApiErrorKind,
+        retryable: diagnostics.modelApiErrorRetryable
+      });
+      // 再試行しても意味がない失敗(認証エラー等)はここで打ち切る。
+      if (!diagnostics.modelApiErrorRetryable) {
+        break;
+      }
+      continue;
+    }
+
+    usages.push(...invocation.usage);
+    const normalized = normalizeSummaryResponse(invocation.data);
+    if (!normalized) {
+      logEvent("gemini_fallback_used", {
+        kind: "summary",
+        reason: "schema_validation_failed",
+        attempt,
+        failureReason: invocation.failureReason ?? null
+      });
+      continue;
+    }
+
+    return {
+      summary: polishSummaryRecord(normalized),
+      provider: "openai",
+      ...(usages.length > 0 ? { llmUsage: usages } : {})
+    };
+  }
+
+  return {
+    summary: localSummaryFallback(input),
+    provider: "fallback",
+    ...(usages.length > 0 ? { llmUsage: usages } : {})
+  };
+}
+
+/// 1回目がスキーマ不一致で落ちたときだけ使う。要求する形をより明示して投げ直す。
+function retrySummaryPrompt(basePrompt: string): string {
+  return [
+    basePrompt,
+    "",
+    "The previous response did not match the required JSON schema.",
+    "Return a single JSON object with exactly these keys: verdict (string), highlights (array), changes (array).",
+    "Each element of highlights and changes must be an object with keys text (string) and sourceIds (array of strings).",
+    "Do not wrap the JSON in markdown fences and do not add any other key."
+  ].join("\n");
+}
+
+function polishSummaryRecord(record: SummaryRecord): SummaryRecord {
+  return {
+    verdict: polishSummaryText(record.verdict),
+    highlights: record.highlights.map((line) => ({ ...line, text: polishSummaryText(line.text) })),
+    changes: record.changes.map((line) => ({ ...line, text: polishSummaryText(line.text) }))
+  };
+}
+
+function polishSummaryText(text: string): string {
+  return stripEnglishParentheticals(polishJapaneseText(stripAnswerFormattingArtifacts(text)));
 }
 
 export async function generateModelQuoteTranslation(

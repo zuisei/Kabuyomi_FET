@@ -6,6 +6,8 @@ export {
   buildOpenAIResponsesPromptRequest,
   invokeOpenAIChat,
   invokeOpenAIQuoteTranslation,
+  invokeOpenAISummary,
+  buildOpenAISummaryRequest,
   invokeOpenAIDashboardPrompt,
   resolveOpenAIPromptId,
   resolveOpenAIChatModel,
