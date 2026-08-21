@@ -3,6 +3,17 @@ import { extractMDASectionWithDiagnostics, normalizeFilingText } from "../extrac
 import type { CompanyFactsResponse, ConceptResponse } from "../clients/sec";
 
 const MAX_RESPONSE_CACHE_ENTRIES = 512;
+/// **件数だけでは isolate のメモリを守れない。**
+/// `responseCache` はモジュールスコープなので isolate が生きている限り残り、
+/// XBRL の `companyfacts` は1社あたり実測 3.6 MB(パース後の JS オブジェクトは
+/// その2〜6倍を占める)。追跡銘柄30社を1回の cron で回すと、
+/// 件数上限 512 には遠く届かないままテキスト換算で 100 MB を超えうる。
+/// Workers の isolate 上限は 128 MB なので、バイト数側にも蓋をする。
+///
+/// 12 MB は「同一URLの再取得を抑える」という本来の効果を残しつつ、
+/// 別CIKの巨大応答が積み上がるのを防げる水準。cron は銘柄ごとに別URLを
+/// 引くためキャッシュ再利用が効かず、ここを削っても取得回数はほぼ増えない。
+const MAX_RESPONSE_CACHE_BYTES = 12 * 1024 * 1024;
 const CACHE_TTL = {
   tickerSnapshot: 24 * 60 * 60 * 1000,
   submissions: 30 * 60 * 1000,
@@ -49,6 +60,9 @@ interface CacheEntry {
   value?: unknown;
   expiresAt: number;
   pending?: Promise<unknown>;
+  /// ロード時に実測した応答テキスト長(UTF-16 コード単位)。厳密なバイト数では
+  /// ないが、退避の判断には十分な近似。`pending` のみのエントリは 0。
+  sizeBytes?: number;
 }
 
 const responseCache = new Map<string, CacheEntry>();
@@ -74,14 +88,17 @@ export function createCloudflareSecFetcherService(
       );
 
       if (options.allowNotFound === true && response.status === 404) {
-        return null;
+        return { value: null, sizeBytes: 0 };
       }
 
       if (!response.ok) {
         throw new Error(`SEC request failed (${response.status}) for ${url}`);
       }
 
-      return response.json();
+      // 本文はどのみち全量バッファされるので、ここで長さを測っておく。
+      // `response.json()` を直接使うと保持量を知る手立てが無くなる。
+      const text = await response.text();
+      return { value: JSON.parse(text) as unknown, sizeBytes: text.length };
     });
   }
 
@@ -103,7 +120,8 @@ export function createCloudflareSecFetcherService(
         throw new Error(`SEC request failed (${response.status}) for ${url}`);
       }
 
-      return response.text();
+      const text = await response.text();
+      return { value: text, sizeBytes: text.length };
     }) as Promise<string>;
   }
 
@@ -418,7 +436,12 @@ async function fetchWithRetry(url: string, init: RequestInit, config: SecFetcher
   throw lastError ?? new Error(`Request failed for ${url}`);
 }
 
-async function withCache<T>(cache: Map<string, CacheEntry>, key: string, ttlMs: number, loader: () => Promise<T>): Promise<T> {
+async function withCache<T>(
+  cache: Map<string, CacheEntry>,
+  key: string,
+  ttlMs: number,
+  loader: () => Promise<{ value: T; sizeBytes: number }>
+): Promise<T> {
   const cached = cache.get(key);
   if (cached) {
     if (cached.value !== undefined && cached.expiresAt > Date.now()) {
@@ -432,11 +455,12 @@ async function withCache<T>(cache: Map<string, CacheEntry>, key: string, ttlMs: 
 
   const pending = (async () => {
     try {
-      const value = await loader();
+      const { value, sizeBytes } = await loader();
       if (ttlMs > 0) {
         setCacheEntry(cache, key, {
           value,
-          expiresAt: Date.now() + ttlMs
+          expiresAt: Date.now() + ttlMs,
+          sizeBytes
         });
       } else {
         cache.delete(key);
@@ -489,17 +513,25 @@ function setCacheEntry(cache: Map<string, CacheEntry>, key: string, entry: Cache
 }
 
 function pruneCache(cache: Map<string, CacheEntry>): void {
-  if (cache.size <= MAX_RESPONSE_CACHE_ENTRIES) {
+  let totalBytes = 0;
+  for (const entry of cache.values()) {
+    totalBytes += entry.sizeBytes ?? 0;
+  }
+  if (cache.size <= MAX_RESPONSE_CACHE_ENTRIES && totalBytes <= MAX_RESPONSE_CACHE_BYTES) {
     return;
   }
 
+  // Map は挿入順を保つ。`setCacheEntry` が毎回 delete してから set し直すので
+  // 先頭ほど古い = 先に退避してよい。
   for (const [key, entry] of cache) {
-    if (cache.size <= MAX_RESPONSE_CACHE_ENTRIES) {
+    if (cache.size <= MAX_RESPONSE_CACHE_ENTRIES && totalBytes <= MAX_RESPONSE_CACHE_BYTES) {
       return;
     }
+    // 進行中の取得は落とさない(同一URLの相乗りを壊すため)。
     if (entry.pending) {
       continue;
     }
+    totalBytes -= entry.sizeBytes ?? 0;
     cache.delete(key);
   }
 }
@@ -515,13 +547,28 @@ function normalizeSubmissionRecent(payload: unknown): SubmissionRecent | null {
       ? candidate.filings.recent as SubmissionRecent
       : payload as SubmissionRecent;
 
-  return Array.isArray(recent.form) &&
-    Array.isArray(recent.accessionNumber) &&
-    Array.isArray(recent.primaryDocument) &&
-    Array.isArray(recent.filingDate) &&
-    Array.isArray(recent.reportDate)
-    ? recent
-    : null;
+  const columns = [
+    recent.form,
+    recent.accessionNumber,
+    recent.primaryDocument,
+    recent.filingDate,
+    recent.reportDate
+  ];
+  if (!columns.every((column) => Array.isArray(column))) {
+    return null;
+  }
+
+  // SEC の submissions.json は列指向で、5つの配列が同じ添字で1件の資料を表す。
+  // 長さが揃っていない応答(部分応答・切り詰め)をそのまま通すと、
+  // `toSubmissionEntries` が `form.length` を基準に回して他を `?? ""` で埋めるため、
+  // **種別と実体がずれた資料**(form[i] と accessionNumber[i] が別物)を
+  // 掴みうる。列が食い違う応答は資料一覧として信用できないので弾く。
+  const expectedLength = columns[0]!.length;
+  if (!columns.every((column) => column.length === expectedLength)) {
+    return null;
+  }
+
+  return recent;
 }
 
 function toSubmissionEntries(recent: SubmissionRecent): SubmissionEntry[] {

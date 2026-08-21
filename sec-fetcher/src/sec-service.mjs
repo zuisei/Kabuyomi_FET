@@ -429,13 +429,26 @@ function normalizeSubmissionRecent(payload) {
       ? payload.filings.recent
       : payload;
 
-  return Array.isArray(recent.form) &&
-    Array.isArray(recent.accessionNumber) &&
-    Array.isArray(recent.primaryDocument) &&
-    Array.isArray(recent.filingDate) &&
-    Array.isArray(recent.reportDate)
-    ? recent
-    : null;
+  const columns = [
+    recent.form,
+    recent.accessionNumber,
+    recent.primaryDocument,
+    recent.filingDate,
+    recent.reportDate
+  ];
+  if (!columns.every((column) => Array.isArray(column))) {
+    return null;
+  }
+
+  // 5つの配列は同じ添字で1件の資料を表す。長さが揃わない応答を通すと
+  // 種別と実体がずれた資料を掴みうるので弾く。
+  // (Worker 内の複製 workers/src/lib/sec-fetcher-service.ts と同じ判定)
+  const expectedLength = columns[0].length;
+  if (!columns.every((column) => column.length === expectedLength)) {
+    return null;
+  }
+
+  return recent;
 }
 
 function toSubmissionEntries(recent) {
