@@ -787,6 +787,17 @@ private struct RedesignResearchOverview: View {
         orderedInvestorMetrics(for: company)
     }
 
+    /// 指標タイルのスパークライン用に、同じ論理名の系列を古い順で取り出す。
+    private func history(for metric: MetricPayload) -> [Double] {
+        guard let series = company.historicalOverview?.series.first(where: { $0.logicalName == metric.logicalName }) else {
+            return []
+        }
+        return series.points
+            .sorted(by: { $0.periodEnd < $1.periodEnd })
+            .suffix(4)
+            .map(\.value)
+    }
+
     /// 結論 → 数値 → なぜ → 確認点 → 詳細 の順に読ませる。
     /// 以前は同じ粒度の見出しが5つ縦に並び、長い「推移」が
     /// 「変化と確認論点」を画面外まで押し下げていた。
@@ -808,7 +819,7 @@ private struct RedesignResearchOverview: View {
                         .foregroundStyle(KabuyomiTheme.ink)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 142), spacing: 16)], alignment: .leading, spacing: 18) {
                         ForEach(metrics) { metric in
-                            RedesignMetricView(metric: metric)
+                            RedesignMetricView(metric: metric, history: history(for: metric))
                         }
                     }
                 }
@@ -896,10 +907,9 @@ private struct RedesignEvidenceList: View {
                                             let label = investorFacingSourceLabel(for: chunk, in: company)
                                             Text(label)
                                                 .font(.caption.weight(.bold))
-                                            // 「売上高 / 売上高」のように同じ語を2行に出さない。
-                                            // 副題は本文と違う情報を持つときだけ意味がある。
-                                            if !chunk.sectionTitle.isEmpty, chunk.sectionTitle != label {
-                                                Text(chunk.sectionTitle)
+                                            // 「売上高 / 売上高」の重複も、英語のままの節見出しも出さない。
+                                            if let subtitle = japaneseFacingSubtitle(chunk.sectionTitle, matching: label) {
+                                                Text(subtitle)
                                                     .font(.caption)
                                                     .foregroundStyle(KabuyomiTheme.inkSoft)
                                             }
@@ -933,16 +943,28 @@ private struct RedesignEvidenceList: View {
 
 private struct RedesignMetricView: View {
     let metric: MetricPayload
+    /// 同じ指標の履歴があれば、点の値だけでなく向きも一目で分かるようにする。
+    var history: [Double] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(MetricLabeler.title(for: metric.logicalName))
                 .font(.caption)
                 .foregroundStyle(KabuyomiTheme.inkSoft)
-            Text(formattedMetricValue(metric))
-                .font(.title3.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(KabuyomiTheme.ink)
+            HStack(alignment: .bottom, spacing: 10) {
+                Text(formattedMetricValue(metric))
+                    .font(.title3.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(KabuyomiTheme.ink)
+                Spacer(minLength: 4)
+                if history.count >= 2 {
+                    RedesignSparkline(
+                        values: history,
+                        isPositive: (metric.yoyPercent ?? 0) >= 0
+                    )
+                    .frame(width: 40, height: 18)
+                }
+            }
             if let display = metricYoYDisplay(for: metric) {
                 Label(display.text, systemImage: display.direction == .positive ? "arrow.up.right" : display.direction == .negative ? "arrow.down.right" : "minus")
                     .font(.caption.weight(.semibold))
@@ -1017,31 +1039,9 @@ private struct RedesignHistoricalOverview: View {
 
     @ViewBuilder
     private var historicalSeries: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 20) {
             ForEach(overview.series.prefix(4)) { series in
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(series.label.isEmpty ? MetricLabeler.title(for: series.logicalName) : series.label)
-                        .font(.headline)
-
-                    ForEach(series.points.sorted(by: { $0.periodEnd > $1.periodEnd }).prefix(4)) { point in
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text(formattedFilingDate(point.periodEnd))
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(formattedMetricValue(point.value, logicalName: series.logicalName, unit: point.unit))
-                                .font(.body.weight(.semibold))
-                                .monospacedDigit()
-                            if let yoy = point.yoyPercent {
-                                Text(formattedSignedYoY(yoy))
-                                    .font(.caption.weight(.semibold))
-                                    .monospacedDigit()
-                            }
-                        }
-                        .accessibilityElement(children: .combine)
-                    }
-                }
-                .padding(.vertical, 8)
+                RedesignTrendChart(series: series)
                 if series.id != overview.series.prefix(4).last?.id {
                     Divider()
                 }

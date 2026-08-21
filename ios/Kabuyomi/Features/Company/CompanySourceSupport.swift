@@ -129,12 +129,24 @@ func investorFacingSourceLabel(rawLabel: String, in company: CompanyPayload) -> 
 /// 個別のキーワードを足し続けても SEC の節見出しは網羅できないので、
 /// 日本語をひとつも含まないラベルは総称に落とす
 /// (「Margin and profitability…」のような英語の断片が画面に出ていた)。
-private func japaneseFacingLabel(_ label: String) -> String {
-    let hasJapanese = label.unicodeScalars.contains { scalar in
-        (0x3040...0x30FF).contains(scalar.value)      // ひらがな・カタカナ
-            || (0x4E00...0x9FFF).contains(scalar.value)  // 漢字
+/// 副題も同じ扱いにする。タイトルが「利益率」になっていても
+/// その下に "Margin and profitability discussion" が残っていては意味がない。
+/// 日本語を含まない副題は情報より雑音なので出さない。
+func japaneseFacingSubtitle(_ subtitle: String, matching label: String) -> String? {
+    let trimmed = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed != label else { return nil }
+    return containsJapanese(trimmed) ? trimmed : nil
+}
+
+private func containsJapanese(_ text: String) -> Bool {
+    text.unicodeScalars.contains { scalar in
+        (0x3040...0x30FF).contains(scalar.value)
+            || (0x4E00...0x9FFF).contains(scalar.value)
     }
-    return hasJapanese ? label : "提出資料の記述"
+}
+
+private func japaneseFacingLabel(_ label: String) -> String {
+    containsJapanese(label) ? label : "提出資料の記述"
 }
 
 func matchedSourceChunk(for source: LocalMessageSourceRef, in company: CompanyPayload) -> SourceChunkPayload? {
