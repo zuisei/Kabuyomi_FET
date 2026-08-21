@@ -327,3 +327,94 @@ rpIdHash、counter===0、aaguid環境判定、keyId===credentialId、公開鍵�
   定数(TOKEN_BUDGET 15,000 / MIN_SECTION_CHARS 2,400)まで同じ。
   本番は Worker 側(`extractMDASectionWithDiagnostics`)を使うため Node 側は死んでいる。
   → sec-service / prepared-filing の**2組の二重実装**が sec-fetcher に存在する。
+
+---
+
+# F. 訂正 — 「お金は問題なし」は言い過ぎだった(2026-08-22 後半 追検証)
+
+前節までで「二重消費・返却漏れ・権限昇格は無い」と書いた。それ自体は変わらない。
+ただしその見出しを **「お金は問題なし」** と要約したのは誤りだった。
+**付与の入口に環境の区別が無い**ことを、重要度の低い運用事項として扱っていた。
+AUDIT_PROMPT.md の「提出/課金/データ破損を最上位」に反する順位付けだったので訂正する。
+
+## F-1 【重大・実測】sandbox の購入が本番でクレジットを付与する
+
+**経路(全て確認済み):**
+
+1. `wrangler.toml:46` → `APPLE_APP_STORE_SERVER_ENVIRONMENT = "auto"`(本番設定)
+2. `apple-store-server.ts:390` `resolveVerificationEnvironments("auto")` → `["production", "sandbox"]`
+3. `fetchSignedTransactionInfo` は production を先に叩き、404 `TransactionIdNotFound`(4040010)なら
+   `shouldTryNextAppleEnvironment` が true を返して **sandbox にフォールバックする**
+4. sandbox の transactionId は production に存在しないので必ず 404 → sandbox で検証成功
+5. `verifyCreditPurchaseWithApple` は `verificationEnvironment` を**返している**
+   (`apple-store-server.ts:115`)が、
+   `routes/credit-purchase-grant.ts:40-45` は **それを `grantPurchasedCredits` に渡していない**
+
+→ sandbox 由来の取引が、**呼び出し元の本番 quotaSubject に対して実クレジットを付与する。**
+   環境の記録すら残らない。
+
+**失敗シナリオ(具体・攻撃を要しない):**
+TestFlight の Release ビルドは `APIBaseURLResolver.productionURL`
+(`ios/Kabuyomi/Services/APIClient.swift:68`)を叩く。DEBUG 切り替えは
+`kabuyomi-api-test` 側にしか効かない(`SettingsView.swift:136`)。
+一方 TestFlight の StoreKit が返すのは **sandbox の取引**である。
+つまり **TestFlight ユーザーが普通にクレジットパックを買うだけで**、
+production 照会が 4040010 で外れ → sandbox 照会が通り → 本番クレジットが無償で付与される。
+悪意も細工も要らない。`revocationDate` が無い限り 409 にもならない。
+
+(悪用経路としては、その `transactionId` を本番アプリの principal で
+`POST /v1/ios/purchases/credits/complete` に投げ直すこともできる。
+ただし**主たる問題は攻撃ではなく、TestFlight の通常利用そのもの**である。)
+
+**購読との対比(ここが判断材料):**
+購読側は環境を捨てていない。`entitlements.ts:83` / `:343` が
+`deriveStableSubscriptionPrincipal(env, originalTransactionId, environment)` に環境を渡すため、
+sandbox 購読は **production とは別の principal** に着地する(=本番ユーザーの権利にはならない)。
+`durable/entitlement.ts:116` は環境が変わった状態遷移も検出する。
+**同じリポジトリ内で、購読は環境を分離していて、消費型クレジットだけしていない。**
+これは設計の一貫性が破れている箇所であり、「auto は Apple 推奨だから正しい」では説明できない。
+
+**⑨ との複合:** 本番 `APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS = "true"` により
+`verifyAppExtensions` は extensions 不在で早期 return する。
+attestation 側での build 由来の絞り込みは当てにできない。
+
+## F-2 【実施済】環境を記録する(2026-08-22)
+
+`verificationEnvironment` は credit 経路で受け取ったまま**どこにも記録されていなかった**。
+事後に「どの付与が sandbox 由来か」を D1 から特定する手段が無かったので、まずそこを塞いだ。
+
+- `d1/migrations/0019_purchase_transaction_environment.sql`
+  `purchase_transactions.verification_environment TEXT`(**nullable**)。
+  既存行は環境を知り得ないので `production` での backfill はしない。NULL は「不明」であって
+  「production」ではない。
+- 経路: `credit-purchase-grant.ts` → `grantPurchasedCredits` → `ensurePurchaseTransactionRow`
+  → INSERT / SELECT / `PurchaseTransactionRow`(cf6ae35 と同種の列ずれを避けるため
+  SELECT 列と型も同時に広げた)
+- `production` は `logEvent`、それ以外は `logWarnEvent`
+  (`credit_purchase_grant_non_production_environment`)。D1 を引かずに気づける。
+- 回帰テスト: sandbox 付与が `"sandbox"` として記録されることを bind 引数で固定。
+
+**この作業で追加で1件出た。**
+
+- **F-3 [中]** `routes/internal-credit-purchase-grant.ts` が
+  **Apple 検証を一切通さない第2の付与経路**である。型を必須にしたことで露見した。
+  ここを `production` と記録すると内部付与が実購入と区別できなくなるため、
+  記録値を `production` / `sandbox` / **`internal`** の3値(`CreditGrantEnvironment`)にした。
+
+## F-4 【重要】(b)「sandbox を別 principal に隔離」は**成立しない**
+
+指示は (b) だったが、実装しようとして矛盾が出たので報告する。
+
+購読が環境で principal を分けられるのは、`readQuotaIdentity` に **entitlement 段があり、
+消費時にも同じ sandbox principal が再導出されるから**である。
+クレジットにはその段が無い。消費は device / account principal で解決される。
+
+→ 付与だけを別 principal に隔離すると、**誰も使えないクレジットが発行される**。
+   TestFlight での課金テストは (a) と同じく死に、しかも 403 ではなく**黙って失敗する**。
+   (a) のコストを払って (a) より悪い挙動になる。
+
+消費側も揃えるには「この installation は sandbox クライアントである」という
+**永続的な識別状態を課金経路に新設する**ことになり、(b) の想定を超える。
+
+したがって **遮断方式は (a) / (c) / 現状維持のいずれかで再決定が必要**。
+F-2 はどれを選んでも必要な土台なので先に入れてある。

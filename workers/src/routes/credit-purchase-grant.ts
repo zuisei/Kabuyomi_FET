@@ -41,7 +41,8 @@ export const handleCreditPurchaseGrantRoute: RouteHandler = async ({ request, ur
     productId: payload.productId,
     transactionId: verified.transactionId,
     originalTransactionId: verified.originalTransactionId,
-    purchasedAt: payload.purchasedAt
+    purchasedAt: payload.purchasedAt,
+    verificationEnvironment: verified.verificationEnvironment
   });
 
   return json({

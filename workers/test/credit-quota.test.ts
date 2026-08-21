@@ -115,7 +115,8 @@ describe("credit quota bridge", () => {
         productId: "kabuyomi.credits.100",
         transactionId: "tx-100",
         originalTransactionId: "orig-tx-100",
-        purchasedAt: "2026-04-25T00:00:00.000Z"
+        purchasedAt: "2026-04-25T00:00:00.000Z",
+        verificationEnvironment: "production"
       }
     );
 
@@ -134,6 +135,7 @@ describe("credit quota bridge", () => {
       "orig-tx-100",
       100,
       "pending",
+      "production",
       "2026-04-25T00:00:00.000Z",
       expect.any(String),
       expect.any(String)
@@ -202,7 +204,8 @@ describe("credit quota bridge", () => {
         productId: "kabuyomi.credits.50",
         transactionId: "tx-50",
         originalTransactionId: "orig-tx-50",
-        purchasedAt: "2026-05-09T00:00:00.000Z"
+        purchasedAt: "2026-05-09T00:00:00.000Z",
+        verificationEnvironment: "production"
       }
     );
 
@@ -217,6 +220,84 @@ describe("credit quota bridge", () => {
       "orig-tx-50",
       50,
       "pending",
+      "production",
+      "2026-05-09T00:00:00.000Z",
+      expect.any(String),
+      expect.any(String)
+    );
+  });
+
+  // APPLE_APP_STORE_SERVER_ENVIRONMENT is "auto" in production, so a transaction
+  // Apple's production endpoint does not recognise is retried against sandbox and
+  // still verifies. TestFlight Release builds talk to the production API while
+  // StoreKit hands them sandbox transactions, so sandbox-verified grants reach
+  // production balances. This pins the ledger's ability to tell them apart.
+  it("records the Apple verification environment so sandbox grants stay identifiable", async () => {
+    const db = createPurchaseDb({
+      user_id: identity.quotaSubject,
+      product_id: "kabuyomi.credits.50",
+      transaction_id: "tx-sandbox-50",
+      original_transaction_id: "orig-tx-sandbox-50",
+      credits_granted: 50,
+      status: "pending",
+      purchased_at: "2026-05-09T00:00:00.000Z",
+      created_at: "2026-05-09T00:00:00.000Z",
+      updated_at: "2026-05-09T00:00:00.000Z"
+    });
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          usage: usagePayload(50),
+          didMutate: true,
+          creditsRemaining: 80,
+          creditOperation: {
+            operationId: "purchase:tx-sandbox-50",
+            type: "purchase_grant",
+            status: "applied",
+            delta: 50,
+            balanceAfter: 80,
+            monthlyBalanceAfter: 30,
+            purchasedBalanceAfter: 50,
+            referenceType: "purchase",
+            referenceId: "tx-sandbox-50",
+            createdAt: "2026-05-09T00:00:01.000Z"
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    const result = await grantPurchasedCredits(
+      identity,
+      {
+        DB: db.db,
+        USER_QUOTA: {
+          getByName: vi.fn().mockReturnValue({ fetch })
+        }
+      } as never,
+      DEFAULT_REMOTE_CONFIG,
+      {
+        productId: "kabuyomi.credits.50",
+        transactionId: "tx-sandbox-50",
+        originalTransactionId: "orig-tx-sandbox-50",
+        purchasedAt: "2026-05-09T00:00:00.000Z",
+        verificationEnvironment: "sandbox"
+      }
+    );
+
+    expect(result.didMutate).toBe(true);
+    expect(db.db.prepare).toHaveBeenCalledWith(
+      expect.stringContaining("verification_environment")
+    );
+    expect(db.bind).toHaveBeenCalledWith(
+      expect.any(String),
+      identity.quotaSubject,
+      "kabuyomi.credits.50",
+      "tx-sandbox-50",
+      "orig-tx-sandbox-50",
+      50,
+      "pending",
+      "sandbox",
       "2026-05-09T00:00:00.000Z",
       expect.any(String),
       expect.any(String)
@@ -413,7 +494,8 @@ describe("credit quota bridge", () => {
       DEFAULT_REMOTE_CONFIG,
       {
         productId: "kabuyomi.credits.100",
-        transactionId: "tx-100-granted"
+        transactionId: "tx-100-granted",
+        verificationEnvironment: "production"
       }
     );
 
@@ -440,7 +522,8 @@ describe("credit quota bridge", () => {
         DEFAULT_REMOTE_CONFIG,
         {
           productId: "unknown_pack",
-          transactionId: "tx-unknown"
+          transactionId: "tx-unknown",
+          verificationEnvironment: "production"
         }
       )
     ).rejects.toMatchObject({
@@ -475,7 +558,8 @@ describe("credit quota bridge", () => {
       DEFAULT_REMOTE_CONFIG,
       {
           productId: "kabuyomi.credits.100",
-          transactionId: "tx-reused"
+          transactionId: "tx-reused",
+        verificationEnvironment: "production"
       }
       )
     ).rejects.toMatchObject({

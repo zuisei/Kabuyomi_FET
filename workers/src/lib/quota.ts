@@ -1,4 +1,5 @@
 import type { Env, UsageState } from "../env";
+import type { VerifiedAppleEnvironment } from "./apple-signed-data";
 import {
   resolveCreditPackCredits,
   resolveMonthlyCreditLimit,
@@ -50,8 +51,20 @@ interface UsageEnvelope {
   dailyRewardsRemaining?: number;
 }
 
+/**
+ * How a credit purchase grant was authorised.
+ * - "production" / "sandbox": which Apple endpoint verified the transaction.
+ *   APPLE_APP_STORE_SERVER_ENVIRONMENT is "auto" in production, so both are
+ *   reachable there.
+ * - "internal": /v1/internal/credits/purchase-grant, which grants without any
+ *   Apple verification. Recording it as "production" would invent an audit fact.
+ */
+export type CreditGrantEnvironment = VerifiedAppleEnvironment | "internal";
+
 interface PurchaseTransactionRow {
   user_id: string;
+  /** null on rows written before 0019: unknown environment, not "production". */
+  verification_environment: CreditGrantEnvironment | null;
   product_id: string;
   transaction_id: string;
   original_transaction_id: string | null;
@@ -536,6 +549,7 @@ export async function grantPurchasedCredits(
     transactionId: string;
     originalTransactionId?: string;
     purchasedAt?: string;
+    verificationEnvironment: CreditGrantEnvironment;
   }
 ): Promise<PurchaseCreditGrantResult> {
   assertPurchasedCreditGrantsEnabled(config);
@@ -549,7 +563,8 @@ export async function grantPurchasedCredits(
     transactionId: options.transactionId,
     originalTransactionId: options.originalTransactionId,
     creditsGranted,
-    purchasedAt: options.purchasedAt
+    purchasedAt: options.purchasedAt,
+    verificationEnvironment: options.verificationEnvironment
   });
 
   if (transaction.user_id !== identity.quotaSubject) {
@@ -560,6 +575,27 @@ export async function grantPurchasedCredits(
   }
   if (transaction.status !== "pending" && transaction.status !== "granted") {
     throw new AppError(409, "Purchase transaction is in an unsupported state");
+  }
+
+  // APPLE_APP_STORE_SERVER_ENVIRONMENT is "auto" in production, so a transaction
+  // Apple's production endpoint does not know is retried against sandbox and
+  // still verifies. TestFlight Release builds talk to the production API while
+  // StoreKit hands them sandbox transactions, so this is reachable without any
+  // tampering. Recorded and logged here; whether such a grant should be blocked
+  // is still an open product decision.
+  const environmentLog = {
+    quotaSubjectHash: hashForLog(identity.quotaSubject),
+    transactionIdSuffix: suffixForLog(options.transactionId),
+    productId: options.productId,
+    verificationEnvironment: options.verificationEnvironment,
+    recordedEnvironment: transaction.verification_environment,
+    transactionStatus: transaction.status,
+    creditsGranted
+  };
+  if (options.verificationEnvironment === "production") {
+    logEvent("credit_purchase_grant_environment", environmentLog);
+  } else {
+    logWarnEvent("credit_purchase_grant_non_production_environment", environmentLog);
   }
 
   if (transaction.status === "granted") {
@@ -1375,6 +1411,7 @@ async function ensurePurchaseTransactionRow(
     originalTransactionId?: string;
     creditsGranted: number;
     purchasedAt?: string;
+    verificationEnvironment: CreditGrantEnvironment;
   }
 ): Promise<PurchaseTransactionRow> {
   const now = new Date().toISOString();
@@ -1387,10 +1424,11 @@ async function ensurePurchaseTransactionRow(
       original_transaction_id,
       credits_granted,
       status,
+      verification_environment,
       purchased_at,
       created_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       crypto.randomUUID(),
@@ -1400,6 +1438,7 @@ async function ensurePurchaseTransactionRow(
       options.originalTransactionId ?? null,
       options.creditsGranted,
       "pending",
+      options.verificationEnvironment,
       options.purchasedAt ?? null,
       now,
       now
@@ -1425,6 +1464,7 @@ async function loadPurchaseTransactionRow(
       original_transaction_id,
       credits_granted,
       status,
+      verification_environment,
       debt_offset_applied,
       refunded_at,
       refund_reversed_at,

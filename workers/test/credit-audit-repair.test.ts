@@ -393,7 +393,8 @@ describe("credit audit repair", () => {
         DEFAULT_REMOTE_CONFIG,
         {
           productId: "kabuyomi.credits.100",
-          transactionId: "tx-repair"
+          transactionId: "tx-repair",
+          verificationEnvironment: "production"
         }
       )
     ).rejects.toThrow("purchase mark failed");
