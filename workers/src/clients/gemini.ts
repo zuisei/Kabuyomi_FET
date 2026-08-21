@@ -76,9 +76,20 @@ export async function generateSummary(
   };
 }
 
-export async function generateChatAnswer(env: Env, input: ChatPromptInput): Promise<GeminiChatAnswer> {
-  if (!env.GEMINI_API_KEY) {
-    logEvent("gemini_fallback_used", { kind: "chat", reason: "missing_api_key" });
+/// `forceFallback` はリモートモデルを一切呼ばずローカルの組み立て回答を返す。
+/// 以前は呼び出し側が `{ ...env, GEMINI_API_KEY: undefined }` と env を書き換えて
+/// これを実現していたが、その書き方はプロバイダが増えた瞬間に意味が変わる
+/// (要約がテンプレートのまま3か月半放置された退行と同じ形)。意図を引数で明示する。
+export async function generateChatAnswer(
+  env: Env,
+  input: ChatPromptInput,
+  options: { forceFallback?: boolean } = {}
+): Promise<GeminiChatAnswer> {
+  if (options.forceFallback || !env.GEMINI_API_KEY) {
+    logEvent("gemini_fallback_used", {
+      kind: "chat",
+      reason: options.forceFallback ? "forced_local_fallback" : "missing_api_key"
+    });
     return attachChatDecisionMeta(localChatFallback(input), {
       geminiCalled: false,
       geminiSucceeded: false,

@@ -1,6 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
 import { prepareFilingText } from "./prepared-filing.mjs";
 
+// NOTE: このサービスは本番/test のどちらの経路でも使われていない。
+// `wrangler.toml` / `wrangler.test.toml` はいずれも
+// `SEC_FETCHER_BASE_URL = "cloudflare-internal"` で、実際に動くのは
+// Worker 内の `workers/src/lib/sec-fetcher-service.ts` の方。
+// ここを直しても本番は変わらないので、両実装を触るときは必ず対にすること。
 const DEFAULT_USER_AGENT = "Kabuyomi admin@kabuyomi.app";
 const MAX_RESPONSE_CACHE_ENTRIES = 512;
 const CACHE_TTL = {

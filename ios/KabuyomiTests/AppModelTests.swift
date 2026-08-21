@@ -1221,6 +1221,58 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(pbxproj.contains("CURRENT_PROJECT_VERSION = 6;"))
     }
 
+    /// 本番 Worker の `APP_ATTEST_ALLOWED_BUNDLE_VERSIONS` に載っていないビルド番号を
+    /// App Store に出すと、新規インストールの attestation が
+    /// `attestation_bundle_version_not_allowed` で拒否され、
+    /// **ウェルカムクレジットも購入も無言で落ちる**(ユーザーにはエラーが出ない)。
+    ///
+    /// 同じ突き合わせは `workers/scripts/deploy-worker.mjs` にもあるが、あちらは
+    /// **Worker をデプロイするときにしか走らない**。iOS だけ提出する経路には
+    /// これまでゲートが無かったので、iOS 側のテストにも置く。
+    func testBundleVersionIsCoveredByProductionAppAttestAllowlist() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let projectYML = try String(contentsOf: repoRoot.appendingPathComponent("ios/project.yml"), encoding: .utf8)
+        let wrangler = try String(contentsOf: repoRoot.appendingPathComponent("workers/wrangler.toml"), encoding: .utf8)
+
+        guard let buildNumber = Self.firstCapture(
+            in: projectYML,
+            pattern: #"(?m)^\s*CURRENT_PROJECT_VERSION:\s*(\S+)"#
+        ) else {
+            return XCTFail("ios/project.yml から CURRENT_PROJECT_VERSION を読めなかった")
+        }
+        guard let allowlistRaw = Self.firstCapture(
+            in: wrangler,
+            pattern: #"(?m)^APP_ATTEST_ALLOWED_BUNDLE_VERSIONS\s*=\s*"([^"]*)""#
+        ) else {
+            return XCTFail("workers/wrangler.toml から APP_ATTEST_ALLOWED_BUNDLE_VERSIONS を読めなかった")
+        }
+
+        let allowlist = allowlistRaw
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        XCTAssertTrue(
+            allowlist.contains(buildNumber),
+            """
+            ビルド番号 \(buildNumber) が本番の App Attest 許可リスト [\(allowlist.joined(separator: ", "))] に入っていない。
+            この状態で提出すると新規インストールが無言で restricted_installation に落ちる。
+            workers/wrangler.toml の APP_ATTEST_ALLOWED_BUNDLE_VERSIONS に \(buildNumber) を追加し、
+            Worker をデプロイしてから提出すること。
+            """
+        )
+    }
+
+    private static func firstCapture(in text: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let range = Range(match.range(at: 1), in: text) else { return nil }
+        return String(text[range]).trimmingCharacters(in: .whitespaces)
+    }
+
     func testResetLocalDataClearsRecentStateAndKeepsDeviceIdentity() async throws {
         let persistence = PersistenceController(inMemory: true)
         let company = TestFixtures.companyPayload()

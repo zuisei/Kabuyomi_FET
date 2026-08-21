@@ -18,8 +18,9 @@ export async function buildLocalFallbackResponse({
   contextPack?: ChatContextPack;
 }): Promise<ChatResponsePayload | null> {
   const fallback = await generateChatAnswer(
-    { ...env, GEMINI_API_KEY: undefined } as Env,
-    { filing, question, questionIntent: contextPack?.questionIntent, contextPack }
+    env,
+    { filing, question, questionIntent: contextPack?.questionIntent, contextPack },
+    { forceFallback: true }
   );
   const approvedSourceIds = fallback.sourceIds.filter((sourceId) => validSourceIds.has(sourceId));
 

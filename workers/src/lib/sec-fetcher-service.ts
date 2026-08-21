@@ -22,6 +22,11 @@ interface SecFetcherConfig {
   retryCount: number;
   initialBackoffMs: number;
   requestTimeoutMs: number;
+  /// SEC を実際に叩く直前に必ず呼ばれる。**再試行のたびにも呼ばれる**ので、
+  /// レート予算は「フェッチャ呼び出し数」ではなく「実 HTTP リクエスト数」で消費される。
+  /// これが無いと 1トークンで最大 retryCount+1 回 SEC を叩けてしまい、
+  /// SEC の fair-access(10 req/s 超過でIPブロック)を静かに超える。
+  beforeAttempt?: () => Promise<void>;
 }
 
 interface SubmissionRecent {
@@ -48,8 +53,11 @@ interface CacheEntry {
 
 const responseCache = new Map<string, CacheEntry>();
 
-export function createCloudflareSecFetcherService(env: Env) {
-  const config = readSecFetcherConfig(env);
+export function createCloudflareSecFetcherService(
+  env: Env,
+  options: { beforeAttempt?: () => Promise<void> } = {}
+) {
+  const config = { ...readSecFetcherConfig(env), beforeAttempt: options.beforeAttempt };
 
   async function secJson(url: string, options: { allowNotFound?: boolean; cacheTtlMs?: number } = {}) {
     return withCache(responseCache, url, options.cacheTtlMs ?? 0, async () => {
@@ -381,6 +389,7 @@ async function fetchWithRetry(url: string, init: RequestInit, config: SecFetcher
 
   for (let attempt = 0; attempt <= config.retryCount; attempt += 1) {
     try {
+      await config.beforeAttempt?.();
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
       try {

@@ -258,8 +258,14 @@ async function fetchFromCloudflareInternalSecFetcher(
   payload: Record<string, unknown>
 ): Promise<unknown> {
   try {
+    // 経路の入口で1回。ここで払うのは「この呼び出しを始めてよいか」の分。
     await waitForSecRateLimit(env, path);
-    const service = createCloudflareSecFetcherService(env);
+    // そのうえで、実際に SEC を叩くたび(再試行を含む)に1トークン払う。
+    // 入口の1回だけだと、429/5xx が続いたときに 1トークンで
+    // retryCount+1 回まで SEC を叩けてしまい、予算を静かに超える。
+    const service = createCloudflareSecFetcherService(env, {
+      beforeAttempt: () => waitForSecRateLimit(env, path, 1)
+    });
 
     if (path === "/internal/sec/tickers-snapshot") {
       return service.fetchTickerSnapshot();
@@ -330,7 +336,7 @@ async function fetchFromCloudflareInternalSecFetcher(
   }
 }
 
-async function waitForSecRateLimit(env: Env, path: string): Promise<void> {
+async function waitForSecRateLimit(env: Env, path: string, overrideTokens?: number): Promise<void> {
   if (!env.SEC_RATE_LIMITER) {
     logErrorEvent("sec_rate_limiter_missing", {
       path,
@@ -343,7 +349,8 @@ async function waitForSecRateLimit(env: Env, path: string): Promise<void> {
     return;
   }
 
-  const tokens = path === "/internal/sec/filing-assets" || path === "/internal/sec/prepared-filing" ? 2 : 1;
+  const tokens = overrideTokens ??
+    (path === "/internal/sec/filing-assets" || path === "/internal/sec/prepared-filing" ? 2 : 1);
   const response = await env.SEC_RATE_LIMITER.getByName(SEC_RATE_LIMITER_NAME).fetch(
     `https://do/sec-rate-limit?tokens=${tokens}`
   );
