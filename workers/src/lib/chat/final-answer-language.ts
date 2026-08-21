@@ -398,11 +398,16 @@ function inferDriverLabels(text: string): string[] {
   add("利用席数", /seats? (?:grew|growth|increased)|seat growth/);
   add("販売数量", /\bsales\s+volume|production volumes?|unit volumes?|数量/);
   add("価格実現", /price realization|pricing|price\/mix|price mix|価格/);
-  add("平均販売価格", /average selling prices?|asp\b/);
+  // 先頭に語境界が無いと "grasp" / "clasp" / "gasp" が asp に一致する。
+  add("平均販売価格", /average selling prices?|\basp\b/);
   add("出荷量", /bit shipments?|shipments?/);
-  add("製品ミックス", /favorable mix|product mix|mix/);
+  // 裸の mix は "mixture" / "mixed" にも一致するため語境界を付ける。
+  add("製品ミックス", /favorable mix|product mix|\bmix\b/);
   add("製造コスト削減", /manufacturing cost reductions?/);
-  add("DRAM・NAND需要", /dram|nand/);
+  // 語境界が無いと "dramatically" / "dramatic" が dram に部分一致し、
+  // **半導体メモリと無関係な企業の回答に「DRAM・NAND需要」が混入する**。
+  // 実測: KO(飲料)と LLY(製薬)の回答で発生していた。
+  add("DRAM・NAND需要", /\bdram\b|\bnand\b/);
   add("需要", /demand|需要/);
   add("エンドユーザー向け機械販売", /equipment to end users?|end users?|machine sales/);
   add("受注残", /backlog/);
@@ -427,7 +432,9 @@ function inferDriverLabels(text: string): string[] {
   add("検索広告", /google search|search advertising/);
   add("YouTube広告", /youtube ads/);
   add("為替影響", /foreign exchange|foreign currency/);
-  add("AWS顧客利用量", /aws[\s\S]{0,160}customer usage|customer usage/);
+  // 単独の "customer usage" を許すと、AWS と無関係な企業の回答に
+  // 「AWS顧客利用量」というラベルが付く。AWS の近傍にある場合だけ採る。
+  add("AWS顧客利用量", /\baws\b[\s\S]{0,160}customer usage/);
   add("中古車・整備・充電・保険サービス", /used vehicle sales|maintenance services|supercharging|automotive insurance/);
   add("Mounjaro・Zepbound需要", /mounjaro|zepbound/);
   add("実現価格低下による相殺", /lower realized prices/);
