@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { computeReleaseCandidate } from "./release-candidate.mjs";
-import { verifyAcceptedReleaseEvidence } from "./release-evidence.mjs";
+import { verifyAcceptedReleaseEvidenceOrApprovedWaiver } from "./release-evidence.mjs";
 
 const workersDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -42,7 +42,11 @@ export async function prepareDeploy(request, options = {}) {
       process.env.KABUYOMI_RELEASE_EVIDENCE_MANIFEST?.trim() ??
       join(localWorkersDir, "testbench/release-evidence/current.json")
     );
-    releaseEvidence = await verifyAcceptedReleaseEvidence({
+    // マニフェストが現行 candidate に追いついていない場合に限り、
+    // RELEASE_GATE_STATE.json に記録されたリリースオーナー承認の免除を受け付ける。
+    // 以前は厳格版だけを呼んでいたため、免除時はこのスクリプトを迂回して
+    // wrangler を直接叩くしかなく、デプロイの記録が残らなかった。
+    releaseEvidence = await verifyAcceptedReleaseEvidenceOrApprovedWaiver({
       workersDir: localWorkersDir,
       manifestPath,
       releaseCandidateId: candidate.releaseCandidateId,
