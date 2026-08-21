@@ -74,6 +74,18 @@ func investorFacingSourceLabel(rawLabel: String, in company: CompanyPayload) -> 
         return "純利益"
     }
 
+    if lowered.contains("margin") || lowered.contains("profitability") || lowered.contains("gross profit") {
+        return "利益率"
+    }
+
+    if lowered.contains("cash flow") || lowered.contains("liquidity") {
+        return "キャッシュフロー"
+    }
+
+    if lowered.contains("segment") {
+        return "セグメント"
+    }
+
     if let range = raw.range(of: #"Part\s+[IVXLC]+\s+Item\s+\d+[A-Za-z]?"#, options: .regularExpression) {
         return "\(company.formType) \(translatedItemLabel(from: String(raw[range])))"
     }
@@ -107,10 +119,22 @@ func investorFacingSourceLabel(rawLabel: String, in company: CompanyPayload) -> 
 
     if raw.count > 24 {
         let endIndex = raw.index(raw.startIndex, offsetBy: 24)
-        return String(raw[..<endIndex]) + "…"
+        return japaneseFacingLabel(String(raw[..<endIndex]) + "…")
     }
 
-    return raw
+    return japaneseFacingLabel(raw)
+}
+
+/// 訳語に当たらなかった英語の見出しをそのまま出さないための歯止め。
+/// 個別のキーワードを足し続けても SEC の節見出しは網羅できないので、
+/// 日本語をひとつも含まないラベルは総称に落とす
+/// (「Margin and profitability…」のような英語の断片が画面に出ていた)。
+private func japaneseFacingLabel(_ label: String) -> String {
+    let hasJapanese = label.unicodeScalars.contains { scalar in
+        (0x3040...0x30FF).contains(scalar.value)      // ひらがな・カタカナ
+            || (0x4E00...0x9FFF).contains(scalar.value)  // 漢字
+    }
+    return hasJapanese ? label : "提出資料の記述"
 }
 
 func matchedSourceChunk(for source: LocalMessageSourceRef, in company: CompanyPayload) -> SourceChunkPayload? {

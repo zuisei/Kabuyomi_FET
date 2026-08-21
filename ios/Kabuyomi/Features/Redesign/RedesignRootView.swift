@@ -787,33 +787,25 @@ private struct RedesignResearchOverview: View {
         orderedInvestorMetrics(for: company)
     }
 
+    /// 結論 → 数値 → なぜ → 確認点 → 詳細 の順に読ませる。
+    /// 以前は同じ粒度の見出しが5つ縦に並び、長い「推移」が
+    /// 「変化と確認論点」を画面外まで押し下げていた。
     var body: some View {
-        VStack(alignment: .leading, spacing: 32) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("概要")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .textCase(.uppercase)
-                Text(company.summary.verdict)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                    .lineSpacing(5)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if !company.summary.highlights.isEmpty {
-                RedesignEvidenceList(
-                    title: "重要なポイント",
-                    lines: company.summary.highlights,
-                    company: company,
-                    openSource: openSource
-                )
-            }
+        VStack(alignment: .leading, spacing: 30) {
+            // 「概要」というラベルは中身を説明していないので置かない。
+            // 直上のヘッダに会社名・書類種別・提出日が出ており、文脈は足りている。
+            Text(company.summary.verdict)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(KabuyomiTheme.ink)
+                .lineSpacing(5)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("redesign.company.verdict")
 
             if !metrics.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("主要数値")
-                        .font(.title3.weight(.bold))
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 142), spacing: 16)], alignment: .leading, spacing: 18) {
                         ForEach(metrics) { metric in
                             RedesignMetricView(metric: metric)
@@ -822,18 +814,29 @@ private struct RedesignResearchOverview: View {
                 }
             }
 
-            if let historicalOverview = company.historicalOverview,
-               !historicalOverview.series.isEmpty {
-                RedesignHistoricalOverview(overview: historicalOverview)
+            if !company.summary.highlights.isEmpty {
+                RedesignEvidenceList(
+                    title: "ポイント",
+                    lines: company.summary.highlights,
+                    company: company,
+                    emphasis: .primary,
+                    openSource: openSource
+                )
             }
 
             if !company.summary.changes.isEmpty {
                 RedesignEvidenceList(
-                    title: "変化と確認論点",
+                    title: "確認したい点",
                     lines: company.summary.changes,
                     company: company,
+                    emphasis: .secondary,
                     openSource: openSource
                 )
+            }
+
+            if let historicalOverview = company.historicalOverview,
+               !historicalOverview.series.isEmpty {
+                RedesignHistoricalOverview(overview: historicalOverview)
             }
         }
         .padding(.horizontal, 22)
@@ -843,16 +846,24 @@ private struct RedesignResearchOverview: View {
 }
 
 private struct RedesignEvidenceList: View {
+    /// 「ポイント」と「確認したい点」は役割が違う。
+    /// 同じ見出しの重さで並べると、どちらが本筋か読み手に伝わらない。
+    enum Emphasis {
+        case primary
+        case secondary
+    }
+
     let title: String
     let lines: [SummaryLinePayload]
     let company: CompanyPayload
+    var emphasis: Emphasis = .primary
     let openSource: (LocalMessageSourceRef) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: emphasis == .primary ? 16 : 12) {
             Text(title)
-                .font(.headline.weight(.bold))
-                .foregroundStyle(KabuyomiTheme.ink)
+                .font(emphasis == .primary ? .headline.weight(.bold) : .subheadline.weight(.bold))
+                .foregroundStyle(emphasis == .primary ? KabuyomiTheme.ink : KabuyomiTheme.inkSoft)
 
             ForEach(lines) { line in
                 VStack(alignment: .leading, spacing: 10) {
@@ -863,8 +874,8 @@ private struct RedesignEvidenceList: View {
                             .padding(.top, 3)
                             .accessibilityHidden(true)
                         Text(line.text)
-                            .font(.body)
-                            .foregroundStyle(KabuyomiTheme.ink)
+                            .font(emphasis == .primary ? .body : .subheadline)
+                            .foregroundStyle(emphasis == .primary ? KabuyomiTheme.ink : KabuyomiTheme.inkSoft)
                             .lineSpacing(5)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -882,9 +893,12 @@ private struct RedesignEvidenceList: View {
                                         Image(systemName: "doc.text.magnifyingglass")
                                             .font(.caption.weight(.semibold))
                                         VStack(alignment: .leading, spacing: 1) {
-                                            Text(investorFacingSourceLabel(for: chunk, in: company))
+                                            let label = investorFacingSourceLabel(for: chunk, in: company)
+                                            Text(label)
                                                 .font(.caption.weight(.bold))
-                                            if !chunk.sectionTitle.isEmpty {
+                                            // 「売上高 / 売上高」のように同じ語を2行に出さない。
+                                            // 副題は本文と違う情報を持つときだけ意味がある。
+                                            if !chunk.sectionTitle.isEmpty, chunk.sectionTitle != label {
                                                 Text(chunk.sectionTitle)
                                                     .font(.caption)
                                                     .foregroundStyle(KabuyomiTheme.inkSoft)
@@ -934,7 +948,9 @@ private struct RedesignMetricView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(KabuyomiTheme.inkSoft)
             } else {
-                Text(metric.periodEnd)
+                // 前年同期比が無い指標だけ ISO 日付が生で出ており、他のタイルと揃っていなかった。
+                // 何の日付か分かる形にして、表記もアプリ内の他の日付と合わせる。
+                Text("期末 \(formattedFilingDate(metric.periodEnd))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -956,23 +972,52 @@ private struct RedesignMetricView: View {
         if let display = metricYoYDisplay(for: metric) {
             return "\(title)、\(value)、前年同期比 \(display.text)"
         }
-        return "\(title)、\(value)、\(metric.periodEnd)"
+        return "\(title)、\(value)、期末 \(formattedFilingDate(metric.periodEnd))"
     }
 }
 
 private struct RedesignHistoricalOverview: View {
     let overview: HistoricalOverviewPayload
+    /// 4指標 × 4期を常に開いておくと、この1節だけで画面2〜3枚分を占める。
+    /// 結論と数値を先に読ませるため、詳細は必要なときだけ開く。
+    @State private var isExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("推移")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(KabuyomiTheme.ink)
-            Text("過去\(overview.years)期 ・ \(historicalBasisTitle(overview.comparisonBasis))")
-                .font(.subheadline)
-                .foregroundStyle(KabuyomiTheme.inkSoft)
-                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { isExpanded.toggle() }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("推移")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(KabuyomiTheme.ink)
+                        Text("過去\(overview.years)期 ・ \(historicalBasisTitle(overview.comparisonBasis))")
+                            .font(.subheadline)
+                            .foregroundStyle(KabuyomiTheme.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("redesign.company.historical.toggle")
+            .accessibilityLabel(isExpanded ? "推移を閉じる" : "推移を開く")
 
+            if isExpanded {
+                historicalSeries
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var historicalSeries: some View {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(overview.series.prefix(4)) { series in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(series.label.isEmpty ? MetricLabeler.title(for: series.logicalName) : series.label)
