@@ -1046,10 +1046,15 @@ struct CreditView: View {
 
     private func formattedOptionalDate(_ rawValue: String?) -> String? {
         guard let rawValue else { return nil }
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime, .withColonSeparatorInTimeZone]
 
-        guard let date = isoFormatter.date(from: rawValue) else {
+        // Apple 由来の日付は Worker が `new Date(ms).toISOString()` で作るため
+        // **必ず小数秒が付く**(`2026-09-01T00:00:00.000Z`)。
+        // `.withFractionalSeconds` が無いと ISO8601DateFormatter はこれを
+        // パースできず、そのまま生の ISO 文字列が画面に出る
+        // (「次回: 2026-09-01T00:00:00.000Z」)。**課金中の購読者にだけ見える。**
+        // サーバ自前生成の期間は `2026-09-01T00:00:00+09:00` で小数秒が無いので、
+        // `DeviceIdentityStore.parseISO8601` と同じく両方を試す。
+        guard let date = Self.parseISO8601(rawValue) else {
             return rawValue
         }
 
@@ -1058,6 +1063,18 @@ struct CreditView: View {
         formatter.timeZone = TimeZone(identifier: "Asia/Tokyo")
         formatter.setLocalizedDateFormatFromTemplate("M月d日")
         return formatter.string(from: date)
+    }
+
+    static func parseISO8601(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [
+            .withInternetDateTime, .withColonSeparatorInTimeZone, .withFractionalSeconds
+        ]
+        if let date = fractional.date(from: value) { return date }
+
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime, .withColonSeparatorInTimeZone]
+        return plain.date(from: value)
     }
 
     private func formattedShortDateTime(_ date: Date) -> String {

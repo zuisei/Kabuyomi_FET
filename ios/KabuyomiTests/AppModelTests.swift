@@ -1266,6 +1266,27 @@ final class AppModelTests: XCTestCase {
         )
     }
 
+    /// Apple 由来の期限は Worker が `new Date(ms).toISOString()` で作るため必ず
+    /// 小数秒が付く(`2026-09-01T00:00:00.000Z`)。`.withFractionalSeconds` を
+    /// 持たない ISO8601DateFormatter はこれをパースできず、CreditView が
+    /// 生の ISO 文字列を「次回: 2026-09-01T00:00:00.000Z」と表示していた。
+    /// **課金中の購読者にだけ見える不具合**だったので回帰を固定する。
+    func testCreditViewParsesBothFractionalAndPlainISO8601() throws {
+        let withFraction = try XCTUnwrap(
+            CreditView.parseISO8601("2026-09-01T00:00:00.000Z"),
+            "Apple 由来の小数秒つき ISO をパースできていない"
+        )
+        let withoutFraction = try XCTUnwrap(
+            CreditView.parseISO8601("2026-09-01T00:00:00Z"),
+            "小数秒なしの ISO をパースできていない"
+        )
+        XCTAssertEqual(withFraction, withoutFraction)
+
+        // サーバ自前生成の期間(JST オフセット付き・小数秒なし)も従来どおり通ること。
+        XCTAssertNotNil(CreditView.parseISO8601("2026-09-01T00:00:00+09:00"))
+        XCTAssertNil(CreditView.parseISO8601("not-a-date"))
+    }
+
     private static func firstCapture(in text: String, pattern: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),

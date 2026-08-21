@@ -570,3 +570,118 @@ config 再発行と `dailyRefreshEnabled=true` の後、最初の cron(18:00 UTC
 - `workers/wrangler.toml` の `APP_ATTEST_ALLOWED_BUNDLE_VERSIONS`
 
 の3点を揃えて更新し、**Worker をデプロイしてから提出**すること。
+
+---
+
+# 残していた4項目の決着(2026-08-22)
+
+前回「未対応(意図的)」として残した4件を全て閉じた。
+
+## 1. `requiredSourceIds` は出典チップに反映されている(問題なし)
+
+`response-finalizer.ts:426` が `addRequiredNumericSources()` を呼び、
+引用に無い裏付け事実の `sourceId` を**レスポンスの `sources` に追加**している(843-877行)。
+`filing.sourceChunks` に無い場合も `facts` から XBRL チップを合成して補う。
+
+**「検証は通ったが出典が画面に出ない数値」は発生しない。** 懸念は解消。
+
+## 2. P0-2 の本番での発生頻度 = **現時点では 0件**(実測)
+
+チャット回答は仕様上保存されないため、**同じモデルが書く日本語の財務散文**である
+決算要約(v9・R2 の全53件)で代用計測した。
+
+```
+v9 レコード             : 53
+summaryProvider         : openai 27 / fallback 26
+全角(数字/％/，．)を含む : 0
+```
+
+**本番の OpenAI 生成要約 27件はすべて半角。** P0-2 の穴は実在し修正も正しいが、
+**「今まさに漏れ続けていた」わけではない**。前回の報告で P0 に置いたのは重すぎた。
+実態は「いつ踏んでもおかしくない地雷を踏まずに済んでいた」であり、
+プロンプトやモデルを変えた瞬間に顕在化しうる。修正済みなので今後は関係ない。
+
+なお副産物として、**要約退行の修正が本番で効いていることが確認できた**
+(以前は v9 の30件が 30/30 fallback → 現在は 53件中 27件が `openai`)。
+
+## 3. `CreditView.swift` — 実バグを1件発見・修正
+
+**購読者にだけ見える表示不具合。**
+
+`formattedOptionalDate` の ISO パーサが `.withFractionalSeconds` を持っていなかった:
+
+```swift
+isoFormatter.formatOptions = [.withInternetDateTime, .withColonSeparatorInTimeZone]
+```
+
+Apple 由来の期限は Worker の `normalizeAppleDateToIso`(`apple-store-server.ts:389`)が
+`new Date(millis).toISOString()` で作るため**必ず小数秒が付く**。
+
+実際に Swift で確かめた結果:
+
+| 入力 | 結果 |
+|---|---|
+| `2026-09-01T00:00:00+09:00`(サーバ自前生成) | `9/1` ✅ |
+| `2026-09-01T00:00:00Z` | `9/1` ✅ |
+| **`2026-09-01T00:00:00.000Z`(Apple 由来)** | **パース失敗 → 生の文字列を表示** ❌ |
+
+`activeSubscriptionSummary`(742行)と `nextRenewalText`(756行)がこれを使うため、
+**課金中の購読者には**
+
+```
+Pro / 900クレジット / 月 / 次回: 2026-09-01T00:00:00.000Z
+```
+
+と表示されていた(正しくは `次回: 9月1日`)。無料ユーザーには `activeSubscription` が
+無いので出ない = **金を払った人だけが壊れた画面を見る。**
+
+→ `DeviceIdentityStore.parseISO8601` と同じく小数秒あり/なしの両方を試す実装に修正。
+iOS 全体を grep して、同じ欠落が他に無いことも確認済み。回帰テスト追加(iOS 206件目)。
+
+## 4. 「150問中112問がテンプレート」— **前提が間違っていた**
+
+`workers/testbench/runs/2026-08-21-summary-openai-baseline-r1.jsonl`(150行)を実測。
+
+```
+responsePath : deterministic 112 / openai 23 / historical 15
+fallbackKind : none  ... 150件すべて
+```
+
+**`fallbackKind` が全行 `none`。つまり失敗してテンプレートに落ちた回答は1件も無い。**
+
+112件は「LLM に到達できなかった失敗」ではなく、**`deterministic` という設計上の経路**の結果。
+しかも中身はテンプレートではない:
+
+```
+Q: 直近決算の売上はどうだった？
+A: 売上高は 1,111.8億ドル で、前年同期比 16.6%増 です。売上構造を見る軸は、
+   iPhone、Mac、iPad、ウェアラブル機器、サービスです。提出資料では、
+   日本は iPhone、アジア太平洋は iPhone と サービスと説明しています。
+```
+
+実数・実セグメント・出典に基づく限定表現が入っている。
+**文字数はむしろ決定的経路の方が長い**(平均163字 vs OpenAI 115字)。
+
+さらに内訳を取ると:
+
+| | 件数 |
+|---|---:|
+| `deterministic` 112件のうち **モデルを試した/安全層が差し替えた形跡があるもの** | **51** |
+| 純粋に決定的経路だけで完結したもの | 61 |
+
+`margin_driver_deterministic_recovery` 15 / `q10_semantic_deterministic_recovery` 15 /
+`numeric_alignment_deterministic_recovery` 15 / `revenue_driver_deterministic_recovery` 13 /
+`model_retry_used` 6 — **モデルは呼ばれていて、その出力が数値整合や出典ゲートで
+弾かれて決定的回答に差し替えられている。** これは安全機構が設計どおり働いた結果であって、
+「LLM に到達していない」ではない。
+
+### 実際に効きそうなレバー(**変更していない**)
+
+| 観測 | 件数 | 意味 |
+|---|---:|---|
+| `retry_blocked:hard_intent_retry_disabled` | **13** | `HARD_INTENT_TARGETED_RETRIEVAL_MODE = "diagnostic"` のため、難問向けの追加検索が**観測のみで実行されていない**。`active` にすれば最大3ソース/3000字を追加できる |
+| `source_gate_failed` | 5 | 根拠が足りずゲートで止まった。検索そのものの改善が要る |
+
+**13件は設定1つで挙動が変わる位置にいる。** ただしこれは品質の実験であってバグ修正ではなく、
+A/B で測ってから決めるべきものなので**今回は触っていない**。
+「112問を直す」のではなく「この13件を active で測る」が次の一手として具体的。
