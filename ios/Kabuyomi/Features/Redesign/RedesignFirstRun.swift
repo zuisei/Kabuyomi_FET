@@ -129,7 +129,11 @@ struct RedesignWelcomeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(KabuyomiTheme.canvas)
-        .accessibilityIdentifier("redesign.welcome")
+        // ここに識別子は付けない。素の VStack に付けると子孫まで降りていって
+        // 主 CTA と副 CTA の識別子を両方この1つで上書きする
+        // (アスクバーで踏んだのと同じ罠。シミュレータ実機確認 2026-08-22。
+        //  UI テストが「あとで」を見失い、覆いが外れないまま以降が全滅した)。
+        // この面の存在は2つのボタンで確かめる。
     }
 }
 

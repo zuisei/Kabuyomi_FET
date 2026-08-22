@@ -466,6 +466,49 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         }
     }
 
+    #if DEBUG
+    /// UI テスト専用の起動引数。**これが渡されたときだけ**、
+    /// ローカルの痕跡(UserDefaults 側)を初回インストール相当まで消す。
+    static let freshInstallUITestArgument = "-KabuyomiUITestFreshInstall"
+
+    /// 初回動線(v2 IA 仕様 Phase 6)は「本当の初回」でしか出ないので、
+    /// UI テストからは通常たどり着けない — `XCUIApplication` は
+    /// terminate/launch しかできず、アプリを消してくれない。
+    /// シミュレータを erase してからの1本目に賭けると、実行順しだいで
+    /// 通ったり通らなかったりするテストになる。
+    ///
+    /// 消すのは UserDefaults だけで十分。盤面もストリームも
+    /// `savedTickers` / `recentTickers` から導出されるので、
+    /// Core Data に会社が残っていても面には出てこない。
+    /// `PersistenceController` には触らない(消す範囲を最小に保つ)。
+    static func eraseLocalStateForFreshInstallUITestIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains(freshInstallUITestArgument) else { return }
+
+        let defaults = UserDefaults.standard
+        let keys = [
+            savedTickersKey,
+            recentTickersKey,
+            lastViewedTickerKey,
+            activeConversationTickerKey,
+            hasCompletedInitialEntryKey,
+            hasSeenEntryIntroKey,
+            pendingConversationTickerKey,
+            pendingConversationQuestionKey,
+            appLaunchCountKey,
+            starterCompaniesAutoHiddenKey,
+            showStarterCompaniesKey,
+            aiConsentKey
+        ]
+        for key in keys {
+            defaults.removeObject(forKey: key)
+        }
+        for key in defaults.dictionaryRepresentation().keys
+        where key.hasPrefix(lastOpenedAtKeyPrefix) || key.hasPrefix("kabuyomi.lastSeenFiling.") {
+            defaults.removeObject(forKey: key)
+        }
+    }
+    #endif
+
     static func live() -> AppModel {
         let deviceIdentity = DeviceIdentityStore.shared
         #if DEBUG

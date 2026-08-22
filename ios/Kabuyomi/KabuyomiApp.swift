@@ -3,9 +3,17 @@ import GoogleMobileAds
 
 @main
 struct KabuyomiApp: App {
-    @State private var appModel = AppModel.live()
+    @State private var appModel: AppModel
 
     init() {
+        // AppModel は UserDefaults をプロパティ初期化子で読む。
+        // 初回インストール相当まで戻すなら、生成より**前**に消しておかないと
+        // 消える前の値を抱えたモデルが出来上がる。
+        #if DEBUG
+        AppModel.eraseLocalStateForFreshInstallUITestIfRequested()
+        #endif
+        _appModel = State(initialValue: AppModel.live())
+
         guard !AppModel.isRunningTests else { return }
         let testDeviceIdentifiers = AdMobConfig.testDeviceIdentifiers
         if !testDeviceIdentifiers.isEmpty {

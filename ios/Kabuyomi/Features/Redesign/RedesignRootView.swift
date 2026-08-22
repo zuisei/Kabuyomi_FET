@@ -610,10 +610,26 @@ private struct RedesignStreamView: View {
         }
     }
 
-    /// まだ何も無い面。ミッション文(既存文言のまま)+ スターター企業 + 例示の質問。
+    /// まだ何も無い面。会社を1社も持っていない人には
+    /// 「銘柄を追加しよう」+「銘柄をさがす」を最初に出し(v2 IA 仕様 Phase 6)、
+    /// その下に既存のミッション文とスターター企業が続く。
+    ///
+    /// ミッション文は**置き換えない**。あそこにしか無い断り書き
+    /// (「投資助言や売買推奨は行いません。」)ごと画面から消えてしまうため、
+    /// 新しい CTA は上に足すだけにしてある。
     @ViewBuilder
     private var emptyStreamSections: some View {
         if missionProminence == .prominent {
+            Section {
+                RedesignEmptyCallToAction(
+                    action: { present(.companyPicker(.starter)) },
+                    identifierPrefix: "redesign.stream"
+                )
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            }
+
             Section {
                 RedesignDiscoveryMission()
                     .listRowBackground(Color.clear)
@@ -633,6 +649,9 @@ private struct RedesignStreamView: View {
             }
         }
 
+        // スターター一覧は「候補」として残る。押しても保存はしない —
+        // 資料を開くだけで、盤面に載るのは本人が保存したときだけ
+        // (v2 IA 仕様 Phase 6「勝手に据えない」)。
         if appModel.showStarterCompanies, missionProminence == .prominent {
             Section {
                 ForEach(appModel.starterCompanies) { company in
@@ -799,7 +818,9 @@ private struct RedesignAskBar: View {
                 Image(systemName: "building.2")
                     .font(.caption2.weight(.bold))
                     .accessibilityHidden(true)
-                Text(context?.displayName ?? "会社を選ぶ")
+                // 会社がどこにも無いときの文言。スターター企業を勝手に据えず、
+                // 「銘柄を選ぶ」とだけ言ってピッカーへ渡す(v2 IA 仕様 Phase 6)。
+                Text(context?.displayName ?? RedesignFirstRunCopy.askContextPlaceholder)
                     .font(.footnote.weight(.semibold))
                     .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
@@ -1273,9 +1294,21 @@ private struct RedesignSummaryView: View {
         }
     }
 
-    /// 盤面が空のときだけ、ミッション文とスターター企業に入れ替わる(Phase 3 のまま)。
+    /// 盤面が空のとき。ストリームと同じ CTA を頭に置き(v2 IA 仕様 Phase 6)、
+    /// その下は Phase 3 のままミッション文とスターター企業が続く。
+    /// スターターは「候補」で、押しても保存はしない。
     @ViewBuilder
     private var emptyBoardSections: some View {
+        Section {
+            RedesignEmptyCallToAction(
+                action: { present(.companyPicker(.starter)) },
+                identifierPrefix: "redesign.summary"
+            )
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        }
+
         Section {
             RedesignDiscoveryMission()
                 .listRowBackground(Color.clear)
@@ -1413,13 +1446,20 @@ private struct RedesignCompanyPickerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("閉じる") { dismiss() }
+                        // 保存の最中は閉じさせない。スワイプと同じ理由で、
+                        // 途中まで保存された状態のまま面だけが消えるのを防ぐ。
+                        .disabled(isSaving)
                         .accessibilityIdentifier("redesign.picker.close")
                 }
             }
+            // 識別子はリストに付け、`safeAreaInset` は**その後**に足す。
+            // 逆順にすると "redesign.picker" が底の CTA まで降りていって
+            // 「はじめる」の識別子を上書きする(ストリームのアスクバーで
+            //  踏んだのと同じ罠。シミュレータ実機確認 2026-08-22)。
+            .accessibilityIdentifier("redesign.picker")
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isStarterMode { startBar }
             }
-            .accessibilityIdentifier("redesign.picker")
         }
         .tint(KabuyomiTheme.accent)
         // 保存の最中にシートを引きずり下ろされると、途中まで保存された状態で

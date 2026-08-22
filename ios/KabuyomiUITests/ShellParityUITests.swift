@@ -349,14 +349,125 @@ final class ShellParityUITests: XCTestCase {
         }
     }
 
-    private func launch() {
+    // MARK: - Phase 6: 初回動線と空状態
+
+    /// 本当の初回インストール。「ようこそ」が根を覆い、「あとで」で空のストリームへ落ちる。
+    /// 空のストリームは「銘柄を追加しよう」で受け止め、
+    /// アスクバーの会社チップは会社を持たないので「銘柄を選ぶ」を出す
+    /// (AAPL その他のスターター企業を勝手に据えない)。
+    func testFirstRunShowsTheWelcomeAndSkippingLandsOnTheEmptyStream() throws {
+        launch(freshInstall: true)
+
+        // 面そのものに識別子は無い(素の VStack に付けると子孫を上書きする)。
+        // 「ようこそ」が出ていることは2つのボタンで確かめる。
+        XCTAssertTrue(app.buttons["redesign.welcome.start"].waitForExistence(timeout: 12))
+        XCTAssertTrue(app.buttons["redesign.welcome.skip"].exists)
+        XCTAssertTrue(app.staticTexts["SEC資料から、会社を理解する"].exists)
+        // 1枚だけ。ページドットもカルーセルも持たない。
+        XCTAssertEqual(app.pageIndicators.count, 0)
+        // 覆っているあいだは根に触れない。
+        XCTAssertFalse(app.buttons["redesign.askbar.send"].isHittable)
+        capture("Welcome")
+
+        app.buttons["redesign.welcome.skip"].tap()
+
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 12))
+        XCTAssertTrue(app.staticTexts["銘柄を追加しよう"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["redesign.stream.empty.find"].exists)
+        // ミッション文(法務上の断り書きを含む)は空状態に残る。
+        XCTAssertTrue(app.staticTexts["SEC資料から、会社を理解する"].exists)
+        XCTAssertEqual(app.buttons["redesign.askbar.company"].label, "質問する会社を選ぶ")
+        capture("Empty stream")
+
+        // 空状態の CTA はスターターの複数選択ピッカーを開く。
+        app.buttons["redesign.stream.empty.find"].tap()
+        XCTAssertTrue(app.navigationBars["気になる会社を選ぶ"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["redesign.picker.starter.AAPL"].waitForExistence(timeout: 12))
+        // 1社も選んでいないうちは「はじめる」を押せない。
+        XCTAssertFalse(app.buttons["redesign.picker.start"].isEnabled)
+        app.buttons["redesign.picker.starter.AAPL"].tap()
+        XCTAssertTrue(app.buttons["redesign.picker.start"].isEnabled)
+        capture("Starter picker")
+
+        app.buttons["redesign.picker.close"].tap()
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 8))
+
+        // 一度閉じた「ようこそ」は再起動しても出ない。
+        launch()
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 12))
+        XCTAssertFalse(app.buttons["redesign.welcome.skip"].exists)
+    }
+
+    /// 「銘柄を選んではじめる」はスターターの複数選択ピッカーへ渡す。
+    func testWelcomePrimaryActionOpensTheStarterPicker() throws {
+        launch(freshInstall: true)
+
+        XCTAssertTrue(app.buttons["redesign.welcome.start"].waitForExistence(timeout: 12))
+        app.buttons["redesign.welcome.start"].tap()
+
+        XCTAssertTrue(app.navigationBars["気になる会社を選ぶ"].waitForExistence(timeout: 12))
+        XCTAssertTrue(app.buttons["redesign.picker.start"].exists)
+        // 検索は初回のピッカーにもある(任意のティッカーを足せる)。
+        XCTAssertTrue(app.searchFields.firstMatch.exists)
+
+        // ここでも閉じられる。閉じたら空のストリームが受け止める。
+        app.buttons["redesign.picker.close"].tap()
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 12))
+        XCTAssertTrue(app.staticTexts["銘柄を追加しよう"].waitForExistence(timeout: 8))
+    }
+
+    /// サマリー盤面の空状態も同じ CTA を持つ。
+    func testSummaryEmptyBoardOffersTheSameCallToAction() throws {
+        launch(freshInstall: true)
+        XCTAssertTrue(app.buttons["redesign.welcome.skip"].waitForExistence(timeout: 12))
+        app.buttons["redesign.welcome.skip"].tap()
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 12))
+
+        selectTab("サマリー")
+        XCTAssertTrue(element("redesign.summary").waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["銘柄を追加しよう"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["redesign.summary.empty.find"].exists)
+        capture("Empty summary board")
+    }
+
+    private func launch(freshInstall: Bool = false) {
         app.terminate()
-        app.launchArguments = [
+        var arguments = [
             "-AppleLanguages", "(ja)",
             "-AppleLocale", "ja_JP"
         ]
+        // 初回動線は「本当の初回」でしか出ない。XCUIApplication はアプリを
+        // 消せないので、Debug 限定の起動引数でローカルの痕跡だけを戻す。
+        if freshInstall { arguments.append("-KabuyomiUITestFreshInstall") }
+        app.launchArguments = arguments
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 12))
+        if !freshInstall { dismissWelcomeIfPresent() }
+    }
+
+    /// クリーンインストールの直後は「ようこそ」が根を覆っている。
+    /// 初回動線そのものを見るテスト以外は、まずここを抜けてから始める
+    /// (覆われているあいだはタブバーもアスクバーも押せない)。
+    @discardableResult
+    private func dismissWelcomeIfPresent() -> Bool {
+        // 起動直後は bootstrap 中の待ち画面なので、どちらもまだ出ていない。
+        // 「ようこそ」と根のアスクバー、先に現れた方で決める
+        // (固定の待ち時間を置くと、出ない側で毎回その秒数を捨てることになる)。
+        // 起動時に会社ドキュメントへ復元しないのは Phase 4 の規約なので、
+        // 起動直後の行き先はこの2つで尽きている。
+        let skip = app.buttons["redesign.welcome.skip"]
+        let send = app.buttons["redesign.askbar.send"]
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline {
+            if skip.exists {
+                skip.tap()
+                XCTAssertTrue(skip.waitForNonExistence(timeout: 8))
+                return true
+            }
+            if send.exists { return false }
+            _ = skip.waitForExistence(timeout: 0.4)
+        }
+        return false
     }
 
     /// 根のストリームまで戻す。Phase 4 は起動時に会社へ復元しないので
