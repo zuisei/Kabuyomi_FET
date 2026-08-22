@@ -10,6 +10,15 @@ import { findMetricSourceChunk } from "./context-metrics";
 import type { QuestionIntent } from "./intent";
 import { logEvent } from "../logging";
 
+/**
+ * Sent to the model as `factual_pack_json`.
+ *
+ * WARNING for anyone adding a field: both serialisation points in
+ * `clients/gemini/prompts.ts` spread this whole object, so a new field reaches
+ * the model by default. Anything that describes the pack rather than the
+ * company — provenance, counts, diagnostics — must also be removed in
+ * `promptSafeFactualPack`, or it ships into the prompt silently.
+ */
 export interface ChatFactualPack {
   kind: "business_overview" | "revenue_breakdown" | "risk_factors";
   companyName: string;
