@@ -419,6 +419,47 @@ attestation 側での build 由来の絞り込みは当てにできない。
 したがって **遮断方式は (a) / (c) / 現状維持のいずれかで再決定が必要**。
 F-2 はどれを選んでも必要な土台なので先に入れてある。
 
+## F-5 【実施済】(a) を入れた — 「計測してから」は誤った推奨だった(2026-08-22)
+
+いったん「F-2 をデプロイして sandbox 付与の件数を見てから遮断方式を決める」と推奨したが、
+**その計測は判断を分岐させない**。sandbox 付与が0件でも穴は塞ぐべきで、
+0件でなくても塞ぐべきである。計測が答えるのは
+「**既存の不正付与を回収する必要があるか**」であって「塞ぐべきか」ではない。
+2つの問いを混ぜていたので訂正する。
+
+⑨(App Attest)と②(seed)は計測先行が正しい。**フリップの代償が違う**からである。
+
+| | フリップの代償 | 計測は判断を変えるか |
+|---|---|---|
+| ⑧ | TestFlight での付与テストのみ(ユーザーに影響なし) | **変えない** |
+| ⑨ | **実ユーザーを締め出しうる** | 変える |
+| ② | 主要5銘柄の回答が劣化しうる | 変える |
+
+**入れたもの:** `isCreditGrantEnvironmentAccepted`(`routes/credit-purchase-grant.ts`)。
+
+- `production` の取引は全デプロイで受理
+- `sandbox` の取引は **`APPLE_APP_STORE_SERVER_ENVIRONMENT` が明示的に `"sandbox"`
+  のデプロイ(= test worker)でのみ受理**
+- `auto` / `production` / 未設定 は本番姿勢とみなし 403
+
+未設定を「許可」と解釈しないのは意図的。未設定は
+`resolveVerificationEnvironments` が `["production","sandbox"]` に落ちる
+= 本番と同じ姿勢だからである。
+
+**設定変更(`APPLE_APP_STORE_SERVER_ENVIRONMENT` を `"production"` にする)ではなく
+コード側で塞いだ理由:** この env は購読側の
+`derivePrincipalCandidates` と `appleVerificationEnvironmentReady` でも読まれる。
+`"production"` にすると sandbox の**購読**検証まで止まる。
+購読側は principal で分離済みで問題が無いため、影響範囲の広い設定変更より
+消費型クレジットだけを対象にするコード側の方が外科的。
+
+**代償(明示):** TestFlight ビルドでクレジットを買っても**付与されなくなる**。
+購入とサーバーの拒否までは検証できるので、失うのは付与の1手のみ。
+付与まで通す検証は test worker を指すビルドで行う必要がある。
+
+**回収の要否は別問題。** F-2 のログと `verification_environment` 列で
+既存の sandbox 付与を洗い出すこと。これは遮断とは独立に必要。
+
 ---
 
 # G. 純粋バグの修正結果(2026-08-22)
