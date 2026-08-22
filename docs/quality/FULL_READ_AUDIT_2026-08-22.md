@@ -459,3 +459,39 @@ DO 側の `refundChat` アクションは `mutateUsage` 経由でしか到達で
 その契約を決める呼び出し元が存在しない。存在しない呼び出し元を前提に
 配線を作るのは避けたので、**死んでいる事実の記録に留める**。
 削除するかどうかは別途判断。
+
+---
+
+# H. ②の可視化(2026-08-22)
+
+方針は「まず可視化だけ」。回答は変えていない。
+`workers/scripts/report-constant-answer-coverage.mjs` が定数表をソースから直接抽出し、
+本番の `DEFAULT_TRACKED_TICKERS` 30件と突き合わせる。結果は
+[CONSTANT_ANSWER_COVERAGE.md](CONSTANT_ANSWER_COVERAGE.md)(自動生成、手編集しない)。
+
+表がリネーム・再構成されたら**黙って「該当なし」を返さず落ちる**ように、
+各抽出器は空を検出した時点で exit 1 する。
+
+## 出た数字
+
+**13/30 銘柄**が1つ以上の定数経路に該当する。裏返すと **17銘柄はキュレーションが一切無い**
+(AVGO META BRK-B JNJ ORCL MA AMD COST NFLX BAC ABBV CVX PLTR HD INTC PG CSCO)。
+「ベンチは通るが本番の過半には効かない」という A-1〜A-5 の構造が、銘柄単位で確定した。
+
+| 発見 | 数字 |
+|---|---|
+| `deterministic.ts` の3表 | 12/30。GOOGL キーのため **GOOG は3表すべてで外れる** |
+| `context-factual-pack.ts` の seed | 5/30(AAPL MSFT NVDA AMZN GOOG)。**本文の有無に関係なく merge される** |
+| `source-gate.ts` の sector 表 | 6/30。表の17件中**11件は本番で追跡されていない銘柄**向け |
+| `gemini/fallback-known-business.ts` | **0/30**。PH CRWD CEG INTU はいずれも本番の追跡外で、この経路は本番では死んでいる |
+| 定型合成(JPM / WMT / GOOG(L)) | 各1/30 |
+
+## ⑥(GOOG 欠落)はここに畳んだ
+
+`GOOG` は factual pack の seed・既知事業ラベル・売上ファクト seed・GOOG(L)定型合成の
+**4経路には該当する**が、`deterministic.ts` の3表には**該当しない**。
+E-4 で「同一リポジトリ内で扱いが割れている」と書いた件が、銘柄単位で裏付けられた。
+
+3表に `GOOG` を足せば揃うが、それは**定数由来の回答が発火する範囲を広げる**ことになる。
+「まず可視化だけ」の方針に反するので**足していない**。
+②の方針が決まった時点で、揃える / 3表ごと落とす のどちらかに寄せる判断になる。
