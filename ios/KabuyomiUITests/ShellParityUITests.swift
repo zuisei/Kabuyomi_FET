@@ -132,11 +132,16 @@ final class ShellParityUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["サマリー"].exists)
         XCTAssertEqual(app.tabBars.firstMatch.buttons.count, 2)
 
-        // アスクバーの3点(会社チップ / 入力欄 / 送信)と残高は常にホームの根にある。
+        // アスクバーの3点(会社チップ / 入力欄 / 送信)は常にホームの根にある。
         XCTAssertTrue(app.buttons["redesign.askbar.company"].exists)
-        XCTAssertTrue(app.buttons["redesign.askbar.credits"].exists)
         XCTAssertTrue(app.buttons["redesign.askbar.send"].exists)
         XCTAssertTrue(app.textFields["redesign.askbar.field"].exists)
+
+        // 残高チップだけは条件付き(v2 IA 仕様 Phase 6.5)。
+        // 質問しようとした人には必ず出るので、入力してから確かめる。
+        app.textFields["redesign.askbar.field"].tap()
+        app.typeText("あ")
+        XCTAssertTrue(app.buttons["redesign.askbar.credits"].waitForExistence(timeout: 4))
 
         // 検索は根には無く、会社ピッカーのシートの中にある。
         XCTAssertFalse(app.searchFields.firstMatch.exists)
@@ -246,10 +251,16 @@ final class ShellParityUITests: XCTestCase {
         XCTAssertFalse(app.buttons["redesign.company.sources"].exists)
     }
 
-    /// 残高はアスクバーに出しっぱなしで、押せばクレジット画面へ入れる。
+    /// 残高チップを押せばクレジット画面へ入れる。
+    /// チップは「質問しようとした」時点から出る(v2 IA 仕様 Phase 6.5)ので、
+    /// まず入力欄に1文字入れてから押す。
     func testAskBarCreditChipOpensCredits() throws {
         launch()
         reachStreamRoot()
+
+        app.textFields["redesign.askbar.field"].tap()
+        app.typeText("あ")
+        XCTAssertTrue(app.buttons["redesign.askbar.credits"].waitForExistence(timeout: 4))
 
         app.buttons["redesign.askbar.credits"].tap()
         // シートとして出た CreditView は自前のヘッダを持つ(push 版と違い
@@ -402,31 +413,37 @@ final class ShellParityUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["気になる会社を選ぶ"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["redesign.picker.starter.AAPL"].waitForExistence(timeout: 12))
 
-        // Phase 6.5: 一覧は分類付き。節見出しは選択数を肩に足すので
-        // (「定番」→「定番 1社」)、完全一致ではなく部分一致で見る。
-        for section in ["定番", "半導体・AI", "金融・決済", "生活・消費"] {
-            XCTAssertTrue(
-                app.descendants(matching: .any)
-                    .matching(NSPredicate(format: "label BEGINSWITH %@", section))
-                    .firstMatch
-                    .waitForExistence(timeout: 4),
-                "ピッカーに分類「\(section)」が無い"
-            )
-        }
-
         // 1社も選んでいないうちは「はじめる」を押せない。
         XCTAssertFalse(app.buttons["redesign.picker.start"].isEnabled)
         app.buttons["redesign.picker.starter.AAPL"].tap()
         XCTAssertTrue(app.buttons["redesign.picker.start"].isEnabled)
         capture("Starter picker")
 
-        // 定番の外(半導体・AI)からも選べる。14社あるので下の分類は
-        // スクロールしないと届かない。
+        // Phase 6.5: 一覧は分類付き。14社あるので下の分類は画面の外にあり、
+        // List は見えている行しか要素にしないのでスクロールしながら上から順に見る。
+        // 節見出しは選択数を肩に足す(「定番」→「定番 1社」)ので前方一致で見る。
+        func assertSectionReachable(_ title: String) {
+            XCTAssertTrue(
+                scrollPickerUntilFound(
+                    app.descendants(matching: .any)
+                        .matching(NSPredicate(format: "label BEGINSWITH %@", title))
+                        .firstMatch
+                ),
+                "ピッカーに分類「\(title)」が無い"
+            )
+        }
+
+        assertSectionReachable("定番")
+        assertSectionReachable("半導体・AI")
+
+        // 定番の外(半導体・AI)からも選べる。ここまで送ってあるので行は見えている。
         let broadcom = app.buttons["redesign.picker.starter.AVGO"]
-        XCTAssertTrue(broadcom.waitForExistence(timeout: 4))
-        if !broadcom.isHittable { element("redesign.picker").swipeUp() }
+        XCTAssertTrue(scrollPickerUntilFound(broadcom), "AVGO の行に届かない")
         broadcom.tap()
         XCTAssertTrue(app.buttons["redesign.picker.start"].isEnabled)
+
+        assertSectionReachable("金融・決済")
+        assertSectionReachable("生活・消費")
 
         app.buttons["redesign.picker.close"].tap()
         XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 8))
@@ -455,6 +472,35 @@ final class ShellParityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["銘柄を追加しよう"].waitForExistence(timeout: 8))
     }
 
+    /// Phase 6.5: 初回起動の直後は残高チップを出さない。
+    /// 何もしていない人の目の前に、いきなり琥珀の「残高不足」を置かない。
+    /// 入力を始めた時点で初めて出る。
+    ///
+    /// この環境の端末は未認証で残高0(Phase 4 の節に記録済み)。
+    /// 残高のある端末では最初から「残り N」が出るので、
+    /// そのときはこのテストの前半が落ちて状況の変化を知らせる。
+    func testAskBarStaysQuietAboutCreditsUntilTheFirstAttempt() throws {
+        launch(freshInstall: true)
+        XCTAssertTrue(app.buttons["redesign.welcome.skip"].waitForExistence(timeout: 12))
+        app.buttons["redesign.welcome.skip"].tap()
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 12))
+
+        // 着いた時点ではチップそのものが無い。
+        XCTAssertFalse(app.buttons["redesign.askbar.credits"].exists)
+        capture("Ask bar without a credit chip")
+
+        app.textFields["redesign.askbar.field"].tap()
+        app.typeText("あ")
+
+        let chip = app.buttons["redesign.askbar.credits"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 4))
+        XCTAssertTrue(
+            chip.label.contains("残高不足"),
+            "残高0の端末で入力を始めたら「残高不足」を出す(実際のラベル: \(chip.label))"
+        )
+        capture("Ask bar after typing")
+    }
+
     /// サマリー盤面の空状態も同じ CTA を持つ。
     func testSummaryEmptyBoardOffersTheSameCallToAction() throws {
         launch(freshInstall: true)
@@ -467,6 +513,19 @@ final class ShellParityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["銘柄を追加しよう"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["redesign.summary.empty.find"].exists)
         capture("Empty summary board")
+    }
+
+    /// ピッカーの一覧を下へ送りながら要素を探す。
+    /// `List` は見えている行しか要素にしないので、画面の外にある分類は
+    /// 一度スクロールしないと存在すら確かめられない。
+    private func scrollPickerUntilFound(_ element: XCUIElement, swipes: Int = 4) -> Bool {
+        if element.exists && element.isHittable { return true }
+        let list = self.element("redesign.picker")
+        for _ in 0..<swipes {
+            if element.exists && element.isHittable { return true }
+            list.swipeUp()
+        }
+        return element.exists && element.isHittable
     }
 
     private func launch(freshInstall: Bool = false) {

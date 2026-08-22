@@ -70,6 +70,55 @@ func streamCreditBalanceText(totalRemaining: Int?) -> String {
     return "残り \(totalRemaining)"
 }
 
+/// アスクバーの残高チップに何を出すか。
+enum StreamCreditChipDisplay: Equatable {
+    /// 何も出さない。
+    case hidden
+    /// 現行の残高チップ(「残り N」/「残高を確認」)。
+    case balance(text: String)
+    /// 琥珀の「残高不足」。
+    case shortfall
+}
+
+/// 残高チップの表示規則(v2 IA 仕様 Phase 6.5「残高チップの初回体験」)。
+///
+/// 初回起動の直後は未認証で残高が 0 なので、これまでは何もしていない人の
+/// 目の前にいきなり琥珀の「残高不足」が座っていた。まだ一度も質問しようと
+/// していない人に、払えという合図から見せることになる。
+///
+/// **変えるのは表示の時機だけ**。送信の可否(`redesignComposerDisabledReason` /
+/// `streamSendIntent`)もクレジット画面への導線も一切触らない。
+///
+/// - 残高が分かっていて残っている: 現行どおり「残り N」を出しっぱなし
+/// - 残高0(または読み込み前)で、入力欄が空で、送信も試していない: 出さない
+/// - 入力を始めた / 送信を試みた: そこで初めて出す
+///
+/// 読み込み前(`totalRemaining` が nil)を「残高あり」に含めないのは、
+/// 起動直後に「残高を確認」が一瞬出てから消え、入力すると「残高不足」に
+/// 化けるという、消したかったものより悪い明滅になるため。
+/// 分からないうちは黙っている。
+///
+/// `isOutOfCredit` は `redesignComposerDisabledReason` が「残高不足」を
+/// 返しているかどうか。1件分に足りない残り(残 1 / 費用 2)もここに入るので、
+/// 残高の数だけで琥珀にするかを決めない。
+func streamCreditChipDisplay(
+    totalRemaining: Int?,
+    isOutOfCredit: Bool,
+    draft: String,
+    hasAttemptedSend: Bool
+) -> StreamCreditChipDisplay {
+    if let totalRemaining, totalRemaining > 0, !isOutOfCredit {
+        return .balance(text: streamCreditBalanceText(totalRemaining: totalRemaining))
+    }
+
+    let isDraftEmpty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    guard !isDraftEmpty || hasAttemptedSend else { return .hidden }
+
+    return isOutOfCredit
+        ? .shortfall
+        : .balance(text: streamCreditBalanceText(totalRemaining: totalRemaining))
+}
+
 // MARK: - 提案質問
 
 /// 資料が出たカードに添える提案質問。

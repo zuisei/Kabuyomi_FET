@@ -627,6 +627,146 @@ final class StreamSupportTests: XCTestCase {
         XCTAssertEqual(streamCreditBalanceText(totalRemaining: nil), "残高を確認")
     }
 
+    // MARK: - 残高チップの表示規則(Phase 6.5)
+
+    /// 残高があるあいだは現行どおり出しっぱなし。何も変わらない。
+    func testCreditChipKeepsShowingTheBalanceWhenThereIsCredit() {
+        XCTAssertEqual(
+            streamCreditChipDisplay(
+                totalRemaining: 12,
+                isOutOfCredit: false,
+                draft: "",
+                hasAttemptedSend: false
+            ),
+            .balance(text: "残り 12")
+        )
+    }
+
+    /// 初回起動の直後。残高0・入力欄が空・送信未試行なら、チップは出ない。
+    /// 何もしていない人の目の前に琥珀の警告を置かない。
+    func testCreditChipIsHiddenBeforeTheFirstAttemptWhenThereIsNoCredit() {
+        XCTAssertEqual(
+            streamCreditChipDisplay(
+                totalRemaining: 0,
+                isOutOfCredit: true,
+                draft: "",
+                hasAttemptedSend: false
+            ),
+            .hidden
+        )
+        // 空白だけの下書きは「入力を始めた」に数えない。
+        XCTAssertEqual(
+            streamCreditChipDisplay(
+                totalRemaining: 0,
+                isOutOfCredit: true,
+                draft: "   \n ",
+                hasAttemptedSend: false
+            ),
+            .hidden
+        )
+    }
+
+    /// 入力を始めた時点、または送信を試みた時点で初めて「残高不足」を出す。
+    func testCreditChipWarnsOnceTheUserTypesOrAttemptsToSend() {
+        XCTAssertEqual(
+            streamCreditChipDisplay(
+                totalRemaining: 0,
+                isOutOfCredit: true,
+                draft: "売上は？",
+                hasAttemptedSend: false
+            ),
+            .shortfall
+        )
+        XCTAssertEqual(
+            streamCreditChipDisplay(
+                totalRemaining: 0,
+                isOutOfCredit: true,
+                draft: "",
+                hasAttemptedSend: true
+            ),
+            .shortfall
+        )
+    }
+
+    /// 読み込み前(残高が nil)も黙っている。
+    /// ここで「残高を確認」を出すと、起動直後に一瞬出て消え、
+    /// 入力すると「残高不足」に化ける — 消したかったものより悪い明滅になる。
+    func testCreditChipStaysQuietWhileTheBalanceIsStillUnknown() {
+        XCTAssertEqual(
+            streamCreditChipDisplay(
+                totalRemaining: nil,
+                isOutOfCredit: false,
+                draft: "",
+                hasAttemptedSend: false
+            ),
+            .hidden
+        )
+        // 分からないまま入力を始めた人には、警告ではなく現行の文言を出す。
+        // 残高が足りないと分かっているわけではない。
+        XCTAssertEqual(
+            streamCreditChipDisplay(
+                totalRemaining: nil,
+                isOutOfCredit: false,
+                draft: "売上は？",
+                hasAttemptedSend: false
+            ),
+            .balance(text: "残高を確認")
+        )
+    }
+
+    /// 1件分に足りない残り(残 1 / 費用 2)は「残高あり」ではない。
+    /// 数だけで決めず、`redesignComposerDisabledReason` の結論に従う。
+    func testCreditChipTreatsAnInsufficientRemainderAsAShortfall() {
+        XCTAssertEqual(
+            streamCreditChipDisplay(
+                totalRemaining: 1,
+                isOutOfCredit: true,
+                draft: "",
+                hasAttemptedSend: false
+            ),
+            .hidden
+        )
+        XCTAssertEqual(
+            streamCreditChipDisplay(
+                totalRemaining: 1,
+                isOutOfCredit: true,
+                draft: "売上は？",
+                hasAttemptedSend: false
+            ),
+            .shortfall
+        )
+    }
+
+    /// 表示規則は送信の可否に触らない。同じ入力で
+    /// `streamSendIntent` / `redesignComposerDisabledReason` の結論は変わらない。
+    func testCreditChipDisplayDoesNotChangeWhetherTheQuestionCanBeSent() {
+        let reason = redesignComposerDisabledReason(
+            isSending: false,
+            hasChatCreditAvailable: false,
+            authenticatedCreditActionsAvailable: true,
+            chatEnabled: true
+        )
+        XCTAssertEqual(reason, "残高不足")
+
+        // チップが隠れていても送れないことは変わらない。
+        XCTAssertEqual(
+            streamCreditChipDisplay(
+                totalRemaining: 0,
+                isOutOfCredit: true,
+                draft: "",
+                hasAttemptedSend: false
+            ),
+            .hidden
+        )
+        XCTAssertNil(
+            streamSendIntent(
+                draft: "売上は？",
+                context: StreamAskContext(ticker: "AAPL", companyName: "Apple Inc."),
+                disabledReason: reason
+            )
+        )
+    }
+
     // MARK: - 空のストリームの例示
 
     func testExampleQuestionsAreThreeColloquialPrompts() {

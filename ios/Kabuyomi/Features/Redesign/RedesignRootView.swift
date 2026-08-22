@@ -445,6 +445,13 @@ private struct RedesignStreamView: View {
     @State private var draft = ""
     @State private var isSubmitting = false
     @State private var deferredAsk: RedesignDeferredAsk?
+    /// この面が生きているあいだに一度でも送信を試みたか
+    /// (v2 IA 仕様 Phase 6.5 の残高チップの表示規則)。
+    ///
+    /// ここだけの `@State` にする。AppModel には足さない — 残高も課金も
+    /// 変わらず、変わるのはこのバーがチップを描く時機だけなので、
+    /// アプリの状態として持つと「表示の都合」がモデルに漏れる。
+    @State private var hasAttemptedSend = false
     @FocusState private var askFocused: Bool
 
     // 検索の状態はここでは読まない。読むとピッカーの1打鍵ごとに
@@ -545,7 +552,12 @@ private struct RedesignStreamView: View {
                 draft: $draft,
                 isFocused: $askFocused,
                 context: askContext,
-                creditText: streamCreditBalanceText(totalRemaining: appModel.usage?.credits?.totalRemaining),
+                creditDisplay: streamCreditChipDisplay(
+                    totalRemaining: appModel.usage?.credits?.totalRemaining,
+                    isOutOfCredit: askDisabledReason == "残高不足",
+                    draft: draft,
+                    hasAttemptedSend: hasAttemptedSend
+                ),
                 disabledReason: askDisabledReason,
                 isSending: isSubmitting,
                 canSend: streamSendIntent(
@@ -688,6 +700,11 @@ private struct RedesignStreamView: View {
     // MARK: アスクバーの動き
 
     private func send() {
+        // 押した時点で「質問しようとした人」になる。以降この面が生きているあいだは
+        // 残高チップを隠さない(v2 IA 仕様 Phase 6.5)。
+        // 送れたかどうかは問わない — 送れなかった理由こそチップに出したいもの。
+        hasAttemptedSend = true
+
         guard !isSubmitting,
               let intent = streamSendIntent(
                   draft: draft,
@@ -767,7 +784,9 @@ private struct RedesignAskBar: View {
     @Binding var draft: String
     var isFocused: FocusState<Bool>.Binding
     let context: StreamAskContext?
-    let creditText: String
+    /// 残高チップに何を出すか。表示の時機は `streamCreditChipDisplay` が決める
+    /// (v2 IA 仕様 Phase 6.5)。バーは決まった結果を描くだけ。
+    let creditDisplay: StreamCreditChipDisplay
     let disabledReason: String?
     let isSending: Bool
     let canSend: Bool
@@ -846,27 +865,58 @@ private struct RedesignAskBar: View {
         .accessibilityIdentifier("redesign.askbar.company")
     }
 
+    /// まだ一度も質問しようとしていない残高0の人には、チップごと出さない
+    /// (v2 IA 仕様 Phase 6.5)。押せる要素が消えるだけで、
+    /// クレジット画面へは設定シートからも入れる。
+    @ViewBuilder
     private var creditChip: some View {
+        switch creditDisplay {
+        case .hidden:
+            EmptyView()
+        case .balance(let text):
+            creditChipButton(
+                symbol: "bolt.fill",
+                text: text,
+                tint: KabuyomiTheme.inkSoft,
+                fill: KabuyomiTheme.inputWell,
+                label: "\(text)クレジット。クレジットを確認"
+            )
+        case .shortfall:
+            creditChipButton(
+                symbol: "exclamationmark.circle.fill",
+                text: "残高不足",
+                tint: KabuyomiTheme.caution,
+                fill: KabuyomiTheme.cautionSoft,
+                label: "残高不足。クレジットを確認"
+            )
+        }
+    }
+
+    private func creditChipButton(
+        symbol: String,
+        text: String,
+        tint: Color,
+        fill: Color,
+        label: String
+    ) -> some View {
         Button(action: openCredits) {
             HStack(spacing: 4) {
-                Image(systemName: isOutOfCredit ? "exclamationmark.circle.fill" : "bolt.fill")
+                // 状態を色だけで言わない。字形(雷 / 感嘆符)も一緒に変える。
+                Image(systemName: symbol)
                     .font(.system(size: 9, weight: .bold))
                     .accessibilityHidden(true)
-                Text(isOutOfCredit ? "残高不足" : creditText)
+                Text(text)
                     .font(KabuyomiTheme.figure(.caption2, weight: .semibold))
             }
-            .foregroundStyle(isOutOfCredit ? KabuyomiTheme.caution : KabuyomiTheme.inkSoft)
+            .foregroundStyle(tint)
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
-            .background(
-                isOutOfCredit ? KabuyomiTheme.cautionSoft : KabuyomiTheme.inputWell,
-                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-            )
+            .background(fill, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(isOutOfCredit ? "残高不足。クレジットを確認" : "\(creditText)クレジット。クレジットを確認")
+        .accessibilityLabel(label)
         .accessibilityIdentifier("redesign.askbar.credits")
     }
 
