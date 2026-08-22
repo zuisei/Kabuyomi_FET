@@ -1998,7 +1998,10 @@ function translateDriverList(raw: string): string {
     .replace(/\bproducts?\b/gi, "製品")
     .replace(/\bvolume\b/gi, "数量")
     .replace(/\bpricing\b/gi, "価格改定")
-    .replace(/\btransactions?\b/gi, "取引件数")
+    // 直前に固有名詞(大文字始まり)が来る場合は訳さない。"the Pioneer transaction" は
+    // M&A の案件であって決済の件数ではないのに「the Pioneer 取引件数」になっていた。
+    // "processed transactions" / "Transactions increased" は従来どおり訳される。
+    .replace(/(?<!\b[A-Z][A-Za-z&.\-]+\s)\b[Tt]ransactions?\b/g, "取引件数")
     .replace(/\bdelivery\b/gi, "配送")
     .replace(/\band\b/gi, "と")
     .replace(/\s+/g, " ")

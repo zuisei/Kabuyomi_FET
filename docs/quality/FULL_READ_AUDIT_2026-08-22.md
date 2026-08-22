@@ -418,3 +418,44 @@ attestation 側での build 由来の絞り込みは当てにできない。
 
 したがって **遮断方式は (a) / (c) / 現状維持のいずれかで再決定が必要**。
 F-2 はどれを選んでも必要な土台なので先に入れてある。
+
+---
+
+# G. 純粋バグの修正結果(2026-08-22)
+
+「回答の中身を変えない」ものだけを対象にした。全て typecheck + 1165/1165 通過。
+
+| # | 内容 | 状態 |
+|---|---|---|
+| ③ | `casm`→sarcasm / `fare`→welfare・warfare / `asm`→plasma・enthusiasm / `mix`→mixed(`final-answer-language.ts`) | 修正済 |
+| ③ | `screening|diagnostic` 単独で「がん検査・診断」(`gemini/fallback.ts`)→ 腫瘍学語の近接必須に | 修正済 |
+| ④ | `Emerging Markets`→「Emerging 市場業務」/ `the Pioneer transaction`→「the Pioneer 取引件数」 | 修正済 |
+| ⑦ | `card` 部分一致で MA が bank 誤分類 → `\bcard\b` | 修正済 |
+| ⑪ | `markPurchaseTransactionGranted` の0行更新が黙って通る | 修正済 |
+| ⑬ | `pruneOldCreditOperations` が辞書順先頭500件しか見ない | 修正済 |
+| ⑭ | 購読 principal 移行の内部トークン比較が timing-safe でない | 修正済 |
+
+## ④ で1つ踏んだ罠(記録)
+
+`transactions?` の保護に `(?<!\b[A-Z]...)` を足したが、置換が `/gi` だったため
+**`i` フラグが lookbehind の `[A-Z]` にも効き**、`processed transactions` まで
+保護対象になって訳されなくなった。`/g` + `[Tt]ransactions?` に変更して解消。
+この置換チェーンは他にも `gi` が多く、同種の見落としが残っている可能性がある。
+
+## 着手しなかった2件と、その理由
+
+**⑥(キュレーション表の GOOG 欠落)は意図的に見送った。**
+`deterministic.ts` の3表に GOOG を足すと、**定数由来の回答が発火する銘柄が増える**。
+②で選ばれた「まず可視化だけ」と逆方向なので、②のフェーズで扱う。
+⑥ は「coverage の穴」ではなく「②の対象範囲がどこまでかという問題」である。
+
+**⑫(`refundChat` の日次境界)は現状発火しない。**
+`refundChatQuota` の**呼び出し元がゼロ**(テストにも無い)。
+DO 側の `refundChat` アクションは `mutateUsage` 経由でしか到達できず、
+その唯一の入口である `refundChatQuota` を誰も呼んでいない。
+`consumeChatQuota` も `pipeline.ts` で import されているだけで未使用。
+
+日付を正しく扱うには「消費時の dateJST を返却時まで運ぶ」配線が要るが、
+その契約を決める呼び出し元が存在しない。存在しない呼び出し元を前提に
+配線を作るのは避けたので、**死んでいる事実の記録に留める**。
+削除するかどうかは別途判断。

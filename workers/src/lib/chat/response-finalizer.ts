@@ -2373,12 +2373,17 @@ function normalizeAwkwardModelLanguage(answer: string): string {
     .replace(/\be-?commerce\b/gi, "EC")
     .replace(/\bcomparable\s+sales\b/gi, "既存店売上")
     .replace(/\baverage\s+ticket\b/gi, "客単価")
-    .replace(/\btransactions?\b/gi, "取引件数")
+    // 直前に固有名詞(大文字始まり)が来る場合は訳さない。"the Pioneer transaction" は
+    // M&A の案件であって決済の件数ではないのに「the Pioneer 取引件数」になっていた。
+    // "processed transactions" / "Transactions increased" は従来どおり訳される。
+    .replace(/(?<!\b[A-Z][A-Za-z&.\-]+\s)\b[Tt]ransactions?\b/g, "取引件数")
     .replace(/\bunit\s+case\s+volume\b/gi, "ユニットケース販売数量")
     .replace(/\bunit\s+volumes?\b/gi, "販売数量")
     .replace(/\bvolume\s*[（(]\s*販売数量\s*[）)]/gi, "販売数量")
     .replace(/\bvolume\b/gi, "販売数量")
-    .replace(/\bMarkets?\b/g, "市場業務")
+    // 区分名の一部である Markets は訳さない。"Emerging Markets" が
+    // 「Emerging 市場業務」になっていた。単独の Markets(市場業務部門)は従来どおり。
+    .replace(/(?<!\b(?:Emerging|Capital|Developed|Global|International|Frontier|End)\s)\bMarkets?\b/g, "市場業務")
     .replace(/\bdistribution\s+fees\b/gi, "流通費用")
     .replace(/\bfees?\b/gi, "手数料")
     .replace(/\bAWM\b/g, "資産・ウェルスマネジメント部門")
