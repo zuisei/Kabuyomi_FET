@@ -1490,13 +1490,30 @@ async function markPurchaseTransactionGranted(
   transactionId: string,
   debtOffsetApplied: number
 ): Promise<void> {
-  await env.DB.prepare(
+  const result = await env.DB.prepare(
     `UPDATE purchase_transactions
     SET status = ?, debt_offset_applied = ?, updated_at = ?
     WHERE transaction_id = ? AND status = 'pending'`
   )
     .bind("granted", debtOffsetApplied, new Date().toISOString(), transactionId)
     .run();
+
+  const changes = Number(result.meta?.changes);
+  if (!Number.isFinite(changes) || changes >= 1) {
+    return;
+  }
+
+  // The other mark* helpers treat "no row updated" as divergence outright. Here
+  // it is not necessarily divergence: granting the same transaction twice is
+  // idempotent in the Durable Object, and the loser of that race finds the row
+  // already 'granted'. So re-read before deciding — but do not let a genuinely
+  // missing or mismatched projection pass silently, which is what this did
+  // before. The caller enqueues a repair and logs on throw.
+  const row = await loadPurchaseTransactionRow(env, transactionId);
+  if (row?.status === "granted" && row.debt_offset_applied === debtOffsetApplied) {
+    return;
+  }
+  throw new AppError(409, "Purchase transaction projection did not record the grant");
 }
 
 async function markPurchaseTransactionRefunded(

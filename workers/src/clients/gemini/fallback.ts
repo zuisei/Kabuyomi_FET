@@ -1101,7 +1101,13 @@ function summarizeBusinessNarrativeEvidence(narrative: SourceChunkRecord, compan
   };
 
   add("がん領域の精密医療", /precision oncology|oncology/i);
-  add("がん検査・診断", /cancer|tumor|screening|diagnostic/i);
+  // "screening" / "diagnostic" 単独は腫瘍学の語ではない(半導体・産業機械の提出資料でも
+  // 普通に使われる)のに、このラベルは「がん検査」を主張する。近接条件で腫瘍学の語を必須にする。
+  // final-answer-language.ts の AWS顧客利用量 と同じ近接イディオム。
+  add(
+    "がん検査・診断",
+    /\b(?:cancer|tumou?rs?)\b[\s\S]{0,200}\b(?:screening|diagnostics?)\b|\b(?:screening|diagnostics?)\b[\s\S]{0,200}\b(?:cancer|tumou?rs?)\b/i
+  );
   add("血液検査・分子診断", /blood[- ]based|liquid biopsy|molecular|genomic/i);
   add("製薬会社向けサービス", /biopharmaceutical|pharmaceutical|clinical trial/i);
   add("車両販売・関連サービス", /automotive|vehicle sales|deliveries and servicing/i);

@@ -502,14 +502,18 @@ function inferMarginDriverLabels(text: string): string[] {
     }
   };
 
-  add("営業費用", /operating expense|operating cost|cost per available seat mile|casm|non-fuel unit cost|cost structure|expenses?/);
+  // \bcasm\b: 裸の casm は "sarcasm" に一致する。68c2b70 の dram/dramatically と同型で、
+  // 航空の単位コストのラベルが無関係な本文に付く。
+  add("営業費用", /operating expense|operating cost|cost per available seat mile|\bcasm\b|non-fuel unit cost|cost structure|expenses?/);
   add("燃料費", /fuel cost|aircraft fuel|jet fuel|fuel expense/);
   add("人件費", /salaries|wages|labor cost|compensation|related costs/);
   add("精製・第三者向け販売コスト", /refinery sales to third parties|refinery sales|third[- ]party sales/);
-  add("単位コスト", /unit cost|cost per available seat mile|casm|cost per unit/);
-  add("価格・単価", /pricing|price realization|premium products?|fare|average ticket|rate increase/);
-  add("製品・顧客ミックス", /mix|premium products?|corporate customers?|product mix|customer mix/);
-  add("販売数量・稼働率", /volume|capacity|available seat mile|asm|load factor|traffic/);
+  add("単位コスト", /unit cost|cost per available seat mile|\bcasm\b|cost per unit/);
+  // \bfares?\b: 裸の fare は "welfare" / "warfare" に一致する。
+  add("価格・単価", /pricing|price realization|premium products?|\bfares?\b|average ticket|rate increase/);
+  add("製品・顧客ミックス", /\bmix\b|premium products?|corporate customers?|product mix|customer mix/);
+  // \basms?\b: 裸の asm は "plasma" / "enthusiasm" に一致する。
+  add("販売数量・稼働率", /volume|capacity|available seat mile|\basms?\b|load factor|traffic/);
   add("粗利益率", /gross margin|gross profit/);
   add("信用損失・引当", /provision for credit losses|credit loss|allowance/);
   add("販管費・研究開発費", /sg&a|selling, general and administrative|research and development|r&d/);
@@ -521,7 +525,7 @@ function inferMarginDriverLabels(text: string): string[] {
 function inferMarginNextIndicators(text: string, marginLabels: string[]): string[] {
   const lower = text.toLowerCase();
   const indicators = [...marginLabels];
-  if (/operating expense|operating cost|casm|unit cost/.test(lower)) {
+  if (/operating expense|operating cost|\bcasm\b|unit cost/.test(lower)) {
     indicators.push("単位コスト");
   }
   if (/fuel/.test(lower)) {
@@ -530,10 +534,10 @@ function inferMarginNextIndicators(text: string, marginLabels: string[]): string
   if (/salaries|wages|labor|compensation/.test(lower)) {
     indicators.push("人件費");
   }
-  if (/pricing|price|premium products?|fare|rate/.test(lower)) {
+  if (/pricing|price|premium products?|\bfares?\b|rate/.test(lower)) {
     indicators.push("価格・単価");
   }
-  if (/mix|premium products?|corporate customers?/.test(lower)) {
+  if (/\bmix\b|premium products?|corporate customers?/.test(lower)) {
     indicators.push("製品・顧客ミックス");
   }
   return [...new Set(indicators)];

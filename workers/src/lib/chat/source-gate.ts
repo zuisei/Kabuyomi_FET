@@ -345,7 +345,12 @@ export function normalizeSector(
 
   const haystack = `${sector ?? ""} ${companyName}`.toLowerCase();
   if (/capital markets|broker|wealth|asset management|investment banking|trading|morgan stanley/.test(haystack)) return "capital_markets";
-  if (/bank|financial|jpmorgan|card/.test(haystack)) return "bank";
+  // \bcard\b, not bare "card": the unbounded form matched "mastercard", so MA was
+  // classified as a bank and then required net-interest-income and provision-for-
+  // credit-losses discussion that its filings do not contain, failing the source
+  // gate every time. V, the same business, was already "general". Card revenue /
+  // card services still match.
+  if (/bank|financial|jpmorgan|\bcard\b/.test(haystack)) return "bank";
   if (/oilfield|halliburton|drilling|completion/.test(haystack)) return "oilfield_services";
   if (/energy|oil|gas|exxon|upstream|downstream|refining/.test(haystack)) return "energy";
   if (/semiconductor|wafer|kla|equipment/.test(haystack)) return "semiconductor_equipment";
