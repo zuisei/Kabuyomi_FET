@@ -344,17 +344,18 @@ private struct RedesignStreamView: View {
         .scrollContentBackground(.hidden)
         .background(KabuyomiTheme.canvas)
         .scrollDismissesKeyboard(.interactively)
-        .navigationBarTitleDisplayMode(.inline)
+        // ストリームの識別子はリスト自身に付ける。チェーンの末尾に置くと
+        // safeAreaInset に入れたアスクバーの中まで降りていき、
+        // 会社チップ・残高・入力欄・送信の識別子を全部この1つで上書きする
+        // (シミュレータ実機確認 2026-08-22。UIテストが送信ボタンを見失った)。
+        .accessibilityIdentifier("redesign.stream")
+        // ワードマークは大タイトルに任せる。ツールバーの leading に Text を置くと
+        // iOS 26 が操作系の丸いカプセルに詰め、「K…」に化ける
+        // (シミュレータ実機確認 2026-08-22)。大タイトルなら左寄せのまま、
+        // スクロールで1行のバーへ収束する。
+        .navigationTitle("Kabuyomi")
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Text("Kabuyomi")
-                    .font(.headline.weight(.bold))
-                    .tracking(0.4)
-                    .foregroundStyle(KabuyomiTheme.ink)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("redesign.wordmark")
-            }
-
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     present(.companyPicker)
@@ -406,7 +407,6 @@ private struct RedesignStreamView: View {
                 draft = deferredAsk.question
             }
         }
-        .accessibilityIdentifier("redesign.stream")
     }
 
     // MARK: 面
@@ -626,7 +626,9 @@ private struct RedesignAskBar: View {
         .padding(.bottom, 5)
         .background(KabuyomiTheme.paper)
         .overlay(alignment: .top) { KabuyomiHairline(color: KabuyomiTheme.separatorStrong) }
-        .accessibilityIdentifier("redesign.askbar")
+        // ここに識別子は付けない。素の VStack に付けると子孫まで降りていって
+        // 会社チップ・残高・入力欄・送信の識別子を全部上書きする
+        // (シミュレータ実機確認 2026-08-22)。バーの存在は送信ボタンで確かめる。
     }
 
     private var companyChip: some View {
@@ -925,11 +927,13 @@ private struct RedesignStreamFilingCard: View {
                         .foregroundStyle(KabuyomiTheme.ink)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
+                    // 行数は切らない。verdict の書き出しは1文で、カードは行ではないので
+                    // 2行で切ると実際に文末が消える(アクセシビリティ監査が
+                    // 「Text clipped」で拾った。シミュレータ実機確認 2026-08-22)。
                     Text(event.verdictLine)
                         .font(.footnote)
                         .foregroundStyle(KabuyomiTheme.inkSoft)
                         .multilineTextAlignment(.leading)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

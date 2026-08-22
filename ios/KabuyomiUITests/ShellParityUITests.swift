@@ -148,6 +148,23 @@ final class ShellParityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 8))
     }
 
+    /// 残高はアスクバーに出しっぱなしで、押せばクレジット画面へ入れる。
+    func testAskBarCreditChipOpensCredits() throws {
+        launch()
+        reachStreamRoot()
+
+        app.buttons["redesign.askbar.credits"].tap()
+        // シートとして出た CreditView は自前のヘッダを持つ(push 版と違い
+        // ナビゲーションバーは無い)。閉じるボタンでその面だと確かめる。
+        XCTAssertTrue(app.buttons["クレジット画面を閉じる"].waitForExistence(timeout: 8))
+        let billingAlert = app.alerts["Kabuyomi"]
+        if billingAlert.waitForExistence(timeout: 2) {
+            billingAlert.buttons["閉じる"].tap()
+            XCTAssertTrue(billingAlert.waitForNonExistence(timeout: 4))
+        }
+        capture("Credits from the ask bar")
+    }
+
     func testProductionDeviceAuthenticationStatusIsReachable() throws {
         launch()
         reachStreamRoot()
