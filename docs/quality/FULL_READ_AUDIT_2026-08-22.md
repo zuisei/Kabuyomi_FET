@@ -859,3 +859,102 @@ AUDIT_PROMPT の「`npx wrangler tail` はこの環境で出力が取れない�
 
 また**同一 filingKey + 同一質問は応答キャッシュに当たる**ため、
 2回目以降は生成イベント自体が出ない。計測を確認するときは質問を変えること。
+
+# M. ②の解消 — 定数回答経路の削除(2026-08-22)
+
+H節で可視化し、K節・L節で計測した②を、ゲートではなく**削除**で片付けた。
+L-4 で本番から取れた1行目——
+
+```
+chat_constant_answer_served
+  ticker=AAPL  table=TICKER_BUSINESS_OVERVIEWS  sourceCount=3
+```
+
+——が問題の全体像だった。filing を一度も参照せずに書かれた定数文に、
+その filing の実ソースチップが3件付いて返っている。
+条件を足して塞いでも同じ文が1条件先に残るだけなので、経路ごと消した。
+
+## M-1 削除したもの
+
+| ファイル | 削除した宣言 | 返していたもの |
+|---|---|---|
+| `lib/chat/deterministic.ts` | `TICKER_BUSINESS_OVERVIEWS` / `buildTickerBusinessOverviewAnswer` | 「{社名}は、{定数}で収益を得ている会社です。」 |
+| `lib/chat/deterministic.ts` | `TICKER_REVENUE_BREAKDOWNS` / `buildKnownRevenueBreakdownAnswer` | 「売上構造を見る軸は、{定数}です。」 |
+| `lib/chat/deterministic.ts` | `fallbackOverviewSources` | 上2つのチップ。「xbrl_metric 以外の先頭3件」を出典に仕立てる関数で、経路の一部であって傍観者ではない |
+| `lib/chat/context-factual-pack.ts` | `seedKnownTickerLabels` / `seedKnownTickerRevenueFacts` | 本文の有無に関係なく factual pack に定数ラベルを merge |
+| `lib/chat/context-factual-pack.ts` | `hasKnownBusinessLabels` / `fallbackKnownBusinessSourceIds` | `selectFactualSourceIds` が品質で落とした md_a チャンクを、出典として付け直す |
+| `lib/chat/context-factual-pack.ts` | `ChatFactualPack.seededOnlyLabels` と `chat_factual_pack_seeded_labels` | K節の計測。測っていた機構ごと消えたので一緒に外した |
+| `clients/gemini/fallback-known-business.ts` | ファイルごと(`summarizeKnownCompanyBusiness`) | PH / CRWD / CEG / INTU の事業説明を段落まるごと定数で返す |
+| `lib/chat/response-finalizer.ts` | `buildJpmDurabilitySynthesis` / `buildWmtDurabilitySynthesis` / `buildGoogleDurabilitySynthesis` | 社名の正規表現だけを門にして、銀行・小売・プラットフォームの定型段落を返し、ラベルには `source_backed` を名乗る |
+| `lib/chat/response-finalizer.ts` | `isWmtLikeFiling` / `isGoogleLikeFiling` / `hasBankDurabilityEvidence` / `hasRetailDurabilityEvidence` | 上3つ専用のヘルパー。`isJpmLikeFiling` は無関係な呼び出しが2箇所あるので残した |
+
+`buildBusinessOverviewAnswer` は `buildTickerBusinessOverviewAnswer` への短絡が7箇所あり、
+うち1つは `buildChatFactualPack` より**手前**にあった。
+抽出で答えられる filing でも定数が勝つ構造になっていたということ。
+
+## M-2 意図的に残したもの
+
+| 名前 | 場所 | 残す理由 |
+|---|---|---|
+| `issuerSignalLabels` | `lib/chat/deterministic.ts` | 削除したテーブルと**見た目が同じで、向きが逆**。ここに並ぶラベルは、先に `signals` の正規表現が MD&A の実文に当たっていなければ1つも通らない。この表はその一致をさらに絞るだけで、記述を**足すことはできず、削ることしかできない**。混同されないようコメントを付けた |
+| `normalizeSector` | `lib/chat/source-gate.ts` | どの根拠タイプを要求するかを決める判定表。回答文そのものを供給しない |
+
+`CONSTANT_ANSWER_COVERAGE.md` にも同じ2件を明記した。
+0件という数字を「見るのをやめた」と読まれないようにするため。
+
+## M-3 何に置き換わったか
+
+分岐ごとに「次の正直な選択肢に落とす」か「`null` を返してモデル経路に渡す」かを選んだ。
+`null` は打ち切りではない。モデル経路は別途出典検証を通るので、
+そちらに渡す方が定数を返すより厳しい。
+
+- 事業内容: factual pack(抽出のみ)→ `summarizeBusinessOverview`(本文からの要約)→ `null`
+- 売上区分: 抽出した区分 → `null`
+- 売上スナップショット: 内訳が取れなければ 売上構造 の一文を**足さない**。指標文と要因文は自分の出典を持っている
+- 継続性: `buildGenericDriverDurabilitySynthesis` のみ。evidence テキストから拾ったラベルで組み立てるので、evidence に無い要因は名指しできない
+
+ガードの形は残して救済だけ差し替えた箇所が2つある。
+composed した文が読点で終わる場合と、ラベルは取れたが出典チャンクを解決できない場合。
+どちらも定数ではなく `null` を返す。後者は「チップ0件の回答」そのもので、まさに塞ぐべき状態。
+
+品質が落ちた例も記録しておく。CRWD の事業概要は本文に "Falcon platform" があり
+抽出パターンもあるのに、この filing の md_a チャンクが factual pack の品質ゲートを
+全部落ちるため、pack に出典が無く、より曖昧な要約に落ちる。
+これまではその「品質ゲートが落としたチャンク」を `fallbackKnownBusinessSourceIds` が
+出典として付け直していた。曖昧になったが、引用元は自分が引いたチャンクのままである。
+
+## M-4 tripwire
+
+`scripts/report-constant-answer-coverage.mjs` の役目(②を見えるようにする)は完了したので、
+**不在の tripwire** に書き換えた。削除した8つの宣言のいずれかが `workers/src` 配下に
+再び現れたら非ゼロ終了する。`--write` で `CONSTANT_ANSWER_COVERAGE.md` を再生成する。
+
+`test/constant-answer-absence.test.ts` が同じロジックを `npm test` から実行する。
+スクリプトを走らせ忘れても守られる。ネガティブケース(宣言を1つ書いた一時ツリーを
+渡して検出されることを確認)と、空ツリーで成功を報告しないことの確認も入れた。
+「何も走査していないから違反0件」を通さないため。
+
+## M-5 書き換えたテストと、その理由
+
+| テスト | 何を守っていたか | どうしたか |
+|---|---|---|
+| `test/factual-pack-seeded-labels.test.ts` → `factual-pack-extraction-only.test.ts` | seed 挙動の記録 + 診断値をプロンプトに送らないこと | 前者は反転(製品名の無い filing からは製品ラベルが出ない)。後者は出典健全性なので残し、**強化**した。`seededOnlyLabels` が消えた今、未知のフィールドを pack に足して allowlist が落とすことを確認する形にした |
+| `test/chat-route-policy.test.ts` | 「filing 本文から作れないときにティッカー定数を使う」 | 本文が `Revenue was 100. Net income was 10.` だけの filing に「クラウド、Microsoft 365」を返していたテスト。deterministic 層が**降りる**ことを pin する形に反転。降りるからモデル経路に届く |
+| `test/pipeline.test.ts`(sparse AAPL) | 弱いリモート出力からの deterministic 復帰 | fixture の本文は季節性の段落だけで製品名が1つも無いのに `iPhone` を期待していた。本文に無い製品を名指ししないことを pin する形に変更。`responsePath`・出典・fetch 未呼び出しの assertion はそのまま |
+| `test/pipeline.test.ts`(PH / CRWD) | 汎用テックラベルへの流出防止 | PH は無変更(本文に実際に書いてある)。CRWD は M-3 の理由で曖昧化したので positive を差し替え、negative 2件はそのまま |
+| `test/gemini.test.ts`(CRWD / CEG fallback) | Nvidia 的な言い回しへの流出防止 | negative assertion は無変更。positive を「引用したチャンクに沿っていること」に変更 |
+| `test/gemini.test.ts`(MSFT/AMZN テンプレート) | business_overview / revenue_breakdown の deterministic 応答 | 同じ本文でティッカーだけ変えたら**同じ答えになる**ことを pin する形にした。定数依存が戻れば必ず落ちる |
+| `test/final-answer-language.test.ts`(JPM / WMT / GOOGL 継続性) | 出典ゲート通過後の未達回答が実質的な回答に修復されること | 修復されること自体は無変更。evidence テキストから辿れる要因ラベルを pin し、加えて「定数が主張していたが evidence には無い記述」を negative に足した(WMT: 燃料価格、GOOGL: Googleサービス、JPM: 金利環境の断定句) |
+| `test/final-answer-language.test.ts`(不正な通貨表記) | 壊れた金額 `143,7.6億ドル` をユーザーに出さないこと | ガード2件はそのまま。定数の内訳文に差し替えていた箇所が、根拠不足を認める回答になったので期待値を更新 |
+
+green にするために落とした assertion は無い。出典健全性の assertion は全て残っている。
+
+## M-6 範囲外として記録(未修正)
+
+`clients/gemini/fallback.ts:712-769` `sectorRevenueDriverChecklist`。
+`ticker === "AAPL" || /apple/.test(company)` のように**識別子だけ**を門にして
+定数文を返し、出典チップを持つ回答に連結される。
+728-730行目が最も明確で、`Appleのような製品・サービス企業では、iPhone、Services、Mac、…`
+と製品名を名指しする。同ファイル757-758行目は同じ文字列だが門が本文(`haystack`)側なので
+性質が違う。「次に何を見るか」の案内であって事業内容の断定ではない分だけ弱いが、
+同じ種類ではある。今回の指示範囲外なので触っていない。
