@@ -17,7 +17,9 @@ import {
   type RequestExecutionReservationOptions,
   type QuotaIdentity
 } from "../lib/quota";
+import { AppError } from "../lib/errors";
 import { parseJsonBody } from "../lib/request";
+import { QUESTION_TOO_SHORT_MESSAGE, questionHasSubstance } from "../lib/chat/question-substance";
 import { hashForLog, logErrorEvent, suffixForLog } from "../lib/logging";
 import { json, notFound, serverError, unavailable } from "../lib/response";
 import type { Env } from "../env";
@@ -37,6 +39,10 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
     maxBytes: CHAT_PAYLOAD_MAX_BYTES,
     tooLargeMessage: "Chat payload is too large"
   });
+  // 予約(クレジット)より前。ここで止めれば何も消費されない。
+  if (!questionHasSubstance(payload.question)) {
+    throw new AppError(400, QUESTION_TOO_SHORT_MESSAGE);
+  }
   const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
   const creditBillingEnabled = isCreditBillingEnabledForIdentity(config, identity);
   const reservation = buildChatReservation(identity, payload.filingKey);

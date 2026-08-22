@@ -1799,7 +1799,10 @@ function isLowSignalNarrative(chunk: SourceChunkRecord): boolean {
     return false;
   }
 
-  return /available information|available free of charge|forward-looking statements|private securities litigation reform act|investor relations website|corporate website|sec.?s website|securities and exchange commission|investor\.nvidia\.com|table of contents|following table sets forth|expressed as a percentage of revenue|should be read in conjunction|financial reporting standards?|new pronouncements|accounting policies/i.test(
+  // could differ materially / actual results / safe harbor / cautionary:
+  // 「forward-looking statements」の語を含まない safe-harbor 文が根拠チップに
+  // 「売上高」として出ていた(2026-08-22 実機レビュー)。
+  return /available information|available free of charge|forward-looking statements|could differ materially|actual results (?:and outcomes )?(?:could|may) differ|safe harbor|cautionary statements?|private securities litigation reform act|investor relations website|corporate website|sec.?s website|securities and exchange commission|investor\.nvidia\.com|table of contents|following table sets forth|expressed as a percentage of revenue|should be read in conjunction|financial reporting standards?|new pronouncements|accounting policies/i.test(
     normalized
   );
 }
