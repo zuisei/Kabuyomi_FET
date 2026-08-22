@@ -718,6 +718,60 @@ struct StarterCompany: Identifiable, Hashable {
     ]
 }
 
+/// スターターカタログの1分類。
+struct StarterCatalogSection: Identifiable, Hashable {
+    let title: String
+    let companies: [StarterCompany]
+
+    var id: String { title }
+}
+
+/// 初回ピッカーに並べる会社の全部(v2 IA 仕様 Phase 6.5「スターターの拡充と分類」)。
+///
+/// `StarterCompany.defaults` は**5社のまま増やさない**。空状態の候補一覧や
+/// `AppModel.starterCompanies` があの5社を指しており、増やすと初めて開いた面が
+/// 一覧で埋まる。拡張分はこちらに持ち、ピッカーだけが見る。
+///
+/// 銘柄は本番の追跡リスト(workers/src/lib/tracked-tickers.ts の
+/// `DEFAULT_TRACKED_TICKERS`)からだけ選ぶ。Worker が filing をキャッシュ済みの
+/// 会社しか置かないので、選んだ直後に中身のある盤面が出る。
+/// 追跡外の会社を混ぜると、初回に選んだ会社だけが空のまま残る。
+/// 部分集合であることは `FirstRunSupportTests` が固定している。
+///
+/// 表記は正式名称を手で持つ。SEC の提出者名は全大文字が多く
+/// (BROADCOM INC.、JPMORGAN CHASE & CO.)、そのまま出すと盤面で叫ぶ。
+/// ここの表記は `homeBoardCompanyName` にも供給される。
+enum StarterCatalog {
+    static let sections: [StarterCatalogSection] = [
+        // 先頭は既存の5社。列挙し直さず `defaults` から作る
+        // (2か所に書くと、片方だけ動く日が来る)。
+        StarterCatalogSection(title: "定番", companies: StarterCompany.defaults),
+        StarterCatalogSection(title: "半導体・AI", companies: [
+            StarterCompany(ticker: "AVGO", companyName: "Broadcom Inc."),
+            StarterCompany(ticker: "AMD", companyName: "Advanced Micro Devices, Inc."),
+            StarterCompany(ticker: "MU", companyName: "Micron Technology, Inc.")
+        ]),
+        StarterCatalogSection(title: "金融・決済", companies: [
+            StarterCompany(ticker: "JPM", companyName: "JPMorgan Chase & Co."),
+            StarterCompany(ticker: "V", companyName: "Visa Inc."),
+            StarterCompany(ticker: "MA", companyName: "Mastercard Incorporated")
+        ]),
+        StarterCatalogSection(title: "生活・消費", companies: [
+            StarterCompany(ticker: "WMT", companyName: "Walmart Inc."),
+            StarterCompany(ticker: "COST", companyName: "Costco Wholesale Corporation"),
+            StarterCompany(ticker: "PG", companyName: "The Procter & Gamble Company")
+        ])
+    ]
+
+    /// 分類をほどいた全社。表記オーバーライドと重複判定はこちらを見る。
+    static let companies: [StarterCompany] = sections.flatMap(\.companies)
+
+    /// 正式表記の引き当て。ticker の大小は問わない。
+    static func company(for ticker: String) -> StarterCompany? {
+        companies.first { $0.ticker.caseInsensitiveCompare(ticker) == .orderedSame }
+    }
+}
+
 struct LocalCompanyRecord {
     let company: CompanyPayload
     let chatHistory: [LocalChatMessage]

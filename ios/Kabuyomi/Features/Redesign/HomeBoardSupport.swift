@@ -131,11 +131,13 @@ private func homeBoardRow(
 func homeBoardCompanyName(companyName: String, ticker: String) -> String {
     // SEC の提出者名は全大文字が多く(NVIDIA CORP、COCA COLA CO)、
     // Apple Inc. と並ぶと1社だけ叫んでいるように見える。表記を持っている
-    // 会社(スターター表)は正式表記を優先する。それ以外を title-case で
+    // 会社(スターターカタログ)は正式表記を優先する。それ以外を title-case で
     // 加工することはしない — Nvidia Corp は NVIDIA より悪い嘘になる。
-    if let curated = StarterCompany.defaults.first(where: {
-        $0.ticker.caseInsensitiveCompare(ticker) == .orderedSame
-    }) {
+    //
+    // 参照するのは `StarterCompany.defaults`(5社)ではなくカタログ全部
+    // (v2 IA 仕様 Phase 6.5)。ピッカーで AVGO を選べるのに盤面では
+    // 「BROADCOM INC.」と叫ぶ、という食い違いをここで閉じる。
+    if let curated = StarterCatalog.company(for: ticker) {
         return curated.companyName
     }
     let trimmed = companyName.trimmingCharacters(in: .whitespacesAndNewlines)

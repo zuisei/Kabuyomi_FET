@@ -60,4 +60,67 @@ final class FirstRunSupportTests: XCTestCase {
         XCTAssertNil(streamAskContext(lastOpenedTicker: nil, saved: [], recent: []))
         XCTAssertNil(streamAskContext(lastOpenedTicker: "   ", saved: [], recent: []))
     }
+
+    // MARK: - スターターカタログ(Phase 6.5)
+
+    /// 本番の追跡リスト(workers/src/lib/tracked-tickers.ts の
+    /// `DEFAULT_TRACKED_TICKERS`)をここに写している。**唯一の出所はあちら**で、
+    /// この配列はカタログが勝手にはみ出していないかを見るための鏡でしかない。
+    /// Worker 側で追跡銘柄を減らしたときは、まずこのテストが落ちる。
+    private static let trackedTickers: Set<String> = [
+        "NVDA", "GOOG", "AAPL", "MSFT", "AMZN", "AVGO", "META", "TSLA", "BRK-B", "WMT",
+        "JPM", "LLY", "V", "XOM", "JNJ", "MU", "ORCL", "MA", "AMD", "COST",
+        "NFLX", "BAC", "CAT", "ABBV", "CVX", "PLTR", "HD", "INTC", "PG", "CSCO"
+    ]
+
+    /// カタログは追跡銘柄の部分集合。外れた会社を置くと、
+    /// 初回に選んだ会社だけが「資料がまだありません」のまま残る。
+    func testStarterCatalogOnlyContainsTrackedTickers() {
+        for company in StarterCatalog.companies {
+            XCTAssertTrue(
+                Self.trackedTickers.contains(company.ticker),
+                "\(company.ticker) は本番の追跡リストに無い"
+            )
+        }
+    }
+
+    /// 分類は3〜4、社数は12社前後(v2 IA 仕様 Phase 6.5)。
+    /// 同じ会社が2つの分類に出ない。
+    func testStarterCatalogIsGroupedWithoutDuplicates() {
+        XCTAssertTrue((3...4).contains(StarterCatalog.sections.count))
+        XCTAssertEqual(StarterCatalog.companies.count, 14)
+
+        let tickers = StarterCatalog.companies.map(\.ticker)
+        XCTAssertEqual(Set(tickers).count, tickers.count, "同じ会社が2つの分類に出ている")
+
+        for section in StarterCatalog.sections {
+            XCTAssertFalse(section.title.isEmpty)
+            XCTAssertFalse(section.companies.isEmpty)
+        }
+    }
+
+    /// 先頭の分類は既存の5社そのまま。`defaults` は増やさない
+    /// (空状態の候補一覧と `AppModel.starterCompanies` があの5社を指している)。
+    func testStarterCatalogKeepsTheOriginalFiveDefaultsUntouched() {
+        XCTAssertEqual(StarterCompany.defaults.count, 5)
+        XCTAssertEqual(
+            StarterCompany.defaults.map(\.ticker),
+            ["AAPL", "MSFT", "NVDA", "AMZN", "TSLA"]
+        )
+        XCTAssertEqual(StarterCatalog.sections.first?.title, "定番")
+        XCTAssertEqual(StarterCatalog.sections.first?.companies, StarterCompany.defaults)
+    }
+
+    /// 拡張分の正式表記も表記オーバーライドへ流れている
+    /// (`homeBoardCompanyName` が SEC の全大文字を置き換える)。
+    func testCuratedNamesFromTheExpandedCatalogReachTheDisplayNameChokePoint() {
+        XCTAssertEqual(homeBoardCompanyName(companyName: "BROADCOM INC.", ticker: "AVGO"), "Broadcom Inc.")
+        XCTAssertEqual(
+            homeBoardCompanyName(companyName: "JPMORGAN CHASE & CO", ticker: "JPM"),
+            "JPMorgan Chase & Co."
+        )
+        XCTAssertEqual(homeBoardCompanyName(companyName: "Walmart Inc.", ticker: "wmt"), "Walmart Inc.")
+        // カタログの外は加工しない(Phase 3 からの約束)。
+        XCTAssertEqual(homeBoardCompanyName(companyName: "COCA COLA CO", ticker: "KO"), "COCA COLA CO")
+    }
 }

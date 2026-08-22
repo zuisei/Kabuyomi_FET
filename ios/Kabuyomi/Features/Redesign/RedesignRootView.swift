@@ -1494,29 +1494,41 @@ private struct RedesignCompanyPickerSheet: View {
         .overlay(alignment: .top) { KabuyomiHairline(color: KabuyomiTheme.separatorStrong) }
     }
 
+    /// 初回ピッカーの一覧。`StarterCatalog` の分類をそのまま節にする
+    /// (v2 IA 仕様 Phase 6.5「スターターの拡充と分類」)。
+    ///
+    /// 節の見出しは他の面と同じ `RedesignSectionHeader`。
+    /// 選択数は**節ごと**に出す。14社が4つの節に分かれた以上、
+    /// 合計だけを1つ目の節の肩に載せると、下の節で選んだ数が
+    /// 上の節の数として読めてしまう。
     @ViewBuilder
     private var starterChoiceSection: some View {
-        Section {
-            ForEach(appModel.starterCompanies) { company in
-                RedesignStarterChoiceRow(
-                    ticker: company.ticker,
-                    companyName: company.companyName,
-                    detail: "10-K / 10-Qを確認",
-                    isSelected: selection.contains(company.ticker),
-                    toggle: { toggle(company.ticker, searchItem: nil) }
+        ForEach(StarterCatalog.sections) { section in
+            Section {
+                ForEach(section.companies) { company in
+                    RedesignStarterChoiceRow(
+                        ticker: company.ticker,
+                        companyName: company.companyName,
+                        detail: "10-K / 10-Qを確認",
+                        isSelected: selection.contains(company.ticker),
+                        toggle: { toggle(company.ticker, searchItem: nil) }
+                    )
+                }
+            } header: {
+                let picked = section.companies.filter { selection.contains($0.ticker) }.count
+                RedesignListSectionHeader(
+                    title: section.title,
+                    trailing: picked == 0 ? nil : "\(picked)社"
                 )
             }
-        } header: {
-            RedesignListSectionHeader(
-                title: "はじめに見る会社",
-                trailing: selection.isEmpty ? nil : "\(selection.count)社"
-            )
         }
 
         // 検索で足した銘柄は、検索語を消すと検索結果ごと消える。
         // 選んだものが視界から無くなるので、ここに残しておく。
+        // 突き合わせる先はカタログ全部(`appModel.starterCompanies` の5社だと
+        // AVGO を選んだ人に同じ行が2度出る)。
         let addedTickers = selection.filter { ticker in
-            !appModel.starterCompanies.contains { $0.ticker == ticker }
+            StarterCatalog.company(for: ticker) == nil
         }
         if !addedTickers.isEmpty {
             Section {
