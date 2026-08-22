@@ -335,13 +335,26 @@ enum RedesignAskPreparation: Equatable {
 }
 
 /// 送信前の判定。2つのコンポーザが同じ順序で同じ結論に至るための1か所。
+/// 「h」「G」のような1文字にも回答が生成されクレジットが減っていた
+/// (2026-08-22 実機レビュー)。Worker 側は 400 で弾くが、端末側は送信ボタンを
+/// 活性化しないことで、往復もアラートも無しに止める。基準は Worker と同じ
+/// 「文字・数字が2つ以上」— 「売上」「AWS」は通り、1文字や記号だけは止まる。
+func redesignQuestionHasSubstance(_ question: String) -> Bool {
+    var count = 0
+    for scalar in question.unicodeScalars where scalar.properties.isAlphabetic || scalar.properties.numericType != nil {
+        count += 1
+        if count >= 2 { return true }
+    }
+    return false
+}
+
 func redesignAskPreparation(
     rawQuestion: String,
     disabledReason: String?,
     aiConsentGranted: Bool
 ) -> RedesignAskPreparation {
     let trimmed = rawQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return .empty }
+    guard redesignQuestionHasSubstance(trimmed) else { return .empty }
     if let disabledReason { return .blocked(reason: disabledReason) }
     guard aiConsentGranted else { return .needsConsent(question: trimmed) }
     return .ready(question: trimmed)
@@ -381,7 +394,7 @@ func streamSendIntent(
     disabledReason: String?
 ) -> StreamAskBarIntent? {
     let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty, disabledReason == nil, let context else { return nil }
+    guard redesignQuestionHasSubstance(trimmed), disabledReason == nil, let context else { return nil }
     return .submit(question: trimmed, context: context)
 }
 

@@ -500,7 +500,7 @@ private struct RedesignStreamView: View {
         )
 
         List {
-            if items.isEmpty {
+            if items.isEmpty && pendingAsks.isEmpty {
                 emptyStreamSections
             } else {
                 streamSections(items)
@@ -585,9 +585,28 @@ private struct RedesignStreamView: View {
 
     // MARK: 面
 
+    /// 送信中の質問。新しい順。会社名はカードの表記と同じ関所を通す。
+    private var pendingAsks: [(state: PendingChatState, companyName: String)] {
+        appModel.pendingChats.values
+            .sorted { $0.submittedAt > $1.submittedAt }
+            .map { state in
+                let name = (savedCards + recentCards)
+                    .first { $0.ticker.caseInsensitiveCompare(state.ticker) == .orderedSame }?
+                    .companyName ?? ""
+                return (state, homeBoardCompanyName(companyName: name, ticker: state.ticker))
+            }
+    }
+
     @ViewBuilder
     private func streamSections(_ items: [StreamItem]) -> some View {
         Section {
+            ForEach(pendingAsks, id: \.state.id) { pending in
+                RedesignStreamPendingCard(
+                    ticker: pending.state.ticker,
+                    companyName: pending.companyName,
+                    question: pending.state.question
+                )
+            }
             ForEach(items) { item in
                 switch item {
                 case .answer(let entry):
@@ -618,7 +637,7 @@ private struct RedesignStreamView: View {
                 }
             }
         } header: {
-            RedesignListSectionHeader(title: "ストリーム", trailing: "\(items.count)件")
+            RedesignListSectionHeader(title: "ストリーム", trailing: "\(items.count + pendingAsks.count)件")
         }
     }
 
@@ -765,8 +784,10 @@ private struct RedesignStreamView: View {
         Task {
             appModel.openConversation(for: context.ticker)
             await appModel.loadCompany(ticker: context.ticker)
-            // 回答が流れる面は会社ドキュメント。ストリームは終わったものを後から並べる。
-            openCompany(context.ticker)
+            // 文書へは飛ばさない。送った人が見ている場所(このストリーム)に
+            // 「回答中」カードが立ち、回答が返ればその場で回答カードに育つ。
+            // 2026-08-22 の実機レビューで、送信→文書の「資料」タブへ飛ばされ、
+            // 自分の質問も回答も見えない場所に着地するのが最大の違和感だった。
             let didSend = await appModel.sendChat(question: prompt, ticker: context.ticker)
             isSubmitting = false
             if !didSend, draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -991,6 +1012,52 @@ private struct RedesignAskBar: View {
 // MARK: - ストリームのカード
 
 /// 回答カード。質問は小さく、回答は読み面、根拠はチップで下に。
+/// 送信直後から回答が返るまでストリームの先頭に立つカード。
+/// 回答カードと同じ会社ヘッダー+質問ブロックで、回答の場所に進行表示を置く。
+/// 返ったら AppModel の pendingChats から消え、同じ位置に回答カードが現れる。
+private struct RedesignStreamPendingCard: View {
+    let ticker: String
+    let companyName: String
+    let question: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            RedesignStreamCompanyHeader(
+                ticker: ticker,
+                companyName: companyName,
+                attribution: ""
+            ) {
+                EmptyView()
+            }
+            HStack(alignment: .top, spacing: 0) {
+                Rectangle()
+                    .fill(KabuyomiTheme.accent)
+                    .frame(width: 2)
+                Text(question)
+                    .font(.subheadline)
+                    .foregroundStyle(KabuyomiTheme.ink)
+                    .padding(.leading, 10)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(KabuyomiTheme.accent)
+                Text("回答中")
+                    .font(.footnote)
+                    .foregroundStyle(KabuyomiTheme.inkSoft)
+            }
+        }
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .listRowBackground(KabuyomiTheme.paper)
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(companyName.isEmpty ? ticker : companyName)、\(question)、回答中")
+        .accessibilityIdentifier("redesign.stream.pending.\(ticker)")
+    }
+}
+
 private struct RedesignStreamAnswerCard: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let entry: ResearchArchiveEntry
@@ -2401,6 +2468,15 @@ private struct RedesignCompanyWorkspace: View {
             .background(KabuyomiTheme.paper)
             .scrollDismissesKeyboard(.interactively)
             // 最新に貼りつくのは会話の面だけ。資料の読み位置は動かさない。
+            // 開いた瞬間も末尾へ。会話は古い順に積むので、ここが無いと
+            // 「会話」を開くたびに最初の質問が見え、最新は画面外になる
+            // (2026-08-22 実機レビュー)。LazyVStack の末尾はまだ実体化して
+            // いないことがあるので、1ターン遅らせてから寄せる。
+            .onAppear {
+                DispatchQueue.main.async {
+                    proxy.scrollTo("research-end", anchor: .bottom)
+                }
+            }
             .onChange(of: pendingChat?.id) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) {
                     proxy.scrollTo("research-end", anchor: .bottom)
@@ -2422,7 +2498,13 @@ private struct RedesignCompanyWorkspace: View {
                     // 状態行(保存済み資料表示中 / 前の資料に基づく会話)は畳まれる領域の外に置き、
                     // 収束しても消えないようにする。
                     RedesignCollapsingCompanyHeader(
-                        companyName: company.companyName,
+                        // 盤面・ストリームと同じ表記の関所(AMAZON COM INC → Amazon.com, Inc.)。
+                        // 関所は「名前=ticker」のプレースホルダを空にするが、文書ヘッダで
+                        // 空は困るので、その場合だけ元の名前に戻す。
+                        companyName: {
+                            let curated = homeBoardCompanyName(companyName: company.companyName, ticker: company.ticker)
+                            return curated.isEmpty ? company.companyName : curated
+                        }(),
                         formType: company.formType,
                         filedAt: formattedFilingDate(company.filedAt),
                         sourceCount: company.sourceChunks.count,

@@ -793,4 +793,20 @@ final class StreamSupportTests: XCTestCase {
         XCTAssertFalse(events[0].suggestedQuestions.isEmpty)
         XCTAssertTrue(events[1].suggestedQuestions.isEmpty)
     }
+
+    // 2026-08-22 実機レビュー: 1文字の「h」「G」にも回答が生成されていた。
+    func testSendRequiresTwoContentCharacters() {
+        for q in ["h", "G", "?", "？？", " . ", ""] {
+            XCTAssertFalse(redesignQuestionHasSubstance(q), q)
+        }
+        for q in ["売上", "AWS", "ok", "利益率は？", "なにで稼いでんの？", "10-K"] {
+            XCTAssertTrue(redesignQuestionHasSubstance(q), q)
+        }
+        let context = StreamAskContext(ticker: "AAPL", companyName: "Apple Inc.")
+        XCTAssertNil(streamSendIntent(draft: "h", context: context, disabledReason: nil))
+        XCTAssertNotNil(streamSendIntent(draft: "売上", context: context, disabledReason: nil))
+        if case .empty = redesignAskPreparation(rawQuestion: "G", disabledReason: nil, aiConsentGranted: true) {} else {
+            XCTFail("single character must be treated as empty")
+        }
+    }
 }
