@@ -8,6 +8,7 @@ import {
 } from "./context-quality";
 import { findMetricSourceChunk } from "./context-metrics";
 import type { QuestionIntent } from "./intent";
+import { logEvent } from "../logging";
 
 export interface ChatFactualPack {
   kind: "business_overview" | "revenue_breakdown" | "risk_factors";
@@ -22,6 +23,17 @@ export interface ChatFactualPack {
   largestRevenueCategory?: string;
   sourceIds: string[];
   missingFields: string[];
+  /**
+   * Labels that came only from the hardcoded seed table — extraction did not
+   * find them in the filing. The prompt tells the model to prefer the factual
+   * pack over raw excerpts, so to the model these are provided context and a
+   * model perfectly obeying "do not invent facts" will still state them.
+   *
+   * Recorded, not removed: this measures how much the seeded tickers actually
+   * depend on the constants before deciding whether dropping them makes answers
+   * worse. Empty here means seeding was a no-op for this request.
+   */
+  seededOnlyLabels?: string[];
 }
 
 export interface RevenueFact {
@@ -33,6 +45,30 @@ export interface RevenueFact {
 }
 
 export function buildChatFactualPack(
+  filing: FilingCacheRecord,
+  questionIntent: QuestionIntent
+): ChatFactualPack | undefined {
+  const pack = buildChatFactualPackForIntent(filing, questionIntent);
+  // Measures how much the seeded tickers actually lean on the constants. The
+  // prompt tells the model to prefer the factual pack over raw excerpts, so a
+  // seeded label the filing does not contain is stated as fact no matter how
+  // well the model obeys "do not invent facts" — the constants are, from its
+  // point of view, provided context. If this stays empty in production, the
+  // seeds can be dropped without changing any answer.
+  if (pack) {
+    const seededOnlyLabels = pack.seededOnlyLabels ?? [];
+    logEvent("chat_factual_pack_seeded_labels", {
+      ticker: filing.ticker.toUpperCase(),
+      questionIntent,
+      packKind: pack.kind,
+      seededOnlyLabelCount: seededOnlyLabels.length,
+      seededOnlyLabels
+    });
+  }
+  return pack;
+}
+
+function buildChatFactualPackForIntent(
   filing: FilingCacheRecord,
   questionIntent: QuestionIntent
 ): ChatFactualPack | undefined {
@@ -59,16 +95,19 @@ export function buildChatFactualPack(
 
 function buildBusinessOverviewFactualPack(filing: FilingCacheRecord): ChatFactualPack | undefined {
   const sourceText = filingSearchText(filing);
-  const productsServices = seedKnownTickerLabels(
+  const seededProductsServices = seedKnownTickerLabels(
     filing.ticker,
     "products_services",
     collectOrderedLabels(sourceText, businessProductDefinitions(filing.ticker))
   );
-  const reportableSegments = seedKnownTickerLabels(
+  const seededReportableSegments = seedKnownTickerLabels(
     filing.ticker,
     "reportable_segments",
     collectOrderedLabels(sourceText, reportableSegmentDefinitions(filing.ticker))
   );
+  const productsServices = seededProductsServices.labels;
+  const reportableSegments = seededReportableSegments.labels;
+  const seededOnlyLabels = [...seededProductsServices.seededOnly, ...seededReportableSegments.seededOnly];
   const revenueCategories = extractRevenueFacts(filing).filter((fact) => fact.kind !== "geography");
   let sourceIds = selectFactualSourceIds(
     filing,
@@ -108,7 +147,8 @@ function buildBusinessOverviewFactualPack(filing: FilingCacheRecord): ChatFactua
     reportableSegments,
     revenueCategories: revenueCategories.slice(0, 8),
     sourceIds,
-    missingFields
+    missingFields,
+    ...(seededOnlyLabels.length > 0 ? { seededOnlyLabels } : {})
   };
 }
 
@@ -484,7 +524,7 @@ function seedKnownTickerLabels(
   ticker: string,
   field: "products_services" | "reportable_segments",
   labels: string[]
-): string[] {
+): { labels: string[]; seededOnly: string[] } {
   const upperTicker = ticker.toUpperCase();
   const seeds: Record<string, Record<typeof field, string[]>> = {
     AAPL: {
@@ -528,7 +568,11 @@ function seedKnownTickerLabels(
       reportable_segments: []
     }
   };
-  return mergeLabels(labels, seeds[upperTicker]?.[field] ?? []);
+  const seeded = seeds[upperTicker]?.[field] ?? [];
+  return {
+    labels: mergeLabels(labels, seeded),
+    seededOnly: seeded.filter((seed) => !labels.includes(seed))
+  };
 }
 
 function hasKnownBusinessLabels(ticker: string): boolean {

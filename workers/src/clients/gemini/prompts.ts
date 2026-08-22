@@ -2,6 +2,7 @@ import type { ChatPromptInput, QuoteTranslationPromptInput, SummaryPromptInput }
 import type { MetricSnapshot, SourceChunkRecord, VerifiedFinancialFact } from "../../env";
 import { formatMetricValue, formatYoYDelta, metricLabel } from "../../lib/metrics";
 import { buildVerifiedFinancialFacts } from "../../lib/chat/verified-financial-facts";
+import type { ChatFactualPack } from "../../lib/chat/context-factual-pack";
 
 export function buildSummaryPrompt(input: SummaryPromptInput): string {
   return [
@@ -159,7 +160,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     JSON.stringify(buildPromptVerifiedFactPack(contextPack.verifiedFacts)),
     "",
     "Factual pack:",
-    JSON.stringify(contextPack.factualPack ?? null),
+    JSON.stringify(contextPack.factualPack ? promptSafeFactualPack(contextPack.factualPack) : null),
     "",
     "Sources:",
     JSON.stringify(contextPack.sourceChunks)
@@ -180,7 +181,7 @@ export function buildChatPromptTemplateVariables(input: ChatPromptInput): Record
     ? `${input.question}\n\n直近の会話文脈:\n${conversationContext}`
     : input.question;
   const hostedPromptFactualPack = {
-    ...(contextPack.factualPack ?? {}),
+    ...promptSafeFactualPack(contextPack.factualPack),
     verifiedFinancialFacts: buildPromptVerifiedFactPack(contextPack.verifiedFacts)
   };
   return {
@@ -476,4 +477,18 @@ export function retryInstruction(input: ChatPromptInput): string {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * The factual pack carries seededOnlyLabels for diagnostics — which labels came
+ * from the hardcoded seed table rather than from the filing. That is internal
+ * attribution about the pack, not a fact about the company, so it must not be
+ * sent to the model: both serialisation points spread the whole pack.
+ */
+function promptSafeFactualPack(factualPack: ChatFactualPack | undefined): Record<string, unknown> {
+  if (!factualPack) {
+    return {};
+  }
+  const { seededOnlyLabels: _seededOnlyLabels, ...promptFields } = factualPack;
+  return promptFields;
 }

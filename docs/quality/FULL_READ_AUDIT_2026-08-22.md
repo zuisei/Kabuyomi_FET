@@ -698,3 +698,44 @@ extensions を持たない attestation が門で落ちるため、**実在のイ
 **⑯ sec-fetcher の二重実装2組** — 失敗シナリオが無い。
 `sec-service` / `prepared-filing` はいずれも本番で使われず(本番は Worker 側)、
 「重複がある」以上の害を特定できていない。リファクタの話であって修正ではない。
+
+---
+
+# K. ②の実行時計測(2026-08-22)
+
+H節は**静的**な可視化(表に載っているか)だった。実トラフィックで
+「その回答が定数に依存したか」は分からないままだったので、そこを足した。判定も回答も変えていない。
+
+## 何を測るか
+
+`seedKnownTickerLabels` は抽出結果と定数を merge する。
+このうち**抽出が見つけられなかった分**、つまり
+**filing に書かれていないのに factual pack に入った分**だけを `seededOnlyLabels` として記録する。
+
+```
+seededOnly = seeds.filter(seed => !labels.includes(seed))
+```
+
+`chat_factual_pack_seeded_labels` イベントに ticker / questionIntent /
+packKind / 件数 / ラベルを出す。
+
+**この数字が本番で実質0なら、seed を外しても回答は1文字も変わらない。**
+0でないなら、変わる量が分かった上で判断できる。
+
+## 診断値はモデルに送らない
+
+`seededOnlyLabels` は「pack の出自」であって「会社の事実」ではない。
+`buildChatPromptTemplateVariables` は `{...contextPack.factualPack}` で
+**pack 全体を展開する**ため、そのままだとプロンプトに載る。
+`promptSafeFactualPack` で落とした(`buildChatPrompt` 側の直列化も同様)。
+
+`test/factual-pack-seeded-labels.test.ts` が
+**2つの直列化経路の両方**でこのフィールドが出ないことを固定している。
+seed されたラベル自体は従来どおりモデルに渡る — 変えたのは測定であって挙動ではない。
+
+## I-3 の再確認
+
+プロンプトには `You must not invent facts.` が実在する。
+それでも定数が出るのは、seed された定数が**モデルから見て「提供された文脈」だから**である。
+②はプロンプトでは解けない。この計測は「seed をやめる」判断の材料であって、
+別の解き方の提案ではない。
