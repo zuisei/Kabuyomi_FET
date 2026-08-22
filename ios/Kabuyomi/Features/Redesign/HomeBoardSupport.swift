@@ -193,8 +193,15 @@ func homeFeedVerdictLine(verdict: String, companyName: String) -> String {
 // MARK: - 研究(Q&A アーカイブ)
 
 /// アーカイブの1件 = 過去の質問1つと、それに続く回答。
+///
+/// Phase 4 ではこれがストリームの「回答カード」そのものになるので、
+/// カード1枚を描くのに必要なもの(会社・回答本文・出典チップ)をここで持ち切る。
+/// view 側が `CompanyPayload` を引き当て直さずに済むようにするための拡張で、
+/// Phase 3 のフィールドはすべてそのまま残っている。
 struct ResearchArchiveEntry: Identifiable, Equatable {
     let id: String
+    let ticker: String
+    let companyName: String
     let filingKey: String
     let formType: String
     /// 提出日は生の文字列のまま持ち、書式は表示側に任せる
@@ -203,6 +210,11 @@ struct ResearchArchiveEntry: Identifiable, Equatable {
     let question: String
     /// 回答の書き出し1文。まだ回答が無い質問では nil。
     let answerPreview: String?
+    /// 回答の本文(日本語化済み)。まだ回答が無い質問では nil。
+    /// どこで畳むかは表示側が決める。
+    let answerText: String?
+    /// 回答に付いた出典チップ。同じ資料の同じ抜粋を指す行はここで畳まれている。
+    let sourceChips: [SourceChipDescriptor]
     let answerCount: Int
     let askedAt: Date
     let latestActivity: Date
@@ -254,6 +266,11 @@ func researchArchiveGroups(records: [LocalCompanyRecord]) -> [ResearchArchiveGro
     }
 }
 
+/// 1件の回答に添える出典チップの上限。
+/// ストリームは1枚のカードなので、根拠を全部並べると回答本文より長くなる。
+/// 続きは会社ドキュメントの会話面に全部ある。
+private let researchArchiveSourceChipLimit = 3
+
 private func researchArchiveEntries(for record: LocalCompanyRecord) -> [ResearchArchiveEntry] {
     let messages = record.chatHistory
     var entries: [ResearchArchiveEntry] = []
@@ -272,16 +289,31 @@ private func researchArchiveEntries(for record: LocalCompanyRecord) -> [Research
             cursor += 1
         }
 
+        let answerText = answers.first.map { localizedAssistantDisplayText($0.content) }
+        let sourceChips = answers.first.map { answer in
+            Array(
+                sourceChipDescriptors(
+                    for: Array(
+                        displayableMessageSources(answer.sources, in: record.company)
+                            .prefix(researchArchiveSourceChipLimit)
+                    ),
+                    in: record.company
+                )
+            )
+        } ?? []
+
         entries.append(
             ResearchArchiveEntry(
                 id: message.id.uuidString,
+                ticker: record.company.ticker.uppercased(),
+                companyName: record.company.companyName,
                 filingKey: record.company.filingKey,
                 formType: record.company.formType,
                 filedAt: record.company.filedAt,
                 question: question,
-                answerPreview: answers.first.flatMap { answer in
-                    redesignLeadSentence(localizedAssistantDisplayText(answer.content))
-                },
+                answerPreview: answerText.flatMap(redesignLeadSentence),
+                answerText: answerText,
+                sourceChips: sourceChips,
                 answerCount: answers.count,
                 askedAt: message.createdAt,
                 latestActivity: answers.last?.createdAt ?? message.createdAt

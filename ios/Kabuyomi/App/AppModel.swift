@@ -2088,6 +2088,27 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         return Array(orderedCards(for: filteredTickers).prefix(limit))
     }
 
+    /// 最後に開いた会社。アスクバーの会社チップの既定値に使う
+    /// (`streamAskContext`)。`rootConversationTicker` と違い、
+    /// 該当が無いときにスターター企業へ落とさない —
+    /// 本人が選んでいない会社を質問の宛先に据えないため。
+    var lastOpenedCompanyTicker: String? {
+        activeConversationTicker ?? lastViewedTicker
+    }
+
+    /// ストリームの回答カードの素。追っている会社(保存済み + 最近)の会話記録を
+    /// まとめて読み出す。並べ替えと組み立ては `researchArchiveGroups` / `streamItems`
+    /// (純ロジック)側の仕事で、ここは永続化に触れる部分だけを引き受ける。
+    func trackedConversationRecords(companyLimit: Int = 12) -> [LocalCompanyRecord] {
+        let recent = recentCompanyCards(limit: companyLimit, includeSaved: false)
+        var seen = Set<String>()
+        let tickers = (watchlist + recent)
+            .map { normalizedTicker($0.ticker) }
+            .filter { seen.insert($0).inserted }
+            .prefix(companyLimit)
+        return tickers.flatMap { conversationHistory(for: $0) }
+    }
+
     func dismissAlert() {
         activeAlert = nil
     }
