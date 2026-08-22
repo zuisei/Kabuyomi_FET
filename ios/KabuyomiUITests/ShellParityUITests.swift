@@ -1,5 +1,9 @@
 import XCTest
 
+/// v2 IA Phase 4 の骨格(docs/ui-redesign-v2/V2_IA_SPEC.md「Phase 4」節)。
+/// タブは無く、根はストリーム + 底のアスクバー。会社ドキュメント・資料・引用は push、
+/// 会社ピッカーと設定はシート。ここで固定するのは
+/// 「どの面がどこから到達できるか」と「アスクバーが根にだけ貼りつくこと」。
 @MainActor
 final class ShellParityUITests: XCTestCase {
     private lazy var app = XCUIApplication()
@@ -10,27 +14,29 @@ final class ShellParityUITests: XCTestCase {
 
     func testProductionShellCompanyBoardWorkspaceAndSourcesAreReachable() throws {
         launch()
-        reachCompanySearch()
         searchAndOpenAAPL()
 
         XCTAssertTrue(app.staticTexts["AAPL"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.navigationBars["AAPL"].exists)
         XCTAssertTrue(app.buttons["redesign.company.sources"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["redesign.company.more"].exists)
+        // 質問の入り口は2つ、送信の道は1つ。ドキュメントの上ではドキュメント側の
+        // コンポーザだけが出て、根のアスクバーは重ならない。
+        XCTAssertFalse(app.buttons["redesign.askbar.send"].exists)
+        XCTAssertTrue(app.buttons["redesign.composer.expand"].exists)
         XCTAssertFalse(app.tabBars.firstMatch.exists)
         XCTAssertFalse(app.staticTexts["このアプリの署名を確認できません"].exists)
         capture("Research workspace")
 
         app.buttons["redesign.company.sources"].tap()
         XCTAssertTrue(app.navigationBars["資料と根拠"].waitForExistence(timeout: 8))
-        XCTAssertFalse(app.tabBars.firstMatch.exists)
+        XCTAssertFalse(app.buttons["redesign.askbar.send"].exists)
         capture("Sources")
     }
 
     func testResearchSupportsNativeEdgeSwipeNavigation() throws {
         launch()
-        reachCompanySearch()
-        openAAPLFromBoard()
+        openAAPLFromStream()
 
         XCTAssertTrue(app.buttons["redesign.company.sources"].waitForExistence(timeout: 15))
         app.buttons["redesign.company.sources"].tap()
@@ -42,18 +48,17 @@ final class ShellParityUITests: XCTestCase {
 
     func testResearchCompanySupportsNativeEdgeSwipeNavigation() throws {
         launch()
-        reachCompanySearch()
-        openAAPLFromBoard()
+        openAAPLFromStream()
 
         XCTAssertTrue(app.buttons["redesign.company.sources"].waitForExistence(timeout: 15))
         edgeSwipeBack()
-        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 8))
+        // 根まで戻ると、アスクバーがまた底に貼りつく。
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 8))
     }
 
     func testResearchSourceDetailSupportsNativeEdgeSwipeNavigation() throws {
         launch()
-        reachCompanySearch()
-        openAAPLFromBoard()
+        openAAPLFromStream()
 
         XCTAssertTrue(app.buttons["redesign.company.sources"].waitForExistence(timeout: 15))
         app.buttons["redesign.company.sources"].tap()
@@ -72,8 +77,7 @@ final class ShellParityUITests: XCTestCase {
 
     func testResearchSecondaryActionsRemainReachable() throws {
         launch()
-        reachCompanySearch()
-        openAAPLFromBoard()
+        openAAPLFromStream()
 
         XCTAssertTrue(app.buttons["redesign.company.save"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.buttons["redesign.company.more"].waitForExistence(timeout: 15))
@@ -84,12 +88,9 @@ final class ShellParityUITests: XCTestCase {
 
     func testProductionTopLevelNavigationAndBillingEntryAreReachable() throws {
         launch()
-        reachTopLevelTabs()
+        reachStreamRoot()
 
-        app.tabBars.buttons["研究"].tap()
-        XCTAssertTrue(element("redesign.archive").waitForExistence(timeout: 8))
-
-        app.tabBars.buttons["設定"].tap()
+        app.buttons["redesign.stream.profile"].tap()
         XCTAssertTrue(element("redesign.settings").waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["redesign.settings.credits"].exists)
 
@@ -106,27 +107,52 @@ final class ShellParityUITests: XCTestCase {
 
         app.navigationBars.buttons["設定"].tap()
         XCTAssertTrue(element("redesign.settings").waitForExistence(timeout: 8))
-        XCTAssertTrue(app.tabBars.buttons["設定"].exists)
+
+        // シートを閉じても根のストリームはそのまま残る。
+        app.buttons["redesign.settings.close"].tap()
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 8))
     }
 
-    func testHomeAndArchiveHaveDistinctRoles() throws {
+    /// Phase 3 の「ホームと研究は役割が違う」に代わる主張。
+    /// Phase 4 では面が1つになったので、固定すべきは
+    /// 「1本のストリームが根で、アスクバーがそこに貼りついている」こと。
+    func testStreamIsTheRootSurfaceWithAPinnedAskBar() throws {
         launch()
-        reachCompanySearch()
+        reachStreamRoot()
 
-        XCTAssertTrue(app.searchFields.firstMatch.exists)
+        XCTAssertTrue(element("redesign.stream").waitForExistence(timeout: 8))
+        XCTAssertFalse(app.tabBars.firstMatch.exists)
 
-        app.tabBars.buttons["研究"].tap()
-        XCTAssertTrue(element("redesign.archive").waitForExistence(timeout: 8))
+        // アスクバーの3点(会社チップ / 入力欄 / 送信)と残高は常に根にある。
+        XCTAssertTrue(app.buttons["redesign.askbar.company"].exists)
+        XCTAssertTrue(app.buttons["redesign.askbar.credits"].exists)
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].exists)
+        XCTAssertTrue(app.textFields["redesign.askbar.field"].exists)
+
+        // 検索は根には無く、会社ピッカーのシートの中にある。
         XCTAssertFalse(app.searchFields.firstMatch.exists)
-        XCTAssertFalse(app.staticTexts["盤面"].exists)
-        capture("Archive")
+        capture("Stream")
+    }
+
+    /// 会社チップのピッカーは「宛先にする」と「開く」の2つの道を持つ。
+    func testCompanyPickerOffersSearchAndOpensTheDocument() throws {
+        launch()
+        reachStreamRoot()
+
+        app.buttons["redesign.askbar.company"].tap()
+        XCTAssertTrue(element("redesign.picker").waitForExistence(timeout: 8))
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 8))
+        capture("Company picker")
+
+        app.buttons["redesign.picker.close"].tap()
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 8))
     }
 
     func testProductionDeviceAuthenticationStatusIsReachable() throws {
         launch()
-        reachTopLevelTabs()
+        reachStreamRoot()
 
-        app.tabBars.buttons["設定"].tap()
+        app.buttons["redesign.stream.profile"].tap()
         XCTAssertTrue(element("redesign.settings").waitForExistence(timeout: 8))
 
         app.buttons["redesign.settings.details"].tap()
@@ -157,14 +183,16 @@ final class ShellParityUITests: XCTestCase {
                 "+16.6%", "+21.3%"
             ]
             // iOS 26.2 misclassifies explicit inverse-color capsules and
-            // scroll content occluded by the bottom safe-area composer. These
-            // elements are also checked in rendered screenshots; every other
-            // contrast and accessibility finding remains active.
+            // scroll content occluded by the bottom safe-area composer. The
+            // Phase 4 root carries that inset permanently (the ask bar), so the
+            // occlusion case now applies to the stream as well. These elements
+            // are also checked in rendered screenshots; every other contrast and
+            // accessibility finding remains active.
             let inaccessibleSystemAuditNode = issue.auditType == .contrast && issue.element == nil
-            let occludedByComposer = issue.auditType == .contrast
+            let occludedByAskBar = issue.auditType == .contrast
                 && (issue.element?.frame.minY ?? 0) >= 650
             return issue.auditType == .contrast && verifiedFalsePositives.contains(label)
-                || inaccessibleSystemAuditNode || occludedByComposer
+                || inaccessibleSystemAuditNode || occludedByAskBar
         }
     }
 
@@ -178,35 +206,27 @@ final class ShellParityUITests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 12))
     }
 
-    private func reachCompanySearch() {
-        if app.searchFields.firstMatch.waitForExistence(timeout: 3) {
+    /// 根のストリームまで戻す。Phase 4 は起動時に会社へ復元しないので
+    /// 通常はもう根にいるが、直前のテストが押し込んだ状態からも回復できるようにする。
+    private func reachStreamRoot() {
+        if app.buttons["redesign.askbar.send"].waitForExistence(timeout: 5) {
             return
         }
 
-        let homeBackButton = app.navigationBars.buttons["ホーム"]
-        if homeBackButton.waitForExistence(timeout: 5) {
-            homeBackButton.tap()
-        }
+        edgeSwipeBack()
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 8))
+    }
 
+    /// 検索は会社ピッカーのシートの中。まず検索アイコンで開く。
+    private func openCompanyPicker() {
+        if app.searchFields.firstMatch.exists { return }
+        reachStreamRoot()
+        app.buttons["redesign.stream.search"].tap()
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 8))
     }
 
-    private func reachTopLevelTabs() {
-        if app.tabBars.firstMatch.waitForExistence(timeout: 2) {
-            return
-        }
-
-        let homeBackButton = app.navigationBars.buttons["ホーム"]
-        if homeBackButton.waitForExistence(timeout: 3) {
-            homeBackButton.tap()
-        } else {
-            edgeSwipeBack()
-        }
-
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 8))
-    }
-
     private func searchAndOpenAAPL() {
+        openCompanyPicker()
         let searchField = app.searchFields.firstMatch
         searchField.tap()
         searchField.typeText("AAPL")
@@ -215,13 +235,24 @@ final class ShellParityUITests: XCTestCase {
         app.buttons["redesign.search.open.AAPL"].tap()
     }
 
-    private func openAAPLFromBoard() {
-        let recentOrStarterAAPL = app.buttons["redesign.company.open.AAPL"]
-        if recentOrStarterAAPL.waitForExistence(timeout: 5) {
-            recentOrStarterAAPL.tap()
-        } else {
-            searchAndOpenAAPL()
+    /// ストリームから AAPL を開く。カードが無ければ検索から。
+    private func openAAPLFromStream() {
+        reachStreamRoot()
+        let streamCard = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "redesign.stream.filing.AAPL")
+        ).firstMatch
+        if streamCard.waitForExistence(timeout: 3) {
+            streamCard.tap()
+            return
         }
+
+        let starterRow = app.buttons["redesign.company.open.AAPL"]
+        if starterRow.waitForExistence(timeout: 3) {
+            starterRow.tap()
+            return
+        }
+
+        searchAndOpenAAPL()
     }
 
     private func edgeSwipeBack() {
