@@ -129,6 +129,15 @@ private func homeBoardRow(
 /// そのまま出すと「AAPL / AAPL」と2段同じ文字が並ぶ(シミュレータ実機確認 2026-08-22)。
 /// 名乗るものが無いときは空にして、行側で2行目を落とす。
 func homeBoardCompanyName(companyName: String, ticker: String) -> String {
+    // SEC の提出者名は全大文字が多く(NVIDIA CORP、COCA COLA CO)、
+    // Apple Inc. と並ぶと1社だけ叫んでいるように見える。表記を持っている
+    // 会社(スターター表)は正式表記を優先する。それ以外を title-case で
+    // 加工することはしない — Nvidia Corp は NVIDIA より悪い嘘になる。
+    if let curated = StarterCompany.defaults.first(where: {
+        $0.ticker.caseInsensitiveCompare(ticker) == .orderedSame
+    }) {
+        return curated.companyName
+    }
     let trimmed = companyName.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.caseInsensitiveCompare(ticker) == .orderedSame ? "" : trimmed
 }

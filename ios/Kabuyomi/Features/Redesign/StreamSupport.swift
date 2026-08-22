@@ -146,7 +146,11 @@ func streamFilingEvents(
         cardsByTicker[card.ticker] = card
     }
 
-    return homeFeedRows(saved: saved, recent: recent, limit: limit).map { row in
+    // 提案質問チップは最新のイベント1枚だけに付ける。全カードに付けると
+    // 同じ3チップが縦に繰り返されて画面の大半がチップになる(2026-08-22 の
+    // 実機レビューで指摘)。2枚目以降は見出し+要約だけの静かな行でよい —
+    // 聞きたければタップして文書のコンポーザがある。
+    return homeFeedRows(saved: saved, recent: recent, limit: limit).enumerated().map { index, row in
         let card = cardsByTicker[row.ticker]
         return StreamFilingEventCard(
             ticker: row.ticker,
@@ -161,10 +165,12 @@ func streamFilingEvents(
                 lastOpenedAt: lastOpenedAt[row.ticker]
             ),
             revenueDelta: homeBoardDelta(metrics: card?.metrics ?? []),
-            suggestedQuestions: streamSuggestedQuestions(
-                formType: row.formType,
-                metrics: card?.metrics ?? []
-            )
+            suggestedQuestions: index == 0
+                ? streamSuggestedQuestions(
+                    formType: row.formType,
+                    metrics: card?.metrics ?? []
+                )
+                : []
         )
     }
 }

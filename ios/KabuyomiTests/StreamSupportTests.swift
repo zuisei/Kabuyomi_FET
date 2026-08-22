@@ -139,11 +139,18 @@ final class StreamSupportTests: XCTestCase {
         XCTAssertEqual(context?.displayName, "SOFI")
     }
 
-    /// 追跡していない会社を最後に開いていても、宛先としては成立する(社名は空)。
+    /// 追跡していない会社を最後に開いていても、宛先としては成立する。
+    /// TSLA はスターター表に正式表記があるので、裸の ticker ではなく
+    /// 「Tesla, Inc.」を名乗れる(2026-08-22 の表記オーバーライドで改善)。
+    /// 表に無い銘柄は従来どおり ticker のまま。
     func testAskContextKeepsAnUntrackedLastOpenedCompany() {
         let context = streamAskContext(lastOpenedTicker: "tsla", saved: [], recent: [])
         XCTAssertEqual(context?.ticker, "TSLA")
-        XCTAssertEqual(context?.displayName, "TSLA")
+        XCTAssertEqual(context?.displayName, "Tesla, Inc.")
+
+        let uncurated = streamAskContext(lastOpenedTicker: "sofi", saved: [], recent: [])
+        XCTAssertEqual(uncurated?.ticker, "SOFI")
+        XCTAssertEqual(uncurated?.displayName, "SOFI")
     }
 
     // MARK: - 提案質問
@@ -628,5 +635,22 @@ final class StreamSupportTests: XCTestCase {
         for question in streamExampleQuestions {
             XCTAssertFalse(question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
+    }
+
+    // 2026-08-22 実機レビュー: 同じ3チップが全イベントカードに繰り返され、
+    // 画面の大半がチップになっていた。提案は最新の1枚だけが持つ。
+    func testOnlyNewestFilingEventCarriesSuggestions() {
+        let events = streamFilingEvents(
+            saved: [
+                card(ticker: "NVDA", filedAt: date(1_780_000_000), metrics: [metric("revenue", yoyPercent: 85.2)]),
+                card(ticker: "AAPL", filedAt: date(1_770_000_000), metrics: [metric("revenue", yoyPercent: 16.6)])
+            ],
+            recent: [],
+            lastOpenedAt: [:]
+        )
+
+        XCTAssertEqual(events.map(\.ticker), ["NVDA", "AAPL"])
+        XCTAssertFalse(events[0].suggestedQuestions.isEmpty)
+        XCTAssertTrue(events[1].suggestedQuestions.isEmpty)
     }
 }

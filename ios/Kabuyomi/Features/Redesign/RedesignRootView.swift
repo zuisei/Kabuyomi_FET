@@ -877,8 +877,17 @@ private struct RedesignAskBar: View {
             .lineLimit(1)
     }
 
+    // ホームには「この資料」は無い。文書画面用の文言を使い回した結果、
+    // ストリームの上で「どの資料？」となっていた(2026-08-22 実機レビュー)。
+    private var fieldPrompt: String {
+        if let context {
+            return "\(context.ticker)について質問"
+        }
+        return "銘柄を選んで質問"
+    }
+
     private var field: some View {
-        TextField("この資料について質問", text: $draft, axis: .vertical)
+        TextField(fieldPrompt, text: $draft, axis: .vertical)
             .focused(isFocused)
             .lineLimit(1...5)
             .submitLabel(.send)
@@ -1104,11 +1113,10 @@ private struct RedesignStreamFilingCard: View {
                 VStack(alignment: .leading, spacing: 5) {
                     companyHeader
                     badgeRow
-                    Text(event.headline)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                    // 見出し文(「◯◯ の 10-Q が出ました」)は置かない。
+                    // 会社ヘッダー+バッジ+日付が同じ内容を既に言っており、
+                    // カード1枚で社名2回・form 2回の重複になっていた
+                    // (2026-08-22 実機レビュー「ストリームの情報量が多すぎる」)。
                     // 行数は切らない。verdict の書き出しは1文で、カードは行ではないので
                     // 2行で切ると実際に文末が消える(アクセシビリティ監査が
                     // 「Text clipped」で拾った。シミュレータ実機確認 2026-08-22)。

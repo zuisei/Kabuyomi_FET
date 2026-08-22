@@ -70,8 +70,11 @@ final class HomeBoardSupportTests: XCTestCase {
     /// シミュレータ実機確認 2026-08-22 で出た欠陥。
     /// 会社名未取得のカードは社名に ticker が入るので「AAPL / AAPL」と2段重なっていた。
     func testBoardSuppressesACompanyNameThatIsJustTheTicker() {
-        XCTAssertEqual(homeBoardCompanyName(companyName: "AAPL", ticker: "AAPL"), "")
-        XCTAssertEqual(homeBoardCompanyName(companyName: " aapl ", ticker: "AAPL"), "")
+        // スターター表にある銘柄は、名前未取得のプレースホルダでも正式表記を出せる
+        // (2026-08-22 の表記オーバーライド)。抑止の検証は表に無い銘柄で行う。
+        XCTAssertEqual(homeBoardCompanyName(companyName: "AAPL", ticker: "AAPL"), "Apple Inc.")
+        XCTAssertEqual(homeBoardCompanyName(companyName: "SOFI", ticker: "SOFI"), "")
+        XCTAssertEqual(homeBoardCompanyName(companyName: " sofi ", ticker: "SOFI"), "")
         XCTAssertEqual(homeBoardCompanyName(companyName: "Apple Inc.", ticker: "AAPL"), "Apple Inc.")
 
         let rows = homeBoardRows(
@@ -485,5 +488,13 @@ final class HomeBoardSupportTests: XCTestCase {
         ])
 
         XCTAssertTrue(groups.isEmpty)
+    }
+
+    // SEC 提出者名は全大文字が多い(NVIDIA CORP)。表記を持っている会社は
+    // 正式表記を優先し、持っていない会社は加工しない(Nvidia Corp は NVIDIA より悪い嘘)。
+    func testCompanyNamePrefersCuratedStarterSpelling() {
+        XCTAssertEqual(homeBoardCompanyName(companyName: "NVIDIA CORP", ticker: "NVDA"), "NVIDIA Corporation")
+        XCTAssertEqual(homeBoardCompanyName(companyName: "Apple Inc.", ticker: "AAPL"), "Apple Inc.")
+        XCTAssertEqual(homeBoardCompanyName(companyName: "COCA COLA CO", ticker: "KO"), "COCA COLA CO")
     }
 }
