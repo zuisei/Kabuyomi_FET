@@ -365,6 +365,24 @@ final class ShellParityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["SEC資料から、会社を理解する"].exists)
         // 1枚だけ。ページドットもカルーセルも持たない。
         XCTAssertEqual(app.pageIndicators.count, 0)
+
+        // Phase 6.5: 見出しとボタンの間に中身がある。
+        // 3ステップは番号と文を1つの読み上げにまとめてあるので、
+        // ラベルの完全一致ではなく部分一致で見る。
+        for step in ["気になる会社を選ぶ", "決算の要点を日本語で読む", "気になったことを質問する"] {
+            XCTAssertTrue(
+                app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "label CONTAINS %@", step))
+                    .firstMatch
+                    .waitForExistence(timeout: 4),
+                "ようこそに「\(step)」が出ていない"
+            )
+        }
+        // 予告編カードは装飾。押せず、読み上げにも出ない。
+        // 識別子が生きていると、ストリームの本物のカードを探すクエリが
+        // 「ようこそ」の静止画を掴む(Phase 6 で踏んだ識別子の罠と同じ形)。
+        XCTAssertFalse(app.buttons["redesign.stream.filing.AAPL"].exists)
+        XCTAssertFalse(app.staticTexts["決算の要点を、日本語の1文で読めます。"].exists)
         // 覆っているあいだは根に触れない。
         XCTAssertFalse(app.buttons["redesign.askbar.send"].isHittable)
         capture("Welcome")
@@ -383,11 +401,32 @@ final class ShellParityUITests: XCTestCase {
         app.buttons["redesign.stream.empty.find"].tap()
         XCTAssertTrue(app.navigationBars["気になる会社を選ぶ"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["redesign.picker.starter.AAPL"].waitForExistence(timeout: 12))
+
+        // Phase 6.5: 一覧は分類付き。節見出しは選択数を肩に足すので
+        // (「定番」→「定番 1社」)、完全一致ではなく部分一致で見る。
+        for section in ["定番", "半導体・AI", "金融・決済", "生活・消費"] {
+            XCTAssertTrue(
+                app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "label BEGINSWITH %@", section))
+                    .firstMatch
+                    .waitForExistence(timeout: 4),
+                "ピッカーに分類「\(section)」が無い"
+            )
+        }
+
         // 1社も選んでいないうちは「はじめる」を押せない。
         XCTAssertFalse(app.buttons["redesign.picker.start"].isEnabled)
         app.buttons["redesign.picker.starter.AAPL"].tap()
         XCTAssertTrue(app.buttons["redesign.picker.start"].isEnabled)
         capture("Starter picker")
+
+        // 定番の外(半導体・AI)からも選べる。14社あるので下の分類は
+        // スクロールしないと届かない。
+        let broadcom = app.buttons["redesign.picker.starter.AVGO"]
+        XCTAssertTrue(broadcom.waitForExistence(timeout: 4))
+        if !broadcom.isHittable { element("redesign.picker").swipeUp() }
+        broadcom.tap()
+        XCTAssertTrue(app.buttons["redesign.picker.start"].isEnabled)
 
         app.buttons["redesign.picker.close"].tap()
         XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 8))

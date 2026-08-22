@@ -1079,7 +1079,12 @@ private struct RedesignStreamAnswerCard: View {
 
 /// 資料が出たカード。見出し + verdict + 提案質問チップ。
 /// チップは入力欄に載せるだけで、送信は起きない。
-private struct RedesignStreamFilingCard: View {
+///
+/// `private` を外してあるのは「ようこそ」の予告編プレビューが**この型そのもの**を
+/// 使うため(v2 IA 仕様 Phase 6.5)。レイアウトを写して2枚目のカードを作ると、
+/// 予告編だけが本物と違う見た目に育つ。プレビュー側は
+/// `suggestedQuestions` を空にし、`allowsHitTesting(false)` で押せなくする。
+struct RedesignStreamFilingCard: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let event: StreamFilingEventCard
     let open: () -> Void

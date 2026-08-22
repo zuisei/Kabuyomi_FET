@@ -54,6 +54,24 @@ final class FirstRunSupportTests: XCTestCase {
         XCTAssertEqual(RedesignFirstRunCopy.askContextPlaceholder, "銘柄を選ぶ")
     }
 
+    /// ようこそ画面の3ステップ(Phase 6.5 の確定文言)。順序も文字列も仕様のまま。
+    func testWelcomeStepsMatchTheSpecifiedStrings() {
+        XCTAssertEqual(
+            RedesignFirstRunCopy.welcomeSteps,
+            ["気になる会社を選ぶ", "決算の要点を日本語で読む", "気になったことを質問する"]
+        )
+    }
+
+    /// 予告編カードの1行。`homeFeedVerdictLine` が返すのと同じ形
+    /// (1文で終わる)を保つ。実在の会社の業績を作文していないことも
+    /// ここで目に入るようにしておく。
+    func testWelcomePreviewVerdictIsASingleSentence() {
+        let line = RedesignFirstRunCopy.welcomePreviewVerdict
+        XCTAssertEqual(redesignLeadSentence(line), line)
+        XCTAssertTrue(line.hasSuffix("。"))
+        XCTAssertFalse(line.contains("%"))
+    }
+
     /// アスクバーの会社チップ。会社がどこにも無ければ宛先は nil で、
     /// チップは「銘柄を選ぶ」を出す(スターター企業を勝手に据えない)。
     func testAskContextIsEmptyWithoutAnyCompany() {
