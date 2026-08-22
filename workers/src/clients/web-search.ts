@@ -2,8 +2,16 @@ import type { Env, FilingCacheRecord } from "../env";
 import { hashForLog, logEvent } from "../lib/logging";
 
 const SEARCH_TIMEOUT_MS = 6_000;
-const SEARCH_USER_AGENT =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
+// Identify the client honestly, in the same shape as SEC_USER_AGENT
+// ("Kabuyomi <purpose> admin@kabuyomi.app"). This previously sent a Chrome 135
+// UA string, which claimed to be a human's browser to every host it touched.
+//
+// DuckDuckGo's HTML endpoint may well reject a non-browser UA. That is
+// acceptable: the only caller is gated behind webSupplementEnabled, which
+// defaults to false, so nothing reaches here in production today. If the flag
+// is ever flipped on, a 403 here is a signal to negotiate real access — not a
+// reason to paste the Chrome string back in.
+const SEARCH_USER_AGENT = "Kabuyomi filing-supplement admin@kabuyomi.app";
 
 export interface WebSupplementRecord {
   title: string;
