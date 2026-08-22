@@ -39,8 +39,8 @@ export interface NumericAlignmentClaimBinding {
   semanticLabel: string;
   periodStart: string | null;
   periodEnd: string;
-  role: VerifiedFinancialFact["role"];
-  scope: VerifiedFinancialFact["scope"];
+  role: VerifiedFinancialFact["role"] | "excerpt";
+  scope: VerifiedFinancialFact["scope"] | "excerpt";
   outcome: "passed" | "repaired" | "blocked";
 }
 
@@ -48,6 +48,8 @@ interface ClaimResolution {
   claim: MaterialNumericClaim;
   outcome: "ignored" | "passed" | "repaired" | "blocked";
   fact?: VerifiedFinancialFact;
+  /** XBRL に無く、引用済み本文抜粋の中に同じ数値があった場合の出どころ。 */
+  excerptSourceId?: string | null;
   replacement?: string;
   labels: NumericAlignmentFailureLabel[];
 }
@@ -108,7 +110,7 @@ export function validateNumericAlignment(input: {
       if (supporting.sourceId && !cited.has(supporting.sourceId)) {
         excerptRequiredSourceIds.push(supporting.sourceId);
       }
-      return excerptSupportedResolution(resolution.claim);
+      return excerptSupportedResolution(resolution.claim, supporting.sourceId);
     });
   const resolutions = blockCurrentComparisonRoleCollapse(surfaceValidatedResolutions, input.facts);
   const blocked = resolutions.filter((resolution) => resolution.outcome === "blocked");
@@ -227,9 +229,31 @@ function blockCurrentComparisonRoleCollapse(
 }
 
 function buildClaimBindings(resolutions: ClaimResolution[]): NumericAlignmentClaimBinding[] {
-  return resolutions.flatMap((resolution) => {
-    if (!resolution.fact || resolution.outcome === "ignored") {
+  return resolutions.flatMap((resolution): NumericAlignmentClaimBinding[] => {
+    if (resolution.outcome === "ignored") {
       return [];
+    }
+    if (!resolution.fact) {
+      // 本文抜粋で裏が取れた数値。XBRL の fact は無いが、最終表面の検証数に
+      // 数えないと「claim 3 件 / verified 2 件」となり、ベンチの数値証明
+      // (verified == claims)が根拠のある回答を material numeric error に
+      // 数えてしまう(2026-08-22 口語ベンチ JPM-Q05 / MA-Q12)。
+      if (resolution.outcome !== "passed" || !resolution.labels.includes("excerpt_supported_numeric_claim")) {
+        return [];
+      }
+      return [{
+        claimStart: resolution.claim.start,
+        claimEnd: resolution.claim.end,
+        claimKind: resolution.claim.kind,
+        factId: `EXCERPT:${resolution.excerptSourceId ?? "cited"}`,
+        sourceId: resolution.excerptSourceId ?? "cited",
+        semanticLabel: "excerpt",
+        periodStart: null,
+        periodEnd: "",
+        role: "excerpt",
+        scope: "excerpt",
+        outcome: "passed"
+      }];
     }
     return [{
       claimStart: resolution.claim.start,
@@ -740,10 +764,11 @@ function excerptSupportsClaim(claim: MaterialNumericClaim, texts: string[]): boo
   });
 }
 
-function excerptSupportedResolution(claim: MaterialNumericClaim): ClaimResolution {
+function excerptSupportedResolution(claim: MaterialNumericClaim, sourceId: string | null): ClaimResolution {
   return {
     claim,
     outcome: "passed",
+    excerptSourceId: sourceId,
     labels: ["excerpt_supported_numeric_claim"]
   };
 }

@@ -59,4 +59,20 @@ describe("numeric alignment accepts claims present in cited excerpts", () => {
     expect(result.status).not.toBe("blocked");
     expect(result.requiredSourceIds).toContain("s2");
   });
+  // 口語ベンチ(2026-08-22 JPM-Q05 / MA-Q12): 抜粋で裏が取れた claim が bindings に
+  // 載らず、最終表面の検証数が claim 数に届かない → ベンチが material numeric error に
+  // 数えていた。裏が取れた claim は verified として bindings に出る。
+  it("lists an excerpt-supported claim in the bindings so the final-surface proof counts it", () => {
+    const result = validateNumericAlignment({
+      answer: "AWSの売上は前年同期比で17%増でした。",
+      facts: [],
+      citedSourceIds: ["s1"],
+      citedSourceTexts: ["AWS segment commentary without numbers."],
+      contextSources: [{ sourceId: "s2", text: "AWS sales increased 17% in Q1 2026." }]
+    });
+    expect(result.claimCount).toBe(1);
+    expect(result.verifiedClaimCount).toBe(1);
+    expect(result.claimBindings).toHaveLength(1);
+    expect(result.claimBindings[0]).toMatchObject({ outcome: "passed", sourceId: "s2", semanticLabel: "excerpt" });
+  });
 });
