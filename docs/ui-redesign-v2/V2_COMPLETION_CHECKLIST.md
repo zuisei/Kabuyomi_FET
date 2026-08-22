@@ -29,8 +29,12 @@
 
 ## B. iOS 既知不具合
 
-- [ ] B1. 検索結果の行が生 API 名(SEC 大文字)— 表記の関所を通す
-- [ ] B2. 「Dev モード」トグルが ON にできない(直書きで迂回中)— 原因究明と修正
+- [x] B1. 検索結果の行が生 API 名(SEC 大文字)— 表記の関所を通す
+- [x] B2. 「Dev モード」トグルが ON にできない — **アプリの不具合ではない**。シミュレータへの
+      注入タップ(シミュレータパネル経由も同じ)が UISwitch を動かさず、Apple 純正の
+      設定 > Show Borders でも同じ。スワイプなら全トグルが保存される(コンテナ内 plist で確認)。
+      注意: `simctl spawn defaults` が見る plist はアプリの物ではない。実体は
+      `simctl get_app_container … data` 配下の `Library/Preferences/app.kabuyomi.ios.plist`
 - [ ] B3. 入力欄の「H」残り等、送信不能ドラフトの扱い(非活性時に理由を出すか)— 判断して処置
 
 ## C. ベンチ

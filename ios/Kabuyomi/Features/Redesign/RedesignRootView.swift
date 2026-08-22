@@ -2074,7 +2074,12 @@ private struct RedesignSearchResultRow: View {
                     RedesignTickerMonogram(ticker: item.ticker)
                     VStack(alignment: .leading, spacing: 2) {
                         identityRow
-                        Text(item.companyName)
+                        // 検索結果だけ生の API 名(SEC 大文字)のままで、盤面・ストリームと
+                        // 表記が食い違っていた。同じ関所を通す(placeholder は元の名前)。
+                        Text({
+                            let curated = homeBoardCompanyName(companyName: item.companyName, ticker: item.ticker)
+                            return curated.isEmpty ? item.companyName : curated
+                        }())
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkSoft)
                             .multilineTextAlignment(.leading)
@@ -2094,7 +2099,7 @@ private struct RedesignSearchResultRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(item.ticker)、\(item.companyName)、\(item.supportDisplayLabel)")
+            .accessibilityLabel("\(item.ticker)、\({ let c = homeBoardCompanyName(companyName: item.companyName, ticker: item.ticker); return c.isEmpty ? item.companyName : c }())、\(item.supportDisplayLabel)")
             .accessibilityIdentifier("redesign.search.open.\(item.ticker)")
 
             if item.canAttemptInV1 {
