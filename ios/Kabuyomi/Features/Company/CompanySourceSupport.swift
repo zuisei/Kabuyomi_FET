@@ -618,11 +618,74 @@ func sourceSectionBadge(for source: LocalMessageSourceRef, in company: CompanyPa
     }
 }
 
+// MARK: - XBRL 抜粋の数値整形
+//
+// XBRL 由来の抜粋は Worker が生の桁のまま文字列にしている
+// (`workers/src/lib/filings/ingest.ts`):
+//   "営業CF: 82627000000 USD / 比較値: 71000000000 / YoY: 16.4%"
+// 「82627000000」は読み手が桁を数えないと意味が取れず、
+// 同じ数字を主要数値グリッドは「826.3億ドル」で出しているので表記も割れている。
+// チップに出す前に、アプリ内で唯一の桁変換 `formattedCurrencyLikeMetric` を通す。
+
+/// `ラベル: <数値> <単位>` の形をした断片だけを拾う。
+/// 数値の直後が行末・空白・閉じ括弧のいずれかであることを要求して、
+/// 日付(`period end: 2025-03-29`)や百分率(`YoY: 16.4%`)を巻き込まないようにする。
+private let xbrlMeasurementPattern = try? NSRegularExpression(
+    pattern: #"^(.*?[:：]\s*)(-?\d+(?:\.\d+)?)(?=$|[\s)])(?:[ \t]+([A-Za-z]+(?:/[A-Za-z]+)?))?(.*)$"#
+)
+
+/// XBRL 抜粋の数値を、他の画面と同じ体裁へ整える。
+///
+/// - 単位が `USD` の値だけを換算する。`USD/shares` のような1株あたりの値や、
+///   単位の無い素の数値列は桁が読めるのでそのまま残す。
+/// - `比較値: 71000000000` は単位を持たないので、同じ抜粋の先頭で見つけた単位を引き継ぐ。
+/// - `YoY: 16.4%` / `period end: 2025-03-29` のような数値以外の断片、
+///   および Worker が既に整形済みの `営業CF: 826.3億ドル (2026-03-28)` は
+///   一切書き換えない(期末の併記もそのまま残る)。
+func formattedXBRLExcerptText(_ raw: String) -> String {
+    guard let regex = xbrlMeasurementPattern else { return raw }
+
+    var inheritedUnit: String?
+    let segments = raw.components(separatedBy: " / ")
+
+    let rewritten = segments.map { segment -> String in
+        let range = NSRange(segment.startIndex..<segment.endIndex, in: segment)
+        guard let match = regex.firstMatch(in: segment, range: range),
+              let prefixRange = Range(match.range(at: 1), in: segment),
+              let numberRange = Range(match.range(at: 2), in: segment),
+              let value = Double(segment[numberRange]) else {
+            return segment
+        }
+
+        let explicitUnit = Range(match.range(at: 3), in: segment).map { String(segment[$0]) }
+        if let explicitUnit { inheritedUnit = explicitUnit }
+
+        guard let unit = explicitUnit ?? inheritedUnit,
+              unit.uppercased() == "USD" else {
+            return segment
+        }
+
+        let suffix = Range(match.range(at: 4), in: segment).map { String(segment[$0]) } ?? ""
+        return "\(segment[prefixRange])\(formattedCurrencyLikeMetric(value, unit: unit))\(suffix)"
+    }
+
+    return rewritten.joined(separator: " / ")
+}
+
 /// 1行に収まる長さの、決定論的な抜粋の先頭断片。
 /// 同じ入力からは常に同じ断片が出る(要約でも AI 呼び出しでもない)。
 /// ラベルと同じ文字列にしかならないときは `nil` を返し、呼び出し側で別の手掛かりに逃がす。
-func sourceFragmentText(text: String, sectionTitle: String, label: String, limit: Int = 72) -> String? {
-    let preview = sourceListPreviewText(text: text, sectionTitle: sectionTitle, fallback: "", limit: limit)
+func sourceFragmentText(
+    text: String,
+    sectionTitle: String,
+    label: String,
+    limit: Int = 72,
+    isXBRL: Bool = false
+) -> String? {
+    // 数値の整形は XBRL 由来の抜粋だけに掛ける。
+    // 本文(MD&A)の散文にも掛けると「Note: 2024 was…」のような行を壊す。
+    let normalizedText = isXBRL ? formattedXBRLExcerptText(text) : text
+    let preview = sourceListPreviewText(text: normalizedText, sectionTitle: sectionTitle, fallback: "", limit: limit)
     let trimmed = preview.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
     guard trimmed.caseInsensitiveCompare(label) != .orderedSame else { return nil }
@@ -692,7 +755,8 @@ func sourceChipDescriptors(
                 text: chunk.text,
                 sectionTitle: chunk.sectionTitle,
                 label: label,
-                limit: fragmentLimit
+                limit: fragmentLimit,
+                isXBRL: chunk.sectionType == "xbrl_metric"
             ),
             ordinal: nil,
             source: sourceReference(from: chunk, in: company)
@@ -720,7 +784,10 @@ func sourceChipDescriptors(
                 text: excerpt,
                 sectionTitle: chunk?.sectionTitle ?? "",
                 label: label,
-                limit: fragmentLimit
+                limit: fragmentLimit,
+                // 対応する chunk を特定できなかったときは整形しない。
+                // 本文かもしれない文字列に数値整形を掛けるより、生のまま出す方が安全。
+                isXBRL: chunk?.sectionType == "xbrl_metric"
             ),
             ordinal: nil,
             source: source

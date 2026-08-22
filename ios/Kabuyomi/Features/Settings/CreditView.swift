@@ -40,6 +40,77 @@ enum ConsumableCreditReviewUI {
     }
 }
 
+// MARK: - 購入・付与の状態色
+//
+// v2 仕様「購入行の状態(保留/失敗/復元)は caution/gain/loss で即読めるように」。
+// 色は必ず既存の文言と併記し、色だけで状態を読ませない。
+
+/// クレジットの増減にまつわる状態。
+/// `positive` / `negative`(成功・失敗の一般的な状態色)ではなく、
+/// 相場と同じ増減の語彙で塗ることで、主要数値グリッドと同じ読み方に揃える。
+enum CreditStateTone: Equatable {
+    /// 保留・確認中。まだ結果が決まっていない。
+    case pending
+    /// 付与・復元できた。残高が増える向き。
+    case granted
+    /// 取得できなかった。
+    case failed
+    /// まだ何も起きていない。
+    case neutral
+
+    var tint: Color {
+        switch self {
+        case .pending:
+            return KabuyomiTheme.caution
+        case .granted:
+            return KabuyomiTheme.gain
+        case .failed:
+            return KabuyomiTheme.loss
+        case .neutral:
+            return KabuyomiTheme.inkMuted
+        }
+    }
+}
+
+/// 購入同期の生ステータスを、表示文言と状態色の両方へ一度に落とす。
+/// 文言と色が別々の switch から出ていると、片方だけ直したときに食い違う。
+struct CreditSyncDisplay: Equatable {
+    let title: String
+    let tone: CreditStateTone
+}
+
+/// `AppModel.lastBillingSyncStatus` の生文字列は Worker/StoreKit 側の語彙なので、
+/// 画面に出す前にここで一度だけ日本語と状態色へ変換する。
+func creditSyncDisplay(status: String) -> CreditSyncDisplay {
+    if status == "not_started" {
+        return CreditSyncDisplay(title: "未同期", tone: .neutral)
+    }
+    if status.contains("route_missing") || status.contains("failed") {
+        return CreditSyncDisplay(title: "同期エラー", tone: .failed)
+    }
+    if status.contains("syncing") || status.contains("granting") {
+        return CreditSyncDisplay(title: "同期中", tone: .pending)
+    }
+    if status.contains("succeeded") || status.contains("recovered") {
+        return CreditSyncDisplay(title: "同期済み", tone: .granted)
+    }
+    return CreditSyncDisplay(title: status, tone: .neutral)
+}
+
+/// 広告報酬ボタンの状態色。付与は「サーバー確認後」にしか起きないので、
+/// アプリ内で分かるのは保留(確認中)と上限到達までにする。
+func rewardedAdCreditTone(_ state: RewardedAdCreditState) -> CreditStateTone {
+    switch state {
+    case .idle, .presenting:
+        return .neutral
+    case .loading, .pendingGrant:
+        return .pending
+    case .dailyCapReached:
+        // 上限は失敗ではなく「今日はこれ以上できない」注意。
+        return .pending
+    }
+}
+
 enum CreditInitialSheet {
     case plans
     case insufficientCredits(requiredCredits: Int)
@@ -1714,6 +1785,8 @@ struct AccountStatusDisplayModel: Equatable {
     struct Row: Identifiable, Equatable {
         let title: String
         let value: String
+        /// 状態色。既定は無色で、購入同期のように「保留/失敗/成功」がある行だけ色を持つ。
+        var tone: CreditStateTone = .neutral
 
         var id: String { title }
     }
@@ -1752,14 +1825,22 @@ struct AccountStatusDisplayModel: Equatable {
             Row(title: "広告分", value: credits?.rewardedAdRemaining.map(String.init) ?? "未提供"),
             Row(title: "次回更新", value: renewal ?? "未提供"),
             Row(title: "最終利用同期", value: Self.format(date: lastUsageRefreshAt)),
-            Row(title: "最終購入同期", value: Self.billingStatus(status: lastBillingSyncStatus, at: lastBillingSyncAt)),
+            Row(
+                title: "最終購入同期",
+                value: Self.billingStatus(status: lastBillingSyncStatus, at: lastBillingSyncAt),
+                tone: creditSyncDisplay(status: lastBillingSyncStatus).tone
+            ),
             Row(title: "端末情報", value: deviceKeySuffix == "unknown" ? "準備中" : "…\(deviceKeySuffix.suffix(6))"),
             Row(title: "App", value: appVersion)
         ]
 
         #if DEBUG
         var debugRows = [
-            Row(title: "購入同期", value: Self.billingStatus(status: lastBillingSyncStatus, at: lastBillingSyncAt))
+            Row(
+                title: "購入同期",
+                value: Self.billingStatus(status: lastBillingSyncStatus, at: lastBillingSyncAt),
+                tone: creditSyncDisplay(status: lastBillingSyncStatus).tone
+            )
         ]
 
         if let healthReport {
@@ -1807,18 +1888,7 @@ struct AccountStatusDisplayModel: Equatable {
     }
 
     private static func billingStatus(status: String, at date: Date?) -> String {
-        let displayStatus: String
-        if status == "not_started" {
-            displayStatus = "未同期"
-        } else if status.contains("route_missing") || status.contains("failed") {
-            displayStatus = "同期エラー"
-        } else if status.contains("syncing") || status.contains("granting") {
-            displayStatus = "同期中"
-        } else if status.contains("succeeded") || status.contains("recovered") {
-            displayStatus = "同期済み"
-        } else {
-            displayStatus = status
-        }
+        let displayStatus = creditSyncDisplay(status: status).title
 
         if let date {
             return "\(displayStatus) / \(format(date: date))"

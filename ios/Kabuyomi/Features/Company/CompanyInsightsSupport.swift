@@ -408,7 +408,10 @@ private func containsJapaneseText(_ value: String) -> Bool {
     value.range(of: #"[ぁ-んァ-ン一-龥]"#, options: .regularExpression) != nil
 }
 
-private func formattedCurrencyLikeMetric(_ value: Double, unit: String) -> String {
+/// 金額を「826.3億ドル」の体裁へ落とす、アプリ内で唯一の桁変換。
+/// 主要数値グリッドと根拠チップが同じ関数を通ることで、
+/// 同じ数字が画面ごとに違う顔で出ないようにする。
+func formattedCurrencyLikeMetric(_ value: Double, unit: String) -> String {
     guard unit.uppercased() == "USD" else {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
