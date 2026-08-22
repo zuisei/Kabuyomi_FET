@@ -251,10 +251,14 @@ struct CreditView: View {
                         closeCredits()
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .bold))
+                            .font(.footnote.weight(.bold))
                             .foregroundStyle(KabuyomiTheme.accent)
                             .frame(width: 44, height: 44)
-                            .kabuyomiCard(.secondary, radius: 16)
+                            .background(KabuyomiTheme.elevated, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(KabuyomiTheme.separator, lineWidth: KabuyomiTheme.hairlineWidth)
+                            }
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("クレジット画面を閉じる")
@@ -1044,9 +1048,11 @@ struct CreditView: View {
     private func billingAvailabilityCard(message: String) -> some View {
         card {
             HStack(alignment: .top, spacing: 12) {
+                // 「確認中」も「今は購入できません」も、失敗ではなく保留。
+                // 状態色を caution に置いて、操作できる節と読み分けられるようにする。
                 Image(systemName: billingAvailabilityIcon)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.accent)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(CreditStateTone.pending.tint)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(billingAvailabilityTitle)

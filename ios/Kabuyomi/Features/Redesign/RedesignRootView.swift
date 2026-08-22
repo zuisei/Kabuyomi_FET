@@ -214,8 +214,15 @@ private struct RedesignListSectionHeader: View {
     var body: some View {
         RedesignSectionHeader(title: title, trailing: trailing)
             .textCase(nil)
-            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 0, trailing: 16))
-            .listRowBackground(Color.clear)
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // plain list の見出しはスクロール中に上端へ貼りつく。透明のままだと
+            // 下を流れる行が見出しを突き抜けて、どちらも読めなくなる。
+            // `listRowBackground` はヘッダ行には効かないので、面はビュー側で塗る。
+            .background(KabuyomiTheme.canvas)
+            .listRowInsets(EdgeInsets())
             .listRowSeparator(.hidden)
     }
 }
@@ -344,6 +351,8 @@ private struct RedesignCompanyDiscoveryView: View {
         }
         .listStyle(.plain)
         .listRowSeparatorTint(KabuyomiTheme.separator)
+        // 既定の節間は1画面あたりの行数を目に見えて削る。密度側へ寄せる。
+        .listSectionSpacing(10)
         .environment(\.defaultMinListRowHeight, 0)
         .scrollContentBackground(.hidden)
         .background(KabuyomiTheme.canvas)
@@ -776,13 +785,15 @@ private struct RedesignCompanyWorkspace: View {
                     Task { await appModel.loadCompany(ticker: normalizedTicker, forceRefresh: true) }
                 }
             } else {
-                VStack(spacing: 14) {
+                VStack(spacing: 12) {
                     ProgressView()
+                        .tint(KabuyomiTheme.accent)
                     Text("\(normalizedTicker) のSEC資料を準備しています")
-                        .font(.headline)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(KabuyomiTheme.ink)
                     Text("保存済みデータがあれば先に表示し、最新資料を確認します。")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.inkSoft)
                         .multilineTextAlignment(.center)
                 }
                 .padding(24)
@@ -1813,6 +1824,8 @@ private struct RedesignSourceBrowser: View {
         }
         .listStyle(.plain)
         .listRowSeparatorTint(KabuyomiTheme.separator)
+        // 既定の節間は1画面あたりの行数を目に見えて削る。密度側へ寄せる。
+        .listSectionSpacing(10)
         .environment(\.defaultMinListRowHeight, 0)
         .scrollContentBackground(.hidden)
         .background(KabuyomiTheme.canvas)
@@ -1888,6 +1901,14 @@ private struct RedesignSourceDetail: View {
         return matchedChunk?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
+    /// 画面に出す抜粋。XBRL の抜粋は提出書類から切り出した文ではなく、
+    /// Worker が指標から組み立てた合成文なので、一覧のチップと同じ体裁へ整える
+    /// (チップが「826.3億ドル」で、開いた先が「82627000000 USD」では読み手が迷う)。
+    /// 翻訳へ送るのは常に生の `excerpt` のままにする。
+    private var displayedExcerpt: String {
+        matchedChunk?.sectionType == "xbrl_metric" ? formattedXBRLExcerptText(excerpt) : excerpt
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -1932,7 +1953,7 @@ private struct RedesignSourceDetail: View {
 
                     excerptSection(
                         title: "関連する原文",
-                        text: excerpt.isEmpty ? "表示できる抜粋がありません。" : excerpt,
+                        text: excerpt.isEmpty ? "表示できる抜粋がありません。" : displayedExcerpt,
                         isOriginal: true
                     )
             }
@@ -2164,6 +2185,8 @@ private struct RedesignHistoryView: View {
         }
         .listStyle(.plain)
         .listRowSeparatorTint(KabuyomiTheme.separator)
+        // 既定の節間は1画面あたりの行数を目に見えて削る。密度側へ寄せる。
+        .listSectionSpacing(10)
         .environment(\.defaultMinListRowHeight, 0)
         .scrollContentBackground(.hidden)
         .background(KabuyomiTheme.canvas)
@@ -2440,6 +2463,8 @@ private struct RedesignSettingsView: View {
         }
         .listStyle(.plain)
         .listRowSeparatorTint(KabuyomiTheme.separator)
+        // 既定の節間は1画面あたりの行数を目に見えて削る。密度側へ寄せる。
+        .listSectionSpacing(10)
         .environment(\.defaultMinListRowHeight, 0)
         .scrollContentBackground(.hidden)
         .background(KabuyomiTheme.canvas)

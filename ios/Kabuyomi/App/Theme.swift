@@ -1,7 +1,7 @@
 import SwiftUI
 
+/// 面の階層。v2 では影を使わないので、面の違いは塗りと細罫だけで表す。
 enum KabuyomiSurface {
-    case hero
     case primary
     case secondary
     case input
@@ -116,9 +116,6 @@ enum KabuyomiTheme {
         light: (0.043, 0.431, 0.369)   // #0B6E5E
     )
 
-    /// v1 からの呼び出し名。v2 ではアクセントは1色なので `accent` と同一。
-    static let accentDeep = accent
-
     /// accent を塗りに使ったときに載せる文字色。
     static let onAccent = adaptive(
         dark: (0.024, 0.055, 0.071),   // #061012
@@ -198,22 +195,12 @@ enum KabuyomiTheme {
     /// マイクロラベル(「売上高」等)のトラッキング。
     static let microLabelTracking: CGFloat = 0.9
 
-    // MARK: - v1 からの互換名
-
-    static let mist = elevated
-    static let heroText = Color.white
-    static let heroSubtext = Color.white.opacity(0.74)
-    static let tabBarBackground = paper
-    static let tabBarStroke = separator
-
     static var background: some View {
         canvas
     }
 
     static func fill(for surface: KabuyomiSurface) -> AnyShapeStyle {
         switch surface {
-        case .hero:
-            return AnyShapeStyle(elevated)
         case .primary:
             return AnyShapeStyle(paper)
         case .secondary:
@@ -227,8 +214,6 @@ enum KabuyomiTheme {
 
     static func stroke(for surface: KabuyomiSurface) -> Color {
         switch surface {
-        case .hero:
-            return separatorStrong
         case .primary:
             return separator
         case .secondary:
@@ -240,40 +225,9 @@ enum KabuyomiTheme {
         }
     }
 
-    static func shadow(for surface: KabuyomiSurface) -> Color {
-        .clear
-    }
 }
 
 extension View {
-    func kabuyomiCard(_ surface: KabuyomiSurface = .primary, radius: CGFloat = 20) -> some View {
-        background(
-            RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .fill(KabuyomiTheme.fill(for: surface))
-                .overlay(
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .stroke(KabuyomiTheme.stroke(for: surface), lineWidth: 1)
-                )
-                .shadow(color: KabuyomiTheme.shadow(for: surface), radius: 0)
-        )
-    }
-
-    func kabuyomiGlass(
-        radius: CGFloat = 22,
-        tint: Color = .clear,
-        stroke: Color = Color.primary.opacity(0.07),
-        interactive: Bool = false
-    ) -> some View {
-        background(
-            RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .fill(KabuyomiTheme.elevated)
-                .overlay(
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .stroke(stroke, lineWidth: 1)
-                )
-        )
-    }
-
     /// 「売上高」「前年同期比」のようなマイクロラベル。
     /// 小さく、トラッキングを広げ、inkMuted に落として数字を前に出す。
     func kabuyomiMicroLabel() -> some View {
@@ -292,20 +246,6 @@ struct KabuyomiHairline: View {
             .fill(color)
             .frame(height: KabuyomiTheme.hairlineWidth)
             .accessibilityHidden(true)
-    }
-}
-
-struct KabuyomiPressableButtonStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.975 : 1)
-            .opacity(configuration.isPressed ? 0.82 : 1)
-            .animation(
-                reduceMotion ? .linear(duration: 0.08) : .interactiveSpring(response: 0.28, dampingFraction: 1),
-                value: configuration.isPressed
-            )
     }
 }
 
