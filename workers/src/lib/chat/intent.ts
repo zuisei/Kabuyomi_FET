@@ -74,7 +74,8 @@ export function classifyQuestionIntent(
     return "mda_summary";
   }
 
-  if (/(資金繰り|負債|債務|借入|返済|満期|流動性|信用枠|debt|liquidity|maturity|borrowings?|creditfacility)/.test(normalized)) {
+  // 借金: 口語ベンチ(human-phrasing-12 Q10「借金やばくない？」)が unknown に落ちていた。
+  if (/(資金繰り|負債|債務|借入|借金|返済|満期|流動性|信用枠|debt|liquidity|maturity|borrowings?|creditfacility)/.test(normalized)) {
     return "liquidity_debt";
   }
 
@@ -82,7 +83,9 @@ export function classifyQuestionIntent(
     return "cash_flow";
   }
 
-  if (/(リスク|懸念|逆風|不確実|不透明|risk|uncertain|uncertainty|macro|関税|tariff)/.test(normalized)) {
+  // やばい/危ない: 口語ベンチ Q11「この決算でやばいとこある？」。流動性・CF の段が先に
+  // 取るので、「借金やばい」は liquidity のまま。
+  if (/(リスク|懸念|逆風|不確実|不透明|やばい|ヤバい|やばく|危ない|危険|risk|uncertain|uncertainty|macro|関税|tariff)/.test(normalized)) {
     return "risk_factors";
   }
 
@@ -90,7 +93,9 @@ export function classifyQuestionIntent(
     return "margin_profitability";
   }
 
-  if (/(セグメント|segment|部門|地域|geography|地域別|製品別|productmix|構成|内訳)/.test(normalized)) {
+  // どこの事業が調子いい: 口語ベンチ Q08。「事業」単体は business overview と衝突するので
+  // 「どこの/どの事業」「事業が/の調子」の形だけ拾う。
+  if (/(セグメント|segment|部門|地域|geography|地域別|製品別|productmix|構成|内訳|どこの事業|どの事業|事業が調子|事業の調子|事業が好調|事業が不調)/.test(normalized)) {
     return "segment_analysis";
   }
 

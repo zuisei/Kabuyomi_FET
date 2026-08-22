@@ -68,11 +68,9 @@ const ENUM_PARITY_EXCEPTIONS: Record<string, { clean: QuestionIntent; colloquial
   // 「どこの事業が調子いいの？」 classifies as unknown. This row is bait: a looser
   // どんな会社／事業 pattern would make it "agree" by absorbing it into
   // business_overview, which is precisely the capture the fix must avoid.
-  Q08: { clean: "segment_analysis", colloquial: "unknown", why: "segment recognizer lacks 事業が調子いい; must NOT be absorbed by business_overview" },
-  // 借金 is absent from the liquidity vocabulary.
-  Q10: { clean: "liquidity_debt", colloquial: "unknown", why: "liquidity recognizer lacks 借金" },
-  // やばい is absent from the risk vocabulary.
-  Q11: { clean: "risk_factors", colloquial: "unknown", why: "risk recognizer lacks やばい" }
+  // Q08 / Q10 / Q11 were pinned gaps until 2026-08-22 (どこの事業, 借金, やばい
+  // added to the segment / liquidity / risk recognizers). They now agree and
+  // are covered by the parity assertion like every other row.
 };
 
 const COLLOQUIAL_BUSINESS_QUESTION = "この会社ってなにで稼いでんの？";
@@ -197,8 +195,8 @@ describe("colloquial business-overview guard", () => {
     ["お金はちゃんと稼げてる？", "cash_flow"],
     ["現金はどうやって稼いでる？", "cash_flow"],
     ["売上どうだった？伸びてる？", "yoy_change"],
-    ["借金やばくない？大丈夫？", "unknown"],
-    ["どこの事業が調子いいの？逆にダメなとこは？", "unknown"]
+    ["借金やばくない？大丈夫？", "liquidity_debt"],
+    ["どこの事業が調子いいの？逆にダメなとこは？", "segment_analysis"]
   ])("does not absorb %s into business overview", (question, expectedIntent) => {
     expect(isBusinessOverviewQuestion(question)).toBe(false);
     expect(analyzeQuestion(question).asksBusinessOverview).toBe(false);
