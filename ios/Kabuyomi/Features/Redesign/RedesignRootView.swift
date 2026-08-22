@@ -21,21 +21,35 @@ private enum RedesignSettingsRoute: Hashable {
 /// 3つの行き先を1つの状態にまとめ、「今どれが出ているか」を1か所で持つ。
 private enum RedesignSheet: Identifiable {
     /// 会社ピッカー(検索 + 盤面)。会社チップと検索アイコンの両方から開く。
-    case companyPicker
+    /// Phase 6 で「初回の複数選択」という2つ目の顔が付いたが、
+    /// シートは1枚のまま — 面を増やさず、どちらの顔で開くかだけを渡す。
+    case companyPicker(RedesignPickerMode)
     /// プロフィール。中身は既存の設定ルート(CreditView への導線ごと)。
     case settings
     case credits(CreditInitialSheet?)
 
     var id: String {
         switch self {
-        case .companyPicker:
-            return "companyPicker"
+        case .companyPicker(let mode):
+            return "companyPicker.\(mode)"
         case .settings:
             return "settings"
         case .credits:
             return "credits"
         }
     }
+}
+
+/// 会社ピッカーの顔(v2 IA 仕様 Phase 6)。
+///
+/// - `select`: 既存のピッカー。盤面から宛先を選ぶ / 開く。会社を持っている人の道。
+/// - `starter`: 初回の複数選択。選んだ銘柄を**実際に保存**して盤面を始める。
+///
+/// 空の盤面から `select` を開いた人は、その場の CTA で `starter` へ移れる
+/// (シートの上にシートは出せないので、同じシートの中で顔が変わる)。
+enum RedesignPickerMode: String, Hashable {
+    case select
+    case starter
 }
 
 /// 根のタブ。7月ルール「タブは目的地、各タブが NavigationStack を持つ」に戻る。
@@ -53,6 +67,14 @@ struct RedesignRootView: View {
     @State private var homePath: [RedesignRoute] = []
     @State private var summaryPath: [RedesignRoute] = []
     @State private var sheet: RedesignSheet?
+    /// 「ようこそ」を出しているか。`appModel.shouldShowConversationEntry` を
+    /// **一度だけ**写し取る。述語に直結すると、スターターの1社目が保存された瞬間に
+    /// `hasCompletedInitialEntry` が立って、選択の途中で面が引き抜かれる。
+    @State private var showsWelcome = false
+    @State private var didResolveWelcome = false
+    /// 「ようこそ」を閉じたあとにスターターピッカーを出すかどうか。
+    /// fullScreenCover とシートは同時に出せないので、閉じ切ってから出す。
+    @State private var welcomeWantsStarterPicker = false
 
     private var activePath: [RedesignRoute] {
         selectedTab == .home ? homePath : summaryPath
@@ -104,6 +126,23 @@ struct RedesignRootView: View {
         .sheet(item: $sheet) { presented in
             sheetContent(presented)
         }
+        // 初回の1枚。根の面ごと覆う(タブもアスクバーも押させない)。
+        .fullScreenCover(isPresented: $showsWelcome, onDismiss: presentStarterPickerIfRequested) {
+            RedesignWelcomeView(
+                start: {
+                    welcomeWantsStarterPicker = true
+                    dismissWelcome()
+                },
+                skip: dismissWelcome
+            )
+        }
+        // 起動のたびに読み直さない。写し取りは1回だけで、
+        // 以降の可視/不可視は本人の操作でしか動かない。
+        .task {
+            guard !didResolveWelcome else { return }
+            didResolveWelcome = true
+            showsWelcome = appModel.shouldShowConversationEntry
+        }
         .onChange(of: appModel.insufficientCreditRecoveryRequestID) { _, requestID in
             guard requestID != nil else { return }
             let required = appModel.insufficientCreditRecovery?.requiredCredits ?? appModel.chatCreditCost
@@ -114,6 +153,26 @@ struct RedesignRootView: View {
                   appModel.shouldRestoreRewardedAdReturnDestination else { return }
             openCredits(nil)
             appModel.confirmRewardedAdReturnDestinationRestored(visibleSurface: "redesign_credits")
+        }
+    }
+
+    /// 「ようこそ」を閉じる。どちらのボタンで閉じても初回入口は抜けたものとして
+    /// 記録する。「あとで」でスキップした人にもう一度出すのは、
+    /// スキップという操作を無かったことにするのと同じ。
+    private func dismissWelcome() {
+        appModel.completeInitialEntry()
+        showsWelcome = false
+    }
+
+    /// 「銘柄を選んではじめる」の続き。fullScreenCover が閉じ切ってから
+    /// シートを出す(同時に出すと SwiftUI は黙って何もしない — `openCredits` と同じ罠)。
+    private func presentStarterPickerIfRequested() {
+        guard welcomeWantsStarterPicker else { return }
+        welcomeWantsStarterPicker = false
+        selectedTab = .home
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            sheet = .companyPicker(.starter)
         }
     }
 
@@ -140,8 +199,9 @@ struct RedesignRootView: View {
     @ViewBuilder
     private func sheetContent(_ presented: RedesignSheet) -> some View {
         switch presented {
-        case .companyPicker:
+        case .companyPicker(let mode):
             RedesignCompanyPickerSheet(
+                initialMode: mode,
                 selectCompany: { ticker in
                     // 宛先を選ぶだけ。開かずにストリームへ戻る。
                     // 「最後に開いた会社」がそのままアスクバーのチップなので、
@@ -323,15 +383,37 @@ private struct RedesignListSectionHeader: View {
 /// 「SEC資料から、会社を理解する」の節。
 /// 盤面が空の人にしか出ないので、常に一等地の大きさで置く。
 /// 文言は落とさない(法務上の断り書きを含むため)。
-private struct RedesignDiscoveryMission: View {
+///
+/// Phase 6 の「ようこそ」もこの構造体をそのまま使う。ミッション文の文字列は
+/// アプリ中ここ1か所にしか無く、初回画面のために書き直したりしない
+/// (二つ目のミッション文を作ると、断り書きの付いていない方が生まれる)。
+/// 変えるのは見出しの大きさだけ。
+struct RedesignDiscoveryMission: View {
+    enum Size {
+        /// 一覧の空状態に差し込むとき(Phase 3 から不変)。
+        case inline
+        /// 初回の1枚。面のほとんどがこの文なので、見出しを一段上げる。
+        case welcome
+    }
+
+    var size: Size = .inline
+
+    private var titleFont: Font {
+        size == .welcome ? .title.weight(.bold) : .title3.weight(.bold)
+    }
+
+    private var bodyFont: Font {
+        size == .welcome ? .callout : .subheadline
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: size == .welcome ? 12 : 7) {
             Text("SEC資料から、会社を理解する")
-                .font(.title3.weight(.bold))
+                .font(titleFont)
                 .foregroundStyle(KabuyomiTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
             Text("10-K / 10-Qを日本語で読み、根拠を確認しながら質問できます。投資助言や売買推奨は行いません。")
-                .font(.subheadline)
+                .font(bodyFont)
                 .foregroundStyle(KabuyomiTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -438,7 +520,7 @@ private struct RedesignStreamView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    present(.companyPicker)
+                    present(.companyPicker(.select))
                 } label: {
                     Image(systemName: "magnifyingglass")
                         .frame(minWidth: 32, minHeight: 44)
@@ -471,7 +553,7 @@ private struct RedesignStreamView: View {
                     context: askContext,
                     disabledReason: askDisabledReason
                 ) != nil,
-                selectCompany: { present(.companyPicker) },
+                selectCompany: { present(.companyPicker(.select)) },
                 openCredits: { openCredits(nil) },
                 send: send
             )
@@ -1140,7 +1222,7 @@ private struct RedesignSummaryView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    present(.companyPicker)
+                    present(.companyPicker(.select))
                 } label: {
                     Image(systemName: "magnifyingglass")
                         .frame(minWidth: 32, minHeight: 44)
@@ -1221,17 +1303,38 @@ private struct RedesignSummaryView: View {
     }
 }
 
-// MARK: - 会社ピッカー(検索 + 盤面)
+// MARK: - 会社ピッカー(検索 + 盤面 / 初回の複数選択)
 
 /// 会社チップと検索アイコンが開くシート。Phase 3 の盤面行と空状態をそのまま持つ。
 /// 行のタップ = 質問の宛先にする、「開く」= 会社ドキュメントを開く。
+///
+/// Phase 6 でもう1つの顔が付いた。`starter` で開くと、行はチェックボックスになり、
+/// 底の「はじめる」で選んだ銘柄が**実際に保存**される。
+/// 面は増やさない — 検索も盤面もそのまま使い、行の意味と底の CTA だけが変わる。
+/// 保存に使う道はワークスペースのブックマークと同じ `AppModel.saveTicker` /
+/// `AppModel.saveSearchResult`(どちらも内部の
+/// `saveTicker(_:searchItem:redirectToConversation:)` に落ちる)。
+/// 初回のためだけの永続化は書かない。
 private struct RedesignCompanyPickerSheet: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
+    var initialMode: RedesignPickerMode = .select
     let selectCompany: (String) -> Void
     let openCompany: (String) -> Void
+    @State private var mode: RedesignPickerMode?
     @State private var query = ""
     @State private var searchTask: Task<Void, Never>?
+    /// 選んだ順を保つ。Set だと保存の順序が起動ごとに変わり、
+    /// 盤面の並びが理由もなく揺れる。
+    @State private var selection: [String] = []
+    /// 検索から足した銘柄は SearchItem を持って来る(cik まで揃うので、
+    /// 保存が同一発行体の別ティッカーへ吸収されるときに正しく畳まれる)。
+    @State private var selectedSearchItems: [String: SearchItem] = [:]
+    @State private var isSaving = false
+
+    private var activeMode: RedesignPickerMode { mode ?? initialMode }
+
+    private var isStarterMode: Bool { activeMode == .starter }
 
     private var savedCards: [WatchlistCard] {
         appModel.watchlist
@@ -1273,13 +1376,9 @@ private struct RedesignCompanyPickerSheet: View {
                         .listRowBackground(Color.clear)
                     }
                 } else if !appModel.searchResults.isEmpty {
-                    Section {
-                        ForEach(appModel.searchResults) { item in
-                            RedesignSearchResultRow(item: item, opened: openCompany)
-                        }
-                    } header: {
-                        RedesignListSectionHeader(title: "検索結果", trailing: "\(appModel.searchResults.count)件")
-                    }
+                    searchResultsSection
+                } else if isStarterMode {
+                    starterChoiceSection
                 } else if boardRows.isEmpty {
                     emptyBoardSections
                 } else {
@@ -1292,7 +1391,7 @@ private struct RedesignCompanyPickerSheet: View {
             .environment(\.defaultMinListRowHeight, 0)
             .scrollContentBackground(.hidden)
             .background(KabuyomiTheme.canvas)
-            .navigationTitle("会社を選ぶ")
+            .navigationTitle(isStarterMode ? RedesignFirstRunCopy.starterPickerTitle : "会社を選ぶ")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(
                 text: $query,
@@ -1317,10 +1416,149 @@ private struct RedesignCompanyPickerSheet: View {
                         .accessibilityIdentifier("redesign.picker.close")
                 }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if isStarterMode { startBar }
+            }
             .accessibilityIdentifier("redesign.picker")
         }
         .tint(KabuyomiTheme.accent)
+        // 保存の最中にシートを引きずり下ろされると、途中まで保存された状態で
+        // 面だけが消える。保存が終わるまでは閉じさせない。
+        .interactiveDismissDisabled(isSaving)
     }
+
+    // MARK: 初回の複数選択
+
+    /// 底の「はじめる」。1社も選んでいなければ押せない。
+    private var startBar: some View {
+        VStack(spacing: 0) {
+            RedesignPrimaryButton(
+                title: RedesignFirstRunCopy.starterPickerStart,
+                isEnabled: redesignStarterPickerCanStart(selectionCount: selection.count) && !isSaving,
+                action: start
+            )
+            .accessibilityIdentifier("redesign.picker.start")
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+        }
+        .background(KabuyomiTheme.paper)
+        .overlay(alignment: .top) { KabuyomiHairline(color: KabuyomiTheme.separatorStrong) }
+    }
+
+    @ViewBuilder
+    private var starterChoiceSection: some View {
+        Section {
+            ForEach(appModel.starterCompanies) { company in
+                RedesignStarterChoiceRow(
+                    ticker: company.ticker,
+                    companyName: company.companyName,
+                    detail: "10-K / 10-Qを確認",
+                    isSelected: selection.contains(company.ticker),
+                    toggle: { toggle(company.ticker, searchItem: nil) }
+                )
+            }
+        } header: {
+            RedesignListSectionHeader(
+                title: "はじめに見る会社",
+                trailing: selection.isEmpty ? nil : "\(selection.count)社"
+            )
+        }
+
+        // 検索で足した銘柄は、検索語を消すと検索結果ごと消える。
+        // 選んだものが視界から無くなるので、ここに残しておく。
+        let addedTickers = selection.filter { ticker in
+            !appModel.starterCompanies.contains { $0.ticker == ticker }
+        }
+        if !addedTickers.isEmpty {
+            Section {
+                ForEach(addedTickers, id: \.self) { ticker in
+                    RedesignStarterChoiceRow(
+                        ticker: ticker,
+                        companyName: selectedSearchItems[ticker]?.companyName ?? ticker,
+                        detail: "10-K / 10-Qを確認",
+                        isSelected: true,
+                        toggle: { toggle(ticker, searchItem: selectedSearchItems[ticker]) }
+                    )
+                }
+            } header: {
+                RedesignListSectionHeader(title: "検索から追加", trailing: "\(addedTickers.count)社")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var searchResultsSection: some View {
+        Section {
+            ForEach(appModel.searchResults) { item in
+                if isStarterMode {
+                    RedesignStarterChoiceRow(
+                        ticker: item.ticker,
+                        companyName: item.companyName,
+                        detail: item.supportDisplayLabel,
+                        isSelected: selection.contains(item.ticker),
+                        toggle: {
+                            guard item.canAttemptInV1 else {
+                                appModel.activeAlert = AppAlertState(
+                                    message: item.unsupportedAlertMessage,
+                                    kind: .dismissOnly
+                                )
+                                return
+                            }
+                            toggle(item.ticker, searchItem: item)
+                        }
+                    )
+                } else {
+                    RedesignSearchResultRow(item: item, opened: openCompany)
+                }
+            }
+        } header: {
+            RedesignListSectionHeader(title: "検索結果", trailing: "\(appModel.searchResults.count)件")
+        }
+    }
+
+    private func toggle(_ ticker: String, searchItem: SearchItem?) {
+        let normalized = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !normalized.isEmpty else { return }
+        if let index = selection.firstIndex(of: normalized) {
+            selection.remove(at: index)
+            selectedSearchItems.removeValue(forKey: normalized)
+        } else {
+            selection.append(normalized)
+            if let searchItem { selectedSearchItems[normalized] = searchItem }
+        }
+    }
+
+    /// 選んだ銘柄を保存して盤面を始める。
+    ///
+    /// 保存はワークスペースのブックマークと同じ道を通る。1社ずつ順に await するのは、
+    /// `AppModel` 側が watchlist の変更を1件ずつ直列化しているためで、
+    /// 並べて投げても得は無く、保存順(= 盤面の並び)だけが不定になる。
+    /// すでに保存済みの銘柄は先に落とす —
+    /// 通すと「すでに保存済みです。」のダイアログが初回動線の最中に出る。
+    private func start() {
+        guard redesignStarterPickerCanStart(selectionCount: selection.count), !isSaving else { return }
+        let items = selectedSearchItems
+        let picks = redesignStarterPickerSaveOrder(
+            selection: selection,
+            isAlreadySaved: { appModel.isTickerInWatchlist($0, cik: items[$0]?.cik) }
+        )
+        isSaving = true
+        Task {
+            for ticker in picks {
+                let item = items[ticker]
+                if let item {
+                    await appModel.saveSearchResult(item)
+                } else {
+                    await appModel.saveTicker(ticker)
+                }
+            }
+            isSaving = false
+            dismiss()
+        }
+    }
+
+    // MARK: 盤面(既存の顔)
 
     @ViewBuilder
     private var boardSection: some View {
@@ -1345,8 +1583,21 @@ private struct RedesignCompanyPickerSheet: View {
         }
     }
 
+    /// 会社を1社も持っていない人がこのシートを開いたときの面。
+    /// ここから抜ける道は「銘柄をさがす」= 同じシートが複数選択の顔に変わること。
+    /// シートの上にシートは出せないので、行き先を別のシートにはしない。
     @ViewBuilder
     private var emptyBoardSections: some View {
+        Section {
+            RedesignEmptyCallToAction(
+                action: { mode = .starter },
+                identifierPrefix: "redesign.picker"
+            )
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        }
+
         Section {
             RedesignDiscoveryMission()
                 .listRowBackground(Color.clear)
@@ -1728,7 +1979,7 @@ private struct RedesignSearchResultRow: View {
 
 /// ticker の頭2文字を入れる小さな枠。
 /// 根拠チップのバッジと同じ塗り・同じ角丸にして、画面をまたいでも同じ体系に読めるようにする。
-private struct RedesignTickerMonogram: View {
+struct RedesignTickerMonogram: View {
     /// 枠も文字と一緒に伸ばす。文字だけを大きくすると枠から溢れる。
     /// 上限を付けているのは、装飾の枠が AX サイズで行の主役になってしまわないため。
     @ScaledMetric(relativeTo: .caption2) private var boxScale: CGFloat = 1

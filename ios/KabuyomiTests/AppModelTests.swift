@@ -527,6 +527,109 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.showStarterCompanies)
     }
 
+    // MARK: - Phase 6: 初回動線(v2 IA 仕様「Phase 6」節)
+
+    /// 「ようこそ」を出すかどうかは `shouldShowConversationEntry` ひとつが決める。
+    /// 並行フラグは作らない、という設計をここで固定する。
+    /// 真の初回 = 真 / 初回入口を抜けたら偽 / ローカルデータを消したらまた真。
+    func testWelcomeVisibilityFollowsTheInitialEntryFlagAcrossCompletionAndReset() {
+        let persistence = PersistenceController(inMemory: true)
+        let model = makeAppModel(persistence: persistence)
+
+        // 真の初回インストール。
+        XCTAssertTrue(model.shouldShowConversationEntry)
+
+        // 「あとで」でも「銘柄を選んではじめる」でも、閉じた時点でここを通る。
+        model.completeInitialEntry()
+
+        XCTAssertFalse(model.shouldShowConversationEntry)
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: AppModel.hasCompletedInitialEntryKey))
+
+        // 再起動しても出ない(判定は UserDefaults に載っている)。
+        let relaunched = makeAppModel(persistence: persistence)
+        XCTAssertFalse(relaunched.shouldShowConversationEntry)
+
+        // ローカルデータを消した人には、もう一度初回から始まる。
+        relaunched.resetLocalData()
+        XCTAssertTrue(relaunched.shouldShowConversationEntry)
+    }
+
+    /// スターターピッカーの「はじめる」。選んだ銘柄がワークスペースの
+    /// ブックマークと**同じ道**(`AppModel.saveTicker`)で `savedTickers` に載り、
+    /// 盤面が本人のものとして始まること。
+    /// 保存は会社を開かない(初回動線はストリームに着地する)。
+    func testStarterPickerSelectionLandsInSavedTickersThroughTheRealSavePath() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let model = makeAppModel(persistence: persistence)
+        let aapl = TestFixtures.companyPayload(ticker: "AAPL", cik: "0000320193")
+        let msft = TestFixtures.companyPayload(ticker: "MSFT", cik: "0000789019")
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            switch request.url?.path {
+            case "/v1/watchlist/add":
+                let body = try XCTUnwrap(Self.requestBodyData(from: request))
+                let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+                let ticker = try XCTUnwrap(payload["ticker"])
+                let company = ticker == "AAPL" ? aapl : msft
+                let savedTickers = ticker == "AAPL" ? ["AAPL"] : ["AAPL", "MSFT"]
+                let baseData = try TestFixtures.watchlistAddResponseData(ticker: company.ticker, cik: company.cik)
+                var json = try XCTUnwrap(JSONSerialization.jsonObject(with: baseData) as? [String: Any])
+                var usage = try XCTUnwrap(json["usage"] as? [String: Any])
+                usage["stocksUsed"] = savedTickers.count
+                usage["savedTickers"] = savedTickers
+                json["usage"] = usage
+                return (response, try TestFixtures.jsonData(json))
+            default:
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "free",
+                        "chatsUsed": 0,
+                        "chatLimit": 10,
+                        "stocksUsed": 0,
+                        "stockLimit": 3,
+                        "dateJST": "2026-04-18",
+                        "savedTickers": []
+                    ])
+                )
+            }
+        }
+
+        XCTAssertTrue(model.shouldShowConversationEntry)
+
+        // ピッカーが押す順序そのもの(選んだ順・保存済みは落とす)。
+        let picks = redesignStarterPickerSaveOrder(
+            selection: ["AAPL", "MSFT"],
+            isAlreadySaved: { model.isTickerInWatchlist($0) }
+        )
+        XCTAssertEqual(picks, ["AAPL", "MSFT"])
+
+        for ticker in picks {
+            await model.saveTicker(ticker)
+        }
+
+        XCTAssertEqual(model.watchlist.map(\.ticker), ["AAPL", "MSFT"])
+        XCTAssertEqual(
+            UserDefaults.standard.stringArray(forKey: AppModel.savedTickersKey),
+            ["AAPL", "MSFT"]
+        )
+        // 盤面が埋まった以上、「ようこそ」も空状態も次からは出ない。
+        XCTAssertFalse(model.shouldShowConversationEntry)
+        // 保存はドキュメントへ飛ばさない。着地はストリーム。
+        XCTAssertNil(model.activeConversationTicker)
+        // アスクバーの宛先は本人が選んだ1社目。スターターへのフォールバックではない。
+        XCTAssertEqual(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            )?.ticker,
+            "AAPL"
+        )
+    }
+
     func testResetLocalDataClearsAIConsentAndRequiresReconsentBeforeChat() async {
         let model = makeAppModel()
         model.setAIConsent(true)

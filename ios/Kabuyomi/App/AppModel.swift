@@ -3557,7 +3557,13 @@ credit残高に使う端末識別情報は維持されます。
             && shouldRevokeLocalAccessWithoutWatchlist(for: normalized)
     }
 
-    private func completeInitialEntry() {
+    /// 初回入口を抜けたことを記録する。`shouldShowConversationEntry` が偽になり、
+    /// 次の起動から「ようこそ」は出ない。
+    ///
+    /// 会社を開いた・保存したときに内部から呼ばれるほか、Phase 6 では
+    /// 「ようこそ」を閉じた時点でも呼ぶ(「あとで」でスキップした人にも
+    /// 二度と出さない)。並行フラグを足さないための唯一の入口。
+    func completeInitialEntry() {
         guard !hasCompletedInitialEntry else { return }
         hasCompletedInitialEntry = true
         UserDefaults.standard.set(true, forKey: Self.hasCompletedInitialEntryKey)
