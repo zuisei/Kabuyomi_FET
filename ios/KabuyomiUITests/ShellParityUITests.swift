@@ -148,6 +148,41 @@ final class ShellParityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 8))
     }
 
+    /// 盤面の行は2つの意味を持つ。行 = 質問の宛先にする、「開く」= ドキュメントを開く。
+    /// どちらも押せて、押した結果が違うことをここで固定する。
+    func testPickerBoardRowSelectsAsContextAndOpensSeparately() throws {
+        launch()
+        // 盤面に出す会社を1社作る(最近開いた会社が盤面の行になる)。
+        openAAPLFromStream()
+        XCTAssertTrue(app.buttons["redesign.company.sources"].waitForExistence(timeout: 15))
+        edgeSwipeBack()
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 8))
+
+        app.buttons["redesign.askbar.company"].tap()
+        XCTAssertTrue(element("redesign.picker").waitForExistence(timeout: 8))
+
+        let selectRow = app.buttons["redesign.company.select.AAPL"]
+        let openRow = app.buttons["redesign.company.open.AAPL"]
+        XCTAssertTrue(selectRow.waitForExistence(timeout: 8), "盤面の行が出ていない")
+        XCTAssertTrue(openRow.exists, "盤面の行に「開く」が無い")
+        capture("Company picker board")
+
+        // 「開く」はドキュメントへ。
+        openRow.tap()
+        XCTAssertTrue(app.buttons["redesign.company.sources"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["redesign.askbar.send"].exists)
+
+        edgeSwipeBack()
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 8))
+
+        // 行そのものは宛先を変えるだけ。ドキュメントへは行かず、根へ戻る。
+        app.buttons["redesign.askbar.company"].tap()
+        XCTAssertTrue(element("redesign.picker").waitForExistence(timeout: 8))
+        app.buttons["redesign.company.select.AAPL"].tap()
+        XCTAssertTrue(app.buttons["redesign.askbar.send"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["redesign.company.sources"].exists)
+    }
+
     /// 残高はアスクバーに出しっぱなしで、押せばクレジット画面へ入れる。
     func testAskBarCreditChipOpensCredits() throws {
         launch()

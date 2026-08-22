@@ -790,12 +790,17 @@ private struct RedesignStreamAnswerCard: View {
                     identityRow
                     questionBlock
                     if let answerBody {
+                        // 行数は切らない。カードに出すのは
+                        // `structureAssistantMessage` の結論だけで、
+                        // 根拠と留意点はドキュメントの会話面に残っている。
+                        // ここで途中まで見せると、読み面のはずのカードが
+                        // 実際に文末を落とす(資料イベントの verdict と同じ理由。
+                        // アクセシビリティ監査が Text clipped で拾う)。
                         Text(answerBody)
                             .font(.subheadline)
                             .foregroundStyle(KabuyomiTheme.ink)
                             .lineSpacing(3)
                             .multilineTextAlignment(.leading)
-                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 5)
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
                         Text("回答なし")
@@ -876,11 +881,12 @@ private struct RedesignStreamAnswerCard: View {
     }
 
     private var questionBlock: some View {
+        // 質問も切らない。自分が書いた文が途中で消えるのは、
+        // カードが「この質問への回答」だと分かる手がかりを削るだけ。
         Text(entry.question)
             .font(.footnote.weight(.medium))
             .foregroundStyle(KabuyomiTheme.ink)
             .multilineTextAlignment(.leading)
-            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)

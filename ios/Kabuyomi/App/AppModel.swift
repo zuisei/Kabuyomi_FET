@@ -2099,13 +2099,18 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     /// ストリームの回答カードの素。追っている会社(保存済み + 最近)の会話記録を
     /// まとめて読み出す。並べ替えと組み立ては `researchArchiveGroups` / `streamItems`
     /// (純ロジック)側の仕事で、ここは永続化に触れる部分だけを引き受ける。
-    func trackedConversationRecords(companyLimit: Int = 12) -> [LocalCompanyRecord] {
-        let recent = recentCompanyCards(limit: companyLimit, includeSaved: false)
+    ///
+    /// 上限は**最近開いた会社にだけ**かける。保存済みを切り詰めると、
+    /// 20社保存している人の過去の質問が黙って消える面が出る
+    /// (ストリームは Phase 3 の研究アーカイブを置き換えた面なので、
+    /// あちらが見せていた範囲を狭めない)。`savedTickers` 自体が25社で頭打ちなので、
+    /// 読み出す会社数は最悪でも25 + recentLimit に収まる。
+    func trackedConversationRecords(recentLimit: Int = 10) -> [LocalCompanyRecord] {
+        let recent = recentCompanyCards(limit: recentLimit, includeSaved: false)
         var seen = Set<String>()
         let tickers = (watchlist + recent)
             .map { normalizedTicker($0.ticker) }
             .filter { seen.insert($0).inserted }
-            .prefix(companyLimit)
         return tickers.flatMap { conversationHistory(for: $0) }
     }
 
