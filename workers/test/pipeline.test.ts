@@ -539,20 +539,21 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: false }
     );
 
-    expect(response.answer).toContain("Apple Inc.は");
     // The fixture's only narrative chunk is a seasonality paragraph: it names no
     // product at all. The answer used to open with 「iPhone、Mac、iPad、ウェアラブル
-    // 機器、サービスで収益を得ている会社です」 out of TICKER_BUSINESS_OVERVIEWS,
-    // with this chunk cited underneath it.
+    // 機器、サービスで収益を得ている会社です」 out of TICKER_BUSINESS_OVERVIEWS, and
+    // after that table went, with 「製品・サービス販売を主な事業にする会社です」 —
+    // a seasonality sentence ("new product and service introductions") inflated
+    // into the company's main business. A single keyword is not a business
+    // description (2026-08-22): with one label the deterministic layer declines,
+    // and a filing that does not describe the business gets an honest
+    // insufficiency rather than an invented one.
     expect(response.answer).not.toContain("iPhone");
     expect(response.answer).not.toContain("ウェアラブル");
-    expect(response.answer).toContain("製品・サービス販売");
-    expect(response.answer).not.toContain("Services");
+    expect(response.answer).not.toContain("を主な事業にする会社です");
     expect(response.answer).not.toContain("historically experienced higher net sales");
-    expect(response.sources.map((source) => source.sourceId)).toEqual(["S8"]);
-    expect(response.responsePath).toBe("deterministic");
+    expect(response.answer).toMatch(/確認できません|分かりません/);
     expect(response.debug?.sourceIdsValid).toBe(true);
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("uses revenue buckets for broad what-company prompts when business buckets are available", async () => {

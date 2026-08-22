@@ -244,7 +244,7 @@ function makeSegmentedFiling() {
         sectionType: "md_a",
         sectionTitle: "Management discussion",
         sourceLabel: "10-Q Management discussion",
-        text: "Management discusses cloud demand, productivity software, LinkedIn and gaming, but this excerpt does not contain a full revenue table.",
+        text: "Management discusses cloud demand, advertising revenue, productivity software, LinkedIn and gaming, but this excerpt does not contain a full revenue table.",
         startOffset: 0,
         endOffset: 0,
         sortOrder: 1

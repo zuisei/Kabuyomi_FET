@@ -503,7 +503,12 @@ describe("Gemini local chat fallback", () => {
 
     expect(response.answer).not.toContain("アクセラレーテッドコンピューティング");
     expect(response.answer).not.toContain("データセンター");
-    expect(response.answer).toContain("提出資料の本文では");
+    // The no-label case used to quote the first 120 English characters of the
+    // chunk; it now states plainly that the excerpt carries no business
+    // description (2026-08-22). The test's point — the AI glossary must not be
+    // read as an accelerated-computing business — is unchanged.
+    expect(response.answer).toContain("事業内容の説明が含まれていません");
+    expect(response.answer).not.toMatch(/[A-Za-z]{4,}.*[A-Za-z]{4,}.*[A-Za-z]{4,}/);
     expect(response.sourceIds).toEqual(["CTX2"]);
   });
 
@@ -3959,7 +3964,7 @@ function makeKnownTickerRevenueAxisFiling() {
         sectionType: "md_a",
         sectionTitle: "Management discussion",
         sourceLabel: "10-Q Management discussion",
-        text: "Management discusses cloud demand, productivity software, LinkedIn and gaming, but this excerpt does not contain a full revenue table.",
+        text: "Management discusses cloud demand, advertising revenue, productivity software, LinkedIn and gaming, but this excerpt does not contain a full revenue table.",
         startOffset: 0,
         endOffset: 0,
         sortOrder: 1

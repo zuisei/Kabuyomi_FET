@@ -1122,7 +1122,12 @@ function summarizeBusinessNarrativeEvidence(narrative: SourceChunkRecord, compan
     return `${subject}、提出資料から見ると、${labels.slice(0, 4).join("、")}を主な事業にする会社です。`;
   }
 
-  return `この会社は、提出資料の本文では「${truncateExcerpt(narrative.text, 120)}」という文脈で説明されています。`;
+  // 事業を表すラベルが1つも取れないとき、以前は本文の先頭120字を英語のまま
+  // 「…という文脈で説明されています」と引用していた。MA のように抽出された
+  // MD&A が業績記述だけの会社では「Net revenue increased 14%…」が出て、
+  // 何の説明にもならない(2026-08-22 実機レビュー)。英語の生引用はせず、
+  // 事業説明が本文に無いことをそのまま言う。
+  return "提出資料の本文(抜粋)には事業内容の説明が含まれていません。確認できるのは業績の数値と売上要因の記述で、何を売ってどう稼ぐ会社かは、10-K の事業の項(Item 1)を直接確認する必要があります。";
 }
 
 function buildMetricObservation(metric: MetricSnapshot): string {

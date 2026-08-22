@@ -142,6 +142,25 @@ export function buildChatContextPack(
     addMetricSources(filing.sourceChunks, metrics, add);
   } else {
     addRankedSources(rankedIntentSources, add, profile.maxSources);
+    // business_overview はプロファイルに supplementalSources: 5 を持ちながら、
+    // 窓切り出しが driver 系の分岐にしか無く一度も使われていなかった。索引済み
+    // チャンクが利益率・売上要因の抜粋しか持たない会社(MA)では、事業説明が
+    // 文脈に入らず source gate で落ち、モデルが呼ばれもしなかった
+    // (2026-08-22 実機レビュー)。Overview の自己紹介文を優先パターンで窓に取る。
+    if (questionIntent === "business_overview") {
+      const supplementals = buildSupplementalContextChunks(filing, questionIntent, selected, profile, diagnostics);
+      // 診断: 窓が何本できたか・MD&A 本文が何字あるか(strategy 文字列に載せる)。
+      strategyParts.push(`overview_windows=${supplementals.length}`, `mda_chars=${filing.mdaText?.length ?? 0}`);
+      for (const supplemental of supplementals) add(supplemental);
+      // MD&A の冒頭は会社の自己紹介であることが多い(「Mastercard is a technology
+      // company in the global payments industry…」)。短い MD&A では通常の窓が
+      // 選択済み抜粋と重なって全滅するので、冒頭だけは重複判定を免除して入れる。
+      const head = buildOverviewHeadWindow(filing, profile);
+      if (head && !selected.has(head.sourceId)) {
+        strategyParts.push("overview_head");
+        add(head);
+      }
+    }
     addMetricSources(filing.sourceChunks, metrics, add);
   }
 
@@ -580,6 +599,34 @@ function metricSourceScore(source: SourceChunkRecord, questionIntent: QuestionIn
 }
 
 const SEGMENT_FOCUS_SOURCE_PREFIX = `${SUPPLEMENTAL_SOURCE_PREFIX}F`;
+const OVERVIEW_HEAD_SOURCE_ID = `${SUPPLEMENTAL_SOURCE_PREFIX}H1`;
+
+function buildOverviewHeadWindow(filing: FilingCacheRecord, profile: ContextProfile): SourceChunkRecord | null {
+  const text = normalizeWhitespace(filing.mdaText);
+  if (text.length < 200) return null;
+  // MD&A はしばしば forward-looking statements の注記で始まる。定型段落を
+  // 600 字ずつ読み飛ばし、最初の非定型窓(会社の自己紹介が来る位置)を取る。
+  let head: string | null = null;
+  for (let offset = 0; offset < Math.min(text.length, 6_000); offset += 600) {
+    const candidate = clipToSourceExcerpt(text.slice(offset, offset + 1_800), Math.max(profile.sourceExcerptChars, 1_200));
+    if (candidate.length < 200) break;
+    if (!isBoilerplateOrRiskOnly(candidate, "", "md_a")) {
+      head = candidate;
+      break;
+    }
+  }
+  if (!head) return null;
+  return {
+    sourceId: OVERVIEW_HEAD_SOURCE_ID,
+    sectionType: "md_a",
+    sectionTitle: "Business overview (MD&A opening)",
+    sourceLabel: `${filing.formType} Business overview (MD&A opening), filed ${filing.filedAt}`,
+    text: head,
+    startOffset: 0,
+    endOffset: head.length,
+    sortOrder: 800
+  };
+}
 
 /// 質問が名指しした区分(AWS、iPhone …)の周辺を MD&A 全文から切り出す。
 /// 当期の増減を述べる窓(increased / decreased / % を含む)を優先し、
@@ -642,7 +689,10 @@ function buildSupplementalContextChunks(
 
   const pattern = supplementalPattern(questionIntent);
   const windows = buildIntentTextWindows(text, pattern, questionIntent, profile.supplementalWindowChars, diagnostics);
-  const dedupSources = shouldLeadWithDriverNarrative(questionIntent)
+  // 索引済みチャンクは同じ MD&A の抜粋なので、2,500 字の窓は必ずどれかの先頭 160 字を
+  // 含む。filing.sourceChunks 全体と重複判定すると窓が全滅する — business_overview の
+  // 窓が一度も出なかった理由(2026-08-22)。選択済みソースとだけ比較する。
+  const dedupSources = shouldLeadWithDriverNarrative(questionIntent) || questionIntent === "business_overview"
     ? [...selected.values()]
     : [...selected.values(), ...filing.sourceChunks];
   const existingTexts = dedupSources
@@ -742,6 +792,15 @@ function buildIntentTextWindows(
 }
 
 function supplementalPriorityPattern(questionIntent: QuestionIntent): RegExp | null {
+  if (questionIntent === "business_overview") {
+    // 「何の会社か」に答える文は MD&A の Overview にある自己紹介文
+    // ("Mastercard is a technology company in the global payments industry…")。
+    // 汎用パターン(products / services / customers)は本文のどこにでも当たるので、
+    // その前にこの形の文を優先して窓に取る。無いと MA のように利益率・売上要因の
+    // 抜粋だけが文脈になり、モデルが事業を語れず low-quality 判定で落ちる
+    // (2026-08-22 実機レビュー)。
+    return /\b(?:is|are) (?:a|an|the) (?:leading |global |diversified |technology |multinational |premier |world's )?(?:company|provider|corporation|bank|holding company|financial services|technology company)|we are (?:a|an|the) |our mission|we operate (?:in|through|as)|we generate (?:revenue|net sales|income)|we earn (?:revenue|fees|income)|our (?:principal|primary|core) (?:business|products|services|activities)|our business consists|we (?:design|develop|manufacture|market|sell|provide|offer) /gi;
+  }
   if (questionIntent !== "yoy_change" && questionIntent !== "mda_summary") {
     return null;
   }

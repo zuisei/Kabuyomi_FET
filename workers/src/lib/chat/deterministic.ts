@@ -603,13 +603,22 @@ function summarizeBusinessOverview(sourceChunks: SourceChunkRecord[]): {
   sourceIds: string[];
   context: string;
 } | null {
+  // 事業内容を名乗るには区分名が2つ以上要る。「その他収益」のような会計上の
+  // 汎用区分1つで「〜を主な事業にする会社」と断定していた(META、2026-08-22
+  // 実機レビュー)。足りなければ null を返し、MD&A 文脈を持つモデル経路に任せる —
+  // CAT / BAC はその経路で実セグメントまで答えている。
   const revenueBreakdown = summarizeRevenueBreakdown(sourceChunks);
   if (revenueBreakdown) {
-    return {
-      labels: revenueBreakdown.labels,
-      sourceIds: revenueBreakdown.sourceIds,
-      context: "提出資料では、売上区分としてこれらの事業が確認できます。"
-    };
+    const usableLabels = revenueBreakdown.labels.filter(
+      (label) => !isGenericRevenueCategoryLabel(label) && !isGenericBusinessLineLabel(label)
+    );
+    if (usableLabels.length >= 2) {
+      return {
+        labels: usableLabels,
+        sourceIds: revenueBreakdown.sourceIds,
+        context: "提出資料では、売上区分としてこれらの事業が確認できます。"
+      };
+    }
   }
 
   const businessDefinitions: Array<{ label: string; priority: number; patterns: RegExp[] }> = [
@@ -697,7 +706,10 @@ function summarizeBusinessOverview(sourceChunks: SourceChunkRecord[]): {
   }
 
   const matches = Array.from(found.values()).sort((left, right) => left.priority - right.priority).slice(0, 4);
-  if (matches.length === 0) {
+  // キーワード1語(payments / cloud)の一致だけで事業を断定しない。JPM が
+  // 「決済・取引サービス」、Broadcom が「クラウドサービス」の会社にされていた。
+  // 2つ以上揃わなければ辞退してモデル経路へ。
+  if (matches.length < 2) {
     return null;
   }
 
