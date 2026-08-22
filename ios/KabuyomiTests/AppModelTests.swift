@@ -313,6 +313,46 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.activeAlert)
     }
 
+    // 初回訪問は payload が通信中のため recordCompanyVisit が途中で帰る。
+    // 修正前はそのセッション中、開いただけの会社が recents(盤面・ストリーム)に
+    // 一切現れなかった。読み込み完了時に予約済みの訪問が清算されることを固定する。
+    func testFirstVisitBeforePayloadLandsInRecentsOnceLoaded() async throws {
+        UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
+        let model = makeAppModel()
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch request.url?.path ?? "" {
+            case "/v1/company/MSFT":
+                return (response, try TestFixtures.companyPayloadData(ticker: "MSFT"))
+            default:
+                let data = try TestFixtures.jsonData([
+                    "plan": "free",
+                    "chatsUsed": 0,
+                    "chatLimit": 10,
+                    "stocksUsed": 0,
+                    "stockLimit": 3,
+                    "dateJST": "2026-04-18"
+                ])
+                return (response, data)
+            }
+        }
+
+        model.openConversation(for: "MSFT")
+        // payload はまだ無い — ここで訪問しても recents には入れない(入れたら嘘の行になる)
+        model.recordCompanyVisit(ticker: "MSFT")
+        XCTAssertFalse(model.recentCompanies.contains { $0.ticker == "MSFT" })
+
+        await model.loadCompany(ticker: "MSFT")
+
+        // 読み込み完了が予約を清算し、保存も再起動も要らずに recents へ載る
+        XCTAssertTrue(
+            model.recentCompanies.contains { $0.ticker == "MSFT" }
+                || model.watchlist.contains { $0.ticker == "MSFT" },
+            "visited company must appear on the board without saving or relaunching"
+        )
+        XCTAssertEqual(model.lastViewedTicker, "MSFT")
+    }
+
     func testLoadCompanyRetryableStateDoesNotPresentAlert() async {
         UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
         let model = makeAppModel()

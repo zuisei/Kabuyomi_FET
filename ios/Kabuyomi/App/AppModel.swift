@@ -423,6 +423,14 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     private var subscriptionStateObserver: NSObjectProtocol?
     private var savedTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.savedTickers") ?? [])
     private var recentTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.recentTickers") ?? [])
+    /// 初回訪問時は payload が通信中で recordCompanyVisit が guard で帰るため、
+    /// 最近リスト(recentTickers / recentCompanies)への記帳が丸ごと落ちていた。
+    /// 症状: 開いただけの会社がそのセッション中は盤面にもストリームにも出ない
+    /// (保存すれば watchlist 経由で即出る、再起動すれば復元経路の再訪問で出る)。
+    /// 訪問だけ予約しておき、handleLoadedCompany が清算する。
+    /// 予約は最後の1件だけ持つ — 訪問中にユーザーが別の会社へ移った場合、
+    /// 古い方を最近の先頭に押し込むのは嘘になるため。
+    private var pendingVisitTicker: String?
     private var pendingConversationTicker = UserDefaults.standard.string(forKey: "kabuyomi.pendingConversationTicker")
     private var pendingConversationQuestion = UserDefaults.standard.string(forKey: "kabuyomi.pendingConversationQuestion")
     private var starterCompaniesAutoHidden = UserDefaults.standard.bool(forKey: "kabuyomi.starterCompaniesAutoHidden")
@@ -2048,8 +2056,12 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         // 記録を payload の有無より前に置き、ドットが取り残されないようにする。
         markCompanyOpened(ticker: ticker)
 
-        guard let company = companyPayload(for: ticker) else { return }
+        guard let company = companyPayload(for: ticker) else {
+            pendingVisitTicker = normalizedTicker(ticker)
+            return
+        }
 
+        pendingVisitTicker = nil
         let normalized = normalizedTicker(ticker)
         completeInitialEntry()
         lastViewedTicker = normalized
@@ -2549,6 +2561,14 @@ credit残高に使う端末識別情報は維持されます。
             refreshedTickersThisSession.insert(normalizedCompanyTicker)
         }
         loadHomeFromPersistence()
+
+        // 訪問の予約(上の pendingVisitTicker 参照)は、その会社の payload が
+        // 揃ったこの時点で清算する。関係ない会社の読み込み(先読み・一括更新)では
+        // 発火しないよう、予約と一致する場合に限る。
+        if pendingVisitTicker == normalizedCompanyTicker || pendingVisitTicker == requestedTicker {
+            pendingVisitTicker = nil
+            recordCompanyVisit(ticker: normalizedCompanyTicker)
+        }
     }
 
     private func scheduleCompanyLoadRetry(ticker: String, state: CompanyLoadStatePayload) {
