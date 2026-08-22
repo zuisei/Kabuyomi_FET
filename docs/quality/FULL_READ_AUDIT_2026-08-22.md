@@ -762,3 +762,69 @@ seed されたラベル自体は従来どおりモデルに渡る — 変えた�
 それでも定数が出るのは、seed された定数が**モデルから見て「提供された文脈」だから**である。
 ②はプロンプトでは解けない。この計測は「seed をやめる」判断の材料であって、
 別の解き方の提案ではない。
+
+---
+
+# L. test デプロイで判明したこと(2026-08-22)
+
+`kabuyomi-api-test` に migration 0019 適用後デプロイ(version `ff07a5a7`)。
+実リクエストで検証した結果、**K節の計測に穴があった**ので追記する。
+
+## L-1 【重要】②の計測は business_overview では発火しない
+
+AAPL に「何の会社ですか？」を投げると、返るのは:
+
+```
+Apple Inc.は、iPhone、Mac、iPad、ウェアラブル機器、サービスで収益を得ている会社です。
+responsePath: deterministic
+```
+
+`TICKER_BUSINESS_OVERVIEWS.AAPL` の**定数そのもの**である。原因:
+
+```ts
+function buildBusinessOverviewAnswer(filing) {
+  const knownTickerOverview = buildTickerBusinessOverviewAnswer(filing);  // 定数表が先に返る
+  if (knownTickerOverview) return knownTickerOverview;
+  const factualPack = buildChatFactualPack(filing, "business_overview");  // ここまで来ない
+```
+
+→ **`TICKER_BUSINESS_OVERVIEWS` の12銘柄は、定数回答が factual pack を短絡する。**
+K節で入れた `chat_factual_pack_seeded_labels` は
+`buildChatFactualPack` の中にあるので、**この経路では一度も発火しない**。
+
+計測を入れたのに「seed 依存ゼロ」と読めてしまう状態だった。
+H節で「表がリネームされたら黙って該当なしを返さないようにする」と書いたのと同じ失敗を、
+実行時計測の側でやっていた。
+
+**修正:** `chat_constant_answer_served`(ticker / table / sourceCount)を
+`buildTickerBusinessOverviewAnswer` と `buildKnownRevenueBreakdownAnswer` に追加。
+判定も回答も変えていない。
+
+**②の判断への影響:** seed(5銘柄)より先に、**定数表(12銘柄)の方が上位経路**である。
+②を「seed をやめるか」と書いたが、正確には
+**先に効いているのは `deterministic.ts` の定数表**であり、
+AAPL/MSFT/AMZN/NVDA の business_overview は seed に到達すらしていない。
+GOOG だけは `TICKER_BUSINESS_OVERVIEWS` に無い(GOOGL のみ)ため factual pack に落ち、
+seed が効く。E-4 / H節の割れがここでも効いている。
+
+## L-2 検証できたこと / できなかったこと
+
+| 対象 | 結果 |
+|---|---|
+| ⑤ 銀行誤判定 | **修正確認**。KO / AAPL の資金繰り回答に「預金」「信用品質」が出ない |
+| ③ ラベル誤爆 | KO / META / AVGO で DRAM・NAND / がん検査 / 市場業務 等の混入なし |
+| ① 本番プロンプト | **稼働確認**。AVGO で `responsePath: openai` / `gpt-5-nano` / ソース5件、投資助言なし |
+| ⑧ sandbox 遮断 | **未検証**。test は課金無効(`503 Credit purchases are temporarily unavailable`)でゲートまで到達しない。ユニットテスト4件のみ |
+| ⑩ トークン上限再試行 | **未検証**。実際に上限で切れる応答を再現できていない |
+| 既存 smoke | `smoke:test:identity` PASS / `smoke:test:release` 全項目 PASS |
+
+`smoke:test`(`staging-worker.js`)は 401 `Installation credential is required` で落ちるが、
+これは installation identity 導入前の古い smoke であり**今回のデプロイとは無関係**。
+
+## L-3 副次的に確認できたこと
+
+META に「一時的か構造的か」を投げると
+`売上高は 608億ドル で、前年同期比 28.0%増 です。` だけが返る。
+H節の「17銘柄はキュレーション皆無」が実挙動として出ている。
+AVGO(同じくキュレーション外)はモデル経路で具体的に答えており、
+**定数が無い方がむしろ良い回答になる例**でもある。②の判断材料として記録する。

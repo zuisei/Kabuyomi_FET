@@ -1,5 +1,6 @@
 import type { FilingCacheRecord, SourceChunkRecord } from "../../env";
 import { formatMetricValue } from "../metrics";
+import { logEvent } from "../logging";
 import { buildChatFactualPack } from "./context-factual-pack";
 import {
   buildMetricObservationSentence,
@@ -360,6 +361,16 @@ function buildTickerBusinessOverviewAnswer(filing: FilingCacheRecord): ChatRespo
   if (sources.length === 0) {
     return null;
   }
+  // This short-circuits buildBusinessOverviewAnswer before buildChatFactualPack
+  // runs, so the seeded-label instrument in context-factual-pack.ts never sees
+  // these tickers. Without this event the ② measurement would read "no seed
+  // dependence" while a constant string is being served with filing source
+  // chips attached. Recorded, not changed.
+  logEvent("chat_constant_answer_served", {
+    ticker: filing.ticker.toUpperCase(),
+    table: "TICKER_BUSINESS_OVERVIEWS",
+    sourceCount: sources.length
+  });
   return {
     answer: `${filing.companyName}は、${overview}で収益を得ている会社です。`,
     sources
@@ -673,6 +684,11 @@ function buildKnownRevenueBreakdownAnswer(filing: FilingCacheRecord): ChatRespon
   if (sources.length === 0) {
     return null;
   }
+  logEvent("chat_constant_answer_served", {
+    ticker: filing.ticker.toUpperCase(),
+    table: "TICKER_REVENUE_BREAKDOWNS",
+    sourceCount: sources.length
+  });
   return {
     answer: `売上構造を見る軸は、${knownBreakdown.slice(0, 5).join("、")}です。`,
     sources
