@@ -1,6 +1,5 @@
 import type { FilingCacheRecord, SourceChunkRecord } from "../../env";
 import { formatMetricValue } from "../metrics";
-import { logEvent } from "../logging";
 import { buildChatFactualPack } from "./context-factual-pack";
 import {
   buildMetricObservationSentence,
@@ -286,13 +285,10 @@ function isBusinessOverviewQuestion(normalizedQuestion: string): boolean {
 }
 
 function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {
-  // The release benchmark uses a curated company set. Prefer its stable, reviewed
-  // overview instead of appending partially extracted English category labels
-  // (for example, a lone "International," fragment).
-  const knownTickerOverview = buildTickerBusinessOverviewAnswer(filing);
-  if (knownTickerOverview) {
-    return knownTickerOverview;
-  }
+  // Every branch below must end in either an extraction-derived answer carrying
+  // the sources the labels actually came from, or null so the caller continues
+  // to the model path. Returning a constant sentence with filing source chips
+  // attached is the one thing this function may not do.
   const factualPack = buildChatFactualPack(filing, "business_overview");
   if (factualPack && ((factualPack.productsServices?.length ?? 0) > 0 || (factualPack.reportableSegments?.length ?? 0) > 0)) {
     const sources = factualPack.sourceIds.flatMap((sourceId) => {
@@ -304,36 +300,33 @@ function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePay
         ...(factualPack.productsServices ?? []),
         ...(factualPack.reportableSegments ?? [])
       ].map((label) => label.replace(/[、,\s]+$/u, "").trim()).filter((label) => label && !isGenericBusinessLineLabel(label)))).slice(0, 6);
-      if (businessLines.length === 0) {
-        return buildTickerBusinessOverviewAnswer(filing);
+      // No usable label survived filtering: the pack had nothing to say about
+      // this company, so hand the question to the next extractor below rather
+      // than composing a sentence with an empty subject.
+      if (businessLines.length > 0) {
+        const revenueCategories = factualPack.revenueCategories
+          ?.map((fact) => fact.label.replace(/[、,\s]+$/u, "").trim())
+          .filter((label) => label && !businessLines.includes(label) && !isGenericRevenueCategoryLabel(label))
+          .slice(0, 3) ?? [];
+        const revenueSentence =
+          revenueCategories.length > 0
+            ? `売上区分としては、${revenueCategories.join("、")}も確認できます。`
+            : "売上区分の細かい金額内訳は、この抜粋だけでは限定的です。";
+        const answer = `${filing.companyName}は、${businessLines.join("、")}を主な事業・製品群として持つ会社です。${revenueSentence}`;
+        // A trailing comma means a label was cut mid-phrase during extraction.
+        // We cannot stand behind that sentence, and there is nothing honest to
+        // put in its place, so the model path takes the question.
+        if (/[、,]\s*$/u.test(answer)) {
+          return null;
+        }
+        return { answer, sources: dedupeChatSources(sources) };
       }
-      if (businessLines.length < 2) {
-        const tickerOverview = buildTickerBusinessOverviewAnswer(filing);
-        if (tickerOverview) return tickerOverview;
-      }
-      const revenueCategories = factualPack.revenueCategories
-        ?.map((fact) => fact.label.replace(/[、,\s]+$/u, "").trim())
-        .filter((label) => label && !businessLines.includes(label) && !isGenericRevenueCategoryLabel(label))
-        .slice(0, 3) ?? [];
-      const revenueSentence =
-        revenueCategories.length > 0
-          ? `売上区分としては、${revenueCategories.join("、")}も確認できます。`
-          : "売上区分の細かい金額内訳は、この抜粋だけでは限定的です。";
-      const answer = `${filing.companyName}は、${businessLines.join("、")}を主な事業・製品群として持つ会社です。${revenueSentence}`;
-      if (/[、,]\s*$/u.test(answer)) {
-        return buildTickerBusinessOverviewAnswer(filing);
-      }
-      return { answer, sources: dedupeChatSources(sources) };
     }
   }
 
   const overview = summarizeBusinessOverview(filing.sourceChunks);
   if (!overview) {
-    return buildTickerBusinessOverviewAnswer(filing);
-  }
-  if (overview.labels.length < 2) {
-    const tickerOverview = buildTickerBusinessOverviewAnswer(filing);
-    if (tickerOverview) return tickerOverview;
+    return null;
   }
 
   const sources = overview.sourceIds.flatMap((sourceId) => {
@@ -341,9 +334,10 @@ function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePay
     return source ? [buildSecFilingSource(source)] : [];
   });
 
+  // Labels without the chunks they were read out of would be an answer with no
+  // citable source. Nothing to serve.
   if (sources.length === 0) {
-    const tickerOverview = buildTickerBusinessOverviewAnswer(filing);
-    return tickerOverview;
+    return null;
   }
 
   return {
@@ -351,73 +345,6 @@ function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePay
     sources: dedupeChatSources(sources)
   };
 }
-
-function buildTickerBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {
-  const overview = TICKER_BUSINESS_OVERVIEWS[filing.ticker.toUpperCase()];
-  if (!overview) {
-    return null;
-  }
-  const sources = fallbackOverviewSources(filing);
-  if (sources.length === 0) {
-    return null;
-  }
-  // This short-circuits buildBusinessOverviewAnswer before buildChatFactualPack
-  // runs, so the seeded-label instrument in context-factual-pack.ts never sees
-  // these tickers. Without this event the ② measurement would read "no seed
-  // dependence" while a constant string is being served with filing source
-  // chips attached. Recorded, not changed.
-  logEvent("chat_constant_answer_served", {
-    ticker: filing.ticker.toUpperCase(),
-    table: "TICKER_BUSINESS_OVERVIEWS",
-    sourceCount: sources.length
-  });
-  return {
-    answer: `${filing.companyName}は、${overview}で収益を得ている会社です。`,
-    sources
-  };
-}
-
-function fallbackOverviewSources(filing: FilingCacheRecord): ChatEvidenceSource[] {
-  const preferred = filing.sourceChunks.filter((chunk) => chunk.sectionType !== "xbrl_metric").slice(0, 3);
-  const sourceChunks = preferred.length > 0 ? preferred : filing.sourceChunks.slice(0, 3);
-  return dedupeChatSources(sourceChunks.map(buildSecFilingSource));
-}
-
-const TICKER_BUSINESS_OVERVIEWS: Record<string, string> = {
-  AAPL: "iPhone、Mac、iPad、ウェアラブル機器、サービス",
-  JPM: "純利息収入、投資銀行・市場業務、カード・決済、資産運用",
-  XOM: "上流の石油・天然ガス、下流の燃料、化学製品",
-  CAT: "建設機械、資源産業向け機械、エネルギー・輸送機器と関連サービス",
-  WMT: "米国小売、海外小売、Sam's Clubなどの商品販売と会員サービス",
-  NVDA: "データセンター向けGPU・アクセラレータ、ゲーミング、車載、プロ向け可視化",
-  MU: "DRAM、NAND、ストレージなどのメモリ製品",
-  MSFT: "クラウド、Office・Microsoft 365、Windows、LinkedIn、ゲーム",
-  GOOGL: "検索広告、YouTube広告、Google Cloud、サブスクリプション・端末",
-  AMZN: "オンライン小売、第三者販売サービス、広告、サブスクリプション、AWS",
-  TSLA: "車両販売・関連サービス、サービス・その他、エネルギー生成・蓄電",
-  LLY: "糖尿病・肥満症、がん、免疫などの医薬品",
-  V: "決済ネットワーク、取引処理、サービス収入、付加価値サービス",
-  KO: "飲料原液・完成品、ブランド飲料、地域ボトラー向け販売",
-  DAL: "旅客航空、プレミアム座席、ロイヤルティ、貨物・整備関連サービス"
-};
-
-const TICKER_REVENUE_BREAKDOWNS: Record<string, string[]> = {
-  AAPL: ["iPhone", "Mac", "iPad", "ウェアラブル機器", "サービス"],
-  JPM: ["純利息収入", "投資銀行・市場業務", "カード・決済", "資産運用"],
-  XOM: ["上流の石油・天然ガス", "燃料", "化学製品", "特殊製品"],
-  CAT: ["建設機械", "資源産業向け機械", "エネルギー・輸送機器", "関連サービス"],
-  WMT: ["米国小売", "海外小売", "Sam's Club", "会員サービス"],
-  NVDA: ["データセンター", "ゲーミング", "車載", "プロ向け可視化"],
-  MU: ["DRAM", "NAND", "ストレージ"],
-  MSFT: ["クラウド", "Office・Microsoft 365", "Windows", "LinkedIn", "ゲーム"],
-  GOOGL: ["検索広告", "YouTube広告", "Google Cloud", "サブスクリプション・端末"],
-  AMZN: ["オンライン小売", "第三者販売サービス", "広告", "サブスクリプション", "AWS"],
-  TSLA: ["自動車販売・リース", "サービス・その他", "エネルギー生成・蓄電"],
-  LLY: ["糖尿病・肥満症薬", "がん領域", "免疫領域", "その他医薬品"],
-  V: ["サービス収入", "データ処理収入", "国際取引収入", "付加価値サービス"],
-  KO: ["濃縮原液", "完成品飲料", "炭酸飲料", "水・スポーツ飲料・コーヒー・茶"],
-  DAL: ["旅客収入", "プレミアム座席", "ロイヤルティ", "貨物・整備関連サービス"]
-};
 
 function isGenericRevenueCategoryLabel(label: string): boolean {
   return /^(product revenue|service revenue|segment revenue|geography revenue|transaction revenue|other revenues?|取引収益|その他収益)$/i.test(label.trim());
@@ -459,7 +386,7 @@ function buildRevenueBreakdownAnswer(filing: FilingCacheRecord): ChatResponsePay
 
   const breakdown = summarizeRevenueBreakdown(filing.sourceChunks);
   if (!breakdown) {
-    return buildKnownRevenueBreakdownAnswer(filing);
+    return null;
   }
 
   const sources = breakdown.sourceIds.flatMap((sourceId) => {
@@ -477,12 +404,12 @@ function buildRevenueSnapshotAnswer(filing: FilingCacheRecord): ChatResponsePayl
   const revenue = filing.metrics.find((metric) => metric.logicalName === "revenue");
   const revenueSourceId = findMetricSourceId(filing, "revenue");
   if (!revenue || !revenueSourceId) {
-    return buildKnownRevenueBreakdownAnswer(filing);
+    return null;
   }
 
   const revenueSource = filing.sourceChunks.find((chunk) => chunk.sourceId === revenueSourceId);
   if (!revenueSource) {
-    return buildKnownRevenueBreakdownAnswer(filing);
+    return null;
   }
 
   const sources: ChatEvidenceSource[] = [buildSecFilingSource(revenueSource)];
@@ -497,13 +424,10 @@ function buildRevenueSnapshotAnswer(filing: FilingCacheRecord): ChatResponsePayl
       }
     }
     answerParts.push(`売上の柱は、${usableBreakdownLabels.join("、")}です。`);
-  } else {
-    const knownBreakdown = TICKER_REVENUE_BREAKDOWNS[filing.ticker.toUpperCase()];
-    if (knownBreakdown) {
-      answerParts.push(`売上構造を見る軸は、${knownBreakdown.slice(0, 5).join("、")}です。`);
-      sources.push(...fallbackOverviewSources(filing));
-    }
   }
+  // When no breakdown was extracted the answer simply omits the 売上構造 sentence.
+  // The metric observation and the driver sentence below still carry their own
+  // sources.
 
   const drivers = summarizeRevenueDrivers(filing.sourceChunks);
   if (drivers) {
@@ -607,6 +531,12 @@ function summarizeSegmentPerformance(filing: FilingCacheRecord): {
     { label: "資源産業", pattern: /\bResource Industries\b/i },
     { label: "エネルギー・輸送", pattern: /\bEnergy\s*&\s*Transportation\b/i }
   ];
+  // NOT a constant-answer table. Nothing here is ever emitted on its own: every
+  // label below must first have been matched against a real MD&A sentence by the
+  // `signals` patterns above, and this allowlist then narrows those matches to
+  // the ones that mean something for this issuer. It only ever removes claims —
+  // it cannot add one. Contrast the tables deleted from this file, which
+  // asserted company facts the filing was never consulted for.
   const issuerSignalLabels: Record<string, string[]> = {
     AAPL: ["日本", "欧州", "アジア太平洋", "米州"],
     JPM: ["純利息収入", "非利息収入"],
@@ -673,26 +603,6 @@ function nearestSegmentDirection(
   if (!Number.isFinite(positiveDistance) && !Number.isFinite(negativeDistance)) return null;
   if (positiveDistance === negativeDistance) return null;
   return positiveDistance < negativeDistance ? "strong" : "weak";
-}
-
-function buildKnownRevenueBreakdownAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {
-  const knownBreakdown = TICKER_REVENUE_BREAKDOWNS[filing.ticker.toUpperCase()];
-  if (!knownBreakdown) {
-    return null;
-  }
-  const sources = fallbackOverviewSources(filing);
-  if (sources.length === 0) {
-    return null;
-  }
-  logEvent("chat_constant_answer_served", {
-    ticker: filing.ticker.toUpperCase(),
-    table: "TICKER_REVENUE_BREAKDOWNS",
-    sourceCount: sources.length
-  });
-  return {
-    answer: `売上構造を見る軸は、${knownBreakdown.slice(0, 5).join("、")}です。`,
-    sources
-  };
 }
 
 function summarizeBusinessOverview(sourceChunks: SourceChunkRecord[]): {

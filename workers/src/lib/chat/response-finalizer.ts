@@ -115,9 +115,6 @@ export async function finalizeChatResponse({
   );
   const specializedDurabilityRepairAccepted = Boolean(
     q06DurabilityRepair?.labels.some((label) =>
-      label === "q04_bank_durability_source_backed_repair" ||
-      label === "q04_retail_durability_source_backed_repair" ||
-      label === "q04_platform_durability_source_backed_repair" ||
       label === "q04_generic_durability_source_backed_repair"
     ) &&
     languageCheck.ok &&
@@ -964,12 +961,7 @@ function isSourceBackedHardFollowupAccepted({
     return hasExplicitInsufficiencyRepair || selectedNarrativeRepair;
   }
 
-  if (q06DurabilityRepairLabels.some((label) =>
-    label === "q04_bank_durability_source_backed_repair" ||
-    label === "q04_retail_durability_source_backed_repair" ||
-    label === "q04_platform_durability_source_backed_repair" ||
-    label === "q04_generic_durability_source_backed_repair"
-  )) {
+  if (q06DurabilityRepairLabels.includes("q04_generic_durability_source_backed_repair")) {
     return true;
   }
 
@@ -1615,28 +1607,14 @@ function repairDriverDurabilityFollowupAnswer(
   const labels: string[] = [];
   let repairedAnswer = answer;
 
-  const bankRepair = buildJpmDurabilitySynthesis(answer, evidenceText, debug.lowQualityReason, filing);
-  if (bankRepair) {
-    repairedAnswer = bankRepair;
-    labels.push("q04_bank_durability_source_backed_repair");
-  } else {
-    const retailRepair = buildWmtDurabilitySynthesis(answer, evidenceText, filing);
-    if (retailRepair) {
-      repairedAnswer = retailRepair;
-      labels.push("q04_retail_durability_source_backed_repair");
-    } else {
-      const platformRepair = buildGoogleDurabilitySynthesis(answer, evidenceText, filing);
-      if (platformRepair) {
-        repairedAnswer = platformRepair;
-        labels.push("q04_platform_durability_source_backed_repair");
-      } else {
-        const genericRepair = buildGenericDriverDurabilitySynthesis(answer, evidenceText);
-        if (genericRepair) {
-          repairedAnswer = genericRepair;
-          labels.push("q04_generic_durability_source_backed_repair");
-        }
-      }
-    }
+  // Composed out of the evidence labels this filing actually produced. There is
+  // deliberately no per-issuer branch here: the JPM/WMT/GOOGL syntheses that
+  // used to precede this call wrote the driver sentences themselves and then
+  // claimed a `source_backed` label for them.
+  const genericRepair = buildGenericDriverDurabilitySynthesis(answer, evidenceText);
+  if (genericRepair) {
+    repairedAnswer = genericRepair;
+    labels.push("q04_generic_durability_source_backed_repair");
   }
 
   const softenedAnswer = softenOverconfidentDurabilityWording(repairedAnswer);
@@ -1985,74 +1963,11 @@ function extractSourceGateEvidenceText(sourceGateEvidenceSlots?: Record<string, 
   return pieces.join(" ").slice(0, 5000);
 }
 
-function buildJpmDurabilitySynthesis(
-  answer: string,
-  evidenceText: string,
-  lowQualityReason: unknown,
-  filing: FilingCacheRecord
-): string | null {
-  if (!isJpmLikeFiling(filing) || !hasBankDurabilityEvidence(evidenceText)) {
-    return null;
-  }
-  const underAnswered = lowQualityReason === "durability_missing_assessment" ||
-    /セグメント・地域別の強弱|十分に分解できません|確認すべき箇所は/.test(answer);
-  if (!underAnswered) {
-    return null;
-  }
-
-  const lower = evidenceText.toLowerCase();
-  const niiClause = /net interest income|\bnii\b/.test(lower)
-    ? "純利息収入は、市場業務の純利息収入、カード事業のリボ残高、法人預金残高、投資証券活動が寄与しました。一方、預金マージンの縮小や金利低下の影響も受けるため、継続性は金利環境次第です。"
-    : "";
-  const nirClause = /noninterest income|\bnir\b|investment banking|markets noninterest|asset management|payments|first republic/.test(lower)
-    ? "非金利収入は、市場業務、資産運用、決済、投資銀行の手数料収入が寄与しました。ただし、市場関連収益や一時利益は変動しやすい要因です。"
-    : "";
-  if (!niiClause && !nirClause) {
-    return null;
-  }
-
-  return `提出資料だけでは継続性は断定できません。${niiClause}${nirClause}次回は純利息収入、非金利収入、預金マージン、市場業務収益、手数料収入を確認する必要があります。`;
-}
-
-function buildWmtDurabilitySynthesis(
-  answer: string,
-  evidenceText: string,
-  filing: FilingCacheRecord
-): string | null {
-  if (!isWmtLikeFiling(filing) || !hasRetailDurabilityEvidence(evidenceText) || !isDurabilityUnderAnswer(answer)) {
-    return null;
-  }
-
-  return "提出資料だけでは継続性は断定できません。Walmart米国では、既存店売上にECが寄与し、取引件数と販売数量、食品・ヘルスケア商品の強さ、Walmart+の会員利用とオムニチャネル利用が支えになっています。これらは継続性を見る材料ですが、持続性を判断するには、次回の既存店売上、客数、客単価、EC寄与、会員利用、燃料価格の影響を確認する必要があります。";
-}
-
-function buildGoogleDurabilitySynthesis(
-  answer: string,
-  evidenceText: string,
-  filing: FilingCacheRecord
-): string | null {
-  if (!isGoogleLikeFiling(filing) || !isDurabilityUnderAnswer(answer)) {
-    return null;
-  }
-  const lower = evidenceText.toLowerCase();
-  const hasSubscriptions = /paid subscriptions|subscriptions? revenues?|youtube services|google one/.test(lower);
-  const hasAdvertising = /youtube ads|advertis(?:ing|er)|direct response|brand advertising/.test(lower);
-  const hasForeignExchange = /foreign currency|foreign exchange|currency exchange/.test(lower);
-  const hasCloud = /google cloud/.test(lower);
-  const hasDurabilityContext = /seasonal|competition|paid subscriptions|foreign currency|device mix|underlying business trends/.test(lower);
-  if (!hasDurabilityContext || !(hasSubscriptions || hasAdvertising || hasForeignExchange || hasCloud)) {
-    return null;
-  }
-
-  const observations = [
-    hasSubscriptions ? "有料サブスクリプションの増加は継続性を見る材料です。" : "",
-    hasAdvertising ? "広告売上は、広告主の競争、広告形式、端末構成、季節性によって変動します。" : "",
-    hasForeignExchange ? "為替影響も四半期ごとに変動し得ます。" : "",
-    hasCloud ? "Google Cloudは、次回も売上成長率が続くかを確認する必要があります。" : ""
-  ].filter(Boolean).join("");
-  return `提出資料だけでは継続性は断定できません。${observations}次回は、Googleサービス、Google Cloud、YouTube広告、有料サブスクリプションの成長率を同じ基準で確認する必要があります。`;
-}
-
+/**
+ * The only durability synthesis. Every clause is built from labels that
+ * `inferPreviousAnswerDriverLabels` read out of the evidence text, so the
+ * sentence cannot name a driver the evidence does not contain.
+ */
 function buildGenericDriverDurabilitySynthesis(answer: string, evidenceText: string): string | null {
   if (!isDurabilityUnderAnswer(answer) || !hasGenericDurabilityEvidence(evidenceText)) {
     return null;
@@ -2070,30 +1985,6 @@ function buildGenericDriverDurabilitySynthesis(answer: string, evidenceText: str
 
 function isJpmLikeFiling(filing: FilingCacheRecord): boolean {
   return /\bJPM\b|JPMorgan|Chase/i.test(`${filing.ticker} ${filing.companyName}`);
-}
-
-function isWmtLikeFiling(filing: FilingCacheRecord): boolean {
-  return /\bWMT\b|Walmart/i.test(`${filing.ticker} ${filing.companyName}`);
-}
-
-function isGoogleLikeFiling(filing: FilingCacheRecord): boolean {
-  return /\bGOOGL?\b|Alphabet|Google/i.test(`${filing.ticker} ${filing.companyName}`);
-}
-
-function hasBankDurabilityEvidence(text: string): boolean {
-  const lower = text.toLowerCase();
-  const hasNii = /net interest income|\bnii\b|deposit margin compression|wholesale deposit|card services/.test(lower);
-  const hasNir = /noninterest income|\bnir\b|markets noninterest|investment banking|asset management|payments|first republic/.test(lower);
-  const hasDurabilityContext = /deposit margin compression|lower rates|markets|investment banking|first republic|revolving balances|wholesale deposit|fees|gain/.test(lower);
-  return (hasNii || hasNir) && hasDurabilityContext;
-}
-
-function hasRetailDurabilityEvidence(text: string): boolean {
-  const lower = text.toLowerCase();
-  const hasComparableSales = /comparable sales|comp sales|same-store sales/.test(lower);
-  const hasRetailDriver = /ecommerce|e-commerce|walmart\+|member engagement|membership|omnichannel|transactions|unit volumes|average ticket|traffic|ticket/.test(lower);
-  const hasContext = /continued strength|driven by|contributed|growth|fuel|grocery|health and wellness|health & wellness/.test(lower);
-  return hasComparableSales && hasRetailDriver && hasContext;
 }
 
 function hasGenericDurabilityEvidence(text: string): boolean {

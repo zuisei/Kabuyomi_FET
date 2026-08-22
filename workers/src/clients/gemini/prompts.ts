@@ -480,15 +480,34 @@ export function retryInstruction(input: ChatPromptInput): string {
 }
 
 /**
- * The factual pack carries seededOnlyLabels for diagnostics — which labels came
- * from the hardcoded seed table rather than from the filing. That is internal
- * attribution about the pack, not a fact about the company, so it must not be
- * sent to the model: both serialisation points spread the whole pack.
+ * The single choke-point where a ChatFactualPack becomes model input.
+ *
+ * It is an allowlist, not a blocklist: a field added to `ChatFactualPack` does
+ * not reach the model until it is named here. That direction matters — the
+ * prompt tells the model to prefer the factual pack over the raw excerpts, so
+ * anything that lands in this object is treated as an established fact about
+ * the company. Diagnostics, provenance and counts describe the pack rather than
+ * the issuer and must stay out.
+ *
+ * Both serialisation points above go through this function; neither spreads the
+ * pack directly.
  */
 function promptSafeFactualPack(factualPack: ChatFactualPack | undefined): Record<string, unknown> {
   if (!factualPack) {
     return {};
   }
-  const { seededOnlyLabels: _seededOnlyLabels, ...promptFields } = factualPack;
-  return promptFields;
+  return {
+    kind: factualPack.kind,
+    companyName: factualPack.companyName,
+    ticker: factualPack.ticker,
+    formType: factualPack.formType,
+    periodOfReport: factualPack.periodOfReport,
+    ...(factualPack.productsServices ? { productsServices: factualPack.productsServices } : {}),
+    ...(factualPack.reportableSegments ? { reportableSegments: factualPack.reportableSegments } : {}),
+    ...(factualPack.revenueCategories ? { revenueCategories: factualPack.revenueCategories } : {}),
+    ...(factualPack.riskCategories ? { riskCategories: factualPack.riskCategories } : {}),
+    ...(factualPack.largestRevenueCategory ? { largestRevenueCategory: factualPack.largestRevenueCategory } : {}),
+    sourceIds: factualPack.sourceIds,
+    missingFields: factualPack.missingFields
+  };
 }

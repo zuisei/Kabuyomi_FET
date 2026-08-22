@@ -1,218 +1,206 @@
 #!/usr/bin/env node
-// Reports, per production tracked ticker, which constant-derived answer paths
-// can fire for it. Nothing here changes an answer: it makes the existing
-// coverage visible so the "every statement has a source" claim can be checked
-// against what the code actually does.
+// Absence tripwire for the constant-answer surfaces.
 //
-// The tables are module-private, so this reads them out of the source rather
-// than importing them. Every extractor asserts it found something — if a table
-// is renamed or restructured this fails loudly instead of silently reporting
-// "no coverage".
+// This script used to enumerate them: for each production tracked ticker, which
+// constant-derived answer path could fire for it. That surface is gone — the
+// tables and per-issuer synthesis functions were deleted rather than gated — so
+// the script's job changed from measuring the surface to keeping it at zero.
 //
-// Usage: node scripts/report-constant-answer-coverage.mjs [--write]
+// It fails if any of the deleted declarations reappears anywhere under
+// workers/src. Reintroducing one is not a style question: each of them asserted
+// a fact about a company that the filing was never consulted for, and then
+// attached that filing's source chunks to the answer as citations. That is the
+// exact behaviour the product's 「すべての記述に、出典があります」 claim rules out.
+//
+// Usage:
+//   node scripts/report-constant-answer-coverage.mjs           # check, print report
+//   node scripts/report-constant-answer-coverage.mjs --write    # also regenerate the doc
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const workers = resolve(here, "..");
 const repo = resolve(workers, "..");
+const sourceRoot = resolve(workers, "src");
 
-function read(relativePath) {
-  return readFileSync(resolve(workers, relativePath), "utf8");
-}
+/**
+ * The declarations removed when the constant-answer paths were deleted. A match
+ * on any of these names under src/ means one came back.
+ */
+export const FORBIDDEN_DECLARATIONS = [
+  {
+    name: "TICKER_BUSINESS_OVERVIEWS",
+    was: "lib/chat/deterministic.ts",
+    served: "「{社名}は、{定数}で収益を得ている会社です。」+ filing の実ソースチップ"
+  },
+  {
+    name: "TICKER_REVENUE_BREAKDOWNS",
+    was: "lib/chat/deterministic.ts",
+    served: "「売上構造を見る軸は、{定数}です。」+ filing の実ソースチップ"
+  },
+  {
+    name: "seedKnownTickerLabels",
+    was: "lib/chat/context-factual-pack.ts",
+    served: "本文の有無に関係なく factual pack に定数ラベルを merge"
+  },
+  {
+    name: "seedKnownTickerRevenueFacts",
+    was: "lib/chat/context-factual-pack.ts",
+    served: "本文の有無に関係なく factual pack に定数の売上区分を merge"
+  },
+  {
+    name: "summarizeKnownCompanyBusiness",
+    was: "clients/gemini/fallback-known-business.ts (ファイルごと削除)",
+    served: "PH / CRWD / CEG / INTU の事業説明を完全な定数文字列で返す"
+  },
+  {
+    name: "buildJpmDurabilitySynthesis",
+    was: "lib/chat/response-finalizer.ts",
+    served: "JPM 類似 filing に銀行業の定型段落を返し source_backed ラベルを付ける"
+  },
+  {
+    name: "buildWmtDurabilitySynthesis",
+    was: "lib/chat/response-finalizer.ts",
+    served: "WMT 類似 filing に小売の定型段落を返し source_backed ラベルを付ける"
+  },
+  {
+    name: "buildGoogleDurabilitySynthesis",
+    was: "lib/chat/response-finalizer.ts",
+    served: "Alphabet 類似 filing にプラットフォームの定型段落を返す"
+  }
+];
 
-function fail(message) {
-  console.error(`report-constant-answer-coverage: ${message}`);
-  process.exit(1);
-}
+/**
+ * Kept on purpose. Both are per-ticker tables, and neither can produce a claim:
+ * they only narrow claims that extraction already matched against filing text.
+ * Listed here so a reader does not take the zero above as "we stopped looking".
+ */
+export const DELIBERATELY_KEPT = [
+  {
+    name: "issuerSignalLabels",
+    where: "lib/chat/deterministic.ts",
+    why: "MD&A の実文から抽出済みのシグナルを、その発行体にとって意味のあるものだけに絞る。追加はできず、削るだけ。"
+  },
+  {
+    name: "normalizeSector",
+    where: "lib/chat/source-gate.ts",
+    why: "どの根拠タイプを要求するかを決める sector 判定。回答文そのものを供給しない。"
+  }
+];
 
-/** Pulls the top-level keys out of an object literal declared as `<declaration> {` ... `};`. */
-function objectLiteralKeys(source, declaration, label) {
-  const start = source.indexOf(declaration);
-  if (start === -1) fail(`could not find ${label} (${declaration})`);
-  const open = source.indexOf("{", start);
-  let depth = 0;
-  let end = open;
-  for (; end < source.length; end += 1) {
-    if (source[end] === "{") depth += 1;
-    else if (source[end] === "}") {
-      depth -= 1;
-      if (depth === 0) break;
+function listTypeScriptFiles(directory) {
+  const found = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const full = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      found.push(...listTypeScriptFiles(full));
+    } else if (entry.name.endsWith(".ts")) {
+      found.push(full);
     }
   }
-  const body = source.slice(open + 1, end);
-  // Only depth-1 keys: strip nested objects first.
-  let flattened = "";
-  depth = 0;
-  for (const char of body) {
-    if (char === "{") depth += 1;
-    else if (char === "}") depth -= 1;
-    else if (depth === 0) flattened += char;
+  return found;
+}
+
+/**
+ * @returns {{ files: number, violations: Array<{ name: string, file: string, line: number }> }}
+ */
+export function scanForConstantSurfaces(root = sourceRoot) {
+  const files = listTypeScriptFiles(root);
+  if (files.length === 0) {
+    throw new Error(`no TypeScript files found under ${root} — the tripwire is not looking at the source tree`);
   }
-  const keys = [...flattened.matchAll(/(?:^|,)\s*([A-Z][A-Z0-9.\-]{0,15})\s*:/g)].map((m) => m[1]);
-  if (keys.length === 0) fail(`${label} produced no ticker keys — the table shape changed`);
-  return new Set(keys);
-}
 
-/** Pulls tickers out of an inline array literal on the line matching `anchor`. */
-function inlineArrayTickers(source, anchor, label) {
-  const line = source.split("\n").find((candidate) => candidate.includes(anchor));
-  if (!line) fail(`could not find ${label} (${anchor})`);
-  const tickers = [...line.matchAll(/"([A-Z][A-Z0-9.\-]{0,15})"/g)].map((m) => m[1]);
-  if (tickers.length === 0) fail(`${label} produced no tickers — the shape changed`);
-  return new Set(tickers);
-}
-
-const trackedSource = read("src/lib/tracked-tickers.ts");
-const trackedBlock = trackedSource.slice(
-  trackedSource.indexOf("DEFAULT_TRACKED_TICKERS"),
-  trackedSource.indexOf("] as const")
-);
-const tracked = [...trackedBlock.matchAll(/"([A-Z][A-Z0-9.\-]{0,15})"/g)].map((m) => m[1]);
-if (tracked.length === 0) fail("DEFAULT_TRACKED_TICKERS produced no tickers");
-
-const deterministic = read("src/lib/chat/deterministic.ts");
-const factualPack = read("src/lib/chat/context-factual-pack.ts");
-const knownBusiness = read("src/clients/gemini/fallback-known-business.ts");
-const sourceGate = read("src/lib/chat/source-gate.ts");
-const finalizer = read("src/lib/chat/response-finalizer.ts");
-
-const surfaces = [
-  {
-    key: "事業内容(定数)",
-    where: "deterministic.ts TICKER_BUSINESS_OVERVIEWS",
-    note: "「{社名}は、{定数}で収益を得ている会社です。」を返し、filing の実ソースをチップとして添付する",
-    tickers: objectLiteralKeys(deterministic, "const TICKER_BUSINESS_OVERVIEWS", "TICKER_BUSINESS_OVERVIEWS")
-  },
-  {
-    key: "売上区分(定数)",
-    where: "deterministic.ts TICKER_REVENUE_BREAKDOWNS",
-    note: "売上の内訳を定数で提示する",
-    tickers: objectLiteralKeys(deterministic, "const TICKER_REVENUE_BREAKDOWNS", "TICKER_REVENUE_BREAKDOWNS")
-  },
-  {
-    key: "許可ラベル(定数)",
-    where: "deterministic.ts issuerSignalLabels",
-    note: "抽出されたシグナルをこの定数リストに載っているものだけに絞る",
-    tickers: objectLiteralKeys(deterministic, "const issuerSignalLabels", "issuerSignalLabels")
-  },
-  {
-    key: "factual pack への seed",
-    where: "context-factual-pack.ts seedKnownTickerLabels",
-    note: "**本文に出ているかに関係なく** merge され、プロンプトは factual pack を raw excerpt より優先しろと指示する",
-    tickers: objectLiteralKeys(factualPack, "const seeds: Record<string, Record<typeof field, string[]>>", "seedKnownTickerLabels seeds")
-  },
-  {
-    key: "既知事業ラベル",
-    where: "context-factual-pack.ts hasKnownBusinessLabels",
-    note: "定数ラベルを持つ銘柄として扱う",
-    tickers: inlineArrayTickers(factualPack, '"PH", "CRWD", "INTU", "CEG"', "hasKnownBusinessLabels")
-  },
-  {
-    key: "売上ファクト seed",
-    where: "context-factual-pack.ts seedKnownTickerRevenueFacts",
-    note: "売上区分を定数で seed する",
-    tickers: inlineArrayTickers(factualPack, 'if (!["AAPL", "MSFT", "AMZN"', "seedKnownTickerRevenueFacts")
-  },
-  {
-    key: "定数の事業説明",
-    where: "gemini/fallback-known-business.ts",
-    note: "完全な定数文字列を返す",
-    tickers: new Set([...knownBusiness.matchAll(/ticker === "([A-Z][A-Z0-9.\-]{0,15})"/g)].map((m) => m[1]))
-  },
-  {
-    key: "sector 判定表",
-    where: "source-gate.ts normalizeSector",
-    note: "この表に無い銘柄は companyName のキーワードだけで sector が決まる",
-    tickers: new Set([...sourceGate.matchAll(/tickerKey === "([A-Z][A-Z0-9.\-]{0,15})"/g)].map((m) => m[1]))
+  const violations = [];
+  for (const file of files) {
+    const lines = readFileSync(file, "utf8").split("\n");
+    lines.forEach((text, index) => {
+      for (const declaration of FORBIDDEN_DECLARATIONS) {
+        if (text.includes(declaration.name)) {
+          violations.push({ name: declaration.name, file: file.slice(workers.length + 1), line: index + 1 });
+        }
+      }
+    });
   }
-];
-
-// The durability syntheses gate on a company-name regex rather than a ticker table.
-const synthesisGates = [
-  { key: "JPM 定型合成", pattern: /\bJPM\b/, where: "response-finalizer.ts buildJpmDurabilitySynthesis" },
-  { key: "WMT 定型合成", pattern: /\bWMT\b/, where: "response-finalizer.ts buildWmtDurabilitySynthesis" },
-  { key: "GOOG(L) 定型合成", pattern: /\bGOOGL?\b/, where: "response-finalizer.ts buildGoogleDurabilitySynthesis" }
-];
-for (const gate of synthesisGates) {
-  if (!finalizer.includes(gate.where.split(" ")[1])) fail(`could not find ${gate.where}`);
+  return { files: files.length, violations };
 }
 
-const rows = tracked.map((ticker) => {
-  const hits = surfaces.filter((surface) => surface.tickers.has(ticker)).map((surface) => surface.key);
-  const gateHits = synthesisGates.filter((gate) => gate.pattern.test(ticker)).map((gate) => gate.key);
-  return { ticker, hits: [...hits, ...gateHits] };
-});
-
-const uncovered = surfaces.flatMap((surface) =>
-  [...surface.tickers].filter((ticker) => !tracked.includes(ticker)).map((ticker) => ({ surface: surface.key, ticker }))
-);
-
-const lines = [];
-lines.push("# 定数由来の回答が発火しうる範囲(自動生成)");
-lines.push("");
-lines.push("`node workers/scripts/report-constant-answer-coverage.mjs --write` で再生成する。**手で編集しない。**");
-lines.push("");
-lines.push("回答を変更するものではない。「すべての記述に、出典があります」という表示に対して、");
-lines.push("実際にはどこまでが filing 由来でどこからが定数由来なのかを見えるようにするための表。");
-lines.push("");
-lines.push("**読み方の注意**: ここに出るのは「ティッカーで門が開くか」であって、");
-lines.push("「その質問で必ず発火するか」ではない。定型合成は evidence の有無と");
-lines.push("回答の未達判定も条件にする。逆に `factual pack への seed` は");
-lines.push("**本文の有無に関係なく** merge されるので、門が開けば必ず入る。");
-lines.push("");
-lines.push(`本番の追跡銘柄: ${tracked.length}件 (\`DEFAULT_TRACKED_TICKERS\`)`);
-lines.push("");
-lines.push("## 銘柄ごと");
-lines.push("");
-lines.push("| ティッカー | 定数経路の数 | 発火しうる経路 |");
-lines.push("|---|---:|---|");
-for (const row of rows) {
-  lines.push(`| \`${row.ticker}\` | ${row.hits.length} | ${row.hits.length === 0 ? "—" : row.hits.join(" / ")} |`);
-}
-lines.push("");
-const covered = rows.filter((row) => row.hits.length > 0);
-lines.push(`**${covered.length}/${tracked.length} 銘柄**が1つ以上の定数経路に該当する。`);
-lines.push("");
-lines.push("## 経路ごと");
-lines.push("");
-lines.push("| 経路 | 場所 | 本番銘柄の該当数 | 内容 |");
-lines.push("|---|---|---:|---|");
-for (const surface of surfaces) {
-  const hit = tracked.filter((ticker) => surface.tickers.has(ticker));
-  lines.push(`| ${surface.key} | \`${surface.where}\` | ${hit.length}/${tracked.length} | ${surface.note} |`);
-}
-for (const gate of synthesisGates) {
-  const hit = tracked.filter((ticker) => gate.pattern.test(ticker));
-  lines.push(`| ${gate.key} | \`${gate.where}\` | ${hit.length}/${tracked.length} | 完全な定数文字列。ラベルは \`source_backed\` を名乗る |`);
-}
-lines.push("");
-lines.push("## 本番の追跡リストに載っていない銘柄向けの定数");
-lines.push("");
-if (uncovered.length === 0) {
-  lines.push("なし。");
-} else {
-  lines.push("| 経路 | ティッカー |");
-  lines.push("|---|---|");
-  const grouped = new Map();
-  for (const entry of uncovered) {
-    if (!grouped.has(entry.surface)) grouped.set(entry.surface, []);
-    grouped.get(entry.surface).push(entry.ticker);
-  }
-  for (const [surface, tickers] of grouped) {
-    lines.push(`| ${surface} | ${tickers.map((t) => `\`${t}\``).join(", ")} |`);
+export function buildReport(scan) {
+  const lines = [];
+  lines.push("# 定数由来の回答が発火しうる範囲(自動生成)");
+  lines.push("");
+  lines.push("`node workers/scripts/report-constant-answer-coverage.mjs --write` で再生成する。**手で編集しない。**");
+  lines.push("");
+  lines.push("## 現状: 0件");
+  lines.push("");
+  lines.push("会社固有の記述を定数として持ち、それに filing の実ソースチップを付けて返す経路は");
+  lines.push("本番コードから削除済み。事業内容・売上区分・継続性の回答は、抽出結果か、");
+  lines.push("別途出典検証を通るモデル経路か、根拠不足を認める回答のいずれかになる。");
+  lines.push("");
+  lines.push(`スクリプトは \`workers/src\` 配下の ${scan.files} ファイルを走査し、`);
+  lines.push("下表の宣言が再び現れたら非ゼロ終了する。");
+  lines.push("");
+  lines.push("## 削除済みの宣言(再導入を禁止)");
+  lines.push("");
+  lines.push("| 宣言 | あった場所 | 返していたもの |");
+  lines.push("|---|---|---|");
+  for (const declaration of FORBIDDEN_DECLARATIONS) {
+    lines.push(`| \`${declaration.name}\` | \`${declaration.was}\` | ${declaration.served} |`);
   }
   lines.push("");
-  lines.push("これらは本番で追跡されていないため、表に載っていても発火する経路が無い。");
+  lines.push("## 意図的に残している銘柄別テーブル");
+  lines.push("");
+  lines.push("どちらも「実データに対するフィルタ・ゲート」であって、記述を作り出さない。");
+  lines.push("この0件は「見るのをやめた」という意味ではない。");
+  lines.push("");
+  lines.push("| 名前 | 場所 | 残す理由 |");
+  lines.push("|---|---|---|");
+  for (const kept of DELIBERATELY_KEPT) {
+    lines.push(`| \`${kept.name}\` | \`${kept.where}\` | ${kept.why} |`);
+  }
+  lines.push("");
+
+  if (scan.violations.length > 0) {
+    lines.push("## 検出された再導入");
+    lines.push("");
+    lines.push("| 宣言 | 場所 |");
+    lines.push("|---|---|");
+    for (const violation of scan.violations) {
+      lines.push(`| \`${violation.name}\` | \`${violation.file}:${violation.line}\` |`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n") + "\n";
 }
 
-const report = lines.join("\n") + "\n";
-if (process.argv.includes("--write")) {
-  const out = resolve(repo, "docs/quality/CONSTANT_ANSWER_COVERAGE.md");
-  writeFileSync(out, report);
-  console.log(`wrote ${out}`);
-} else {
-  process.stdout.write(report);
+function main() {
+  const scan = scanForConstantSurfaces();
+  if (process.argv.includes("--write")) {
+    const out = resolve(repo, "docs/quality/CONSTANT_ANSWER_COVERAGE.md");
+    writeFileSync(out, buildReport(scan));
+    console.log(`wrote ${out}`);
+  }
+
+  if (scan.violations.length > 0) {
+    console.error("report-constant-answer-coverage: deleted constant-answer declarations are back:");
+    for (const violation of scan.violations) {
+      console.error(`  ${violation.name} at ${violation.file}:${violation.line}`);
+    }
+    console.error("");
+    console.error("These served company-specific text the filing was never consulted for, with");
+    console.error("the filing's own source chunks attached as citations. Answers must come from");
+    console.error("extraction, from the source-validated model path, or admit insufficiency.");
+    process.exit(1);
+  }
+
+  console.log(
+    `report-constant-answer-coverage: 0 constant-answer surfaces across ${scan.files} files under workers/src ` +
+    `(${FORBIDDEN_DECLARATIONS.length} declarations checked).`
+  );
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
 }

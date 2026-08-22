@@ -1,7 +1,6 @@
 import type { FilingCacheRecord, MetricSnapshot, SourceChunkRecord } from "../../env";
 import { formatMetricValue, formatYoYDelta, metricLabel } from "../../lib/metrics";
 import { analyzeQuestion, wantsNarrativeDepth, type QuestionProfile } from "./fallback-question";
-import { summarizeKnownCompanyBusiness } from "./fallback-known-business";
 import type { ChatPromptInput, GeminiChatAnswer } from "./types";
 
 export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
@@ -13,11 +12,6 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
   const nonHardFallback = buildNonHardFallbackIfNeeded(input, profile, sourceChunks, metric, metricSourceId, narrative);
 
   if (profile.asksBusinessOverview) {
-    const knownBusiness = summarizeKnownCompanyBusiness(input.filing);
-    if (knownBusiness) {
-      return knownBusiness;
-    }
-
     if (narrative) {
       return {
         answer: summarizeBusinessNarrativeEvidence(narrative, input.filing.companyName),
@@ -719,7 +713,6 @@ function sectorRevenueDriverChecklist(filing: FilingCacheRecord): string {
   const ticker = filing.ticker.toUpperCase();
   const company = filing.companyName.toLowerCase();
   const haystack = filing.mdaText.slice(0, 8000).toLowerCase();
-  const companyProfile = `${ticker} ${company}`;
 
   if (ticker === "WMT" || /walmart|sam'?s club/.test(company)) {
     return "小売では、既存店売上、traffic、ticket、eCommerce、membership/advertising、在庫とgross marginを分けて確認する必要があります。";
@@ -737,7 +730,7 @@ function sectorRevenueDriverChecklist(filing: FilingCacheRecord): string {
     return "Appleのような製品・サービス企業では、iPhone、Services、Mac、地域別売上、為替、製品mixを分けて確認する必要があります。";
   }
 
-  if (isBankOrFinancialCompany(companyProfile)) {
+  if (isBankOrFinancialCompany(ticker, company)) {
     return "銀行では、net interest income、noninterest income、信用損失引当、預金・貸出残高、投資銀行やマーケット収益を分けて確認する必要があります。";
   }
 
@@ -768,8 +761,34 @@ function sectorRevenueDriverChecklist(filing: FilingCacheRecord): string {
   return "次に見るべきなのは、事業別・地域別・製品別の売上説明、価格や数量、顧客需要のどれが増減に効いたかです。";
 }
 
-function isBankOrFinancialCompany(companyProfile: string): boolean {
-  return /\b(jpm|bac|c|wfc|gs|ms|pnc|usb|td|schw|blk|bank|bancorp|financial|capital markets|wealth management|asset management|brokerage)\b/i.test(companyProfile);
+/**
+ * Ticker symbols and name keywords are different kinds of evidence, so they are
+ * matched differently. The tickers are compared exactly against the ticker
+ * field: as regex alternatives against `${ticker} ${companyName}` the short ones
+ * matched name text — `\bc\b` fired on any company whose name contained a
+ * standalone "c", and `\bms\b`/`\bgs\b`/`\btd\b` were the same bug waiting for a
+ * name to hit. Only the multi-word and unambiguous keywords are matched against
+ * the name.
+ */
+const FINANCIAL_SECTOR_TICKERS = new Set([
+  "JPM",
+  "BAC",
+  "C", // Citigroup
+  "WFC",
+  "GS",
+  "MS",
+  "PNC",
+  "USB",
+  "TD",
+  "SCHW",
+  "BLK"
+]);
+
+function isBankOrFinancialCompany(ticker: string, companyName: string): boolean {
+  if (FINANCIAL_SECTOR_TICKERS.has(ticker.trim().toUpperCase())) {
+    return true;
+  }
+  return /\b(bank|bancorp|financial|capital markets|wealth management|asset management|brokerage)\b/i.test(companyName);
 }
 
 function buildClosestContextFallbackAnswer(
