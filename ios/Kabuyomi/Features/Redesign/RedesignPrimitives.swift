@@ -288,11 +288,23 @@ struct RedesignSourceChip: View {
     }
 
     private var badge: some View {
+        RedesignSourceBadge(text: descriptor.badge, ordinal: descriptor.ordinal)
+            .padding(.top, 1)
+    }
+}
+
+/// セクション種別バッジ。根拠チップと引用詳細の見出しで同じ形を使い、
+/// 一覧で見た行と開いた画面が同じものだと分かるようにする。
+struct RedesignSourceBadge: View {
+    let text: String
+    var ordinal: Int?
+
+    var body: some View {
         VStack(spacing: 1) {
-            Text(descriptor.badge)
+            Text(text)
                 .font(.system(size: 10, weight: .bold))
                 .tracking(0.6)
-            if let ordinal = descriptor.ordinal {
+            if let ordinal {
                 Text("\(ordinal)")
                     .font(.system(size: 9, weight: .bold))
                     .monospacedDigit()
@@ -306,7 +318,6 @@ struct RedesignSourceChip: View {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .stroke(KabuyomiTheme.accent.opacity(0.28), lineWidth: KabuyomiTheme.hairlineWidth)
         }
-        .padding(.top, 1)
         .accessibilityHidden(true)
     }
 }

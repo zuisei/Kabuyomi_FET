@@ -650,6 +650,48 @@ final class ConversationPromptTests: XCTestCase {
         XCTAssertEqual(displayableMessageSources(sources + [sources[0]], in: company).count, 2)
     }
 
+    // MARK: - v2 発見・履歴の密度
+
+    /// ミッション文は初回だけ立て、保存や履歴がある人には控えめに落とす。
+    func testMissionProminenceRecedesOnceTheUserHasHistory() {
+        XCTAssertEqual(
+            redesignMissionProminence(hasRecentCompanies: false, hasSavedCompanies: false),
+            .prominent
+        )
+        XCTAssertEqual(
+            redesignMissionProminence(hasRecentCompanies: true, hasSavedCompanies: false),
+            .receded
+        )
+        XCTAssertEqual(
+            redesignMissionProminence(hasRecentCompanies: false, hasSavedCompanies: true),
+            .receded
+        )
+        XCTAssertEqual(
+            redesignMissionProminence(hasRecentCompanies: true, hasSavedCompanies: true),
+            .receded
+        )
+    }
+
+    func testHistoryTrailingTextPacksAnswerCountAndLatestActivityIntoOneLine() {
+        let activity = Date(timeIntervalSince1970: 1_777_000_000)
+        XCTAssertEqual(
+            redesignHistoryTrailingText(answerCount: 0, latestActivity: nil, formatted: { _ in "x" }),
+            "回答なし"
+        )
+        XCTAssertEqual(
+            redesignHistoryTrailingText(answerCount: 3, latestActivity: nil, formatted: { _ in "x" }),
+            "回答 3件"
+        )
+        XCTAssertEqual(
+            redesignHistoryTrailingText(answerCount: 3, latestActivity: activity, formatted: { _ in "5/2 14:03" }),
+            "回答 3件 ・ 5/2 14:03"
+        )
+        XCTAssertEqual(
+            redesignHistoryTrailingText(answerCount: 0, latestActivity: activity, formatted: { _ in "5/2 14:03" }),
+            "回答なし ・ 5/2 14:03"
+        )
+    }
+
     // MARK: - v2 XBRL 抜粋の数値整形
 
     private func xbrlChunk(id: String, title: String, tag: String, text: String, order: Int) -> SourceChunkPayload {
