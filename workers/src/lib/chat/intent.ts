@@ -1,4 +1,5 @@
 import { classifyHistoricalComparisonMode } from "../history-question";
+import { filingSegmentVocabulary } from "./context-factual-pack";
 import { isBusinessOverviewQuestion } from "./business-overview-question";
 
 export type QuestionIntent =
@@ -16,7 +17,10 @@ export type QuestionIntent =
   | "investment_view"
   | "unknown";
 
-export function classifyQuestionIntent(question: string): QuestionIntent {
+export function classifyQuestionIntent(
+  question: string,
+  options: { ticker?: string } = {}
+): QuestionIntent {
   const normalized = question.replace(/\s+/g, "").toLowerCase();
 
   if (classifyHistoricalComparisonMode(question)) {
@@ -88,6 +92,17 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
 
   if (/(セグメント|segment|部門|地域|geography|地域別|製品別|productmix|構成|内訳)/.test(normalized)) {
     return "segment_analysis";
+  }
+
+  // 会社固有のセグメント・製品名(AWS、iPhone、Google Cloud …)を名指しした質問は、
+  // 一般語の段で拾えなくてもセグメント分析として扱う。利益率など上の段が先に
+  // 取るので、「AWS margin」は margin のまま。空白を潰した normalized ではなく
+  // 元の質問に対して語境界付きで照合する。
+  if (options.ticker) {
+    const original = question.toLowerCase();
+    if (filingSegmentVocabulary(options.ticker).some((pattern) => pattern.test(original))) {
+      return "segment_analysis";
+    }
   }
 
   if (

@@ -2,6 +2,7 @@ import type { ChatPromptInput, QuoteTranslationPromptInput, SummaryPromptInput }
 import type { MetricSnapshot, SourceChunkRecord, VerifiedFinancialFact } from "../../env";
 import { formatMetricValue, formatYoYDelta, metricLabel } from "../../lib/metrics";
 import { buildVerifiedFinancialFacts } from "../../lib/chat/verified-financial-facts";
+import { filingSegmentVocabulary } from "../../lib/chat/context-factual-pack";
 import type { ChatFactualPack } from "../../lib/chat/context-factual-pack";
 
 export function buildSummaryPrompt(input: SummaryPromptInput): string {
@@ -140,7 +141,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     `Question intent: ${contextPack.questionIntent}`,
     `Content mode: ${contextPack.contentMode}`,
     "Answer format:",
-    answerFormatInstruction(contextPack.questionIntent),
+    answerFormatInstruction(contextPack.questionIntent, { question: input.question, ticker: input.filing.ticker }),
     retryInstruction(input),
     "",
     "Filing metadata:",
@@ -188,7 +189,7 @@ export function buildChatPromptTemplateVariables(input: ChatPromptInput): Record
     question: questionForPrompt,
     question_intent: contextPack.questionIntent,
     content_mode: contextPack.contentMode,
-    answer_format_instruction: answerFormatInstruction(contextPack.questionIntent),
+    answer_format_instruction: answerFormatInstruction(contextPack.questionIntent, { question: input.question, ticker: input.filing.ticker }),
     retry_instruction: retryInstruction(input) || "なし",
     filing_metadata_json: JSON.stringify({
       filingKey: input.filing.filingKey,
@@ -401,7 +402,22 @@ export function quoteTranslationResponseJsonSchema() {
   };
 }
 
-export function answerFormatInstruction(intent: NonNullable<ChatPromptInput["questionIntent"]>): string {
+/**
+ * 質問が会社固有の区分(AWS、iPhone、Google Cloud …)を名指ししているとき、
+ * 「主な売上区分 / 大きい区分 / …」のスロット形式は質問とずれる
+ * (「AWS の伸びは？」に「主な売上区分: AWS。大きい区分: AWS。」と返していた、
+ * 2026-08-22 実機レビュー)。名指しされた区分に絞った文章形式に切り替える。
+ */
+export function answerFormatInstruction(
+  intent: NonNullable<ChatPromptInput["questionIntent"]>,
+  focus: { question?: string; ticker?: string } = {}
+): string {
+  if (intent === "segment_analysis" && focus.question && focus.ticker) {
+    const lowered = focus.question.toLowerCase();
+    if (filingSegmentVocabulary(focus.ticker).some((pattern) => pattern.test(lowered))) {
+      return "質問で名指しされた区分(製品・サービス・セグメント)だけに絞り、2〜4文で答える。順に: その区分の当期の増減(数値があれば数値つき)、資料が挙げる理由、資料だけでは分からない点。他の区分の列挙や「主な売上区分」「大きい区分」の見出しは書かない。";
+    }
+  }
   switch (intent) {
     case "business_overview":
       return "Cover, in this order: 一言概要, 主な収益源, 直近filingで見える変化, 注意点。";

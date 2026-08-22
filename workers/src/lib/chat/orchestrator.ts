@@ -78,7 +78,7 @@ export async function buildChatResponse(
     }
     return modelResponse.modelProvider === "openai" ? "openai" : "gemini";
   };
-  const questionIntent = classifyQuestionIntent(question);
+  const questionIntent = classifyQuestionIntent(question, { ticker: filing.ticker });
   const contentMode = resolveContentMode(filing);
   let historical = null;
   try {

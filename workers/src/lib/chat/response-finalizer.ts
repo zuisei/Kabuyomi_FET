@@ -1,4 +1,5 @@
 import type { Env, FilingCacheRecord, VerifiedFinancialFact } from "../../env";
+import { filingSegmentVocabulary } from "./context-factual-pack";
 import type { ChatFallbackKind } from "../../clients/gemini/types";
 import type { RemoteConfig } from "../remote-config";
 import { hashForLog, logEvent } from "../logging";
@@ -296,16 +297,27 @@ export async function finalizeChatResponse({
   const numericFacts = responsePath === "historical"
     ? verifiedFacts.filter((fact) => responseBeforeNumericAlignment.sources.some((source) => source.sourceId === fact.sourceId))
     : verifiedFacts;
+  const citedSourceTexts = (sourceIds: string[]) =>
+    filing.sourceChunks.filter((chunk) => sourceIds.includes(chunk.sourceId)).map((chunk) => chunk.text);
+  // モデルが見た文脈(selectedSourceIds)。引用し忘れた数字の出典はここから拾い、
+  // requiredSourceIds 経由で根拠チップに出す。
+  const contextSources = filing.sourceChunks
+    .filter((chunk) => (debug.selectedSourceIds ?? []).includes(chunk.sourceId))
+    .map((chunk) => ({ sourceId: chunk.sourceId, text: chunk.text }));
   const initialNumericAlignment = validateNumericAlignment({
     answer: sanitizedLanguageSafeAnswer,
     facts: numericFacts,
-    citedSourceIds: responseBeforeNumericAlignment.sources.map((source) => source.sourceId)
+    citedSourceIds: responseBeforeNumericAlignment.sources.map((source) => source.sourceId),
+    citedSourceTexts: citedSourceTexts(responseBeforeNumericAlignment.sources.map((source) => source.sourceId)),
+    contextSources
   });
   logNumericAlignmentResult(filing, responsePath, initialNumericAlignment);
   const validatedInitialNumericAlignment = revalidateNumericAlignmentForFinalSurface({
     initial: initialNumericAlignment,
     facts: numericFacts,
-    citedSourceIds: responseBeforeNumericAlignment.sources.map((source) => source.sourceId)
+    citedSourceIds: responseBeforeNumericAlignment.sources.map((source) => source.sourceId),
+    citedSourceTexts: citedSourceTexts(responseBeforeNumericAlignment.sources.map((source) => source.sourceId)),
+    contextSources
   });
   const initialSemanticQualityLabels = buildFinalSemanticQualityLabels({
     question,
@@ -574,6 +586,14 @@ export async function finalizeChatResponse({
       originalAnswerBeforeLanguageGuardSample: languageCheck.ok
         ? null
         : sampleUnsafeAnswer(originalAnswerBeforeLanguageGuard),
+      cleanupReplacedAnswerSample: `[${responsePath}] ${responseWithUrls.answer.slice(0, 400)}`,
+      cleanupFallbackUserReason: [
+        `cleanupBlocks=${cleanupBlocksModelAnswer}`,
+        `taxonomy=${cleanup.taxonomy?.fallbackUserReason ?? "none"}`,
+        `finalAnswerSafe=${finalAnswerSafe}`,
+        `deterministicFinalizerFallback=${deterministicFinalizerFallback}`,
+        `numericBlocked=${numericAlignmentBlocked}`
+      ].join(" "),
       genericFallbackPhraseDetected: bannedPhraseStillDetected,
       lowQualityReason: deterministicSemanticFallback || specializedDurabilityRepairAccepted || previousAnswerDurabilityRepairAccepted
         ? null
@@ -750,6 +770,8 @@ function revalidateNumericAlignmentForFinalSurface(input: {
   initial: NumericAlignmentResult;
   facts: VerifiedFinancialFact[];
   citedSourceIds: string[];
+  citedSourceTexts?: string[];
+  contextSources?: Array<{ sourceId: string; text: string }>;
 }): NumericAlignmentResult {
   // The API use case applies this same formatter to the returned answer. Run
   // it before the final numeric proof so the hash certifies the exact visible
@@ -768,7 +790,9 @@ function revalidateNumericAlignmentForFinalSurface(input: {
   const revalidated = validateNumericAlignment({
     answer: displayAnswer,
     facts: input.facts,
-    citedSourceIds: dedupeStrings([...input.citedSourceIds, ...input.initial.requiredSourceIds])
+    citedSourceIds: dedupeStrings([...input.citedSourceIds, ...input.initial.requiredSourceIds]),
+    citedSourceTexts: input.citedSourceTexts,
+    contextSources: input.contextSources
   });
   if (
     (revalidated.status !== "passed" && revalidated.status !== "not_applicable") ||
@@ -2053,7 +2077,7 @@ function cleanAnswerForQuestion(
     return cleanBusinessModelAnswer(normalizedAnswer, responsePath, fallbackKind);
   }
   if (isRevenueBreakdownQuestion(question, questionIntent)) {
-    const revenueBreakdownCleanup = cleanRevenueBreakdownAnswer(normalizedAnswer);
+    const revenueBreakdownCleanup = cleanRevenueBreakdownAnswer(normalizedAnswer, filing?.ticker);
     if (revenueBreakdownCleanup) {
       return revenueBreakdownCleanup;
     }
@@ -2119,8 +2143,8 @@ function isRevenueBreakdownQuestion(question: string, questionIntent?: string | 
   return /(売上|revenue|sales)/i.test(normalized) && /(内訳|区分|セグメント|segment|地域|region|製品|カテゴリ|category|伸びた|弱かった)/i.test(normalized);
 }
 
-function cleanRevenueBreakdownAnswer(answer: string): AnswerCleanupResult | null {
-  if (!hasGenericRevenueBreakdownOnly(answer)) {
+function cleanRevenueBreakdownAnswer(answer: string, ticker?: string): AnswerCleanupResult | null {
+  if (!hasGenericRevenueBreakdownOnly(answer, ticker)) {
     return null;
   }
   return sourceInsufficientCleanup(
@@ -2131,7 +2155,7 @@ function cleanRevenueBreakdownAnswer(answer: string): AnswerCleanupResult | null
   );
 }
 
-function hasGenericRevenueBreakdownOnly(answer: string): boolean {
+function hasGenericRevenueBreakdownOnly(answer: string, ticker?: string): boolean {
   const compact = answer.replace(/\s+/g, "");
   const hasGenericCategory =
     /(地域別売上|地域別の内訳|セグメント別|セグメント別売上|セグメント別売上高|セグメント別の売上|セグメント別の売上高|セグメント別の内訳|セグメント別売上の内訳|製品別売上|製品・カテゴリ別売上|売上区分|大きい区分|大きな区分|主な売上区分|主な売上区分は不明|区分別の内訳|個別セグメント別|セグメント別・地域別|製品別・地域別|全社ベース|売上高全体|総売上高|全体売上高|支払い関連サービス全般|servicerevenue)/i.test(compact) ||
@@ -2139,13 +2163,19 @@ function hasGenericRevenueBreakdownOnly(answer: string): boolean {
   if (!hasGenericCategory) {
     return false;
   }
-  if (hasConcreteRevenueBreakdownTerm(answer)) {
+  if (hasConcreteRevenueBreakdownTerm(answer, ticker)) {
     return false;
   }
   return /(地域別売上(?:が|は|を|として|という分類)|地域別の内訳|セグメント別(?:では情報|売上高|内訳|の内訳|の売上(?:高)?(?:が|は|を|として|という分類)?)|セグメント別売上の内訳|製品別売上(?:が|は|を|として|という分類)|大きい区分|大きな区分|主な売上区分(?:[:：]?\s*売上高|は不明)|全社ベース|売上高全体|総売上高|全体売上高|支払い関連サービス全般|service revenue|区分別の内訳|具体的な金額の内訳は|詳細な内訳は|内訳(?:情報|データ|は|が)?(?:[^。]{0,48})?(?:示されていません|含まれていません|明示されていません|読み取れません|欠如しています|記載されていません|分かりません|確認できません)|どのセグメントや地域が伸びたか(?:[^。]{0,48})?(?:示されていません|分かりません)|具体的なセグメント別の売上比率|売上内訳のセグメント別金額|カテゴリ別の寄与は示されていません)/i.test(answer);
 }
 
-function hasConcreteRevenueBreakdownTerm(answer: string): boolean {
+function hasConcreteRevenueBreakdownTerm(answer: string, ticker?: string): boolean {
+  // 固定リストは旧ベンチ15社の語彙で、AWS が無い。AWS を正しく答えた回答が
+  // 「汎用的」と誤判定され、不足テンプレに差し替わっていた(2026-08-22 実機レビュー)。
+  // 提出会社固有のセグメント・製品語彙(factual pack と同じ表)を先に見る。
+  if (ticker && filingSegmentVocabulary(ticker).some((pattern) => pattern.test(answer))) {
+    return true;
+  }
   return [
     /Construction Industries|Resource Industries|Energy & Transportation/i,
     /建設機械|資源産業|エネルギー・輸送/,

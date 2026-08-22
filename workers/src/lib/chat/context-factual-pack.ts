@@ -232,6 +232,19 @@ function collectOrderedLabels(
   return labels;
 }
 
+/**
+ * 提出会社固有のセグメント・製品語彙(AMZN なら AWS / North America /
+ * International …)。意図分類がこれを知らないと、「AWS growth?」のような
+ * 固有名詞だけの質問が unknown に落ち、文脈パックにそのセグメントの本文が
+ * 入らない → モデルは正直に「資料には分かりません」と答える
+ * (2026-08-22 実機レビュー)。factual pack と同じ表を使うので、表が育てば
+ * 分類も同時に育つ。
+ */
+export function filingSegmentVocabulary(ticker: string): RegExp[] {
+  return [...reportableSegmentDefinitions(ticker), ...businessProductDefinitions(ticker)]
+    .flatMap((definition) => definition.patterns);
+}
+
 function businessProductDefinitions(ticker: string): Array<{ label: string; patterns: RegExp[] }> {
   const upperTicker = ticker.toUpperCase();
 

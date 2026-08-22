@@ -1,4 +1,6 @@
 import type { FilingCacheRecord, MetricSnapshot, SourceChunkRecord, VerifiedFinancialFact } from "../../env";
+import { isBoilerplateOrRiskOnly } from "./evidence-text-quality";
+import { filingSegmentVocabulary } from "./context-factual-pack";
 import { buildChatFactualPack, type ChatFactualPack } from "./context-factual-pack";
 import { findMetricSourceChunks, selectIntentMetrics } from "./context-metrics";
 import {
@@ -63,6 +65,13 @@ export interface ChatContextSelectionDiagnostics {
 export interface BuildChatContextPackOptions {
   mode?: ChatContextPackMode;
   retryReason?: string;
+  /**
+   * 質問文。会社固有の区分(AWS、iPhone …)を名指ししているとき、その語を含む
+   * チャンクを先頭に確保するために使う。Apple の reportable segment は地域なので、
+   * segment_analysis の順位付けだけでは iPhone の製品別記述が入らず、モデルが
+   * 「製品別内訳は示されていない」と答えていた(2026-08-22 実機レビュー)。
+   */
+  question?: string;
 }
 
 interface RankedSource {
@@ -103,6 +112,18 @@ export function buildChatContextPack(
   }
 
   addFactualPackSourceIds(filing.sourceChunks, factualPack, add);
+
+  // 名指しされた区分の本文を最優先で確保する。順位付けの前に入れるので、
+  // 予算の端で落ちない。最大3チャンク(同じ語が出る表・注記を全部入れない)。
+  const focusPatterns = options.question
+    ? filingSegmentVocabulary(filing.ticker).filter((pattern) => pattern.test(options.question!.toLowerCase()))
+    : [];
+  if (focusPatterns.length > 0) {
+    strategyParts.push("segment_focus");
+    // 索引済みチャンクには製品別の段落が無いことがある(AAPL は地域別段落にしか
+    // iPhone が出ない)。MD&A 全文から名指し語の周辺を窓で切る。
+    for (const chunk of buildSegmentFocusChunks(filing, focusPatterns, profile)) add(chunk);
+  }
 
   if (shouldLeadWithMetrics(questionIntent)) {
     addMetricSources(filing.sourceChunks, metrics, add);
@@ -558,6 +579,55 @@ function metricSourceScore(source: SourceChunkRecord, questionIntent: QuestionIn
   }
 }
 
+const SEGMENT_FOCUS_SOURCE_PREFIX = `${SUPPLEMENTAL_SOURCE_PREFIX}F`;
+
+/// 質問が名指しした区分(AWS、iPhone …)の周辺を MD&A 全文から切り出す。
+/// 当期の増減を述べる窓(increased / decreased / % を含む)を優先し、
+/// safe-harbor 等の定型段落は除く。最大3窓。ID は CTX の系譜(CTXF1…)なので、
+/// 既存の「補足ソース」扱いがそのまま効く。
+function buildSegmentFocusChunks(
+  filing: FilingCacheRecord,
+  focusPatterns: RegExp[],
+  profile: ContextProfile
+): SourceChunkRecord[] {
+  const text = normalizeWhitespace(filing.mdaText);
+  if (!text) return [];
+  const windowChars = Math.max(600, Math.min(profile.supplementalWindowChars, 1_400));
+  const candidates: Array<{ start: number; text: string; resultLike: boolean }> = [];
+  for (const pattern of focusPatterns) {
+    const global = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+    for (const match of [...text.matchAll(global)].slice(0, 40)) {
+      const index = match.index ?? 0;
+      const start = Math.max(0, index - Math.floor(windowChars / 3));
+      const window = text.slice(start, start + windowChars);
+      if (isBoilerplateOrRiskOnly(window, "", "md_a")) continue;
+      candidates.push({
+        start,
+        text: window,
+        resultLike: /(increased|decreased|grew|declined|\d+(?:\.\d+)?\s*%)/i.test(window)
+      });
+    }
+  }
+  candidates.sort((left, right) => Number(right.resultLike) - Number(left.resultLike) || left.start - right.start);
+  const result: SourceChunkRecord[] = [];
+  for (const candidate of candidates) {
+    if (result.some((chunk) => Math.abs((chunk.startOffset ?? 0) - candidate.start) < windowChars / 2)) continue;
+    const clipped = clipToSourceExcerpt(candidate.text, profile.sourceExcerptChars);
+    result.push({
+      sourceId: `${SEGMENT_FOCUS_SOURCE_PREFIX}${result.length + 1}`,
+      sectionType: "md_a",
+      sectionTitle: "Segment focus",
+      sourceLabel: `${filing.formType} Segment focus, filed ${filing.filedAt}`,
+      text: clipped,
+      startOffset: candidate.start,
+      endOffset: candidate.start + clipped.length,
+      sortOrder: 900 + result.length
+    });
+    if (result.length >= 3) break;
+  }
+  return result;
+}
+
 function buildSupplementalContextChunks(
   filing: FilingCacheRecord,
   questionIntent: QuestionIntent,
@@ -928,7 +998,9 @@ function revenueDriverWindowQualityScore(text: string): number {
   if (/(?:cash provided by operating activities|operating cash flows?|capital expenditures?|technology and infrastructure costs?|fulfillment costs?|operating expenses?|net income|earnings driver analysis).{0,220}(?:driven by|primarily due to|reflecting)/.test(haystack) && !hasRevenueCausalLink) {
     score -= 180;
   }
-  if (/risk factors?|forward-looking statements?|available information|properties|website/.test(haystack) && !/driven by|primarily due to|reflected|reflecting|total net revenue|net sales|sales and revenues/.test(haystack)) {
+  // could differ materially / safe harbor / cautionary: 「forward-looking statements」の語を
+  // 含まない safe-harbor 段落が文脈パックの先頭に選ばれていた(2026-08-22 実機レビュー)。
+  if (/risk factors?|forward-looking statements?|could differ materially|safe harbor|cautionary statements?|available information|properties|website/.test(haystack) && !/driven by|primarily due to|reflected|reflecting|total net revenue|net sales|sales and revenues/.test(haystack)) {
     score -= 80;
   }
   if (isBroadEnergyContextWithoutPeriodResult(haystack)) {

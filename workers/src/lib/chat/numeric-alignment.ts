@@ -14,7 +14,8 @@ export type NumericAlignmentFailureLabel =
   | "sign_error"
   | "period_mismatch"
   | "unsupported_numeric_claim"
-  | "source_identity_repaired";
+  | "source_identity_repaired"
+  | "excerpt_supported_numeric_claim";
 
 export interface NumericAlignmentResult {
   status: NumericAlignmentStatus;
@@ -60,6 +61,20 @@ export function validateNumericAlignment(input: {
   answer: string;
   facts: VerifiedFinancialFact[];
   citedSourceIds: string[];
+  /**
+   * 引用したソース本文。ここに同じ数値が書かれている主張は「出典あり」として通す。
+   * 検証済み事実(XBRL)だけを照合すると、MD&A 本文にしか無い数字
+   * (例: 「AWS sales increased 17%」)を含む正しい回答が丸ごと捨てられ、
+   * 汎用の「特定できません」に差し替わっていた(2026-08-22 実機レビュー)。
+   * 捏造対策は弱めない — 引用文の中に実在する数値表記にしか一致しない。
+   */
+  citedSourceTexts?: string[];
+  /**
+   * モデルが見た文脈チャンク(引用していないものを含む)。ここで一致した数値は
+   * 出典ありとして通し、引用されていなければそのチャンクを requiredSourceIds に
+   * 足して根拠チップに出す — 数字の出典が画面に見える、は守る。
+   */
+  contextSources?: Array<{ sourceId: string; text: string }>;
 }): NumericAlignmentResult {
   const claims = extractMaterialNumericClaims(input.answer);
   if (claims.length === 0) {
@@ -78,9 +93,23 @@ export function validateNumericAlignment(input: {
   }
 
   const cited = new Set(input.citedSourceIds);
+  const excerptSources: Array<{ sourceId: string | null; text: string }> = [
+    ...(input.citedSourceTexts ?? []).map((text) => ({ sourceId: null, text })),
+    ...(input.contextSources ?? [])
+  ];
+  const excerptRequiredSourceIds: string[] = [];
   const surfaceValidatedResolutions = claims
     .map((claim) => resolveClaim(claim, input.facts, cited))
-    .map((resolution) => validateClaimBindingSurface(input.answer, resolution));
+    .map((resolution) => validateClaimBindingSurface(input.answer, resolution))
+    .map((resolution) => {
+      if (resolution.outcome !== "blocked") return resolution;
+      const supporting = excerptSupportingClaim(resolution.claim, excerptSources);
+      if (!supporting) return resolution;
+      if (supporting.sourceId && !cited.has(supporting.sourceId)) {
+        excerptRequiredSourceIds.push(supporting.sourceId);
+      }
+      return excerptSupportedResolution(resolution.claim);
+    });
   const resolutions = blockCurrentComparisonRoleCollapse(surfaceValidatedResolutions, input.facts);
   const blocked = resolutions.filter((resolution) => resolution.outcome === "blocked");
   const repaired = resolutions.filter((resolution) => resolution.outcome === "repaired");
@@ -91,9 +120,10 @@ export function validateNumericAlignment(input: {
   const evidenceFacts = dedupeFactsById(
     resolutions.flatMap((resolution) => evidenceFactsForResolution(resolution, input.facts))
   );
-  const requiredSourceIds = dedupe(
-    evidenceFacts.map((fact) => fact.sourceId).filter((sourceId) => !cited.has(sourceId))
-  );
+  const requiredSourceIds = dedupe([
+    ...evidenceFacts.map((fact) => fact.sourceId).filter((sourceId) => !cited.has(sourceId)),
+    ...excerptRequiredSourceIds
+  ]);
 
   if (blocked.length > 0) {
     return {
@@ -662,6 +692,60 @@ function repairedResolution(
 
 function ignoredResolution(claim: MaterialNumericClaim): ClaimResolution {
   return { claim, outcome: "ignored", labels: [] };
+}
+
+/// 引用本文に同じ数値表記があるか。百分率は「N%」、金額・件数は数値×スケール
+/// (billion / million / 億 …)を正規化して比較する。相対誤差 0.5% まで同一とみなす
+/// (本文の "29.3 billion" と回答の「293億ドル」は同じ数)。
+function excerptSupportingClaim(
+  claim: MaterialNumericClaim,
+  sources: Array<{ sourceId: string | null; text: string }>
+): { sourceId: string | null } | null {
+  for (const source of sources) {
+    if (excerptSupportsClaim(claim, [source.text])) return { sourceId: source.sourceId };
+  }
+  return null;
+}
+
+function excerptSupportsClaim(claim: MaterialNumericClaim, texts: string[]): boolean {
+  if (texts.length === 0) return false;
+  if (claim.kind === "percentage") {
+    const pattern = /(\d+(?:\.\d+)?)\s*(?:%|％|percent)/giu;
+    return texts.some((text) => {
+      for (const match of text.matchAll(pattern)) {
+        const value = Number.parseFloat(match[1]!);
+        if (Number.isFinite(value) && Math.abs(value - claim.numericValue) < 0.05) return true;
+      }
+      return false;
+    });
+  }
+  const pattern = /(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?\s*(trillion|billion|million|thousand|兆|億|百万|千)?/giu;
+  const scales: Record<string, number> = {
+    trillion: 1e12, 兆: 1e12,
+    billion: 1e9,
+    億: 1e8,
+    million: 1e6, 百万: 1e6,
+    thousand: 1e3, 千: 1e3
+  };
+  const target = Math.abs(claim.canonicalValue);
+  if (!(target > 0)) return false;
+  return texts.some((text) => {
+    for (const match of text.matchAll(pattern)) {
+      const whole = match[1]!.replace(/,/g, "");
+      const fraction = match[2] ? `.${match[2]}` : "";
+      const value = Number.parseFloat(`${whole}${fraction}`) * (match[3] ? scales[match[3].toLowerCase()] ?? scales[match[3]] ?? 1 : 1);
+      if (Number.isFinite(value) && value > 0 && Math.abs(value - target) / target <= 0.005) return true;
+    }
+    return false;
+  });
+}
+
+function excerptSupportedResolution(claim: MaterialNumericClaim): ClaimResolution {
+  return {
+    claim,
+    outcome: "passed",
+    labels: ["excerpt_supported_numeric_claim"]
+  };
 }
 
 function blockedResolution(
