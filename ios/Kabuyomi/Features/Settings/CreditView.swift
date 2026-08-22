@@ -1287,7 +1287,8 @@ private struct SubscriptionPlanRow: View {
                     .foregroundStyle(KabuyomiTheme.accent)
                 Text(planActionTitle)
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.inkMuted : CreditStateTone.failed.tint)
+                    // 「現在購入できません」は一時的な保留であって失敗ではない。caution(琥珀)。
+                    .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.inkMuted : CreditStateTone.pending.tint)
             }
             .frame(minWidth: 96, minHeight: 44, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
         }
@@ -1463,7 +1464,7 @@ private struct CreditPackRow: View {
                 Text(packActionTitle)
                     .font(.caption.weight(.bold))
                     // accent の塗りに載せる文字は onAccent。paper だとライトで白地に白になる。
-                    .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.onAccent : CreditStateTone.failed.tint)
+                    .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.onAccent : CreditStateTone.pending.tint)
                     .padding(.horizontal, product.isAvailable && isPurchaseEnabled ? 10 : 0)
                     .padding(.vertical, product.isAvailable && isPurchaseEnabled ? 6 : 0)
                     .background {
