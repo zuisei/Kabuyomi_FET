@@ -681,7 +681,16 @@ JPM・BAC・C は引き続き true、上記5社は false。
 **⑨ App Attest 拡張検査の無効化** — `APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS = "true"` は
 **本番の設定値**であり、コードのバグではない。false にすると
 extensions を持たない attestation が門で落ちるため、**実在のインストールを締め出しうる**。
-⑧ の遮断方式と同じく、あなたの判断が要る。
+判断はあなたのものだが、**判断に必要な材料が存在しなかった**ので、それだけ足した。
+
+`verifyAppExtensions`(`app-attest-verifier.ts:142`)の早期 return は
+**完全に無言**だった。extensions 無しの attestation が本番で何件来ているかを
+誰も知らない状態で、false にするのは目隠しでの変更になる。
+
+`app_attest_extensions_missing_allowed`(warn)と `app_attest_extensions_present`(info)を
+`stage`(attestation / assertion)付きで出すようにした。**判定は一切変えていない。**
+数日眺めて missing が実質0なら、許可を外しても誰も落ちない。
+0でないなら、落ちる母数が分かった上で判断できる。
 
 **⑮ `web-search` の UA 偽装** — 前回の読みどおり本番経路から到達しない。
 生きた経路に戻すなら直す価値があるが、現状は死んでいる。
