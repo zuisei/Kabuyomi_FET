@@ -828,3 +828,34 @@ META に「一時的か構造的か」を投げると
 H節の「17銘柄はキュレーション皆無」が実挙動として出ている。
 AVGO(同じくキュレーション外)はモデル経路で具体的に答えており、
 **定数が無い方がむしろ良い回答になる例**でもある。②の判断材料として記録する。
+
+## L-4 計測2本の稼働確認と、②の最初のデータ
+
+再デプロイ(version `3778cf23`)後、実リクエストで両方の発火を確認した。
+
+```
+chat_constant_answer_served
+  ticker=AAPL  table=TICKER_BUSINESS_OVERVIEWS  sourceCount=3
+
+chat_factual_pack_seeded_labels
+  ticker=GOOG  questionIntent=business_overview  seededOnlyLabelCount=0  seededOnlyLabels=[]
+```
+
+**1行目が②そのものである。** 定数文字列に filing のソースチップが**3件**付いている。
+質問は「つまり何屋なの？」— 本番プロンプトが business-model 質問として名指ししている表現だが、
+そもそもモデルに到達していない。
+
+**2行目が②の最初のデータ。** GOOG の事業概要では
+`seededOnlyLabelCount = 0`、つまり **seed が足すラベルは全て filing 側にも存在していた**。
+この1件に関する限り、seed を外しても回答は変わらない。
+
+母数を貯めてから判断すること。1件では何も言えない。
+
+## L-5 `wrangler tail` の取りこぼしについて
+
+AUDIT_PROMPT の「`npx wrangler tail` はこの環境で出力が取れない」は正確ではなかった。
+**取れるが、取りこぼす。** 同じ条件で6回試して、全イベントが取れたのは2回。
+残りは Durable Object 側(`credit_reservation_*`)だけが出た。
+
+また**同一 filingKey + 同一質問は応答キャッシュに当たる**ため、
+2回目以降は生成イベント自体が出ない。計測を確認するときは質問を変えること。
