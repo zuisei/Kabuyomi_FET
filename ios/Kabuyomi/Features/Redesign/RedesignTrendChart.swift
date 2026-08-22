@@ -34,12 +34,15 @@ struct RedesignSparkline: View {
     let isPositive: Bool
 
     private func barTint(isLatest: Bool, isNegative: Bool) -> Color {
+        // teal(accent)は操作の色なので、向きの表現には使わない。
+        // 赤字の期は loss 側、直近の期だけ向きの色を立てる。
         if isNegative {
-            return isLatest ? KabuyomiTheme.ink.opacity(0.75) : KabuyomiTheme.ink.opacity(0.22)
+            return isLatest ? KabuyomiTheme.loss.opacity(0.85) : KabuyomiTheme.loss.opacity(0.28)
         }
-        return isLatest
-            ? (isPositive ? KabuyomiTheme.accentDeep : KabuyomiTheme.ink).opacity(0.85)
-            : KabuyomiTheme.inkMuted.opacity(0.28)
+        if isLatest {
+            return (isPositive ? KabuyomiTheme.gain : KabuyomiTheme.loss).opacity(0.85)
+        }
+        return KabuyomiTheme.inkMuted.opacity(0.30)
     }
 
     var body: some View {
@@ -75,22 +78,27 @@ struct RedesignTrendChart: View {
     private var latest: HistoricalMetricPointPayload? { orderedPoints.last }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(series.label.isEmpty ? MetricLabeler.title(for: series.logicalName) : series.label)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(KabuyomiTheme.ink)
+                    .kabuyomiMicroLabel()
                 Spacer(minLength: 8)
                 if let latest {
                     Text(formattedMetricValue(latest.value, logicalName: series.logicalName, unit: latest.unit))
-                        .font(.subheadline.weight(.semibold))
-                        .monospacedDigit()
+                        .font(KabuyomiTheme.figure(.subheadline, weight: .medium))
                         .foregroundStyle(KabuyomiTheme.ink)
                     if let yoy = latest.yoyPercent {
-                        Text(formattedSignedYoY(yoy))
-                            .font(.caption.weight(.semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(yoy >= 0 ? KabuyomiTheme.accentDeep : KabuyomiTheme.ink)
+                        // 符号を必ず出すので、色は補助でしかない。
+                        Label {
+                            Text(formattedSignedYoY(yoy))
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                        } icon: {
+                            Image(systemName: yoy >= 0 ? "arrow.up.right" : "arrow.down.right")
+                                .font(.caption2.weight(.bold))
+                        }
+                        .labelStyle(.titleAndIcon)
+                        .foregroundStyle(yoy >= 0 ? KabuyomiTheme.gain : KabuyomiTheme.loss)
                     }
                 }
             }
@@ -109,13 +117,14 @@ struct RedesignTrendChart: View {
                 }
                 .frame(maxHeight: .infinity, alignment: .bottom)
             }
-            .frame(height: 56)
+            .frame(height: 46)
 
             HStack(spacing: 10) {
                 ForEach(orderedPoints) { point in
                     Text(shortPeriodLabel(point.periodEnd))
-                        .font(.caption2)
-                        .foregroundStyle(KabuyomiTheme.inkSoft)
+                        .font(.system(size: 10))
+                        .monospacedDigit()
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -125,11 +134,12 @@ struct RedesignTrendChart: View {
     }
 
     /// 赤字の期は色で区別する。高さは絶対値なので、色が無いと符号が読めない。
+    /// teal(accent)は操作の色なので使わず、loss / gain で塗る。
     private func barTint(isLatest: Bool, isNegative: Bool) -> Color {
         if isNegative {
-            return isLatest ? KabuyomiTheme.ink.opacity(0.75) : KabuyomiTheme.ink.opacity(0.22)
+            return isLatest ? KabuyomiTheme.loss.opacity(0.85) : KabuyomiTheme.loss.opacity(0.30)
         }
-        return isLatest ? KabuyomiTheme.accentDeep.opacity(0.85) : KabuyomiTheme.inkMuted.opacity(0.25)
+        return isLatest ? KabuyomiTheme.gain.opacity(0.80) : KabuyomiTheme.inkMuted.opacity(0.28)
     }
 
     private var accessibilitySummary: String {

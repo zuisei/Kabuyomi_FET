@@ -261,26 +261,30 @@ struct ConversationPromptChip: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: systemImage)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .frame(width: 18, height: 24)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(KabuyomiTheme.accent)
+                    .frame(width: 16)
 
                 Text(text)
-                    .font(.caption.weight(.semibold))
+                    .font(.footnote.weight(.medium))
                     .foregroundStyle(KabuyomiTheme.ink)
                     .multilineTextAlignment(.leading)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
 
                 Spacer(minLength: 0)
 
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(KabuyomiTheme.inkSoft)
+                Image(systemName: "arrow.up.left")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(KabuyomiTheme.accent)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-            .background(KabuyomiTheme.fill(for: .secondary), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(KabuyomiTheme.inputWell, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(KabuyomiTheme.separator, lineWidth: KabuyomiTheme.hairlineWidth)
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("質問を入力: \(text)")

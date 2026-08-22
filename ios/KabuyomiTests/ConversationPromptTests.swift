@@ -562,4 +562,100 @@ final class ConversationPromptTests: XCTestCase {
 
         XCTAssertNil(resolvedSourceURL(for: source, in: company))
     }
+
+    // MARK: - v2 根拠チップの識別性
+
+    private func mdChunk(id: String, title: String, text: String, order: Int) -> SourceChunkPayload {
+        SourceChunkPayload(
+            sourceId: id,
+            sectionType: "md_a",
+            sectionTitle: title,
+            sourceLabel: "Item 7",
+            text: text,
+            startOffset: 0,
+            endOffset: text.count,
+            tagName: nil,
+            sortOrder: order
+        )
+    }
+
+    func testSourceSectionBadgeSeparatesFilingSectionKinds() {
+        XCTAssertEqual(sourceSectionBadge(sectionType: "xbrl_metric"), "XBRL")
+        XCTAssertEqual(sourceSectionBadge(sectionType: "historical_metric"), "履歴")
+        XCTAssertEqual(sourceSectionBadge(sectionType: "historical_segment"), "セグメント")
+        XCTAssertEqual(sourceSectionBadge(sectionType: "web_search"), "WEB")
+        XCTAssertEqual(
+            sourceSectionBadge(sectionType: "md_a", sectionTitle: "Item 1A. Risk Factors"),
+            "リスク"
+        )
+        XCTAssertEqual(
+            sourceSectionBadge(sectionType: "md_a", sectionTitle: "Management's Discussion and Analysis"),
+            "MD&A"
+        )
+        XCTAssertEqual(sourceSectionBadge(sectionType: "md_a", sectionTitle: "Gross margin"), "本文")
+    }
+
+    /// 監査で「利益率」が3つ並んで見分けられなかった状態の回帰テスト。
+    func testSourceChipDescriptorsDistinguishChunksThatShareOneLabel() {
+        let company = TestFixtures.companyPayload()
+        let chunks = [
+            mdChunk(id: "m1", title: "Gross margin", text: "Gross margin increased to 46.6% in the second quarter.", order: 0),
+            mdChunk(id: "m2", title: "Margin outlook", text: "Margin outlook was pressured by higher research spending.", order: 1),
+            mdChunk(id: "m3", title: "Profitability", text: "Profitability improved on a favorable product mix.", order: 2)
+        ]
+
+        let descriptors = sourceChipDescriptors(for: chunks, in: company)
+
+        XCTAssertEqual(descriptors.map(\.label), ["利益率", "利益率", "利益率"])
+        XCTAssertEqual(Set(descriptors.compactMap(\.fragment)).count, 3)
+        XCTAssertTrue(descriptors.allSatisfy { $0.ordinal == nil })
+        XCTAssertTrue(descriptors.allSatisfy { $0.source?.sourceIdSnapshot != nil })
+    }
+
+    func testSourceChipDescriptorsNumberRowsThatStayIdenticalAfterBadgeAndFragment() {
+        let company = TestFixtures.companyPayload()
+        let chunks = [
+            mdChunk(id: "m1", title: "Gross margin", text: "   ", order: 0),
+            mdChunk(id: "m2", title: "Margin outlook", text: "", order: 1)
+        ]
+
+        let descriptors = sourceChipDescriptors(for: chunks, in: company)
+
+        XCTAssertEqual(descriptors.map(\.label), ["利益率", "利益率"])
+        XCTAssertEqual(descriptors.map(\.fragment), [nil, nil])
+        XCTAssertEqual(descriptors.map(\.ordinal), [1, 2])
+    }
+
+    func testSourceChipDescriptorsDropRepeatsOfTheSameChunk() {
+        let company = TestFixtures.companyPayload()
+        let chunk = mdChunk(id: "m1", title: "Gross margin", text: "Gross margin increased.", order: 0)
+
+        XCTAssertEqual(sourceChipDescriptors(for: [chunk, chunk], in: company).count, 1)
+    }
+
+    func testDisplayableMessageSourcesKeepDistinctEvidenceThatSharesOneLabel() {
+        let company = TestFixtures.companyPayload()
+        let sources = ["a", "b"].map { id in
+            LocalMessageSourceRef(
+                id: UUID(),
+                sourceIdSnapshot: id,
+                sourceKind: .secFiling,
+                sourceLabelSnapshot: "Gross margin",
+                excerpt: "Margin note \(id).",
+                sourceUrl: nil
+            )
+        }
+
+        XCTAssertEqual(displayableMessageSources(sources, in: company).count, 2)
+        XCTAssertEqual(displayableMessageSources(sources + [sources[0]], in: company).count, 2)
+    }
+
+    func testHeaderCollapseUsesHysteresisSoItDoesNotFlapAtTheThreshold() {
+        XCTAssertFalse(redesignHeaderCollapsed(current: false, offset: 0))
+        XCTAssertFalse(redesignHeaderCollapsed(current: false, offset: 20))
+        XCTAssertTrue(redesignHeaderCollapsed(current: false, offset: 40))
+        // 一度畳んだら、戻す閾値まで下がるまで開かない。
+        XCTAssertTrue(redesignHeaderCollapsed(current: true, offset: 20))
+        XCTAssertFalse(redesignHeaderCollapsed(current: true, offset: 4))
+    }
 }
