@@ -261,14 +261,6 @@ interface PrincipalMigrationTombstone extends PrincipalMigrationLock {
   migratedAt: string;
 }
 
-interface ChatRefundRecord {
-  operationId: string;
-  dateJST: string;
-  status: "applied" | "noop";
-  chatsUsedAfter: number;
-  createdAt: string;
-}
-
 interface RewardedAdDailyCapRecord {
   dateKey: string;
   count: number;
@@ -281,7 +273,6 @@ const CREDIT_STATE_KEY = "credit_state";
 const CREDIT_OPERATION_PREFIX = "credit_operation:";
 const MONTHLY_GRANT_PREFIX = "monthly_grant:";
 const PURCHASE_TRANSACTION_PREFIX = "purchase_transaction:";
-const CHAT_REFUND_PREFIX = "chat_refund:";
 const REWARDED_AD_DAILY_CAP_PREFIX = "rewarded_ad_daily_cap:";
 const REQUEST_EXECUTION_PREFIX = "request_execution:";
 const CREDIT_RESERVATION_PREFIX = "credit_reservation:";
@@ -603,44 +594,6 @@ export class UserQuotaDO {
         didMutate = true;
       }
 
-      let pendingChatRefund: ChatRefundRecord | undefined;
-      if (body.action === "refundChat") {
-        const operationId = body.operationId;
-        if (!operationId) {
-          return {
-            status: 400,
-            payload: { error: "Invalid quota payload", usage: currentUsage(), didMutate }
-          };
-        }
-
-        const existingRefund = await this.loadChatRefund(operationId);
-        if (existingRefund) {
-          await Promise.all([
-            this.state.storage.put(buildDailyKey(body.dateJST), dailyRecord),
-            this.state.storage.put(SAVED_TICKERS_KEY, savedTickerRecord),
-            this.state.storage.put(CREDIT_STATE_KEY, creditState),
-            monthlyGrant ? this.saveMonthlyGrant(monthlyGrant) : Promise.resolve()
-          ]);
-          return {
-            status: 200,
-            payload: { usage: currentUsage(), didMutate: false, monthlyGrant }
-          };
-        }
-
-        const now = new Date().toISOString();
-        if (dailyRecord.chatsUsed > 0) {
-          dailyRecord.chatsUsed -= 1;
-          didMutate = true;
-        }
-        pendingChatRefund = {
-          operationId,
-          dateJST: body.dateJST,
-          status: didMutate ? "applied" : "noop",
-          chatsUsedAfter: dailyRecord.chatsUsed,
-          createdAt: now
-        };
-      }
-
       if (body.action === "checkStock") {
         if (!alreadyTracked && savedTickerRecord.savedTickers.length >= savedTickerRecord.stockLimit) {
           return {
@@ -701,8 +654,7 @@ export class UserQuotaDO {
         this.state.storage.put(buildDailyKey(body.dateJST), dailyRecord),
         this.state.storage.put(SAVED_TICKERS_KEY, savedTickerRecord),
         this.state.storage.put(CREDIT_STATE_KEY, creditState),
-        monthlyGrant ? this.saveMonthlyGrant(monthlyGrant) : Promise.resolve(),
-        pendingChatRefund ? this.saveChatRefund(pendingChatRefund) : Promise.resolve()
+        monthlyGrant ? this.saveMonthlyGrant(monthlyGrant) : Promise.resolve()
       ]);
 
       return { status: 200, payload: { usage: currentUsage(), didMutate, monthlyGrant } };
@@ -2536,16 +2488,6 @@ export class UserQuotaDO {
     return operation;
   }
 
-  private async loadChatRefund(operationId: string): Promise<ChatRefundRecord | undefined> {
-    return (await this.state.storage.get<ChatRefundRecord>(buildChatRefundKey(operationId))) as
-      | ChatRefundRecord
-      | undefined;
-  }
-
-  private async saveChatRefund(refund: ChatRefundRecord): Promise<void> {
-    await this.state.storage.put(buildChatRefundKey(refund.operationId), refund);
-  }
-
   private async loadRewardedAdDailyCap(dateKey: string): Promise<RewardedAdDailyCapRecord> {
     return (
       ((await this.state.storage.get<RewardedAdDailyCapRecord>(buildRewardedAdDailyCapKey(dateKey))) as
@@ -2935,10 +2877,6 @@ function buildPurchaseRefundOperationId(transactionId: string): string {
 
 function buildPurchaseRefundReversalOperationId(transactionId: string): string {
   return `purchase-refund-reversal:${transactionId}`;
-}
-
-function buildChatRefundKey(operationId: string): string {
-  return `${CHAT_REFUND_PREFIX}${operationId}`;
 }
 
 function buildRewardedAdDailyCapKey(dateKey: string): string {

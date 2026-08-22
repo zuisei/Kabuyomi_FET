@@ -92,7 +92,6 @@ export interface QuotaMutationResult {
 
 interface QuotaMutationOptions {
   relatedTickers?: readonly string[];
-  operationId?: string;
 }
 
 export interface CreditReference {
@@ -468,15 +467,6 @@ export async function consumeChatQuota(
   config: RemoteConfig
 ): Promise<UsageState> {
   return (await mutateUsage(identity, env, config, "consumeChat")).usage;
-}
-
-export async function refundChatQuota(
-  identity: QuotaIdentity,
-  env: Env,
-  config: RemoteConfig,
-  options: { operationId: string }
-): Promise<UsageState> {
-  return (await mutateUsage(identity, env, config, "refundChat", undefined, options)).usage;
 }
 
 export async function ensureMonthlyCreditGrant(
@@ -970,7 +960,6 @@ async function mutateUsage(
     | "checkChat"
     | "checkStock"
     | "consumeChat"
-    | "refundChat"
     | "consumeStock"
     | "refundStock"
     | "removeTicker"
@@ -999,8 +988,7 @@ async function mutateUsage(
       monthlyCreditLimit: limits.monthlyCreditLimit,
       monthlyCreditPeriodStart: limits.monthlyCreditPeriodStart,
       monthlyCreditPeriodEnd: limits.monthlyCreditPeriodEnd,
-      monthlyGrantOperationId: limits.monthlyGrantOperationId,
-      operationId: options.operationId
+      monthlyGrantOperationId: limits.monthlyGrantOperationId
     })
   });
 

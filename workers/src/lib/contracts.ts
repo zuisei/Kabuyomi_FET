@@ -274,7 +274,6 @@ export const QuotaRequestSchema = z.object({
     "checkChat",
     "checkStock",
     "consumeChat",
-    "refundChat",
     "consumeStock",
     "refundStock",
     "removeTicker",
