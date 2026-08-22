@@ -68,6 +68,30 @@ describe("chat question intent and context packing", () => {
     expect(classifyQuestionIntent("収益源は何？")).toBe("business_overview");
   });
 
+  /**
+   * The colloquial half of the paired benchmark runs. 「なにで稼いでんの？」 used
+   * to fall through every branch to unknown, so the same filing that answered the
+   * clean phrasing with real segments answered this one with the source-
+   * insufficient fallback.
+   */
+  it("classifies colloquial business-model questions as business overview", () => {
+    expect(classifyQuestionIntent("この会社ってなにで稼いでんの？")).toBe("business_overview");
+    expect(classifyQuestionIntent("つまり何屋なの？")).toBe("business_overview");
+    expect(classifyQuestionIntent("どうやって稼いでるの？")).toBe("business_overview");
+    expect(classifyQuestionIntent("ビジネスモデルってどんな感じ？")).toBe("business_overview");
+    expect(classifyQuestionIntent("何してる会社なの？")).toBe("business_overview");
+  });
+
+  /**
+   * 稼 alone is not a business-overview signal: business overview is checked
+   * before cash flow here, so a bare 稼 pattern would swallow Q09.
+   */
+  it("keeps cash-generation phrasing out of business overview", () => {
+    expect(classifyQuestionIntent("ちゃんとキャッシュ稼げてる？")).toBe("cash_flow");
+    expect(classifyQuestionIntent("お金はちゃんと稼げてる？")).toBe("cash_flow");
+    expect(classifyQuestionIntent("現金はどうやって稼いでる？")).toBe("cash_flow");
+  });
+
   it("keeps revenue-driver durability rewrites out of margin intent when AAPL-like drivers are present", () => {
     expect(
       classifyQuestionIntent("前問で挙げた売上高の要因（product mix、Services、foreign exchange、demand）は一時的ですか？継続性と不明点を分けて説明してください。")

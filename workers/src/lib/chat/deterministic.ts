@@ -1,5 +1,6 @@
 import type { FilingCacheRecord, SourceChunkRecord } from "../../env";
 import { formatMetricValue } from "../metrics";
+import { isBusinessOverviewQuestion } from "./business-overview-question";
 import { buildChatFactualPack } from "./context-factual-pack";
 import {
   buildMetricObservationSentence,
@@ -274,14 +275,6 @@ function findRevenueMovementWithoutDriverSource(sourceChunks: SourceChunkRecord[
       /(?:total revenues?|net sales|sales and other operating revenue)[^.]{0,260}(?:due to|driven by|reflecting|attributable to)/i.test(text);
     return hasRevenueMovement && !hasActualRevenueCause;
   }) ?? null;
-}
-
-function isBusinessOverviewQuestion(normalizedQuestion: string): boolean {
-  return (
-    /(何屋|なに屋|なんの企業|何の企業|なんの会社|何の会社|どんな企業|どんな会社|何してる|何をしてる|何をやってる|何で儲け|なんで儲け|何で稼|なんで稼|事業内容|主な事業|事業は)/.test(
-      normalizedQuestion
-    ) || /(whatdoes.*companydo|whatcompany|whatbusiness|businessmodel)/.test(normalizedQuestion)
-  );
 }
 
 function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {

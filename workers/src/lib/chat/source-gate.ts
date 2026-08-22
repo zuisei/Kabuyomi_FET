@@ -1,5 +1,6 @@
 import type { MetricSnapshot, SourceChunkRecord } from "../../env";
 import { hasStrongRevenueDriverSource } from "../filings/ingest";
+import { isBusinessOverviewQuestion, isLooseEarningsPhrasing } from "./business-overview-question";
 import { isUnsafeDriverEvidence } from "./evidence-text-quality";
 import type { QuestionIntent } from "./intent";
 import { hasRevenueDriverSignal, hasSegmentRevenueSignal } from "./source-family";
@@ -297,8 +298,12 @@ export function resolveHardFinancialIntent(
   const asksDurability = /(一時|一過性|継続|続く|構造|temporary|transitory|recurring|sustain|continue)/.test(normalized);
   const asksRevenueDriver = /(売上|収益|sales|revenue)/.test(normalized) && /(主因|要因|原因|理由|なぜ|driver|cause|why|伸び|増収|減収)/.test(normalized);
   const asksMargin = /(利益率|マージン|粗利|営業利益率|純利益率|margin|profitability|採算)/.test(normalizedQuestion);
+  // This gate grades an answer that already exists, so it keeps the wider net it
+  // has always cast: bare 稼いでる／儲けてる with no instrument interrogative. The
+  // shared recognizer stays narrower because it decides which answer gets built.
   const asksBusinessModel = questionIntent === "business_overview" ||
-    /(何屋|なに屋|何で稼|なにで稼|何で儲|なにで儲|儲けている|儲けてる|稼いでる|稼いでん|なんの会社|何の会社|どんな会社|何してる|何をしてる|事業内容|収益源|businessmodel|whatdoes.*companydo|whatbusiness)/.test(normalizedQuestion);
+    isBusinessOverviewQuestion(normalizedQuestion) ||
+    isLooseEarningsPhrasing(normalizedQuestion);
 
   if (asksDurability && (asksMargin || questionIntent === "margin_profitability")) {
     return "margin_durability_followup";

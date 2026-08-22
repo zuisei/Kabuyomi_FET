@@ -7,6 +7,7 @@ import {
   buildJapaneseLanguageGuardRepair,
   checkFinalAnswerJapaneseOnly
 } from "./final-answer-language";
+import { isBusinessOverviewQuestion, isLooseEarningsPhrasing } from "./business-overview-question";
 import { buildDeterministicMetricAnswer } from "./deterministic";
 import { attachChatDebug } from "./response-payload";
 import {
@@ -2868,8 +2869,9 @@ function isBusinessModelQuestion(question: string, questionIntent?: string | nul
   if (questionIntent === "business_model" || questionIntent === "business_overview") {
     return true;
   }
-  const normalized = question.replace(/\s+/g, "").toLowerCase();
-  return /(何屋|なに屋|何で稼|なにで稼|何で儲|なにで儲|儲けている|儲けてる|稼いでる|稼いでん|なんの会社|何の会社|どんな会社|何してる|何をしてる|事業内容|収益源|businessmodel|whatdoes.*companydo|whatbusiness)/.test(normalized);
+  // Same wider net as the source gate: this runs on an answer that already
+  // exists, so bare 稼いでる／儲けてる still counts here.
+  return isBusinessOverviewQuestion(question) || isLooseEarningsPhrasing(question);
 }
 
 function isMetricSnapshotOnly(answer: string): boolean {

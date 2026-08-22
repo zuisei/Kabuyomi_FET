@@ -1,4 +1,5 @@
 import { classifyHistoricalComparisonMode } from "../history-question";
+import { isBusinessOverviewQuestion } from "./business-overview-question";
 
 export type QuestionIntent =
   | "business_overview"
@@ -38,11 +39,10 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
     return "investment_view";
   }
 
-  if (
-    /(何で儲け|なんで儲け|何で稼|なんで稼|収益源|なんの企業|何の企業|なんの会社|何の会社|どんな企業|どんな会社|何してる|何をしてる|何をやってる|事業内容|主な事業|事業は|主な製品|主要製品|製品と顧客|顧客|customers?|businessmodel|whatdoes.*companydo|whatcompany|whatbusiness)/.test(
-      normalized
-    )
-  ) {
+  // The shared vocabulary lives in business-overview-question.ts. The extra
+  // alternation is this classifier's own breadth: only the context pack treats a
+  // product/customer question as a business overview.
+  if (isBusinessOverviewQuestion(normalized) || /(主な製品|主要製品|製品と顧客|顧客|customers?)/.test(normalized)) {
     return "business_overview";
   }
 

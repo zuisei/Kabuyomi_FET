@@ -881,6 +881,15 @@ describe("Gemini local chat fallback", () => {
 
     const business = buildDeterministicMetricAnswer(filing, "この会社は何で儲けている？");
     expect(business?.strategy).toBe("business_overview");
+    // Same question, typed the way users type it. This used to miss the
+    // business-overview gate entirely and fall through to the model path.
+    const colloquial = buildDeterministicMetricAnswer(filing, "この会社ってなにで稼いでんの？");
+    expect(colloquial?.strategy).toBe("business_overview");
+    expect(colloquial?.response.answer).toBe(business?.response.answer);
+    // 稼 alone must not reach this builder: cash generation is a different answer.
+    expect(buildDeterministicMetricAnswer(filing, "ちゃんとキャッシュ稼げてる？")?.strategy).not.toBe(
+      "business_overview"
+    );
     // The cited chunk says "cloud demand". It does not say Microsoft 365, Azure
     // or Windows, and neither does the answer.
     expect(business?.response.answer).toContain("クラウドサービス");
