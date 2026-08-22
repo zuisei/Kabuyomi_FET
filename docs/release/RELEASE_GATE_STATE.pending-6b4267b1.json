@@ -1,0 +1,314 @@
+{
+  "schemaVersion": 1,
+  "phase": "FULL_PRODUCT_REMEDIATION",
+  "asOf": "2026-08-22",
+  "auditSnapshot": "b61602ef55e2499cccd46e32f53e29bb61c83aa7",
+  "releaseDecision": "GO",
+  "releaseCandidateId": "6b4267b1437289072d67c0b31a681efd88bad8da2996c643f6c1f3313b115137",
+  "openP0Ids": [],
+  "nextLocalReleaseCandidateId": "6b4267b1437289072d67c0b31a681efd88bad8da2996c643f6c1f3313b115137",
+  "lastValidatedCommit": "e8af61085ba608a856469fff1057b41df39ecc6d",
+  "validationScope": "Release candidate bb7d5628 carries the 2026-08-22 audit remediation: the sandbox credit-grant gate (sandbox-verified Apple transactions are refused on production posture; verification environment recorded in purchase_transactions via migration 0019, applied to production D1 before this deploy), removal of every constant-answer surface behind the source-backed claim (deterministic ticker tables, factual-pack seeds, fallback-known-business, the three durability syntheses, the identity-gated sector checklist) with an absence tripwire in the suite, the isBankLike/word-boundary/proper-noun answer fixes, the truncation-aware summary retry, the timing-safe migration-route auth, and the colloquial business-overview intent fix with a 12-pair clean/colloquial parity test. Validated: worker typecheck clean; 1239/1239 unit tests; iOS 206/206 (iPhone 17 Pro / iOS 26.2); sec-fetcher 15/15; migrations 0001-0019 ordered; three live canary runs against the test worker on the new production-tracked ticker set (clean 32 rows, colloquial 32 rows, post-intent-fix 8 rows) with zero constant leaks and zero infra errors, recorded under testbench/runs/2026-08-22-*. NOT validated: the 150-row full smoke was not re-run on this candidate; the human review packet remains unsealed; chat answer content for the formerly curated tickers is intentionally changed by the constant removal (thinner but source-derived), accepted by the release owner in conversation on 2026-08-22.",
+  "authoritativeDocuments": [
+    "docs/release/CURRENT_SHIPPING_TRUTH.md",
+    "docs/release/FEATURE_PARITY_COMPATIBILITY_REPORT.md",
+    "docs/release/FULL_PRODUCT_DISCOVERY_AND_REMEDIATION_REPORT.md",
+    "docs/release/RELEASE_GATE_STATE.json"
+  ],
+  "lastValidatedTestCounts": {
+    "workerTypecheck": {
+      "status": "PASS",
+      "errors": 0
+    },
+    "workerUnit": {
+      "status": "PASS",
+      "testFilesPassed": 77,
+      "testFilesFailed": 0,
+      "testFilesTotal": 77,
+      "testsPassed": 1130,
+      "testsFailed": 0,
+      "testsTotal": 1130
+    },
+    "workerQualityGateUnit": {
+      "status": "PASS",
+      "testsPassed": 25,
+      "testsFailed": 0,
+      "testsTotal": 25
+    },
+    "remoteConfigLifecycle": {
+      "status": "PASS_PRODUCTION_KV_AND_D1_LKG_READBACK",
+      "reviewDueDays": 14,
+      "criticalDays": 35,
+      "hardStopDays": 45,
+      "legacyBridgeMaximumDays": 30,
+      "silentRefresh": false,
+      "operatorHashApprovalRequired": true,
+      "productionAlertEvidence": false
+    },
+    "workerDryRunTestDeploy": {
+      "status": "PASS",
+      "deployed": false
+    },
+    "releasedFeatureParity": {
+      "status": "PASS_LOCAL_CONTRACT",
+      "coreFeaturesPreserved": true,
+      "existingBalancesPreservedByDesign": true,
+      "newPaidGrantsEnabled": false,
+      "accountRecoveryReady": false,
+      "rewardedSsvReady": true,
+      "externalValidationRequired": true
+    },
+    "testD1Migration": {
+      "status": "PASS",
+      "applied": [
+        "0010",
+        "0011",
+        "0012",
+        "0013",
+        "0014",
+        "0015",
+        "0016",
+        "0017",
+        "0018"
+      ],
+      "pendingAfterApply": 0
+    },
+    "migrationFilenameOrder": {
+      "status": "PASS",
+      "files": 18,
+      "first": "0001",
+      "last": "0018"
+    },
+    "testWorkerDeploy": {
+      "status": "PASS_FINAL_CANDIDATE",
+      "versionId": "3f377477-74f2-419b-b4cf-cc703d8ffc84",
+      "url": "https://kabuyomi-api-test.dznqjmctk7.workers.dev",
+      "finalCandidateParity": true,
+      "releaseCandidateId": "56c0c2090f26e087b6890534e1ff28dd23843671f84842f4b880f80adad1e049"
+    },
+    "testWorkerIdentitySmoke": {
+      "status": "PASS_FINAL_CANDIDATE",
+      "bootstrap": true,
+      "unverifiedWelcomeCredits": 0,
+      "search": true,
+      "company": true,
+      "appAttestFailClosed": true,
+      "physicalDevelopmentAttestation": true,
+      "finalCandidateRerunRequired": false
+    },
+    "testWorkerReleaseSmoke": {
+      "status": "PASS_FINAL_CANDIDATE",
+      "exactReplay": true,
+      "changedPayloadConflict": true,
+      "concurrentDuplicateRequests": true,
+      "invalidSsvNoGrant": true,
+      "noCreditGrantPostcondition": true
+    },
+    "testbenchFixtureValidation": {
+      "status": "PASS",
+      "defaultTickers": 5,
+      "questionTemplates": 12
+    },
+    "fullSmokeFixturePreflight": {
+      "status": "PASS_CHECK_ONLY",
+      "tickers": 15,
+      "questionTemplates": 10,
+      "expectedRows": 150,
+      "networkRequests": 0
+    },
+    "productionReleaseSmokePreflight": {
+      "status": "PASS_CHECK_ONLY",
+      "productionTargetGuard": true,
+      "credentialFree": true,
+      "redactedOutput": true,
+      "networkRequests": 0
+    },
+    "secFetcherUnit": {
+      "status": "PASS",
+      "testsPassed": 15,
+      "testsFailed": 0,
+      "testsTotal": 15
+    },
+    "legalSiteValidation": {
+      "status": "PASS_LOCAL_AND_LIVE_HASH_MATCH",
+      "localRevision": "2026-07-11",
+      "liveRevisionCurrent": true,
+      "deploymentRequired": false,
+      "pagesDeploymentId": "cf7a3e20"
+    },
+    "iosUnit": {
+      "status": "PASS",
+      "testsPassed": 201,
+      "testsFailed": 0,
+      "testsTotal": 201,
+      "simulator": "iPhone 17 Pro / iOS 26.2",
+      "parallelTesting": false,
+      "resultBundle": "/Users/0xt4/Library/Developer/Xcode/DerivedData/Kabuyomi-ahctpktmhjduiffpqsutjzsixstg/Logs/Test/Test-Kabuyomi-2026.07.13_5-39-18-+0900.xcresult"
+    },
+    "iosUnsignedReleaseBuild": {
+      "status": "PASS",
+      "codeSigningAllowed": false
+    }
+  },
+  "productionEvidence": {
+    "preRolloutWorkerVersionId": "78971adf-324f-4d27-8f06-b18fd95d81ae",
+    "backup": {
+      "status": "PASS",
+      "path": "/Users/0xt4/.codex/backups/Kabuyomi/2026-07-13-app-attest-release/kabuyomi-history-before-0018.sql",
+      "sha256": "cd0407e6107e95f7d82af0687059311b164df2ccb6a0d6ef1a30c0a084738386"
+    },
+    "migrations": {
+      "status": "PASS",
+      "applied": [
+        "0010",
+        "0011",
+        "0012",
+        "0013",
+        "0014",
+        "0015",
+        "0016",
+        "0017",
+        "0018"
+      ],
+      "pendingAfterApply": 0,
+      "schemaProbe": "PASS"
+    },
+    "workerDeployment": {
+      "status": "PASS_100_PERCENT",
+      "versionId": "e60580e7-e7f5-449d-97b2-d36854c24896",
+      "releaseCandidateId": "ff298a1053695e2df4399177be2a28d4c148a4594c9d12dfbc1d0d71c071b7ea",
+      "previousValidatedVersionId": "6cfa680f-1a92-4806-b561-91d5d08adbd0",
+      "appleAppIdBinding": "CONFIGURED_6762764426",
+      "billingRuntimeStatus": "ACTIVE_APPLE_SIGNATURE_VERIFIER_REACHED"
+    },
+    "smoke": {
+      "status": "PASS_ACTIVE_CAPABILITY_GUARDRAILS",
+      "evidenceScope": "POST_0018_POST_DEPLOY_ACTIVE_CAPABILITY_SMOKE",
+      "chargeableModelRequestsAllowed": false,
+      "customerIdentitiesAllowed": false,
+      "balanceProjectionBeforeAfterEqual": true,
+      "principals": 141,
+      "totalBalance": 8507,
+      "monthlyBalance": 6390,
+      "purchasedBalance": 2088,
+      "rewardedBalance": 26,
+      "ledgerRows": 746,
+      "purchaseRows": 11,
+      "purchasedCreditsGranted": 1000
+    },
+    "strictRemoteConfig": {
+      "status": "PASS_FRESH_KV_AND_D1_LKG",
+      "version": "production-capabilities-restored-20260713-v1",
+      "updatedAt": "2026-07-13T01:20:28.597Z",
+      "d1LkgStoredAt": "2026-07-13T01:48:13.372Z",
+      "legacyBridgeExpiresAt": "2026-08-11T14:14:00.000Z",
+      "newPaidGrantsEnabled": true,
+      "consumablePurchasesEnabled": true,
+      "accountRecoveryReady": false,
+      "rewardedCreditEnabled": true,
+      "rewardedSsvReady": true,
+      "emergencyPaidGrantsDisabled": false,
+      "externalLifecycleEvidence": "INCOMPLETE"
+    },
+    "legalPages": {
+      "status": "PASS_DEPLOYED_AND_HASH_MATCHED",
+      "expectedRevision": "2026-07-11",
+      "verifiedUrls": 5
+    },
+    "physicalProductionAppAttest": {
+      "status": "PASS",
+      "environment": "production",
+      "storedProductionKeys": 1,
+      "invalidKeyRotation": "PASS_SAME_PRINCIPAL",
+      "attestation": "PASS",
+      "assertionProtectedRewardIntent": "PASS"
+    },
+    "genuineRewardedAdCanary": {
+      "status": "PASS",
+      "googleSsv": "PASS",
+      "creditsGranted": 2,
+      "installationBalanceBefore": 903,
+      "installationBalanceAfter": 905,
+      "dailyRemainingBefore": 3,
+      "dailyRemainingAfter": 2,
+      "returnNavigation": "PASS"
+    }
+  },
+  "lastBenchmarkArtifactIds": [
+    "2026-07-13-app-attest-reward-release-r3"
+  ],
+  "lastBenchmarkGate": {
+    "status": "RELEASE_QUALITY_PASS",
+    "rows": 150,
+    "expectedRows": 150,
+    "tickers": 15,
+    "templates": 10,
+    "fallbackRate": 0,
+    "p95LatencyMs": 7425,
+    "humanReview": "PASS_150_OF_150",
+    "sourceRunSha256": "e951d458e4849e584c6f5ce8dd9428c544dec927f7550649542d62c39c3d88ac",
+    "reviewContentSha256": "da2b21169fd0f4164cc97901ceb83347126af098f22da5c1463a925ad9156857"
+  },
+  "oneTimeQualityRerunWaiver": {
+    "status": "APPROVED_BY_RELEASE_OWNER",
+    "approvedAt": "2026-08-22",
+    "deployedCandidateId": "6b4267b1437289072d67c0b31a681efd88bad8da2996c643f6c1f3313b115137",
+    "lastQualityCandidateId": "56c0c2090f26e087b6890534e1ff28dd23843671f84842f4b880f80adad1e049",
+    "scope": "Release-owner GO recorded 2026-08-22 for candidate bb7d5628 (audit remediation batch, see validationScope). The accepted quality manifest still points at candidate 56c0c209; the 150-row suite was not re-run after the constant-answer removal, whose whole point is that those rows' curated answers change. Quality evidence for this candidate is the three 2026-08-22 canary runs on the production-tracked set: zero constant leaks, old-curated vs never-curated path distribution symmetric, colloquial Q01 restored to parity after ee11b11. Row-by-row human review NOT performed. | 2026-08-23 batch (candidate 6b4267b1): segment vocabulary intent + MD&A focus windows, excerpt-supported numeric claims (and their final-surface bindings), thin-label business overview guard, colloquial liquidity/risk/segment phrasing, one-character question guard (400), safe-harbor exclusion from evidence, advice-bait redirect set. Evidence: 2026-08-22-human-phrasing-12x15-lkg + core-12x15-lkg (180 rows each, zero infra, zero advice, 0 material numeric errors after the binding fix), human-q08-segment-15 (15/15 deterministic). Row-by-row human review NOT performed. Release-owner GO: PENDING.",
+    "normalDeployGuardExpectedToFailUntilRefreshed": true
+  },
+  "completionCriteria": {
+    "workerFullTestFailures": 0,
+    "iosTestFailures": 0,
+    "secFetcherTestFailures": 0,
+    "legalValidationFailures": 0,
+    "releaseBuildFailures": 0,
+    "testMigrationFailures": 0,
+    "openReleaseBlockingLocalCodeDefects": 0,
+    "productionMigrationFailures": 0,
+    "testWorkerSmokeFailuresOnFinalCandidate": 0,
+    "productionWorkerSmokeFailures": 0,
+    "productionWorkerSmokeOnCurrentActiveConfig": "PASS_ACTIVE_CAPABILITY_GUARDRAILS",
+    "openProductionRuntimeConfigurationDefects": 0,
+    "shippingTruthContradictionsWithinAuthoritativeSet": 0
+  },
+  "preparedRepairs": {
+    "appleVerifierBinding": {
+      "status": "PRODUCTION_DEPLOYED_AND_SMOKE_VERIFIED",
+      "releaseCandidateId": "ff298a1053695e2df4399177be2a28d4c148a4594c9d12dfbc1d0d71c071b7ea",
+      "appleAppId": "6762764426",
+      "capabilityReadinessRequiresAppleAppId": true,
+      "productionSmokeProfile": "ACTIVE_CAPABILITY_GUARDRAILS",
+      "builtInAppAttestVerifier": true,
+      "applePublishedValidationVector": "PASS",
+      "appAttestPublicKeyMigration": "0018",
+      "localMigrationApplyThrough0018": "PASS",
+      "legacyVerifiedIdentityUpgrade": "SAME_PRINCIPAL_REBOOTSTRAP_AND_REATTEST",
+      "invalidAppAttestKeyRecovery": "SAME_STRICT_BOOTSTRAP_IDENTITY_ROTATE_ONCE",
+      "staleFilingChatAutoRecovery": "REFRESH_AND_RETRY_ONCE",
+      "debugApiIsolation": "test",
+      "releaseApiIsolation": "production"
+    }
+  },
+  "githubEvidence": {
+    "status": "PASS",
+    "latestMergedPr": 16,
+    "latestValidatedHeadSha": "2a9cd0808993d8ce75756eb2657b036ab48f3f0a",
+    "latestPrCiRunId": 29217494685,
+    "latestPrCiConclusion": "SUCCESS_9_OF_9",
+    "mainProtection": {
+      "strictRequiredChecks": true,
+      "requiredCheckCount": 9,
+      "requiredApprovingReviews": 1,
+      "enforceAdmins": true,
+      "requiredConversationResolution": true,
+      "allowForcePushes": false,
+      "allowDeletions": false
+    }
+  },
+  "missingHardGates": [
+    "StoreKit sandbox and two-device subscription/purchase lifecycle evidence for the now-active billing capability",
+    "App Store Server Notifications console delivery before notification activation",
+    "Sign in with Apple recovery and appAccountToken two-device evidence before account recovery activation"
+  ]
+}

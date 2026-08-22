@@ -53,14 +53,13 @@
       release gate の waiver 更新 → deploy → smoke:production:release PASS
       **本番デプロイはリリースオーナーの明示 GO があってから**(この制約は /goal より先に
       オーナーが置いたもの。waiver の `APPROVED_BY_RELEASE_OWNER` を私が書くのは承認の捏造)。
-      準備済み手順(GO 後に実行、所要 10 分):
-      1. `cd workers && npm run -s release:candidate` → 候補 ID(2026-08-22 23:00 時点
-         `6ab80486…`。workers/src・d1/migrations・shared を触ると変わる)
-      2. `docs/release/RELEASE_GATE_STATE.json` の `oneTimeQualityRerunWaiver.deployedCandidateId`
-         と `releaseCandidateId` / `nextLocalReleaseCandidateId` を候補 ID に、`asOf` と
-         `approvedAt` を当日に、`scope` に「A1–A4・質問ガード・safe-harbor・数値証明 binding、
-         evidence は human-phrasing-12x15 / core-12x15 LKG、行別人手レビュー未実施」を追記
-      3. `npm run deploy`(release guard が waiver で通る)→ `npm run smoke:production:release`
+      準備済み手順(GO 後に実行、所要 10 分。release guard の check-only は PASS 済み):
+      1. `cd workers && npm run -s release:candidate` が `6b4267b1…` であることを確認
+         (workers/src・d1/migrations・shared を触ると変わる。変わっていたら pending ファイルの
+         候補 ID 3 箇所を置き換える)
+      2. `cp docs/release/RELEASE_GATE_STATE.pending-6b4267b1.json docs/release/RELEASE_GATE_STATE.json`
+         → scope 末尾の「Release-owner GO: PENDING」を GO の日付に書き換えて commit
+      3. `npm run deploy:check`(PASS)→ `npm run deploy` → `npm run smoke:production:release`
       4. 本節を `[x]`、memory の本番 worker 版を更新
 
 ## E. 整合
