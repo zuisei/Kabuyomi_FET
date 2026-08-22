@@ -809,4 +809,14 @@ final class StreamSupportTests: XCTestCase {
             XCTFail("single character must be treated as empty")
         }
     }
+
+    // 「H」だけ残った入力欄で送信ボタンが沈んだまま、理由が無い状態を無くす。
+    func testDraftHintOnlyForSubstancelessNonEmptyDraft() {
+        XCTAssertNotNil(streamDraftHint(draft: "H", disabledReason: nil))
+        XCTAssertNotNil(streamDraftHint(draft: " ? ", disabledReason: nil))
+        XCTAssertNil(streamDraftHint(draft: "", disabledReason: nil), "空欄はプレースホルダに任せる")
+        XCTAssertNil(streamDraftHint(draft: "   ", disabledReason: nil))
+        XCTAssertNil(streamDraftHint(draft: "売上", disabledReason: nil))
+        XCTAssertNil(streamDraftHint(draft: "H", disabledReason: "残高不足"), "コンポーザ側の理由が優先")
+    }
 }

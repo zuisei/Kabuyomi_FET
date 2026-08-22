@@ -348,6 +348,18 @@ func redesignQuestionHasSubstance(_ question: String) -> Bool {
     return false
 }
 
+/// 入力欄に字はあるのに送信ボタンが沈んだまま、という状態に添える一言。
+/// 「H」だけ残った入力欄で何も言わないと、壊れているように見える
+/// (2026-08-22 実機レビュー)。残高不足などコンポーザ側の理由があるときは
+/// そちらが優先で、この文言は出さない。空欄にも出さない(プレースホルダが言っている)。
+func streamDraftHint(draft: String, disabledReason: String?) -> String? {
+    guard disabledReason == nil else { return nil }
+    let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, !redesignQuestionHasSubstance(trimmed) else { return nil }
+    // 会社チップと残高の間の1行に収める。長いと会社名が「Amazon.com,…」に潰れる。
+    return "もう少し詳しく"
+}
+
 func redesignAskPreparation(
     rawQuestion: String,
     disabledReason: String?,

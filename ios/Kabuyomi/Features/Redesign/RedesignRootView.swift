@@ -819,6 +819,10 @@ private struct RedesignAskBar: View {
         disabledReason == "残高不足"
     }
 
+    private var draftHint: String? {
+        streamDraftHint(draft: draft, disabledReason: disabledReason)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             if dynamicTypeSize.isAccessibilitySize {
@@ -827,12 +831,14 @@ private struct RedesignAskBar: View {
                     companyChip
                     creditChip
                     if let disabledReason, !isOutOfCredit { statusText(disabledReason) }
+                    if let draftHint { statusText(draftHint) }
                 }
             } else {
                 HStack(spacing: 8) {
                     companyChip
                     Spacer(minLength: 8)
                     if let disabledReason, !isOutOfCredit { statusText(disabledReason) }
+                    if let draftHint { statusText(draftHint) }
                     creditChip
                 }
             }

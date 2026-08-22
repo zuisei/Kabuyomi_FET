@@ -11,7 +11,7 @@
 ## 完全体の定義
 
 - [x] A. 回答品質バックログ(実機で見つかった劣化)がすべて解消
-- [ ] B. iOS の既知不具合がすべて解消
+- [x] B. iOS の既知不具合がすべて解消
 - [ ] C. 口語ベンチ(human-phrasing-12 × production-tracked-15)が新 LKG として記録され、
       綺麗版との経路差分が説明可能
 - [ ] D. Worker の改善がすべて本番に反映され、本番 smoke PASS
@@ -35,7 +35,8 @@
       設定 > Show Borders でも同じ。スワイプなら全トグルが保存される(コンテナ内 plist で確認)。
       注意: `simctl spawn defaults` が見る plist はアプリの物ではない。実体は
       `simctl get_app_container … data` 配下の `Library/Preferences/app.kabuyomi.ios.plist`
-- [ ] B3. 入力欄の「H」残り等、送信不能ドラフトの扱い(非活性時に理由を出すか)— 判断して処置
+- [x] B3. 入力欄の「H」残り等、送信不能ドラフトの扱い — 字はあるが送れない時だけ、会社チップと残高の間に
+      「もう少し詳しく」を出す(`streamDraftHint`)。残高不足など他の理由が優先。空欄には出さない
 
 ## C. ベンチ
 
