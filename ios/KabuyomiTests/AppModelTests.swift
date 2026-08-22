@@ -58,6 +58,51 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.consumePendingDraftQuestion(for: "MSFT"))
     }
 
+    /// 盤面の未読ドットの基準になる「会社ごとの最終閲覧時刻」。
+    /// UserDefaults を毎描画で読むと SwiftUI が変化を観測できないので、
+    /// 観測可能な状態と永続の両方が同時に更新されることを固定する。
+    func testMarkCompanyOpenedStoresTimestampInStateAndDefaults() {
+        let model = makeAppModel()
+        let openedAt = Date(timeIntervalSince1970: 1_776_000_000)
+
+        // 記録前は値そのものが無い = `homeBoardIsUnread` 側で既読扱いになる。
+        XCTAssertNil(model.lastOpenedAt["AAPL"])
+
+        model.markCompanyOpened(ticker: " aapl ", at: openedAt)
+
+        XCTAssertEqual(model.lastOpenedAt["AAPL"], openedAt)
+        XCTAssertEqual(
+            UserDefaults.standard.double(forKey: "\(AppModel.lastOpenedAtKeyPrefix)AAPL"),
+            openedAt.timeIntervalSince1970,
+            accuracy: 0.001
+        )
+        XCTAssertFalse(
+            homeBoardIsUnread(
+                filedAt: Date(timeIntervalSince1970: 1_770_000_000),
+                isPlaceholder: false,
+                lastOpenedAt: model.lastOpenedAt["AAPL"]
+            )
+        )
+    }
+
+    /// 保存済みの値はアプリ再起動をまたいで読み戻され、リセットで消える。
+    func testLastOpenedTimestampsSurviveRelaunchAndAreClearedByReset() {
+        let persistence = PersistenceController(inMemory: true)
+        let first = makeAppModel(persistence: persistence)
+        first.markCompanyOpened(ticker: "AAPL", at: Date(timeIntervalSince1970: 1_776_000_000))
+
+        let relaunched = makeAppModel(persistence: persistence)
+        XCTAssertEqual(
+            relaunched.lastOpenedAt["AAPL"],
+            Date(timeIntervalSince1970: 1_776_000_000)
+        )
+
+        relaunched.resetLocalData()
+
+        XCTAssertTrue(relaunched.lastOpenedAt.isEmpty)
+        XCTAssertNil(UserDefaults.standard.object(forKey: "\(AppModel.lastOpenedAtKeyPrefix)AAPL"))
+    }
+
     func testPaidCreditAccountSignOutClearsOnlyLocalSessionAndRefreshesInstallationUsage() async {
         let store = TestAccountCredentialStore(credential: AccountCredential(
             token: "opaque-account-session",

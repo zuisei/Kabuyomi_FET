@@ -329,6 +329,9 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     static let appLaunchCountKey = "kabuyomi.appLaunchCount"
     static let starterCompaniesAutoHiddenKey = "kabuyomi.starterCompaniesAutoHidden"
     static let starterCompaniesAutoHideLaunchThreshold = 5
+    /// 会社ごとの最終閲覧時刻。`kabuyomi.lastSeenFiling.<TICKER>` と同じ
+    /// 「接頭辞 + ticker」のフラットキーで、値は 1970 起点の秒(Double)。
+    static let lastOpenedAtKeyPrefix = "kabuyomi.lastOpenedAt."
     #if DEBUG
     static let devModeEnabledKey = "kabuyomi.detachedAccess.devModeEnabled"
     #endif
@@ -353,6 +356,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var companyLoadStates: [String: CompanyLoadStatePayload] = [:]
     var chatHistoryCache: [String: [LocalChatMessage]] = [:]
     var pendingChats: [String: PendingChatState] = [:]
+    /// 会社ごとの最終閲覧時刻。盤面の未読ドットの基準。
+    /// UserDefaults の読み書きを毎描画で行うと SwiftUI は変化を観測できないので、
+    /// 起動時に一度だけ読み出して観測可能な状態として保持し、書き込み時に両方を更新する。
+    private(set) var lastOpenedAt: [String: Date] = AppModel.loadPersistedLastOpenedAt()
     var lastViewedTicker = UserDefaults.standard.string(forKey: "kabuyomi.lastViewedTicker")
     var activeConversationTicker = UserDefaults.standard.string(forKey: "kabuyomi.activeConversationTicker")
 
@@ -2036,6 +2043,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     func recordCompanyVisit(ticker: String) {
+        // 未読ドットは「開いたかどうか」だけで消す。
+        // 資料の取得に失敗した会社でもワークスペースは開いているので、
+        // 記録を payload の有無より前に置き、ドットが取り残されないようにする。
+        markCompanyOpened(ticker: ticker)
+
         guard let company = companyPayload(for: ticker) else { return }
 
         let normalized = normalizedTicker(ticker)
@@ -3163,6 +3175,7 @@ credit残高に使う端末識別情報は維持されます。
             UserDefaults.standard.removeObject(forKey: Self.pendingConversationQuestionKey)
         }
         clearLastSeenFilingKey(for: normalized)
+        clearLastOpenedAt(for: normalized)
         try? persistence.removeStock(ticker: normalized)
         companyIsLoading = !loadingTickers.isEmpty
         chatIsSending = !pendingChats.isEmpty
@@ -3311,6 +3324,40 @@ credit残高に使う端末識別情報は維持されます。
         "kabuyomi.lastSeenFiling.\(normalizedTicker(ticker))"
     }
 
+    private static func lastOpenedAtKey(for ticker: String) -> String {
+        "\(lastOpenedAtKeyPrefix)\(ticker)"
+    }
+
+    /// 保存済みの最終閲覧時刻をまとめて読み出す。
+    /// 値が無い会社はここに現れず、未読判定側で「既読」として扱われる
+    /// (`homeBoardIsUnread`。導入前から保存されている会社にドットを一斉に付けない)。
+    private static func loadPersistedLastOpenedAt() -> [String: Date] {
+        var result: [String: Date] = [:]
+        for (key, value) in UserDefaults.standard.dictionaryRepresentation()
+        where key.hasPrefix(lastOpenedAtKeyPrefix) {
+            let ticker = String(key.dropFirst(lastOpenedAtKeyPrefix.count))
+            guard !ticker.isEmpty,
+                  let seconds = (value as? NSNumber)?.doubleValue,
+                  seconds > 0 else { continue }
+            result[ticker] = Date(timeIntervalSince1970: seconds)
+        }
+        return result
+    }
+
+    /// 会社を開いたことを記録する。未読ドットはこの時刻を基準に消える。
+    func markCompanyOpened(ticker: String, at date: Date = Date()) {
+        let normalized = normalizedTicker(ticker)
+        guard !normalized.isEmpty else { return }
+        lastOpenedAt[normalized] = date
+        UserDefaults.standard.set(date.timeIntervalSince1970, forKey: Self.lastOpenedAtKey(for: normalized))
+    }
+
+    private func clearLastOpenedAt(for ticker: String) {
+        let normalized = normalizedTicker(ticker)
+        lastOpenedAt.removeValue(forKey: normalized)
+        UserDefaults.standard.removeObject(forKey: Self.lastOpenedAtKey(for: normalized))
+    }
+
     private func setLastSeenFilingKey(_ filingKey: String, for ticker: String) {
         UserDefaults.standard.set(filingKey, forKey: lastSeenFilingKeyKey(for: ticker))
     }
@@ -3318,10 +3365,11 @@ credit残高に使う端末識別情報は維持されます。
     private func clearCompanyNavigationState() {
         let defaults = UserDefaults.standard
         for key in defaults.dictionaryRepresentation().keys {
-            if key.hasPrefix("kabuyomi.lastSeenFiling.") {
+            if key.hasPrefix("kabuyomi.lastSeenFiling.") || key.hasPrefix(Self.lastOpenedAtKeyPrefix) {
                 defaults.removeObject(forKey: key)
             }
         }
+        lastOpenedAt = [:]
     }
 
     private func clearLastSeenFilingKey(for ticker: String) {
