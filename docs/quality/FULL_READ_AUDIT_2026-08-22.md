@@ -1124,3 +1124,58 @@ business-overview の boolean 一致は 12/12。enum 全体では6ペアに既�
 - `app_attest_extensions_missing_allowed` の観察を開始(⑨ の flip 判断材料)
 - smoke を触ったので release candidate は変わる。次回 deploy 時は waiver 再更新が必要
   (`normalDeployGuardExpectedToFailUntilRefreshed: true` は既に立ててある)
+
+---
+
+# Q. v2 完全体チェックリストの消化(2026-08-22 夜)
+
+オーナー指示「完全体になるまで絶対にやめるな」。完了条件は
+`docs/ui-redesign-v2/V2_COMPLETION_CHECKLIST.md`。本節はその証跡。
+
+## Q-1 回答品質バックログ(A)— 残タスク 1〜3 を処置
+
+| 項目 | 処置 | 証跡 |
+|---|---|---|
+| セグメント質問が売上スナップショットに吸われる | 会社固有のセグメント語彙(AWS 等)→ `segment_analysis`、文脈パックに MD&A の名指し窓、数値整合は引用抜粋の数値を採用 | `intent-segment-vocabulary`、`numeric-alignment-excerpt-support` |
+| Q01 薄ラベル | `summarizeBusinessOverview` は使えるラベル 2 件未満なら null → モデル経路。MA は抽出 MD&A に事業説明が無く、正直な不足回答(外部制約として記録) | `revenue-breakdown-concreteness`、pipeline fixture |
+| 口語語彙(借金/やばい) | `liquidity_debt` / `risk_factors` に追加 | LKG で Q10・Q11 とも 15/15 |
+| 投資助言ベイト | `advice-bait-4.jsonl` 追加、12 行すべて redirect | run `2026-08-22-advice-bait-12` |
+| 1 文字質問の課金 | Worker 400(`question-substance`)+ iOS 送信非活性 | `question-substance` |
+
+## Q-2 口語ベンチ LKG(C)
+
+同一 Worker ビルド(test `81602229`)で 180 行 × 2 本。
+
+| | human-phrasing-12 × 15 | core-12 × 15 |
+|---|---|---|
+| run | `2026-08-22-human-phrasing-12x15-lkg` | `2026-08-22-core-12x15-lkg` |
+| 経路 | deterministic 95 / openai 63 / fallback 21 | deterministic 107 / openai 38 / fallback 22 / historical 13 |
+| quality fallback 率 | 11.7% | 12.2% |
+| hard-intent fallback | 13 | 13 |
+| 投資助言 / 英語露出 / 禁止句 | 0 / 0 / 0 | 0 / 0 / 0 |
+| infra(rate limit 等) | 0 | 0 |
+| p50 / p95 | 4.1s / 9.3s | 3.8s / 11.0s |
+| material numeric errors | 3 → **0(計測の穴、下記)** | 0 |
+
+**意図は 12 テンプレ中 10 で一致**。割れた 2 つは質問の意味が違う: Q02 口語
+「前より儲かってる？」は yoy_change(綺麗版は revenue_breakdown)、Q07 口語
+「前とくらべて何が変わった？」は yoy_change(綺麗版は明示的な過去比較で historical)。
+どちらも口語の読みとして妥当。
+
+**経路が割れたのは Q08 だけ**: 綺麗版「どのセグメントや地域が伸びた？」は 15/15 が抽出回答、
+口語「どこの事業が調子いいの？逆にダメなとこは？」は 7 行が fallback。原因は抽出回答の
+トリガ正規表現に 調子/好調/ダメ が無かっただけ → 追加(parity テストで pin)。
+
+**material numeric error 3 件の正体**(いずれも誤答ではない):
+- NVDA-Q05: 数値整合が照合不能な数値を**差し止めた**行(正しい挙動)
+- JPM-Q05 / MA-Q12: 引用抜粋で裏の取れた数値(14%・18.6%)が `claimBindings` に載らず、
+  最終表面の検証数が claim 数に届かなかった。Worker の診断の穴 → 抜粋裏付け claim も
+  binding に出すよう修正(`numeric-alignment-excerpt-support` に pin)
+
+**自分の手違い**: 最初の実行を 10 分のツール制限で止めて同じ run id で再開したため、
+AAPL の Q01〜Q05 が Worker の operationId 再生保護に当たった(Q01〜Q04 は debug 無しの
+再生応答、Q05 は 36ms の空応答)。Worker の不具合ではない。別 run id で AAPL を取り直し。
+
+**バックログ(完全体の定義外)**: Q12「次の決算、どこ見とけばいい？」は両版とも `unknown`
+(パリティは成立、回答は指標+MD&A の案内で妥当)。`mda_summary` に寄せれば見通し文を
+引ける余地がある。
