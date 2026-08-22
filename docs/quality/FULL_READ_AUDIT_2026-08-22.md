@@ -457,8 +457,31 @@ F-2 はどれを選んでも必要な土台なので先に入れてある。
 購入とサーバーの拒否までは検証できるので、失うのは付与の1手のみ。
 付与まで通す検証は test worker を指すビルドで行う必要がある。
 
-**回収の要否は別問題。** F-2 のログと `verification_environment` 列で
-既存の sandbox 付与を洗い出すこと。これは遮断とは独立に必要。
+**回収の要否は別問題。** 遮断は「これから」を止めるだけで、既存の付与は残る。
+
+## F-6 既存分の洗い出し(2026-08-22)
+
+`workers/scripts/sandbox-credit-grant-exposure.mjs` を追加した。読み取り専用。
+
+```bash
+node workers/scripts/sandbox-credit-grant-exposure.mjs        # remote D1
+node workers/scripts/sandbox-credit-grant-exposure.mjs --sql  # SQL だけ出す
+```
+
+**ただし D1 だけでは過去分を特定できない。** `verification_environment` は 0019 で
+新設した列なので、**既存行は全て NULL** である。NULL は「不明」であって「production」ではない。
+スクリプトは NULL を `unknown_pre_0019` として**分けて**集計する
+(`production` に丸めない)。
+
+特定するには Apple に問い合わせ直す必要がある:
+
+```
+GET https://api.storekit.itunes.apple.com/inApps/v1/transactions/{transactionId}
+→ 404 / errorCode 4040010 (TransactionIdNotFound) なら sandbox 由来
+```
+
+App Store Server API の鍵が要るため**スクリプトにはやらせていない**。
+このスクリプトは鍵を持たず、書き込みもしない。対象行の一覧までを出す。
 
 ---
 
