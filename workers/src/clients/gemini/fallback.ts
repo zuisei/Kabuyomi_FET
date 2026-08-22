@@ -710,35 +710,24 @@ function buildRevenueDriverFallbackAnswer(
 }
 
 function sectorRevenueDriverChecklist(filing: FilingCacheRecord): string {
-  const ticker = filing.ticker.toUpperCase();
-  const company = filing.companyName.toLowerCase();
+  // Content-gated only. This used to carry five identity-gated branches above
+  // the text checks (ticker === "AAPL" etc.) that asserted company structure —
+  // "iPhone、Services、Mac" — from the ticker alone, whatever the filing said.
+  // Same family as the deleted constant-answer tables, in advice clothing. The
+  // haystack variants below say the same things when and only when the MD&A
+  // actually uses that sector's vocabulary, which is the only gate that keeps
+  // the "every statement has a source" claim honest here.
   const haystack = filing.mdaText.slice(0, 8000).toLowerCase();
 
-  if (ticker === "WMT" || /walmart|sam'?s club/.test(company)) {
-    return "小売では、既存店売上、traffic、ticket、eCommerce、membership/advertising、在庫とgross marginを分けて確認する必要があります。";
-  }
-
-  if (ticker === "CAT" || /caterpillar/.test(company)) {
-    return "工業株では、price realization、販売数量、dealer inventory、backlog、Construction/Resource/Energy & Transportation別の強弱を分けて確認する必要があります。";
-  }
-
-  if (ticker === "XOM" || /exxon/.test(company)) {
-    return "エネルギーでは、原油・天然ガス価格、upstreamの生産量、refining margin、chemical margin、為替や売却影響を分けて確認する必要があります。";
-  }
-
-  if (ticker === "AAPL" || /apple/.test(company)) {
-    return "Appleのような製品・サービス企業では、iPhone、Services、Mac、地域別売上、為替、製品mixを分けて確認する必要があります。";
-  }
-
-  if (isBankOrFinancialCompany(ticker, company)) {
+  if (/net interest income|noninterest income|provision for credit losses|total deposits|loan portfolio|net charge-offs?/.test(haystack)) {
     return "銀行では、net interest income、noninterest income、信用損失引当、預金・貸出残高、投資銀行やマーケット収益を分けて確認する必要があります。";
   }
 
-  if (ticker === "XOM" || /exxon|upstream|downstream|chemical|crude oil|natural gas|refining margin/.test(haystack)) {
+  if (/exxon|upstream|downstream|chemical|crude oil|natural gas|refining margin/.test(haystack)) {
     return "エネルギーでは、原油・天然ガス価格、upstreamの生産量、refining margin、chemical margin、為替や売却影響を分けて確認する必要があります。";
   }
 
-  if (ticker === "CAT" || /caterpillar|construction industries|resource industries|energy and transportation|backlog|dealer inventory/.test(haystack)) {
+  if (/caterpillar|construction industries|resource industries|energy and transportation|backlog|dealer inventory/.test(haystack)) {
     return "工業株では、price realization、販売数量、dealer inventory、backlog、Construction/Resource/Energy & Transportation別の強弱を分けて確認する必要があります。";
   }
 
@@ -750,7 +739,7 @@ function sectorRevenueDriverChecklist(filing: FilingCacheRecord): string {
     return "バイオ医薬では、製品別売上、提携収入、ロイヤリティ、承認済み製品の需要、研究開発や販売体制の変化を分けて確認する必要があります。";
   }
 
-  if (/rocket lab|space|launch|aerospace|satellite/.test(`${company} ${haystack}`)) {
+  if (/rocket lab|space|launch|aerospace|satellite/.test(haystack)) {
     return "宇宙・航空関連では、打ち上げサービス、宇宙システム、受注残、ミッション数、顧客需要を分けて確認する必要があります。";
   }
 
@@ -761,35 +750,6 @@ function sectorRevenueDriverChecklist(filing: FilingCacheRecord): string {
   return "次に見るべきなのは、事業別・地域別・製品別の売上説明、価格や数量、顧客需要のどれが増減に効いたかです。";
 }
 
-/**
- * Ticker symbols and name keywords are different kinds of evidence, so they are
- * matched differently. The tickers are compared exactly against the ticker
- * field: as regex alternatives against `${ticker} ${companyName}` the short ones
- * matched name text — `\bc\b` fired on any company whose name contained a
- * standalone "c", and `\bms\b`/`\bgs\b`/`\btd\b` were the same bug waiting for a
- * name to hit. Only the multi-word and unambiguous keywords are matched against
- * the name.
- */
-const FINANCIAL_SECTOR_TICKERS = new Set([
-  "JPM",
-  "BAC",
-  "C", // Citigroup
-  "WFC",
-  "GS",
-  "MS",
-  "PNC",
-  "USB",
-  "TD",
-  "SCHW",
-  "BLK"
-]);
-
-function isBankOrFinancialCompany(ticker: string, companyName: string): boolean {
-  if (FINANCIAL_SECTOR_TICKERS.has(ticker.trim().toUpperCase())) {
-    return true;
-  }
-  return /\b(bank|bancorp|financial|capital markets|wealth management|asset management|brokerage)\b/i.test(companyName);
-}
 
 function buildClosestContextFallbackAnswer(
   metric: MetricSnapshot | undefined,
