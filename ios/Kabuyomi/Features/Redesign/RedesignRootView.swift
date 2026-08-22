@@ -3120,7 +3120,7 @@ private struct RedesignSettingsView: View {
                 )) {
                     SettingsToggleLabel(
                         title: "スターター銘柄を表示",
-                        subtitle: "リサーチ画面に代表的な会社を表示します。"
+                        subtitle: "ホーム画面に代表的な会社を表示します。"
                     )
                 }
                 .tint(KabuyomiTheme.accent)
