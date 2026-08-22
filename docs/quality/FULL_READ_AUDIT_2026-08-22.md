@@ -978,3 +978,71 @@ deterministic 回答に置き換わるようになったため。こちらも新
 と製品名を名指しする。同ファイル757-758行目は同じ文字列だが門が本文(`haystack`)側なので
 性質が違う。「次に何を見るか」の案内であって事業内容の断定ではない分だけ弱いが、
 同じ種類ではある。今回の指示範囲外なので触っていない。
+
+---
+
+# N. 一括修正の残り(2026-08-22 後半)— ⑫⑮、⑯の訂正、チェックリストの門
+
+M節(②の削除)と並行して残件を処理した。統合後: typecheck clean / **1190/1190** /
+tripwire 0 surfaces / migrations 19 / sec-fetcher 15/15。
+
+## N-1 ⑫ — 鎖ごと削除した
+
+`refundChatQuota` は呼び出し元ゼロを grep で再確認の上、
+lib 関数 → contracts の enum → DO の分岐 → `ChatRefundRecord` 一式 → テスト3件を削除。
+日次境界バグは**直したのではなく埋葬した** — 消費日を運ぶ契約を定義すべき呼び出し元が
+存在しないため、発明した契約を課金経路に未検証で置くことを拒否した。
+既存 DO の `chat_refund:*` レコードは孤児化するが無害。
+
+**副産物の指摘(未処置):** `consumeChatQuota` / `ensureChatQuotaAvailable` を含む
+旧・日次チャットクォータ系全体がクレジット台帳移行で孤児化している疑い。
+`WORKER_ARCHITECTURE_BRIEF.md:636` の「生成後に consumeChatQuota を呼ぶ」記述は**古い**。
+別作業として切り出すこと。
+
+## N-2 ⑮ — 正直な UA に差し替えた
+
+`web-search.ts` の Chrome 135 偽装を `"Kabuyomi filing-supplement admin@kabuyomi.app"` に。
+到達性も検証済み: 唯一の呼び出し元は `webSupplementEnabled`(既定 false)の後ろ。
+コメントに「DDG に 403 されても Chrome 文字列を貼り戻す免罪符ではない」と明記。
+
+## N-3 【訂正】⑯ — 監査の前提が間違っていた
+
+J-3 で「二重実装2組、本番で死んでいる」と書いたが、削除前の到達性検証で**前提が崩れた**:
+
+1. `server.mjs` から全モジュールが到達可能(`sec-service.mjs` → `prepared-filing.mjs`)
+2. CI に専用ジョブがある(`pull-request-ci.yml`)
+3. **Railway 撤退 runbook に載った稼働可能なロールバック先**である
+   (`docs/deploy/SEC_FETCHER_RAILWAY_EXIT_RUNBOOK.md`、Worker 側も
+   `sec-fetcher.ts:159` で HTTP 経路を保持)
+
+「15テストは何も守っていない」も誤り — ロールバック経路を守っている。
+**何も削除していない。** 重複(`prepared-filing.mjs` ↔ `mda.ts`、定数まで同一)は事実で、
+正しい直し方は共有モジュール化。これは別作業。
+
+この訂正の教訓: 「本番の設定では使われていない」と「死んでいる」は違う。
+設定で選択されるロールバック先は生きている。
+
+## N-4 古い smoke の廃止
+
+`staging-worker.js`(installation identity 導入前、401 で即死)を削除し、
+`smoke:test` は動く2本(`identity` → `release`)の直列実行に。
+隠れた参照 `smoke:staging` も同時に発見・削除。CI は `smoke:production:release` のみ参照で影響なし。
+
+## N-5 sectorRevenueDriverChecklist — M節のフラグを処置
+
+②の削除作業が新たに発見した同族(`fallback.ts`)。identity ゲート5分岐
+(`ticker === "AAPL"` 等)が、filing の中身に関係なく「iPhone、Services、Mac」等の
+企業構造をチップ付き回答の末尾に断定していた。「確認すべき」という助言の体裁でも、
+**その企業のセグメントが何かという主張が定数から来ている**ことは変わらない。
+
+処置: identity 分岐を削除し、**本文ゲート版のみ**に一本化。銀行分岐だけ本文ゲート版が
+無かったので新設(net interest income / provision for credit losses / total deposits …)。
+実際の Walmart / Apple の MD&A はこの語彙を必ず含むので、正しい対象では案内が消えない。
+`isBankOrFinancialCompany` / `FINANCIAL_SECTOR_TICKERS` は最後の呼び出し元を失い同時に削除。
+
+## N-6 未処置として残っているもの(最終)
+
+- **⑨** — flip は計測データ待ち(意図的)。`app_attest_extensions_missing_allowed` を数日観察
+- **⑯の本修正** — 共有モジュール化(リファクタ、別作業)
+- **旧チャットクォータ系の孤児疑い**(N-1 副産物、別作業)
+- **本番デプロイ** — 未実施。本番は依然 `b33a391b`
