@@ -495,3 +495,71 @@ E-4 で「同一リポジトリ内で扱いが割れている」と書いた件�
 3表に `GOOG` を足せば揃うが、それは**定数由来の回答が発火する範囲を広げる**ことになる。
 「まず可視化だけ」の方針に反するので**足していない**。
 ②の方針が決まった時点で、揃える / 3表ごと落とす のどちらかに寄せる判断になる。
+
+---
+
+# I. ①の解決 — 本番プロンプトを実際に見に行った(2026-08-22)
+
+E-1 で「本番のプロンプトはリポジトリに無く、**今回の点検でも読めていない**」と書いた。
+Chrome から OpenAI ダッシュボードを開いて読んだので、その未読を解消する。
+
+写しは `workers/src/clients/llm/providers/openai/production-prompt/` に置いた。
+developer 指示 7,567文字は **SHA-256 でバイト一致を検証済**
+(`7b426ce7250fbc3a0e6dd0c156b9164c9bffb305f6d0ae57e16513fa89c53924`)。
+転記時に1文字誤ったがハッシュ不一致で検出できたので、目視ではなく機械で担保している。
+
+## I-1 【訂正】「安全性の中核がダッシュボード側にある」は言い過ぎだった
+
+`buildOpenAIResponsesPromptRequest`(`request.ts:535`)は毎回
+`model` / `text.format` / `verbosity` / `reasoning.effort` / `max_output_tokens` を
+**明示的に送っている**ため、ダッシュボードに保存された設定は上書きされる。
+
+| 項目 | ダッシュボードの保存値 | 実際に送られる値 | 勝つのは |
+|---|---|---|---|
+| model | `gpt-5-nano` | `OPENAI_CHAT_MODEL` = `gpt-5-nano` | リポジトリ(一致) |
+| reasoning effort | `minimal` | `OPENAI_REASONING_EFFORT` = **`low`** | **リポジトリ(不一致)** |
+| verbosity | `low` | `"low"`(ハードコード) | リポジトリ |
+| text format | `json_schema` `kabuyomi_chat_answer` | `openAIChatResponseJsonSchema()` | リポジトリ |
+| max output tokens | — | `OPENAI_MAX_COMPLETION_TOKENS` = 1800 | リポジトリ |
+
+→ **ダッシュボードが握っているのは指示文だけ**。出力の形もモデルもトークン上限も
+リポジトリ側にある。構造的な問題(コミット無しで本番挙動を変えられる)は残るが、
+影響範囲は E-1 に書いたより狭い。
+
+なお reasoning effort はダッシュボードが `minimal`、送信値が `low` で**食い違っている**。
+実際に効くのは `low`。ダッシュボード側の `minimal` を見て挙動を推測すると誤る。
+
+## I-2 プロンプトの中身は、看板と整合していた
+
+読んだ限り、「すべての記述に出典があります」を支える指示は**実在した**。
+
+- `You must not invent facts.` / `You must not use outside knowledge.`
+- `Use only sourceIds that exist in the provided Sources list.`
+- `If no provided source supports a statement, do not include that statement.`
+- `If a sourceId was not actually used to support the answer, do not include it.`
+- 投資助言の禁止(価格目標、売買推奨、ポートフォリオ配分、株価予想を名指しで禁止)
+- 通貨換算の捏造禁止、durability を根拠なく断定することの禁止
+
+`workers/test/openai-production-prompt-snapshot.test.ts` がこれらの行の存在と
+ハッシュを固定する。
+
+## I-3 【重要】ただし ② との矛盾はプロンプト側では解けない
+
+プロンプトは `Factual pack` を使えと指示している。
+一方 `seedKnownTickerLabels` は **filing 本文の有無に関係なく**定数ラベルを
+その factual pack に merge する(E-3、H節で 5/30銘柄と確定)。
+
+→ モデルから見ると、seed された定数は「提供された文脈」そのものである。
+   `You must not invent facts` を完璧に守っても、**定数は事実として出力される**。
+   ②は、プロンプトを直しても解けない。**seed をやめるかどうかの問題**である。
+
+## I-4 テストの限界(正直に)
+
+このテストは **ダッシュボードが変更されたことを検知できない**。
+検知できるのは (a) `wrangler.toml` の id / version のずれ、(b) 写しの無断編集だけ。
+定期的に取り直して差分を見る運用が要る。
+
+## 副産物
+
+ダッシュボードのプロンプトは `Kabuyomi` と `test` の2件のみ。
+本番が指している `Kabuyomi` は v2 が default。

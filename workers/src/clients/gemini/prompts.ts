@@ -55,6 +55,18 @@ export function buildSummaryPrompt(input: SummaryPromptInput): string {
   ].join("\n");
 }
 
+/**
+ * NOT the production chat prompt.
+ *
+ * With OPENAI_PROMPT_ID set — which it is in both wrangler.toml and
+ * wrangler.test.toml — client.ts routes chat through invokeOpenAIDashboardPrompt
+ * and this string is never sent. The instructions that actually reach the model
+ * live in the OpenAI dashboard; a byte-exact copy of them is checked in at
+ * src/clients/llm/providers/openai/production-prompt/ (see the README there).
+ *
+ * This remains the fallback used when no prompt id is configured, so it is not
+ * dead code — but do not read it as "what production tells the model".
+ */
 export function buildChatPrompt(input: ChatPromptInput): string {
   const contextPack = input.contextPack ?? {
     questionIntent: input.questionIntent ?? "unknown",
