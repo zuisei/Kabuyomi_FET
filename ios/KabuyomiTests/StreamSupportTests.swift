@@ -261,6 +261,7 @@ final class StreamSupportTests: XCTestCase {
             filingKey: "v1:SOFI:1",
             verdictLine: "増収でした。",
             isUnread: false,
+            revenueDelta: nil,
             suggestedQuestions: []
         )
 
@@ -276,6 +277,37 @@ final class StreamSupportTests: XCTestCase {
         )
 
         XCTAssertTrue(events.isEmpty)
+    }
+
+    /// Phase 5: 資料イベントカードは会社ヘッダー行に売上 YoY を1本だけ添える。
+    /// サマリーの板行は3本並べるが、カードは読み面なので本文の前に3本置かない。
+    func testFilingEventsCarryTheRevenuePillOnlyAndOmitItWhenRevenueIsNotCached() {
+        let withRevenue = streamFilingEvents(
+            saved: [
+                card(
+                    ticker: "AAPL",
+                    filedAt: date(1_770_000_000),
+                    metrics: [metric("revenue", yoyPercent: 16.6), metric("netIncome", yoyPercent: 8.0)]
+                )
+            ],
+            recent: [],
+            lastOpenedAt: [:]
+        )
+        XCTAssertEqual(withRevenue[0].revenueDelta?.text, "+16.6%")
+
+        let withoutRevenue = streamFilingEvents(
+            saved: [
+                card(
+                    ticker: "SNAP",
+                    filedAt: date(1_770_000_000),
+                    metrics: [metric("netIncome", yoyPercent: 8.0)]
+                )
+            ],
+            recent: [],
+            lastOpenedAt: [:]
+        )
+        // 売上が無いからといって純利益に差し替えない。カードごとに違う指標が出ると比べられない。
+        XCTAssertNil(withoutRevenue[0].revenueDelta)
     }
 
     // MARK: - ストリームの並び
@@ -320,6 +352,7 @@ final class StreamSupportTests: XCTestCase {
             filingKey: "v1:\(ticker):1",
             verdictLine: "増収でした。",
             isUnread: false,
+            revenueDelta: nil,
             suggestedQuestions: []
         )
     }

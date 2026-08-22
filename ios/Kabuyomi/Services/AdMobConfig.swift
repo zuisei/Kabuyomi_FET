@@ -69,6 +69,18 @@ enum RewardedAdRuntimeMode: String {
 enum AdMobConfig {
     static let appID = "ca-app-pub-1248492954379402~7909080109"
     static let productionRewardedCreditAdUnitID = "ca-app-pub-1248492954379402/7202804414"
+
+    /// Release ビルドのバナー枠のユニット ID。
+    ///
+    /// **現状は空**。空文字は `hasBannerAdConfig` が false になり、
+    /// サマリータブのバナー枠はそもそも描かれない(v2 IA 仕様 Phase 5)。
+    /// 実ユニットの発行は AdMob コンソール側の作業で、リリースオーナーの管轄。
+    ///
+    /// 2026-04-26 の休眠実装(commit 50711ec)はここに
+    /// `"ca-app-pub-1248492954379402/4700244637"` を持っていた。
+    /// 一度も画面に載っていない値で、コンソールで発行済みかどうかの裏が取れていないため、
+    /// Phase 5 では採用せずここに記録だけ残す。有効だと確認できたらこの定数に入れる。
+    static let productionBannerAdUnitID = ""
     #if DEBUG
     static let testRewardedCreditAdUnitID = "ca-app-pub-3940256099942544/1712485313"
     static let debugDemoAdUnitCannotVerifyProductionSSVReason = "debug_demo_ad_unit_cannot_verify_production_ssv"
@@ -79,12 +91,15 @@ enum AdMobConfig {
     #endif
 
     #if DEBUG
-    static let watchlistBannerAdUnitID = "ca-app-pub-3940256099942544/2435281174"
+    /// Google 公式のテストバナーユニット(固定サイズ 320x50)。
+    /// 画面が使う `AdSizeBanner` と寸法が一致するものを選ぶ。
+    static let testBannerAdUnitID = "ca-app-pub-3940256099942544/2934735716"
+    static let bannerAdUnitID = testBannerAdUnitID
     static var rewardedCreditAdUnitID: String {
         rewardedAdRuntimeMode.adUnitID
     }
     #else
-    static let watchlistBannerAdUnitID = "ca-app-pub-1248492954379402/4700244637"
+    static let bannerAdUnitID = productionBannerAdUnitID
     static let rewardedCreditAdUnitID = RewardedAdRuntimeMode.releaseProduction.adUnitID
     #endif
 
@@ -100,6 +115,24 @@ enum AdMobConfig {
 
     static var hasRewardedCreditAdConfig: Bool {
         !rewardedCreditAdUnitID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// バナーユニットが設定されているか。Release で `productionBannerAdUnitID` が空のあいだは false。
+    static var hasBannerAdConfig: Bool {
+        !bannerAdUnitID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// サマリータブ最下部のバナー枠を描くかどうか。
+    ///
+    /// 条件は2つだけで、どちらも欠けたら描かない:
+    /// 1. free プランであること(課金している人に広告を出さない)
+    /// 2. バナーユニット ID が設定されていること(空 ID でのロードは必ず失敗する)
+    ///
+    /// 画面を起動せずに固定できるよう純関数にしてある。
+    /// 呼ぶ側(サマリータブ)が true のときだけ `AdMobBannerView` を載せ、
+    /// バナー側はこの判断を一切持たない。
+    static func bannerSlotIsVisible(isFreePlan: Bool, hasBannerAdUnit: Bool) -> Bool {
+        isFreePlan && hasBannerAdUnit
     }
 
     static var rewardedAdRuntimeMode: RewardedAdRuntimeMode {

@@ -118,6 +118,9 @@ struct StreamFilingEventCard: Identifiable, Equatable {
     let verdictLine: String
     /// Phase 3 の未読状態。会社を開けば `markCompanyOpened` で消える。
     let isUnread: Bool
+    /// 会社ヘッダー行に添える売上 YoY(Phase 5)。売上がキャッシュに無ければ nil。
+    /// サマリーの板行は3本並べるが、ストリームのカードは1枚が読み面なので1本に絞る。
+    let revenueDelta: MetricYoYDisplay?
     let suggestedQuestions: [String]
 
     var id: String { filingKey.isEmpty ? ticker : filingKey }
@@ -157,6 +160,7 @@ func streamFilingEvents(
                 isPlaceholder: card?.isPlaceholder ?? false,
                 lastOpenedAt: lastOpenedAt[row.ticker]
             ),
+            revenueDelta: homeBoardDelta(metrics: card?.metrics ?? []),
             suggestedQuestions: streamSuggestedQuestions(
                 formType: row.formType,
                 metrics: card?.metrics ?? []

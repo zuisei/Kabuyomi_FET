@@ -39,6 +39,28 @@ func redesignLeadSentence(_ text: String) -> String? {
 
 // MARK: - 盤面(ウォッチリスト)
 
+/// 盤面のデルタピル1個。どの指標のピルなのかを表示側が言えるよう、
+/// 表示(`MetricYoYDisplay`)だけでなく指標名とラベルも持つ。
+///
+/// ピルが1個だった Phase 3 までは「ピル = 売上」が暗黙の前提で、
+/// 行の VoiceOver ラベルにも「売上高 前年同期比 …」と直書きできた。
+/// 3個並ぶ Phase 5 では、どの数字がどの指標かを色でも位置でも判別させられない
+/// (色は上げ下げに使い切っている)ので、ラベルは値と一緒に運ぶ。
+struct HomeBoardDelta: Identifiable, Equatable {
+    /// `MetricPayload.logicalName`(revenue / operatingIncome / netIncome)。
+    let logicalName: String
+    /// 画面とVoiceOverに出す日本語名。`MetricLabeler` から取るので新規文言は増えない。
+    let label: String
+    let display: MetricYoYDisplay
+
+    var id: String { logicalName }
+
+    /// 「売上高 前年同期比 +16.6%」。行側の合成ラベルに差し込む。
+    var accessibilityText: String {
+        "\(label) 前年同期比 \(display.text)"
+    }
+}
+
 /// 盤面の1行。ticker / 社名 / 最新 filing / デルタピル / 未読ドット。
 struct HomeBoardRow: Identifiable, Equatable {
     let ticker: String
@@ -49,10 +71,17 @@ struct HomeBoardRow: Identifiable, Equatable {
     let isPlaceholder: Bool
     let isSaved: Bool
     let isUnread: Bool
-    /// 売上 YoY のピル。売上指標がキャッシュに無い会社では nil。
-    let delta: MetricYoYDisplay?
+    /// 売上・営業利益・純利益の YoY ピル。キャッシュに無い指標は入らない。
+    /// **並びを埋めない**ので、会社によって0〜3個になる。
+    let deltas: [HomeBoardDelta]
 
     var id: String { ticker }
+
+    /// 売上 YoY のピル。Phase 3 まで唯一のピルだったもの。
+    /// ストリームの資料イベントカードは今もこれ1個だけを添える。
+    var delta: MetricYoYDisplay? {
+        deltas.first { $0.logicalName == "revenue" }?.display
+    }
 }
 
 /// 盤面の並び。保存済みを先に、その下に「最近開いた」を渡された順のまま置く。
@@ -92,7 +121,7 @@ private func homeBoardRow(
             isPlaceholder: card.isPlaceholder,
             lastOpenedAt: lastOpenedAt[card.ticker]
         ),
-        delta: homeBoardDelta(metrics: card.metrics)
+        deltas: homeBoardDeltas(metrics: card.metrics)
     )
 }
 
@@ -104,12 +133,36 @@ func homeBoardCompanyName(companyName: String, ticker: String) -> String {
     return trimmed.caseInsensitiveCompare(ticker) == .orderedSame ? "" : trimmed
 }
 
-/// デルタピルは売上 YoY だけを出す(v2 IA 仕様)。
+/// ストリームの資料イベントカードに添えるデルタピルは売上 YoY だけ(v2 IA 仕様)。
 /// 売上が取れていない会社で別の指標に差し替えると、
-/// 行ごとに違う指標のピルが並んで板として読めなくなる。
+/// カードごとに違う指標のピルが出て、並べたときに比べられなくなる。
 func homeBoardDelta(metrics: [MetricPayload]) -> MetricYoYDisplay? {
     guard let revenue = metrics.first(where: { $0.logicalName == "revenue" }) else { return nil }
     return metricYoYDisplay(for: revenue)
+}
+
+/// サマリータブの盤面行に並べる3本柱の順序。
+/// 会社ごとに順番が変わると板として横に読めないので、ここで固定する。
+let homeBoardDeltaLogicalNames = ["revenue", "operatingIncome", "netIncome"]
+
+/// 盤面行のデルタピル(売上・営業利益・純利益の YoY)。
+///
+/// **無い指標は詰めない**。キャッシュに売上しか無い会社で営業利益の枠に
+/// 「—」やゼロを置くと、取得できていないことと横ばいであることが同じ見た目になる。
+/// 出せるものだけを、常に同じ順序で出す。
+///
+/// 順序は `homeBoardDeltaLogicalNames` に従い、`metrics` の並び順には依存しない
+/// (Worker のレスポンスは指標の順序を保証していない)。
+func homeBoardDeltas(metrics: [MetricPayload]) -> [HomeBoardDelta] {
+    homeBoardDeltaLogicalNames.compactMap { logicalName in
+        guard let metric = metrics.first(where: { $0.logicalName == logicalName }),
+              let display = metricYoYDisplay(for: metric) else { return nil }
+        return HomeBoardDelta(
+            logicalName: logicalName,
+            label: MetricLabeler.title(for: logicalName),
+            display: display
+        )
+    }
 }
 
 /// 未読ドット。キャッシュ済み filing の提出日が「その会社を最後に開いた時刻」より新しければ未読。

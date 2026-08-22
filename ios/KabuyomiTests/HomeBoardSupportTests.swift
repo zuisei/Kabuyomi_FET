@@ -166,6 +166,84 @@ final class HomeBoardSupportTests: XCTestCase {
         XCTAssertTrue(rows[1].isPlaceholder)
     }
 
+    // MARK: - サマリータブの3本ピル(Phase 5)
+
+    /// 3本柱は常に 売上 → 営業利益 → 純利益 の順。
+    /// `metrics` の並びは Worker のレスポンス次第で変わるので、それには従わない。
+    func testBoardDeltasAlwaysUseTheSameOrderRegardlessOfMetricOrder() {
+        let deltas = homeBoardDeltas(metrics: [
+            metric("netIncome", value: 23_000, comparisonValue: 20_000, yoyPercent: 15.0),
+            metric("epsBasic", value: 1.53, comparisonValue: 1.40, yoyPercent: 9.3),
+            metric("operatingIncome", value: 43_000, comparisonValue: 35_000, yoyPercent: 22.9),
+            metric("revenue", value: 143_000, comparisonValue: 124_000, yoyPercent: 15.7)
+        ])
+
+        XCTAssertEqual(deltas.map(\.logicalName), ["revenue", "operatingIncome", "netIncome"])
+        XCTAssertEqual(deltas.map(\.label), ["売上高", "営業利益", "純利益"])
+        XCTAssertEqual(deltas.map(\.display.text), ["+15.7%", "+22.9%", "+15.0%"])
+    }
+
+    /// 無い指標は詰めない。取得できていないことと横ばいであることを
+    /// 同じ見た目にしないため、枠を空けたりゼロを置いたりしない。
+    func testBoardDeltasOmitMetricsThatAreNotCachedAndNeverPad() {
+        let onlyRevenue = homeBoardDeltas(metrics: [
+            metric("revenue", value: 143_000, comparisonValue: 124_000, yoyPercent: 15.7)
+        ])
+        XCTAssertEqual(onlyRevenue.map(\.logicalName), ["revenue"])
+
+        // 中抜け(売上と純利益だけ)でも、残りの2本は同じ順序で並ぶ。
+        let gapped = homeBoardDeltas(metrics: [
+            metric("revenue", value: 143_000, comparisonValue: 124_000, yoyPercent: 15.7),
+            metric("netIncome", value: 23_000, comparisonValue: 20_000, yoyPercent: 15.0)
+        ])
+        XCTAssertEqual(gapped.map(\.logicalName), ["revenue", "netIncome"])
+
+        XCTAssertTrue(homeBoardDeltas(metrics: []).isEmpty)
+    }
+
+    /// YoY が無い指標(前年比較の取れていない初回 filing)はピルにならない。
+    /// `metricYoYDisplay` が nil を返すものは、指標があってもピルを作らない。
+    func testBoardDeltasSkipMetricsWithoutAYoYComparison() {
+        let deltas = homeBoardDeltas(metrics: [
+            metric("revenue", value: 143_000, comparisonValue: nil, yoyPercent: nil),
+            metric("operatingIncome", value: 43_000, comparisonValue: 35_000, yoyPercent: 22.9)
+        ])
+
+        XCTAssertEqual(deltas.map(\.logicalName), ["operatingIncome"])
+    }
+
+    /// VoiceOver ラベルは「{指標名} 前年同期比 {変化}」。
+    /// 3本並ぶと色でも位置でも指標を判別できないので、ラベルが唯一の手がかりになる。
+    func testBoardDeltaAccessibilityTextNamesTheMetric() {
+        let deltas = homeBoardDeltas(metrics: [
+            metric("revenue", value: 143_000, comparisonValue: 124_000, yoyPercent: 16.6),
+            metric("operatingIncome", value: -410, comparisonValue: -2_700, yoyPercent: 84.8)
+        ])
+
+        XCTAssertEqual(deltas[0].accessibilityText, "売上高 前年同期比 +16.6%")
+        // 赤字の会社では符号ではなく日本語の書き分けが入る。ラベルはそれをそのまま読む。
+        XCTAssertEqual(deltas[1].accessibilityText, "営業利益 前年同期比 赤字縮小 84.8%")
+    }
+
+    /// 行の `delta`(ストリームの資料イベントが使う売上1本)は3本ピルから引く。
+    /// 売上が無い会社では、別の指標に化けずに nil のままであること。
+    func testBoardRowRevenueDeltaIsDerivedFromTheThreePillsWithoutSubstitution() {
+        let rows = homeBoardRows(
+            saved: [
+                card(
+                    ticker: "SNAP",
+                    filedAt: date(1_770_000_000),
+                    metrics: [metric("netIncome", value: 23_000, comparisonValue: 20_000, yoyPercent: 15.0)]
+                )
+            ],
+            recent: [],
+            lastOpenedAt: [:]
+        )
+
+        XCTAssertEqual(rows[0].deltas.map(\.logicalName), ["netIncome"])
+        XCTAssertNil(rows[0].delta)
+    }
+
     // MARK: - 未読
 
     /// 最終閲覧時刻が無い会社は既読扱い。
