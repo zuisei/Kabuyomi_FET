@@ -276,7 +276,7 @@ private struct RedesignHomeView: View {
     }
 
     private var feedRows: [HomeFeedRow] {
-        homeFeedRows(saved: savedCards, recent: recentCards, lastOpenedAt: appModel.lastOpenedAt)
+        homeFeedRows(saved: savedCards, recent: recentCards)
     }
 
     private var missionProminence: RedesignMissionProminence {
@@ -600,10 +600,7 @@ private struct RedesignFeedRow: View {
     }
 
     private var accessibilityText: String {
-        var parts: [String] = []
-        if row.isUnread { parts.append("未読") }
-        parts.append(contentsOf: [row.ticker, row.formType, filedText, row.verdictLine])
-        return parts.joined(separator: "、")
+        [row.ticker, row.formType, filedText, row.verdictLine].joined(separator: "、")
     }
 
     var body: some View {
@@ -632,7 +629,6 @@ private struct RedesignFeedRow: View {
     @ViewBuilder
     private var identityRow: some View {
         let identity = HStack(alignment: .firstTextBaseline, spacing: 7) {
-            RedesignUnreadDot(isUnread: row.isUnread)
             Text(row.ticker)
                 .font(KabuyomiTheme.figure(.subheadline, weight: .semibold))
                 .foregroundStyle(KabuyomiTheme.ink)

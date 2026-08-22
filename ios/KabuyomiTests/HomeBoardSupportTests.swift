@@ -233,8 +233,7 @@ final class HomeBoardSupportTests: XCTestCase {
                 card(ticker: "MSFT", filedAt: date(1_770_000_000)),
                 card(ticker: "AAPL", filedAt: date(1_770_000_000))
             ],
-            recent: [card(ticker: "NVDA", filedAt: date(1_776_000_000))],
-            lastOpenedAt: [:]
+            recent: [card(ticker: "NVDA", filedAt: date(1_776_000_000))]
         )
 
         XCTAssertEqual(rows.map(\.ticker), ["NVDA", "AAPL", "MSFT"])
@@ -246,8 +245,7 @@ final class HomeBoardSupportTests: XCTestCase {
                 card(ticker: "SOFI", filedAt: .distantPast, isPlaceholder: true),
                 card(ticker: "AAPL", filedAt: date(1_770_000_000))
             ],
-            recent: [card(ticker: "AAPL", filedAt: date(1_770_000_000))],
-            lastOpenedAt: [:]
+            recent: [card(ticker: "AAPL", filedAt: date(1_770_000_000))]
         )
 
         XCTAssertEqual(rows.map(\.ticker), ["AAPL"])
@@ -257,11 +255,11 @@ final class HomeBoardSupportTests: XCTestCase {
         let cards = (0..<5).map { index in
             card(ticker: "T\(index)", filedAt: date(1_770_000_000 + Double(index)))
         }
-        let rows = homeFeedRows(saved: cards, recent: [], lastOpenedAt: [:], limit: 3)
+        let rows = homeFeedRows(saved: cards, recent: [], limit: 3)
         XCTAssertEqual(rows.map(\.ticker), ["T4", "T3", "T2"])
     }
 
-    func testFeedCarriesUnreadAndTheVerdictLine() {
+    func testFeedCarriesTheVerdictLine() {
         let rows = homeFeedRows(
             saved: [
                 card(
@@ -270,12 +268,10 @@ final class HomeBoardSupportTests: XCTestCase {
                     verdict: "増収増益でした。サービスが牽引しています。"
                 )
             ],
-            recent: [],
-            lastOpenedAt: ["AAPL": date(1_770_000_000)]
+            recent: []
         )
 
         XCTAssertEqual(rows.count, 1)
-        XCTAssertTrue(rows[0].isUnread)
         XCTAssertEqual(rows[0].verdictLine, "増収増益でした。")
     }
 

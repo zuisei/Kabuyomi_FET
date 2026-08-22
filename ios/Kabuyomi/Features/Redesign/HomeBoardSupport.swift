@@ -134,7 +134,6 @@ struct HomeFeedRow: Identifiable, Equatable {
     let filingKey: String
     /// 要約の verdict の書き出し1文。verdict が無ければ社名で代替する。
     let verdictLine: String
-    let isUnread: Bool
 
     var id: String { filingKey.isEmpty ? ticker : filingKey }
 }
@@ -146,10 +145,13 @@ struct HomeFeedRow: Identifiable, Equatable {
 /// 新着も会社ごとに1行になる。過去 filing まで時系列に流すには
 /// PersistenceController に新しい問い合わせが要り、
 /// 「既存の AppModel の状態から導出する」という制約を外れるため、ここでは取らない。
+///
+/// 未読ドットは盤面だけに置く(v2 IA 仕様の新着行は 会社+form+日付+verdict)。
+/// 新着は盤面と同じ会社が同じ条件で並ぶので、両方に点を打つと
+/// 1つの合図が1スクロールに2回出るだけで、情報は増えない。
 func homeFeedRows(
     saved: [WatchlistCard],
     recent: [WatchlistCard],
-    lastOpenedAt: [String: Date],
     limit: Int = 12
 ) -> [HomeFeedRow] {
     var seen = Set<String>()
@@ -167,12 +169,7 @@ func homeFeedRows(
                 formType: card.formType,
                 filedAt: card.filedAt,
                 filingKey: card.filingKey,
-                verdictLine: homeFeedVerdictLine(verdict: card.verdict, companyName: card.companyName),
-                isUnread: homeBoardIsUnread(
-                    filedAt: card.filedAt,
-                    isPlaceholder: card.isPlaceholder,
-                    lastOpenedAt: lastOpenedAt[card.ticker]
-                )
+                verdictLine: homeFeedVerdictLine(verdict: card.verdict, companyName: card.companyName)
             )
         )
     }
