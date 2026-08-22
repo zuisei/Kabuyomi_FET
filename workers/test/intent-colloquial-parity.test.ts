@@ -202,6 +202,15 @@ describe("colloquial business-overview guard", () => {
     expect(analyzeQuestion(question).asksBusinessOverview).toBe(false);
     expect(classifyQuestionIntent(question)).toBe(expectedIntent);
   });
+  // 2026-08-22 LKG(human-phrasing-12x15 vs core-12x15): Q08 だけ経路が割れていた。
+  it("routes the colloquial segment-performance question to the same deterministic answer", () => {
+    const filing = makeSegmentedFiling();
+    const colloquial = buildDeterministicMetricAnswer(filing, "どこの事業が調子いいの？逆にダメなとこは？");
+    const clean = buildDeterministicMetricAnswer(filing, "どのセグメントや地域が伸びた？弱かった部分は？");
+    expect(clean?.strategy).toBe("revenue_breakdown");
+    expect(colloquial?.strategy).toBe(clean?.strategy);
+    expect(colloquial?.response.answer).toBe(clean?.response.answer);
+  });
 });
 
 function makeSegmentedFiling() {

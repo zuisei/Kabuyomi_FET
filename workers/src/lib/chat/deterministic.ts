@@ -46,7 +46,9 @@ export function buildDeterministicMetricAnswer(
     /(セクター|sector|セグメント|segment|事業|business|部門|内訳|構成|柱|源泉|カテゴリ)/.test(normalizedQuestion);
   const asksSegmentOrRegionPerformance =
     /(セグメント|segment|地域|region|事業|business|部門|製品|product|カテゴリ|category)/.test(normalizedQuestion) &&
-    /(伸び|弱|強|増|減|成長|鈍化|grew|growth|weak|declin|increase|decrease)/.test(normalizedQuestion);
+    // 調子/好調/ダメ: 口語ベンチ Q08「どこの事業が調子いいの？逆にダメなとこは？」が
+    // 綺麗版「どのセグメントや地域が伸びた？」と同じ抽出回答に届かなかった(2026-08-22 LKG)。
+    /(伸び|弱|強|増|減|成長|鈍化|調子|好調|不調|ダメ|だめ|grew|growth|weak|declin|increase|decrease)/.test(normalizedQuestion);
   const asksRevenueDrivers =
     /(売上|増収|成長|growth|revenue)/.test(normalizedQuestion) &&
     /(支え|押し上げ|牽引|ドライバ|主因|要因|原因|理由|どの変化|何が)/.test(normalizedQuestion);
