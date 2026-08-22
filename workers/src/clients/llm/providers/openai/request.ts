@@ -332,12 +332,17 @@ export async function invokeOpenAIDashboardPrompt(
   if (parsed.failureReason !== undefined) {
     logEvent("openai_invalid_response", {
       kind: "responses",
-      reason: parsed.failureReason
+      reason: parsed.failureReason,
+      // Distinguishes "cut off at max_output_tokens" from "returned bad JSON".
+      // Both surfaced as json_parse_failed before, which made the chat fallback
+      // rate impossible to attribute.
+      truncatedAtTokenLimit: parsed.truncatedAtTokenLimit ?? false
     });
     return {
       data: {},
       usage,
-      failureReason: parsed.failureReason
+      failureReason: parsed.failureReason,
+      ...(parsed.truncatedAtTokenLimit ? { truncatedAtTokenLimit: true } : {})
     };
   }
 
@@ -347,7 +352,11 @@ export async function invokeOpenAIDashboardPrompt(
   };
 }
 
-export async function invokeOpenAISummary(env: Env, prompt: string): Promise<OpenAIChatInvocationResult> {
+export async function invokeOpenAISummary(
+  env: Env,
+  prompt: string,
+  options: { maxCompletionTokens?: number } = {}
+): Promise<OpenAIChatInvocationResult> {
   const model = resolveOpenAIChatModel(env);
   const reasoningConfig = resolveOpenAIReasoningConfig(env);
   logInvalidReasoningEffortIfNeeded("summary", model, reasoningConfig);
@@ -366,7 +375,7 @@ export async function invokeOpenAISummary(env: Env, prompt: string): Promise<Ope
       },
       body: JSON.stringify(buildOpenAISummaryRequest(model, prompt, {
         reasoningEffort: reasoningConfig.effectiveReasoningEffort,
-        maxCompletionTokens: resolveOpenAISummaryMaxCompletionTokens(env)
+        maxCompletionTokens: options.maxCompletionTokens ?? resolveOpenAISummaryMaxCompletionTokens(env)
       })),
       signal: controller.signal
     });
@@ -441,7 +450,11 @@ export async function invokeOpenAISummary(env: Env, prompt: string): Promise<Ope
     return {
       data: {},
       usage,
-      failureReason: parsed.failureReason
+      failureReason: parsed.failureReason,
+      // finishReason was parsed and logged but never acted on, so a response cut
+      // off at the token cap was retried against the same cap — with a longer
+      // prompt — and failed the same way. Surface it so the caller can decide.
+      ...(parsed.finishReason === "length" ? { truncatedAtTokenLimit: true } : {})
     };
   }
 
@@ -628,7 +641,7 @@ function resolveOpenAISummaryTimeoutMs(env: Env): number {
   return Math.max(resolveOpenAITimeoutMs(env), DEFAULT_OPENAI_SUMMARY_TIMEOUT_MS);
 }
 
-function resolveOpenAISummaryMaxCompletionTokens(env: Env): number {
+export function resolveOpenAISummaryMaxCompletionTokens(env: Env): number {
   const parsed = Number.parseInt(env.OPENAI_SUMMARY_MAX_COMPLETION_TOKENS ?? "", 10);
   if (Number.isFinite(parsed) && parsed > 0) {
     return parsed;

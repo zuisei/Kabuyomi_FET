@@ -7,6 +7,7 @@ export {
   invokeOpenAIChat,
   invokeOpenAIQuoteTranslation,
   invokeOpenAISummary,
+  resolveOpenAISummaryMaxCompletionTokens,
   buildOpenAISummaryRequest,
   invokeOpenAIDashboardPrompt,
   resolveOpenAIPromptId,

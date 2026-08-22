@@ -7,6 +7,13 @@ export interface OpenAIChatInvocationResult {
   data: unknown;
   usage: GeminiInvocationUsage[];
   failureReason?: "json_parse_failed" | "schema_invalid";
+  /**
+   * finish_reason was "length": the model was cut off at max_completion_tokens,
+   * so the JSON is truncated rather than malformed. Retrying the same request
+   * with the same cap fails identically, and retrying with a longer prompt makes
+   * it worse.
+   */
+  truncatedAtTokenLimit?: boolean;
 }
 
 export interface OpenAIApiErrorDiagnostics {
@@ -41,6 +48,11 @@ export interface OpenAIChatCompletionPayload {
 
 export interface OpenAIResponsesPayload {
   model?: string;
+  /** "incomplete" when the response was cut short; see incomplete_details. */
+  status?: string;
+  incomplete_details?: {
+    reason?: string;
+  };
   output_text?: string;
   output?: Array<{
     type?: string;

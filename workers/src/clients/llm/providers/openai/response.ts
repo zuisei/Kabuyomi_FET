@@ -33,23 +33,35 @@ export function parseOpenAIChatCompletionPayload(payload: OpenAIChatCompletionPa
 export function parseOpenAIResponsesPayload(payload: OpenAIResponsesPayload): {
   data: unknown;
   failureReason?: "json_parse_failed" | "schema_invalid";
+  truncatedAtTokenLimit?: boolean;
 } {
   const content = extractOpenAIResponseText(payload);
+  // The Responses API reports being cut off as status "incomplete" with
+  // incomplete_details.reason, not as a finish_reason. Without this a chat
+  // answer truncated at max_output_tokens is indistinguishable in the logs from
+  // a model that returned malformed JSON, which are different problems.
+  const truncated =
+    payload.status === "incomplete" && payload.incomplete_details?.reason === "max_output_tokens";
+  const truncationFlag = truncated ? { truncatedAtTokenLimit: true } : {};
+
   if (!content.trim()) {
     return {
       data: {},
-      failureReason: "schema_invalid"
+      failureReason: "schema_invalid",
+      ...truncationFlag
     };
   }
 
   try {
     return {
-      data: parseJsonishText(content)
+      data: parseJsonishText(content),
+      ...truncationFlag
     };
   } catch {
     return {
       data: {},
-      failureReason: "json_parse_failed"
+      failureReason: "json_parse_failed",
+      ...truncationFlag
     };
   }
 }

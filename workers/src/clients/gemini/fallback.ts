@@ -571,9 +571,25 @@ function fallbackSourceIds(metricSourceId: string | undefined, sourceChunks: Sou
   return Array.from(new Set(ids)).slice(0, 2);
 }
 
-function isBankLike(filing: FilingCacheRecord): boolean {
-  const haystack = `${filing.ticker} ${filing.companyName} ${filing.mdaText.slice(0, 5000)}`.toLowerCase();
-  return /(jpm|bank|financial|deposits?|loans?|net interest income|credit quality|capital ratios?)/.test(haystack);
+export function isBankLike(filing: FilingCacheRecord): boolean {
+  // This gates the liquidity/funding fallback answer, which talks about deposits
+  // and credit quality. The previous version searched ticker + company name +
+  // the first 5,000 characters of MD&A for an unbounded
+  // /jpm|bank|financial|deposits?|loans?|.../ and so matched almost every filing:
+  // "consolidated financial statements" and "financial condition" are boilerplate
+  // in every 10-K and 10-Q, and "bank credit facilities" / "term loans" appear in
+  // ordinary industrial and consumer filings. Apple and Coca-Cola both came out
+  // bank-like, and their funding answers were steered to deposits.
+  //
+  // Split it: the identity terms have to actually name a bank, and the MD&A terms
+  // have to be ones only a bank's MD&A uses.
+  const identity = `${filing.ticker} ${filing.companyName}`.toLowerCase();
+  if (/\b(?:jpm|bac|wfc|gs|pnc|usb|schw|cof|tfc|jpmorgan|citigroup|bancorp|bank|banking|banc)\b/.test(identity)) {
+    return true;
+  }
+
+  const mdaText = filing.mdaText.slice(0, 5000).toLowerCase();
+  return /\b(?:net interest income|net interest margin|noninterest income|noninterest expense|provision for credit losses|allowance for (?:credit|loan) losses|net charge-offs?|tier 1 capital|common equity tier 1|deposit balances|total deposits|loan portfolio|credit quality)\b/.test(mdaText);
 }
 
 function buildMetricFallbackAnswer(

@@ -26,6 +26,7 @@ import {
   generateOpenAIChatAnswer,
   invokeOpenAIQuoteTranslation,
   invokeOpenAISummary,
+  resolveOpenAISummaryMaxCompletionTokens,
   resolveOpenAIChatModel
 } from "./providers/openai";
 import type { LlmProviderName } from "./types";
@@ -108,6 +109,7 @@ export async function generateModelSummary(
 }
 
 const OPENAI_SUMMARY_MAX_ATTEMPTS = 2;
+const SUMMARY_TRUNCATION_RETRY_TOKEN_MULTIPLIER = 2;
 
 async function generateOpenAISummary(env: Env, input: SummaryPromptInput): Promise<ModelSummaryResult> {
   if (!env.OPENAI_API_KEY?.trim()) {
@@ -117,11 +119,22 @@ async function generateOpenAISummary(env: Env, input: SummaryPromptInput): Promi
 
   const basePrompt = buildSummaryPrompt(input);
   const usages: GeminiInvocationUsage[] = [];
+  // Set when the previous attempt was cut off at max_completion_tokens rather
+  // than returning malformed JSON. The two failures need opposite retries:
+  // a schema miss wants the more explicit (longer) prompt, while a truncation
+  // wants the same prompt and more room. Sending the longer prompt against the
+  // same cap — which is what happened before finish_reason was acted on —
+  // guarantees the retry truncates again.
+  let previousAttemptTruncated = false;
 
   for (let attempt = 0; attempt < OPENAI_SUMMARY_MAX_ATTEMPTS; attempt += 1) {
     let invocation: Awaited<ReturnType<typeof invokeOpenAISummary>>;
     try {
-      invocation = await invokeOpenAISummary(env, attempt === 0 ? basePrompt : retrySummaryPrompt(basePrompt));
+      invocation = previousAttemptTruncated
+        ? await invokeOpenAISummary(env, basePrompt, {
+            maxCompletionTokens: resolveOpenAISummaryMaxCompletionTokens(env) * SUMMARY_TRUNCATION_RETRY_TOKEN_MULTIPLIER
+          })
+        : await invokeOpenAISummary(env, attempt === 0 ? basePrompt : retrySummaryPrompt(basePrompt));
     } catch (error) {
       const diagnostics = classifyOpenAIError(error);
       logEvent("gemini_fallback_used", {
@@ -143,10 +156,18 @@ async function generateOpenAISummary(env: Env, input: SummaryPromptInput): Promi
     if (!normalized) {
       logEvent("gemini_fallback_used", {
         kind: "summary",
-        reason: "schema_validation_failed",
+        reason: invocation.truncatedAtTokenLimit ? "output_truncated_at_token_limit" : "schema_validation_failed",
         attempt,
-        failureReason: invocation.failureReason ?? null
+        failureReason: invocation.failureReason ?? null,
+        truncatedAtTokenLimit: invocation.truncatedAtTokenLimit ?? false,
+        retriedWithRaisedTokenLimit: previousAttemptTruncated
       });
+      if (invocation.truncatedAtTokenLimit && previousAttemptTruncated) {
+        // Already retried with the raised cap and still ran out. More attempts
+        // just burn tokens; fall through to the local summary.
+        break;
+      }
+      previousAttemptTruncated = invocation.truncatedAtTokenLimit ?? false;
       continue;
     }
 

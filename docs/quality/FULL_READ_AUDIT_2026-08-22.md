@@ -563,3 +563,88 @@ developer 指示 7,567文字は **SHA-256 でバイト一致を検証済**
 
 ダッシュボードのプロンプトは `Kabuyomi` と `test` の2件のみ。
 本番が指している `Kabuyomi` は v2 が default。
+
+---
+
+# J. ⑤ と ⑩、および着手しないと決めた3件(2026-08-22)
+
+## J-1 ⑤ の実体 —「同概念の実装が2つあり正反対」の正体
+
+⑤ を「本番32件中30件が銀行誤判定」と書いたが、SG-1 の
+「`normalizeSector` は21/30が general に落ちる」と食い違っていた。
+**別の関数だった。**
+
+`src/clients/gemini/fallback.ts` に、同じ概念の実装が2つある。
+
+| 関数 | 判定材料 | 語境界 | 挙動 |
+|---|---|---|---|
+| `isBankLike`(574) | ticker + 社名 + **MD&A 先頭5,000文字** | **無し** | ほぼ全社が bank |
+| `isBankOrFinancialCompany`(755) | ticker + 社名のみ | 有り + ティッカー許可リスト | 妥当 |
+
+`isBankLike` の旧実装は `/(jpm|bank|financial|deposits?|loans?|...)/`。
+**`financial` が致命的で、"consolidated financial statements" と
+"financial condition" はどの 10-K / 10-Q にも必ず出る。** 実測:
+
+```
+AAPL "condensed consolidated financial statements" -> bank ("financial")
+KO   "financial condition and results of operations" -> bank ("financial")
+NVDA "our consolidated financial statements"        -> bank ("financial")
+CAT  "term loans and bank credit facilities"        -> bank ("loans")
+PG   "committed bank credit facilities"             -> bank ("financial")
+```
+
+**影響:** `missingSourceTypesForNonHard`(539)で
+`intent === "liquidity_debt" && isBankLike(filing)` のとき、
+不足ソース種別に **「deposits」「credit quality」** が加わる。
+非銀行の提出資料には存在しないので、資金繰りの質問に対して
+**永久に埋まらない不足**を提示することになる。
+`localChatFallback` は OpenAI 経路の失敗時に必ず通る(`openai/client.ts:27,54,67,102`)ので、
+これは本番の生きた経路。
+
+**修正:** 判定を2段に分けた。社名・ティッカーは**実際に銀行を指す語**のみ、
+MD&A は**銀行の MD&A にしか出ない語**(net interest margin / provision for credit losses /
+net charge-offs / tier 1 capital 等)のみ。
+JPM・BAC・C は引き続き true、上記5社は false。
+`test/bank-like-classification.test.ts` で固定。
+
+なお `isBankOrFinancialCompany` の許可リストには `\bc\b`(Citigroup)が入っており、
+社名に単独の "c" があると誤爆しうる。実害は小さいので今回は触っていない。
+
+## J-2 ⑩ finish_reason —「同じ上限で再試行」の中身
+
+`parseOpenAIChatCompletionPayload` は `finishReason` を返し、
+`invokeOpenAISummary` はそれを**ログに出すだけ**で戻り値に載せていなかった。
+`generateOpenAISummary`(`provider.ts`)の再試行ループは失敗理由を問わず `continue` する。
+
+**結果:** トークン上限で切られた要約は、
+**より長いプロンプト**(`retrySummaryPrompt` はスキーマ説明を5行足す)を
+**同じ上限**に投げ直す。必ず同じ場所で切れる。
+
+**修正:** スキーマ不一致と上限切れは**逆の再試行を要求する**ので分岐させた。
+
+- 上限切れ → 同じ base prompt を **上限2倍**で1回だけ投げ直す
+- スキーマ不一致 → 従来どおり説明を足したプロンプト(上限は据え置き)
+- 上限2倍でも切れたら **break**(3回目を投げない)
+
+ログの `reason` も `output_truncated_at_token_limit` に分離した。
+
+**あわせて chat 側も直した。** 本番のチャットは Responses API 経路で、
+こちらは打ち切りを `finish_reason` ではなく
+`status: "incomplete"` + `incomplete_details.reason: "max_output_tokens"` で返す。
+`parseOpenAIResponsesPayload` はこれを**一切見ていなかった**ため、
+上限切れが `json_parse_failed` と区別できず、
+チャットの fallback 率を原因別に分解できない状態だった。検出とログを追加。
+
+## J-3 着手しないと決めた3件
+
+**⑨ App Attest 拡張検査の無効化** — `APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS = "true"` は
+**本番の設定値**であり、コードのバグではない。false にすると
+extensions を持たない attestation が門で落ちるため、**実在のインストールを締め出しうる**。
+⑧ の遮断方式と同じく、あなたの判断が要る。
+
+**⑮ `web-search` の UA 偽装** — 前回の読みどおり本番経路から到達しない。
+生きた経路に戻すなら直す価値があるが、現状は死んでいる。
+
+**⑯ sec-fetcher の二重実装2組** — 失敗シナリオが無い。
+`sec-service` / `prepared-filing` はいずれも本番で使われず(本番は Worker 側)、
+「重複がある」以上の害を特定できていない。リファクタの話であって修正ではない。
