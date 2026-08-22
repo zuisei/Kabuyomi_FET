@@ -138,7 +138,11 @@ export function buildReport(scan) {
   lines.push("本番コードから削除済み。事業内容・売上区分・継続性の回答は、抽出結果か、");
   lines.push("別途出典検証を通るモデル経路か、根拠不足を認める回答のいずれかになる。");
   lines.push("");
-  lines.push(`スクリプトは \`workers/src\` 配下の ${scan.files} ファイルを走査し、`);
+  // The scanned file count deliberately stays out of the generated body: it
+  // changes whenever an unrelated file is added under src/, which would make
+  // this doc show a diff for reasons that have nothing to do with the surface.
+  // The count goes to stdout instead.
+  lines.push("スクリプトは `workers/src` 配下の TypeScript を走査し、");
   lines.push("下表の宣言が再び現れたら非ゼロ終了する。");
   lines.push("");
   lines.push("## 削除済みの宣言(再導入を禁止)");

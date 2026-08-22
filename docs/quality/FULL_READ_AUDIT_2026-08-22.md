@@ -945,9 +945,29 @@ composed した文が読点で終わる場合と、ラベルは取れたが出�
 | `test/gemini.test.ts`(CRWD / CEG fallback) | Nvidia 的な言い回しへの流出防止 | negative assertion は無変更。positive を「引用したチャンクに沿っていること」に変更 |
 | `test/gemini.test.ts`(MSFT/AMZN テンプレート) | business_overview / revenue_breakdown の deterministic 応答 | 同じ本文でティッカーだけ変えたら**同じ答えになる**ことを pin する形にした。定数依存が戻れば必ず落ちる |
 | `test/final-answer-language.test.ts`(JPM / WMT / GOOGL 継続性) | 出典ゲート通過後の未達回答が実質的な回答に修復されること | 修復されること自体は無変更。evidence テキストから辿れる要因ラベルを pin し、加えて「定数が主張していたが evidence には無い記述」を negative に足した(WMT: 燃料価格、GOOGL: Googleサービス、JPM: 金利環境の断定句) |
-| `test/final-answer-language.test.ts`(不正な通貨表記) | 壊れた金額 `143,7.6億ドル` をユーザーに出さないこと | ガード2件はそのまま。定数の内訳文に差し替えていた箇所が、根拠不足を認める回答になったので期待値を更新 |
+| `test/final-answer-language.test.ts`(不正な通貨表記) | 壊れた金額 `143,7.6億ドル` をユーザーに出さないこと | ガード2件はそのまま。定数の内訳文に差し替えていた箇所が、根拠不足を認める回答になったので期待値を更新。あわせて M-5-1 |
 
 green にするために落とした assertion は無い。出典健全性の assertion は全て残っている。
+
+### M-5-1 定数が fallback の分類を隠していた
+
+不正な通貨表記のテストで、最初の assertion が落ちた時点で vitest が止まるため、
+後続3件の値が変わっていたことに最初は気づかなかった。戻して実行したら3件とも変わっていた。
+
+| debug フィールド | 変更前 | 変更後 |
+|---|---|---|
+| `responsePath` | `deterministic` | `fallback` |
+| `fallbackCategory` | `none` | `answer_quality_guard` |
+| `fallbackUserReason` | `none` | `numeric_alignment_failed` |
+
+ガードは前から発火していた。定数の内訳文が代替として入ることで
+deterministic 応答として成立し、**fallback が起きなかったことになっていた**。
+回答文だけでなく、fallback 率の分類まで定数が歪めていたということ。
+新しい値の方が実際に起きたことに一致している。
+
+GOOGL の継続性テストでも `responsePath` が `openai` → `deterministic` に変わっている。
+プラットフォーム定型合成が無くなり、モデル回答を修復する代わりに
+deterministic 回答に置き換わるようになったため。こちらも新しい値を pin した。
 
 ## M-6 範囲外として記録(未修正)
 

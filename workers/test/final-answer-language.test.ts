@@ -630,6 +630,10 @@ describe("Japanese-only final answer guard", () => {
     // with 「次回は、Googleサービス、Google Cloud、YouTube広告、有料サブスクリプション
     // の成長率を…」 regardless of which of those the evidence mentioned.
     expect(response.answer).not.toContain("Googleサービス");
+    // Was "openai". With no platform synthesis to repair the model answer with,
+    // the deterministic answer is served instead — a routing change worth
+    // pinning rather than leaving unasserted.
+    expect(response.responsePath).toBe("deterministic");
     expect(response.debug?.fallbackCategory).toBe("none");
     expect(response.debug?.guardLabels ?? []).not.toContain("malformed_currency_detected");
     expect(response.debug?.sourceRepairLabels ?? []).not.toContain("q04_platform_durability_source_backed_repair");
@@ -4999,6 +5003,15 @@ describe("Japanese-only final answer guard", () => {
     expect(response.answer).not.toContain("143.7.6億ドル");
     expect(response.answer).toContain("未確認の数値は表示しません");
     expect(response.answer).not.toContain("売上構造を見る軸");
+    // Was "deterministic": the deterministic layer had a constant AAPL breakdown
+    // to serve in place of the blocked answer. It has nothing to serve now, so
+    // the guarded insufficiency answer is the fallback path's.
+    expect(response.responsePath).toBe("fallback");
+    // Was "none", because the constant breakdown stood in for the blocked answer
+    // and the response came out looking clean. The guard did fire, and the debug
+    // metadata now says so.
+    expect(response.debug?.fallbackCategory).toBe("answer_quality_guard");
+    expect(response.debug?.fallbackUserReason).toBe("numeric_alignment_failed");
   });
 
   it("removes minor English and Chinese-looking leakage from final answers", async () => {

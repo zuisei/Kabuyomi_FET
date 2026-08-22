@@ -502,11 +502,15 @@ function promptSafeFactualPack(factualPack: ChatFactualPack | undefined): Record
     ticker: factualPack.ticker,
     formType: factualPack.formType,
     periodOfReport: factualPack.periodOfReport,
-    ...(factualPack.productsServices ? { productsServices: factualPack.productsServices } : {}),
-    ...(factualPack.reportableSegments ? { reportableSegments: factualPack.reportableSegments } : {}),
-    ...(factualPack.revenueCategories ? { revenueCategories: factualPack.revenueCategories } : {}),
-    ...(factualPack.riskCategories ? { riskCategories: factualPack.riskCategories } : {}),
-    ...(factualPack.largestRevenueCategory ? { largestRevenueCategory: factualPack.largestRevenueCategory } : {}),
+    // `!== undefined`, not truthiness: an optional field that is present but
+    // empty must serialise as present, the way spreading the pack did.
+    ...(factualPack.productsServices !== undefined ? { productsServices: factualPack.productsServices } : {}),
+    ...(factualPack.reportableSegments !== undefined ? { reportableSegments: factualPack.reportableSegments } : {}),
+    ...(factualPack.revenueCategories !== undefined ? { revenueCategories: factualPack.revenueCategories } : {}),
+    ...(factualPack.riskCategories !== undefined ? { riskCategories: factualPack.riskCategories } : {}),
+    ...(factualPack.largestRevenueCategory !== undefined
+      ? { largestRevenueCategory: factualPack.largestRevenueCategory }
+      : {}),
     sourceIds: factualPack.sourceIds,
     missingFields: factualPack.missingFields
   };
