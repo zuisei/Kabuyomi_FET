@@ -206,7 +206,19 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertNil(model.activeConversationTicker)
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
-        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+        // v2 IA 仕様 Phase 6「AAPL の自然さ監査」。
+        // 旧 `rootConversationTicker` はここで `?? "AAPL"` へ落ちていた。
+        // 復元をやめた以上、宛先として名指しされる会社は残らない
+        // (recents に残る AAPL は本人が開いた履歴で、質問の宛先ではない)。
+        XCTAssertNil(model.lastOpenedCompanyTicker)
+        XCTAssertNil(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            ),
+            "ユーザー操作なしにアスクバーの宛先が埋まってはいけない"
+        )
     }
 
     func testBootstrapClearsRestoredRecentOnlyNonStarterTickerWithoutWatchlistOrLocalData() async {
@@ -223,7 +235,19 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.lastViewedTicker)
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.lastViewedTickerKey))
-        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+        // v2 IA 仕様 Phase 6「AAPL の自然さ監査」。
+        // 旧 `rootConversationTicker` はここで `?? "AAPL"` へ落ち、
+        // ユーザーが一度も触っていないスターター企業を名指ししていた。
+        // 触っていない状態では、どこにも会社が現れないことを固定する。
+        XCTAssertNil(model.lastOpenedCompanyTicker)
+        XCTAssertNil(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            ),
+            "ユーザー操作なしにアスクバーの宛先が埋まってはいけない"
+        )
     }
 
     func testBootstrapClearsRestoredSavedOnlyTickerWithoutLocalData() async {
@@ -240,7 +264,17 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.lastViewedTicker)
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.lastViewedTickerKey))
-        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+        XCTAssertNil(model.lastOpenedCompanyTicker)
+        // 保存済みが1社ある人の宛先はその会社。スターター企業には落ちない
+        // (v2 IA 仕様 Phase 6「AAPL の自然さ監査」)。
+        XCTAssertEqual(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            )?.ticker,
+            "NVDA"
+        )
     }
 
     func testBootstrapClearsRestoredStarterTickerWithoutLocalData() async {
@@ -256,10 +290,22 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.lastViewedTicker)
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.lastViewedTickerKey))
-        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+        // v2 IA 仕様 Phase 6「AAPL の自然さ監査」。
+        // 旧 `rootConversationTicker` はここで `?? "AAPL"` へ落ち、
+        // ユーザーが一度も触っていないスターター企業を名指ししていた。
+        // 触っていない状態では、どこにも会社が現れないことを固定する。
+        XCTAssertNil(model.lastOpenedCompanyTicker)
+        XCTAssertNil(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            ),
+            "ユーザー操作なしにアスクバーの宛先が埋まってはいけない"
+        )
     }
 
-    func testRootConversationTickerIgnoresSavedOnlyTickerPlaceholderWithoutLocalData() async {
+    func testSavedOnlyTickerPlaceholderStaysTheAskDestinationWithoutLocalData() async {
         UserDefaults.standard.set(["NVDA"], forKey: AppModel.savedTickersKey)
         UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
 
@@ -269,7 +315,17 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(model.watchlist.map(\.ticker), ["NVDA"])
         XCTAssertEqual(model.watchlist.map(\.isPlaceholder), [true])
-        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+        // 資料がまだ落ちてきていない保存済み会社でも、宛先は本人が保存したその会社。
+        // 旧 `rootConversationTicker` はここでスターターの "AAPL" を返していた。
+        XCTAssertNil(model.lastOpenedCompanyTicker)
+        XCTAssertEqual(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            )?.ticker,
+            "NVDA"
+        )
     }
 
     func testLoadCompanyFailureClearsRestoredUnsavedStarterTickerSelection() async {
@@ -309,7 +365,19 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.lastViewedTicker)
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.lastViewedTickerKey))
-        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+        // v2 IA 仕様 Phase 6「AAPL の自然さ監査」。
+        // 旧 `rootConversationTicker` はここで `?? "AAPL"` へ落ち、
+        // ユーザーが一度も触っていないスターター企業を名指ししていた。
+        // 触っていない状態では、どこにも会社が現れないことを固定する。
+        XCTAssertNil(model.lastOpenedCompanyTicker)
+        XCTAssertNil(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            ),
+            "ユーザー操作なしにアスクバーの宛先が埋まってはいけない"
+        )
         XCTAssertNil(model.activeAlert)
     }
 

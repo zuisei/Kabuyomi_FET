@@ -250,21 +250,19 @@ enum ConversationLibraryRecentEmptyCopy {
     static let message = "銘柄を開くと、ここから前回の会話へ戻れます。"
 }
 
+/// 提案質問のチップ。無地のテキストボタンで、頭に飾りのアイコンは持たない
+/// (v2 IA 仕様 Phase 6「AI 臭の除去」= sparkles 全廃。置き換えのアイコンも置かない)。
+/// 末尾の ↖ だけは残す — これは装飾ではなく「押すと入力欄に入る(送信ではない)」
+/// の合図で、Phase 4 の「プレフィルは送信にならない」規約を目で見せている部分。
 struct ConversationPromptChip: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let text: String
-    let systemImage: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(KabuyomiTheme.accent)
-                    .frame(width: 16)
-
                 Text(text)
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(KabuyomiTheme.ink)

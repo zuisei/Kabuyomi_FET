@@ -571,7 +571,7 @@ private struct RedesignStreamView: View {
 
         Section {
             ForEach(streamExampleQuestions, id: \.self) { question in
-                ConversationPromptChip(text: question, systemImage: "sparkles") {
+                ConversationPromptChip(text: question) {
                     apply(streamSuggestedQuestionIntent(question: question, context: askContext))
                 }
                 .listRowBackground(Color.clear)
@@ -1027,7 +1027,7 @@ private struct RedesignStreamFilingCard: View {
             if !event.suggestedQuestions.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(event.suggestedQuestions, id: \.self) { question in
-                        ConversationPromptChip(text: question, systemImage: "sparkles") {
+                        ConversationPromptChip(text: question) {
                             prefill(question)
                         }
                         .accessibilityIdentifier("redesign.stream.suggest.\(event.ticker).\(question)")
@@ -2682,7 +2682,7 @@ private struct RedesignQuestionStarters: View {
                 subtitle: "質問は対象資料と会話の文脈に基づいて回答されます。"
             )
             ForEach(prompts, id: \.self) { prompt in
-                ConversationPromptChip(text: prompt, systemImage: "sparkles") {
+                ConversationPromptChip(text: prompt) {
                     select(prompt)
                 }
             }
@@ -2748,10 +2748,6 @@ private struct RedesignComposer: View {
             isExpandedByUser = true
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: "sparkles")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(KabuyomiTheme.accent)
-                    .accessibilityHidden(true)
                 Text("この資料について質問する")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(KabuyomiTheme.accent)
@@ -2921,7 +2917,9 @@ private struct RedesignResearchMessage: View {
                         .tracking(KabuyomiTheme.microLabelTracking)
                         .foregroundStyle(KabuyomiTheme.accent)
                     if message.modelName != "local", !message.modelName.isEmpty {
-                        Label("AIによる要約", systemImage: "sparkles")
+                        // 出所の断り書き。アイコンは付けない(Phase 6「AI 臭の除去」)。
+                        // 文言そのものは凍結済みなので落とさない。
+                        Text("AIによる要約")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }

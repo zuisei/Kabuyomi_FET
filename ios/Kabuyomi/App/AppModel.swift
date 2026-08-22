@@ -491,14 +491,15 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         StarterCompany.defaults
     }
 
-    var rootConversationTicker: String {
-        activeConversationTicker
-            ?? lastViewedTicker
-            ?? firstRestorableSavedTicker
-            ?? starterCompanies.first?.ticker
-            ?? "AAPL"
-    }
-
+    /// 初回動線の可視条件(v2 IA 仕様 Phase 6)。
+    /// 「ようこそ」を出すかどうかもこの1つの述語が決める。並行フラグは作らない。
+    /// 保存も最近も無く、開いた会社も無く、初回入口をまだ抜けていない = 真の初回。
+    /// `resetLocalData` が `hasCompletedInitialEntry` ごと消すので、
+    /// ローカルデータを消した人にはもう一度ここから始まる。
+    ///
+    /// かつてここには `rootConversationTicker`(最終的に `?? "AAPL"` へ落ちる)が
+    /// 並んでいたが、Phase 6 で削除した。view の消費者はゼロで、
+    /// 残っていると「ユーザーが触っていない会社」を名指しできる口が開いたままになる。
     var shouldShowConversationEntry: Bool {
         !hasCompletedInitialEntry
         && savedTickers.isEmpty
@@ -2101,9 +2102,9 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     /// 最後に開いた会社。アスクバーの会社チップの既定値に使う
-    /// (`streamAskContext`)。`rootConversationTicker` と違い、
-    /// 該当が無いときにスターター企業へ落とさない —
-    /// 本人が選んでいない会社を質問の宛先に据えないため。
+    /// (`streamAskContext`)。該当が無いときは nil のまま返し、
+    /// スターター企業へは落とさない — 本人が選んでいない会社を
+    /// 質問の宛先に据えないため(v2 IA 仕様 Phase 6「AAPL の自然さ監査」)。
     var lastOpenedCompanyTicker: String? {
         activeConversationTicker ?? lastViewedTicker
     }
@@ -3344,14 +3345,6 @@ credit残高に使う端末識別情報は維持されます。
         guard pendingConversationTicker == ticker else { return nil }
         let trimmed = pendingConversationQuestion?.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed?.isEmpty == false ? trimmed : nil
-    }
-
-    private var firstRestorableSavedTicker: String? {
-        if let cachedWatchlistTicker = watchlist.first(where: { !$0.isPlaceholder })?.ticker {
-            return cachedWatchlistTicker
-        }
-
-        return savedTickers.first(where: hasLocallyAvailableConversation(ticker:))
     }
 
     private func hasLocallyAvailableConversation(ticker: String) -> Bool {
