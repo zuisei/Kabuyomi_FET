@@ -23,7 +23,7 @@
       セグメント語を含む質問は segment_driver/model 経路へ
 - [ ] A2. Q01 薄ラベル: JPM「決済・取引サービス」、AVGO「クラウドサービス」、META「その他収益」。
       抽出ラベルが1件だけ/汎用語のときは guard が拾ってモデル経路へ
-- [ ] A3. 口語語彙: Q10「借金やばくない？」→ liquidity_debt、Q11「やばいとこある？」→ risk_factors
+- [x] A3. 口語語彙: Q10「借金やばくない？」→ liquidity_debt、Q11「やばいとこある？」→ risk_factors
       (intent-colloquial-parity の pin を解除して一致させる)
 - [ ] A4. 投資助言ベイトの口語セット(「で、これ買い？」)をベンチに追加し、redirect を確認
 
