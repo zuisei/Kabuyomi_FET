@@ -20,7 +20,7 @@ struct SettingsView: View {
                 if showsDismissButton {
                     HStack(alignment: .center) {
                         Text("設定")
-                            .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                            .font(.title2.weight(.bold))
                             .foregroundStyle(KabuyomiTheme.ink)
 
                         Spacer()
@@ -28,19 +28,18 @@ struct SettingsView: View {
                         Button("閉じる") {
                             dismiss()
                         }
-                        .font(.system(.body, design: .rounded, weight: .semibold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 12)
-                        .kabuyomiCard(.secondary, radius: 22)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(KabuyomiTheme.accent)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
                     }
                     .padding(.horizontal, 20)
-                    .padding(.top, 20)
-                    .padding(.bottom, 14)
+                    .padding(.top, 14)
+                    .padding(.bottom, 10)
                 }
 
                 ScrollView {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 12) {
                         #if DEBUG
                         devCard
                         #endif
@@ -53,7 +52,7 @@ struct SettingsView: View {
                         displayCard
                         resetCard
                     }
-                    .padding(20)
+                    .padding(16)
                     .padding(.top, 2)
                 }
                 .scrollBounceBehavior(.basedOnSize, axes: .vertical)
@@ -78,22 +77,15 @@ struct SettingsView: View {
         )
 
         return card {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("端末情報", systemImage: "iphone.gen3")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                    Text("App Store 配布版や TestFlight でも確認できる、個人を特定しないサポート情報です。")
-                        .font(.footnote)
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            VStack(alignment: .leading, spacing: 10) {
+                RedesignSectionHeader(
+                    title: "端末情報",
+                    subtitle: "App Store 配布版や TestFlight でも確認できる、個人を特定しないサポート情報です。"
+                )
 
                 VStack(spacing: 0) {
                     DeviceInfoRow(title: "サポートコード", value: displayModel.supportCode, usesMonospacedDigits: true)
-                    Divider()
                     DeviceInfoRow(title: "端末認証", value: displayModel.authenticationStatus)
-                    Divider()
                     DeviceInfoRow(title: "App", value: displayModel.appVersion)
                 }
 
@@ -110,8 +102,7 @@ struct SettingsView: View {
     private var devCard: some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
-                Text("開発用オプション")
-                    .font(.system(.headline, design: .rounded, weight: .bold))
+                RedesignSectionHeader(title: "開発用オプション")
 
                 Toggle(isOn: Binding(
                     get: { appModel.devModeEnabled },
@@ -119,7 +110,7 @@ struct SettingsView: View {
                 )) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Dev モード")
-                            .font(.system(.body, design: .rounded, weight: .semibold))
+                            .font(.body.weight(.semibold))
                         Text("DEBUG ビルド専用です。同じ API に detached access header を送り、Worker 側の allowlisted device key だけ開発用 quota を使います。release には出しません。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
@@ -132,7 +123,7 @@ struct SettingsView: View {
                 )) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Test API を使う")
-                            .font(.system(.body, design: .rounded, weight: .semibold))
+                            .font(.body.weight(.semibold))
                         Text("DEBUG ビルド専用です。ON で kabuyomi-api-test、OFF で本番 API を叩きます。切り替え後に利用状況を再同期します。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
@@ -145,7 +136,7 @@ struct SettingsView: View {
                 )) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("SSV smoke mode")
-                            .font(.system(.body, design: .rounded, weight: .semibold))
+                            .font(.body.weight(.semibold))
                         Text("OFF では DEBUG は Google デモ広告unitを使います。広告表示は確認できますが、本番SSV credit付与は確認できません。ON は KABUYOMI_ADMOB_TEST_DEVICE_IDS が必要です。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
@@ -154,11 +145,11 @@ struct SettingsView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("現在の API 接続先")
-                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                        .font(.footnote.weight(.bold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                     Text(appModel.currentAPIEnvironmentDisplayName)
-                        .font(.system(.caption, design: .rounded, weight: .semibold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(KabuyomiTheme.accent)
                     Text(appModel.currentAPIBaseURLDisplay)
                         .font(.system(.footnote, design: .monospaced, weight: .medium))
                         .foregroundStyle(KabuyomiTheme.ink)
@@ -167,7 +158,7 @@ struct SettingsView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("device key")
-                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                        .font(.footnote.weight(.bold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                     // Worker 側の DEV_DETACHED_ACCESS_DEVICE_KEYS は前方一致で照合するため、
                     // 末尾6文字だけでは allowlist に登録できず Dev モードを有効にできなかった。
@@ -181,7 +172,7 @@ struct SettingsView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("x-device-key (allowlist 照合用)")
-                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                        .font(.footnote.weight(.bold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                     Text(appModel.currentLegacyDeviceKeyDisplay)
                         .font(.system(.footnote, design: .monospaced, weight: .medium))
@@ -192,7 +183,7 @@ struct SettingsView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("広告報酬診断")
-                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                        .font(.footnote.weight(.bold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                     Text(appModel.rewardedAdDeveloperDiagnosticLine)
                         .font(.system(.footnote, design: .monospaced, weight: .medium))
@@ -231,8 +222,7 @@ struct SettingsView: View {
     private var aiCard: some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
-                Text("AI 利用")
-                    .font(.system(.headline, design: .rounded, weight: .bold))
+                RedesignSectionHeader(title: "AI 利用")
 
                 Toggle(isOn: Binding(
                     get: { appModel.aiConsentGranted },
@@ -240,7 +230,7 @@ struct SettingsView: View {
                 )) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("AI 利用への同意")
-                            .font(.system(.body, design: .rounded, weight: .semibold))
+                            .font(.body.weight(.semibold))
                         Text("質問内容と対象の決算資料の抜粋が外部 AI モデルに送信されます。個人情報は入力しないでください。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
@@ -253,8 +243,7 @@ struct SettingsView: View {
     private var displayCard: some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
-                Text("表示")
-                    .font(.system(.headline, design: .rounded, weight: .bold))
+                RedesignSectionHeader(title: "表示")
 
                 Toggle(isOn: Binding(
                     get: { appModel.showStarterCompanies },
@@ -262,7 +251,7 @@ struct SettingsView: View {
                 )) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("スターター銘柄を表示")
-                            .font(.system(.body, design: .rounded, weight: .semibold))
+                            .font(.body.weight(.semibold))
                         Text("一覧に AAPL / MSFT などのスターター銘柄を出すかを切り替えます。5回目以降の起動では自動で非表示になりますが、ここで再表示できます。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
@@ -276,15 +265,10 @@ struct SettingsView: View {
     private var storeKitDiagnosticsCard: some View {
         card {
             VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("購入診断")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.ink)
-                    Text("TestFlight の StoreKit 商品取得を確認するための読み取り専用情報です。credit付与や環境切替はできません。")
-                        .font(.footnote)
-                        .foregroundStyle(KabuyomiTheme.inkMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                RedesignSectionHeader(
+                    title: "購入診断",
+                    subtitle: "TestFlight の StoreKit 商品取得を確認するための読み取り専用情報です。credit付与や環境切替はできません。"
+                )
 
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(appModel.storeKitDiagnostics.diagnosticLines, id: \.self) { line in
@@ -295,11 +279,12 @@ struct SettingsView: View {
                     }
                 }
                 .textSelection(.enabled)
-                .padding(12)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(KabuyomiTheme.paper.opacity(0.55))
-                )
+                .padding(11)
+                .background(KabuyomiTheme.inputWell, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(KabuyomiTheme.separator, lineWidth: KabuyomiTheme.hairlineWidth)
+                }
 
                 Button {
                     appModel.refreshStoreKitDiagnostics()
@@ -308,10 +293,10 @@ struct SettingsView: View {
                         Image(systemName: "arrow.clockwise")
                         Text("診断表示を更新")
                     }
-                    .font(.system(.footnote, design: .rounded, weight: .semibold))
+                    .font(.footnote.weight(.semibold))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(KabuyomiTheme.accentDeep)
+                .foregroundStyle(KabuyomiTheme.accent)
             }
         }
     }
@@ -320,8 +305,7 @@ struct SettingsView: View {
     private var linksCard: some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
-                Text("リンク")
-                    .font(.system(.headline, design: .rounded, weight: .bold))
+                RedesignSectionHeader(title: "リンク")
 
                 Text("プライバシーポリシー / 利用条件 / サポートは公開法務ページを開きます。アプリ内表示は接続できない場合の控えです。")
                     .font(.footnote)
@@ -386,8 +370,7 @@ struct SettingsView: View {
     private var resetCard: some View {
         card {
             VStack(alignment: .leading, spacing: 12) {
-                Text("ローカルデータ")
-                    .font(.system(.headline, design: .rounded, weight: .bold))
+                RedesignSectionHeader(title: "ローカルデータ")
                 Text("保存銘柄、取得済みの決算資料、チャット履歴をこの端末から削除します。credit残高に使う端末識別情報は維持されます。")
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
@@ -398,11 +381,16 @@ struct SettingsView: View {
         }
     }
 
+    /// 節の容れ物。境界は影ではなく細罫で引き、面は読み面より一段持ち上げる。
     private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(18)
-            .kabuyomiGlass(radius: 26, tint: Color.white.opacity(0.20), stroke: Color.white.opacity(0.58))
+            .padding(15)
+            .background(KabuyomiTheme.elevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(KabuyomiTheme.separator, lineWidth: KabuyomiTheme.hairlineWidth)
+            }
     }
 
     private var privacySections: [LegalSection] {
@@ -646,24 +634,27 @@ private struct SettingsLinkRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(.body, design: .rounded, weight: .semibold))
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(KabuyomiTheme.ink)
                 Text(subtitle)
-                    .font(.footnote)
+                    .font(.caption2)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(KabuyomiTheme.accentDeep)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(KabuyomiTheme.inkMuted)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .kabuyomiCard(.secondary, radius: 18)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
+        .overlay(alignment: .top) { KabuyomiHairline() }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -675,18 +666,20 @@ private struct DeviceInfoRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(title)
-                .font(.subheadline)
-                .foregroundStyle(KabuyomiTheme.inkMuted)
+                .kabuyomiMicroLabel()
 
             Spacer(minLength: 16)
 
             Text(value)
-                .font(usesMonospacedDigits ? .system(.subheadline, design: .monospaced, weight: .semibold) : .subheadline.weight(.semibold))
+                .font(usesMonospacedDigits
+                    ? .system(.subheadline, design: .monospaced, weight: .medium)
+                    : KabuyomiTheme.figure(.subheadline, weight: .medium))
                 .foregroundStyle(KabuyomiTheme.ink)
                 .multilineTextAlignment(.trailing)
                 .textSelection(.enabled)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 9)
+        .overlay(alignment: .top) { KabuyomiHairline() }
         .accessibilityElement(children: .combine)
     }
 }
@@ -712,64 +705,58 @@ private struct LegalDocumentView: View {
                         Button("閉じる") {
                             dismiss()
                         }
-                        .font(.system(.body, design: .rounded, weight: .semibold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 12)
-                        .kabuyomiCard(.secondary, radius: 22)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(KabuyomiTheme.accent)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text("アプリポリシー")
-                            .font(.system(.caption, design: .rounded, weight: .bold))
-                            .foregroundStyle(KabuyomiTheme.heroSubtext)
+                            .kabuyomiMicroLabel()
                         Text(title)
-                            .font(.system(.title2, design: .rounded, weight: .bold))
+                            .font(.title3.weight(.bold))
                             .foregroundStyle(KabuyomiTheme.ink)
                         Text(subtitle)
-                            .font(.system(.footnote, design: .rounded, weight: .medium))
-                            .foregroundStyle(KabuyomiTheme.inkMuted)
+                            .font(.footnote)
+                            .foregroundStyle(KabuyomiTheme.inkSoft)
                         Text("最終更新日: \(lastUpdated)")
-                            .font(.system(.caption, design: .rounded, weight: .medium))
+                            .font(KabuyomiTheme.figure(.caption2))
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                         if let publicURL {
                             Link(destination: publicURL) {
                                 Label("最新版をWebで確認", systemImage: "arrow.up.right.square")
-                                    .font(.system(.caption, design: .rounded, weight: .semibold))
-                                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(KabuyomiTheme.accent)
+                                    .frame(minHeight: 44)
                             }
-                            .padding(.top, 2)
                         }
                     }
-                    .padding(18)
-                    .kabuyomiCard(.primary, radius: 24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 4)
 
                     ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack(spacing: 10) {
-                                Text(String(format: "%02d", index + 1))
-                                    .font(.system(.caption, design: .rounded, weight: .bold))
-                                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 5)
-                                    .background(Capsule().fill(KabuyomiTheme.accentSoft.opacity(0.58)))
-
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                                RedesignSourceBadge(text: String(format: "%02d", index + 1))
                                 Text(section.title)
-                                    .font(.system(.headline, design: .rounded, weight: .bold))
+                                    .font(.footnote.weight(.bold))
+                                    .tracking(KabuyomiTheme.microLabelTracking)
                                     .foregroundStyle(KabuyomiTheme.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             Text(section.body)
-                                .font(.system(.body, design: .rounded))
+                                .font(.footnote)
                                 .foregroundStyle(KabuyomiTheme.inkSoft)
-                                .lineSpacing(6)
+                                .lineSpacing(5)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(18)
-                        .kabuyomiCard(.primary, radius: 24)
+                        .padding(.top, 12)
+                        .overlay(alignment: .top) { KabuyomiHairline() }
                     }
                 }
-                .padding(20)
+                .padding(18)
             }
         }
     }

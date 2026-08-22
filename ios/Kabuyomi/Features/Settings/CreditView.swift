@@ -236,11 +236,11 @@ struct CreditView: View {
             HStack(alignment: .center, spacing: 12) {
                 if showsDismissButton {
                     Text("クレジット")
-                        .font(.system(.title2, design: .rounded, weight: .bold))
+                        .font(.title2.weight(.bold))
                         .foregroundStyle(KabuyomiTheme.ink)
                 } else {
                     Text("残高と購入")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .font(.headline.weight(.bold))
                         .foregroundStyle(KabuyomiTheme.ink)
                 }
 
@@ -252,7 +252,7 @@ struct CreditView: View {
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(KabuyomiTheme.accentDeep)
+                            .foregroundStyle(KabuyomiTheme.accent)
                             .frame(width: 44, height: 44)
                             .kabuyomiCard(.secondary, radius: 16)
                     }
@@ -262,7 +262,7 @@ struct CreditView: View {
             }
 
             Text("残高、月額プラン、追加購入をひとつの画面で確認")
-                .font(.system(.footnote, design: .rounded, weight: .semibold))
+                .font(.footnote.weight(.semibold))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -281,12 +281,11 @@ struct CreditView: View {
         card {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("残高")
-                            .font(.system(.headline, design: .rounded, weight: .bold))
-                            .foregroundStyle(KabuyomiTheme.ink)
+                            .kabuyomiMicroLabel()
                         Text("サーバーで確認した利用可能残高")
-                            .font(.footnote)
+                            .font(.caption2)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
 
@@ -307,7 +306,7 @@ struct CreditView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .foregroundStyle(KabuyomiTheme.accent)
                     .padding(9)
                     .background(Circle().fill(KabuyomiTheme.fill(for: .secondary)))
                     .disabled(appModel.isUsageRefreshing)
@@ -316,31 +315,34 @@ struct CreditView: View {
 
                 if let credits = appModel.usage?.credits {
                     VStack(alignment: .leading, spacing: 10) {
+                        // 主要数値は大きく細く tabular。固定 46pt は Dynamic Type を殺すので
+                        // text style に載せ、拡大時も桁を縮めずに伸びるようにする。
                         Text("\(credits.totalRemaining)")
-                            .font(.system(size: 46, weight: .bold, design: .rounded))
+                            .font(KabuyomiTheme.figure(.largeTitle, weight: .light))
                             .foregroundStyle(KabuyomiTheme.ink)
-                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
                             .accessibilityLabel("合計 \(credits.totalRemaining) クレジット")
 
                         HStack(spacing: 8) {
                             BadgeText(currentPlanDisplayTitle)
                             if let renewal = nextRenewalText {
                                 Text(renewal)
-                                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                                    .font(.caption.weight(.semibold))
                                     .foregroundStyle(KabuyomiTheme.inkMuted)
                             }
                         }
 
                         if let lastSync = lastUsageRefreshText {
                             Text(lastSync)
-                                .font(.system(.caption, design: .rounded, weight: .semibold))
+                                .font(.caption.weight(.semibold))
                                 .foregroundStyle(KabuyomiTheme.inkMuted)
                         }
 
                         LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 112), spacing: 8)],
+                            columns: [GridItem(.adaptive(minimum: 112), spacing: 16)],
                             alignment: .leading,
-                            spacing: 8
+                            spacing: 0
                         ) {
                             CreditBreakdownTile(title: "月額分", value: "\(credits.monthlyRemaining) / \(credits.monthlyLimit)")
                             CreditBreakdownTile(title: "ウェルカム", value: credits.welcomeRemaining.map(String.init) ?? "—")
@@ -359,8 +361,7 @@ struct CreditView: View {
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
-                Divider()
-                    .overlay(KabuyomiTheme.inkMuted.opacity(0.18))
+                KabuyomiHairline()
 
                 HStack(alignment: .center, spacing: 12) {
                     currentPlanSummary
@@ -374,7 +375,7 @@ struct CreditView: View {
     private var currentPlanSummary: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("現在のプラン")
-                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(KabuyomiTheme.ink)
             Text(activeSubscriptionSummary ?? "Free / 月次0 / 認証済み初回50クレジット")
                 .font(.footnote)
@@ -392,11 +393,11 @@ struct CreditView: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .bold))
             }
-                .font(.system(.caption, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.accentDeep)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(KabuyomiTheme.accent)
                 .padding(.horizontal, 12)
                 .frame(minHeight: 44)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(KabuyomiTheme.fill(for: .secondary)))
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(KabuyomiTheme.fill(for: .secondary)))
         }
         .buttonStyle(.plain)
     }
@@ -454,8 +455,8 @@ struct CreditView: View {
                                 await appModel.loadSubscriptionProducts(showErrors: true)
                             }
                         }
-                        .font(.system(.footnote, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(KabuyomiTheme.accent)
                     }
                 }
             }
@@ -477,7 +478,7 @@ struct CreditView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("追加クレジット")
-                            .font(.system(.headline, design: .rounded, weight: .bold))
+                            .font(.headline.weight(.bold))
                             .foregroundStyle(KabuyomiTheme.ink)
                         Text("月額分とは別に、必要な時だけ買い切りで追加できます。")
                             .font(.footnote)
@@ -512,12 +513,12 @@ struct CreditView: View {
                             Spacer()
                             Image(systemName: "chevron.right")
                         }
-                        .font(.system(.footnote, design: .rounded, weight: .bold))
+                        .font(.footnote.weight(.bold))
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
                         .background(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .fill(KabuyomiTheme.fill(for: .muted).opacity(0.72))
                         )
                     }
@@ -535,8 +536,8 @@ struct CreditView: View {
                                 await appModel.loadCreditPackProducts(showErrors: true)
                             }
                         }
-                        .font(.system(.footnote, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(KabuyomiTheme.accent)
                     }
                 }
             }
@@ -548,7 +549,7 @@ struct CreditView: View {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 5) {
                     Label("購入クレジットの復元", systemImage: "person.crop.circle.badge.checkmark")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .font(.headline.weight(.bold))
                         .foregroundStyle(KabuyomiTheme.ink)
                     Text("Sign in with Appleは購入クレジットの復元と新規購入にだけ使います。SEC資料の閲覧や質問にアカウント作成は不要です。接続すると、端末を変更・紛失した場合も購入済みクレジットを復元できます。")
                         .font(.footnote)
@@ -558,15 +559,15 @@ struct CreditView: View {
 
                 if appModel.isPaidCreditAccountSignedIn {
                     Label("復元用アカウントに接続済み", systemImage: "checkmark.seal.fill")
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.positive)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(CreditStateTone.granted.tint)
 
                     Button("この端末でサインアウト") {
                         Task {
                             await appModel.signOutPaidCreditAccount()
                         }
                     }
-                    .font(.system(.footnote, design: .rounded, weight: .bold))
+                    .font(.footnote.weight(.bold))
                     .foregroundStyle(KabuyomiTheme.inkMuted)
                     .disabled(appModel.billingActionInFlight)
                 } else {
@@ -613,7 +614,7 @@ struct CreditView: View {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("クレジットが不足しています")
-                        .font(.system(.title3, design: .rounded, weight: .bold))
+                        .font(.title3.weight(.bold))
                         .foregroundStyle(KabuyomiTheme.ink)
                     Text(recoveryBodyText(requiredCredits: requiredCredits))
                         .font(.footnote)
@@ -622,20 +623,21 @@ struct CreditView: View {
                 }
 
                 if appModel.hasRecoveredEnoughCreditsForPendingRecovery {
+                    // 残高が戻った合図。色だけに頼らないよう、記号と文言を必ず併記する。
                     Label("送信できます。元の画面で質問をもう一度送信してください。", systemImage: "checkmark.circle.fill")
-                        .font(.system(.footnote, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.positive)
-                        .padding(12)
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(CreditStateTone.granted.tint)
+                        .padding(11)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(KabuyomiTheme.positive.opacity(0.1))
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(CreditStateTone.granted.tint.opacity(0.10))
                         )
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text("続ける方法")
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(KabuyomiTheme.ink)
 
                     if shouldShowRewardedCreditUI {
@@ -740,7 +742,7 @@ struct CreditView: View {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("管理")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .font(.headline.weight(.bold))
                         .foregroundStyle(KabuyomiTheme.ink)
                     Text("購入同期、利用状況、クレジットの扱いを確認できます。")
                         .font(.footnote)
@@ -772,7 +774,7 @@ struct CreditView: View {
         card {
             VStack(alignment: .leading, spacing: 14) {
                 Text("広告報酬（任意）")
-                    .font(.system(.headline, design: .rounded, weight: .bold))
+                    .font(.headline.weight(.bold))
                     .foregroundStyle(KabuyomiTheme.ink)
                 Text("任意で広告を最後まで見ると、サーバー確認後に無料/ad creditを2クレジット獲得できます。1日3回まで、獲得から30日間有効です。広告を見なくてもpaid creditはそのまま使えます。")
                     .font(.footnote)
@@ -859,35 +861,35 @@ struct CreditView: View {
         return NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("利用状況")
-                            .font(.system(.headline, design: .rounded, weight: .bold))
-                            .foregroundStyle(KabuyomiTheme.ink)
+                    VStack(alignment: .leading, spacing: 0) {
+                        RedesignSectionHeader(title: "利用状況", trailing: "\(viewModel.normalRows.count)項目")
                         ForEach(viewModel.normalRows) { row in
-                            CreditMetricRow(title: row.title, value: row.value)
+                            CreditMetricRow(title: row.title, value: row.value, tone: row.tone)
                         }
                     }
 
                     #if DEBUG
                     DisclosureGroup {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 0) {
                             ForEach(viewModel.debugRows) { row in
-                                CreditMetricRow(title: row.title, value: row.value)
+                                CreditMetricRow(title: row.title, value: row.value, tone: row.tone)
                             }
 
                             if let health = appModel.billingAPIHealthReport {
-                                Text("接続診断")
-                                    .font(.system(.subheadline, design: .rounded, weight: .bold))
-                                    .foregroundStyle(KabuyomiTheme.ink)
-                                    .padding(.top, 4)
+                                RedesignSectionHeader(title: "接続診断")
+                                    .padding(.top, 8)
                                 ForEach(health.entries) { entry in
-                                    CreditMetricRow(title: entry.label, value: AccountStatusDisplayModel.connectionStatus(for: entry))
+                                    CreditMetricRow(
+                                        title: entry.label,
+                                        value: AccountStatusDisplayModel.connectionStatus(for: entry),
+                                        tone: AccountStatusDisplayModel.connectionStatus(for: entry) == "正常" ? .granted : .failed
+                                    )
                                 }
                             }
                         }
                     } label: {
                         Text("開発用診断")
-                            .font(.system(.headline, design: .rounded, weight: .bold))
+                            .font(.headline.weight(.bold))
                             .foregroundStyle(KabuyomiTheme.ink)
                     }
                     #endif
@@ -1044,11 +1046,11 @@ struct CreditView: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: billingAvailabilityIcon)
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .foregroundStyle(KabuyomiTheme.accent)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(billingAvailabilityTitle)
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(KabuyomiTheme.ink)
                     Text(message)
                         .font(.footnote)
@@ -1059,11 +1061,16 @@ struct CreditView: View {
         }
     }
 
+    /// 節の容れ物。境界は影ではなく細罫で引き、面は読み面より一段持ち上げる。
     private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .kabuyomiCard(.primary, radius: 16)
+            .padding(15)
+            .background(KabuyomiTheme.elevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(KabuyomiTheme.separator, lineWidth: KabuyomiTheme.hairlineWidth)
+            }
     }
 
     private func recoveryBodyText(requiredCredits: Int) -> String {
@@ -1093,7 +1100,7 @@ struct CreditView: View {
                         .frame(width: 18)
                 }
                 Text(title)
-                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .font(.subheadline.weight(.bold))
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .bold))
@@ -1102,7 +1109,7 @@ struct CreditView: View {
             .foregroundStyle(isDisabled ? KabuyomiTheme.inkMuted : KabuyomiTheme.ink)
             .padding(12)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(KabuyomiTheme.fill(for: .muted))
             )
         }
@@ -1162,7 +1169,7 @@ private struct PlanSheetHeader: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("月額プランを選ぶ")
-                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .font(.title3.weight(.bold))
                     .foregroundStyle(KabuyomiTheme.ink)
                 Text("月額プランは自動更新です。購入後の管理・解約は App Store のアカウント設定から行えます。クレジットはサーバー同期後に反映されます。")
                     .font(.footnote)
@@ -1186,7 +1193,7 @@ private struct PlanSheetHeader: View {
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(KabuyomiTheme.fill(for: .secondary))
         )
     }
@@ -1230,12 +1237,12 @@ private struct SubscriptionPlanRow: View {
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(KabuyomiTheme.fill(for: isCurrent ? .secondary : .muted))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke((isCurrent || isRecommended) ? KabuyomiTheme.accentDeep.opacity(0.26) : KabuyomiTheme.stroke(for: .muted), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke((isCurrent || isRecommended) ? KabuyomiTheme.accent.opacity(0.26) : KabuyomiTheme.stroke(for: .muted), lineWidth: 1)
         )
     }
 
@@ -1243,7 +1250,7 @@ private struct SubscriptionPlanRow: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
                 Text(product.tier.title)
-                    .font(.system(.body, design: .rounded, weight: .bold))
+                    .font(.body.weight(.bold))
                     .foregroundStyle(KabuyomiTheme.ink)
                 if isCurrent {
                     PlanBadge(text: "利用中")
@@ -1270,11 +1277,11 @@ private struct SubscriptionPlanRow: View {
         } label: {
             VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 5) {
                 Text(displayPrice)
-                    .font(.system(.subheadline, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(KabuyomiTheme.accent)
                 Text(planActionTitle)
-                    .font(.system(.caption, design: .rounded, weight: .bold))
-                    .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.inkMuted : KabuyomiTheme.negative)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.inkMuted : CreditStateTone.failed.tint)
             }
             .frame(minWidth: 96, minHeight: 44, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
         }
@@ -1316,9 +1323,9 @@ private struct SubscriptionLegalLinks: View {
             HStack(spacing: 10) {
                 Image(systemName: "checkmark.shield.fill")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .foregroundStyle(KabuyomiTheme.accent)
                 Text("購入前に確認")
-                    .font(.system(.footnote, design: .rounded, weight: .bold))
+                    .font(.footnote.weight(.bold))
                     .foregroundStyle(KabuyomiTheme.ink)
             }
 
@@ -1339,7 +1346,7 @@ private struct SubscriptionLegalLinks: View {
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(KabuyomiTheme.fill(for: .muted))
         )
     }
@@ -1357,7 +1364,7 @@ private struct LegalLink: View {
                     .font(.caption)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.system(.footnote, design: .rounded, weight: .semibold))
+                        .font(.footnote.weight(.semibold))
                     Text(subtitle)
                         .font(.caption2)
                         .foregroundStyle(KabuyomiTheme.inkMuted)
@@ -1367,10 +1374,10 @@ private struct LegalLink: View {
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.inkMuted)
             }
-            .foregroundStyle(KabuyomiTheme.accentDeep)
+            .foregroundStyle(KabuyomiTheme.accent)
             .padding(10)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(KabuyomiTheme.paper.opacity(0.55))
             )
             .contentShape(Rectangle())
@@ -1413,7 +1420,7 @@ private struct CreditPackRow: View {
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(KabuyomiTheme.fill(for: .muted))
         )
     }
@@ -1422,12 +1429,12 @@ private struct CreditPackRow: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
                 Text(product.credits == 50 ? "ミニパック" : "\(product.credits)クレジット")
-                    .font(.system(.body, design: .rounded, weight: .bold))
+                    .font(.body.weight(.bold))
                     .foregroundStyle(KabuyomiTheme.ink)
                 if isPrimary {
                     Text("主要")
-                        .font(.system(.caption2, design: .rounded, weight: .bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(KabuyomiTheme.accent)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
@@ -1445,16 +1452,17 @@ private struct CreditPackRow: View {
         } label: {
             VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 5) {
                 Text(displayPrice)
-                    .font(.system(.subheadline, design: .rounded, weight: .bold))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(KabuyomiTheme.accent)
                 Text(packActionTitle)
-                    .font(.system(.caption, design: .rounded, weight: .bold))
-                    .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.paper : KabuyomiTheme.negative)
+                    .font(.caption.weight(.bold))
+                    // accent の塗りに載せる文字は onAccent。paper だとライトで白地に白になる。
+                    .foregroundStyle(product.isAvailable && isPurchaseEnabled ? KabuyomiTheme.onAccent : CreditStateTone.failed.tint)
                     .padding(.horizontal, product.isAvailable && isPurchaseEnabled ? 10 : 0)
                     .padding(.vertical, product.isAvailable && isPurchaseEnabled ? 6 : 0)
                     .background {
                         if product.isAvailable && isPurchaseEnabled {
-                            Capsule().fill(KabuyomiTheme.accentDeep)
+                            Capsule().fill(KabuyomiTheme.accent)
                         }
                     }
             }
@@ -1541,24 +1549,26 @@ private struct RewardedAdCreditButton: View {
                             .font(.system(size: 16, weight: .bold))
                     }
                     Text(title)
-                        .font(.system(.body, design: .rounded, weight: .bold))
+                        .font(.body.weight(.bold))
                     Spacer()
                 }
-                .foregroundStyle(isDisabled ? KabuyomiTheme.inkMuted : KabuyomiTheme.paper)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                // accent の塗りに載せる文字は onAccent。paper だとライトで白地に白になる。
+                .foregroundStyle(isDisabled ? KabuyomiTheme.inkMuted : KabuyomiTheme.onAccent)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 11)
                 .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(isDisabled ? KabuyomiTheme.fill(for: .muted) : AnyShapeStyle(KabuyomiTheme.accentDeep))
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(isDisabled ? KabuyomiTheme.fill(for: .muted) : AnyShapeStyle(KabuyomiTheme.accent))
                 )
             }
             .buttonStyle(.plain)
             .disabled(isDisabled)
 
             if let message, !message.isEmpty {
+                // 「報酬を確認中」「本日の上限」はいずれも保留であって失敗ではない。
                 Text(message)
                     .font(.footnote)
-                    .foregroundStyle(state == .dailyCapReached ? KabuyomiTheme.negative : KabuyomiTheme.inkMuted)
+                    .foregroundStyle(rewardedAdCreditTone(state).tint)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -1568,26 +1578,26 @@ private struct RewardedAdCreditButton: View {
 private struct CreditMetricRow: View {
     let title: String
     let value: String
+    /// 状態のある行(購入同期など)だけ色を持つ。文言は常に併記する。
+    var tone: CreditStateTone = .neutral
 
     var body: some View {
-        HStack {
-            Text(title)
-                .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                .foregroundStyle(KabuyomiTheme.inkMuted)
-            Spacer()
-            Text(value)
-                .font(.system(.subheadline, design: .rounded, weight: .bold))
-                .foregroundStyle(KabuyomiTheme.ink)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(3)
-                .minimumScaleFactor(0.82)
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(title)
+                    .kabuyomiMicroLabel()
+                Spacer(minLength: 12)
+                Text(value)
+                    .font(KabuyomiTheme.figure(.subheadline, weight: .medium))
+                    .foregroundStyle(tone == .neutral ? KabuyomiTheme.ink : tone.tint)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.82)
+            }
+            .padding(.vertical, 9)
+            .overlay(alignment: .top) { KabuyomiHairline() }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(KabuyomiTheme.fill(for: .muted))
-        )
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1609,8 +1619,8 @@ private struct BadgeText: View {
 
     var body: some View {
         Text(text)
-            .font(.system(.caption, design: .rounded, weight: .bold))
-            .foregroundStyle(KabuyomiTheme.accentDeep)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(KabuyomiTheme.accent)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
@@ -1622,8 +1632,8 @@ private struct PlanBadge: View {
 
     var body: some View {
         Text(text)
-            .font(.system(.caption2, design: .rounded, weight: .bold))
-            .foregroundStyle(KabuyomiTheme.accentDeep)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(KabuyomiTheme.accent)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(Capsule().fill(KabuyomiTheme.fill(for: .secondary)))
@@ -1635,8 +1645,8 @@ private struct CreditFeaturePill: View {
 
     var body: some View {
         Text(text)
-            .font(.system(.caption, design: .rounded, weight: .bold))
-            .foregroundStyle(KabuyomiTheme.accentDeep)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(KabuyomiTheme.accent)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10)
@@ -1652,24 +1662,18 @@ private struct CreditBreakdownTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(.caption2, design: .rounded, weight: .semibold))
-                .foregroundStyle(KabuyomiTheme.inkMuted)
+                .kabuyomiMicroLabel()
                 .lineLimit(1)
 
             Text(value)
-                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                .font(KabuyomiTheme.figure(.title3, weight: .regular))
                 .foregroundStyle(KabuyomiTheme.ink)
-                .monospacedDigit()
                 .lineLimit(1)
-                .minimumScaleFactor(0.78)
+                .minimumScaleFactor(0.7)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(KabuyomiTheme.fill(for: .muted))
-        )
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+        .overlay(alignment: .top) { KabuyomiHairline() }
     }
 }
 
@@ -1712,7 +1716,7 @@ private struct ManagementButton: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .font(.subheadline.weight(.bold))
                     if let subtitle {
                         Text(subtitle)
                             .font(.caption)
@@ -1729,7 +1733,7 @@ private struct ManagementButton: View {
             .foregroundStyle(KabuyomiTheme.ink)
             .padding(12)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(KabuyomiTheme.fill(for: .muted))
             )
         }
@@ -1751,7 +1755,7 @@ private struct RuleText: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(.headline, design: .rounded, weight: .bold))
+                .font(.headline.weight(.bold))
                 .foregroundStyle(KabuyomiTheme.ink)
             Text(text)
                 .font(.footnote)
@@ -1761,7 +1765,7 @@ private struct RuleText: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(KabuyomiTheme.fill(for: .muted))
         )
     }
@@ -1770,13 +1774,14 @@ private struct RuleText: View {
 private struct AccountStatusActionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(.body, design: .rounded, weight: .bold))
-            .foregroundStyle(KabuyomiTheme.paper)
+            .font(.body.weight(.bold))
+            // accent の塗りに載せる文字は onAccent。白や paper は teal 上で読めない。
+            .foregroundStyle(KabuyomiTheme.onAccent)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(configuration.isPressed ? KabuyomiTheme.accentDeep.opacity(0.82) : KabuyomiTheme.accentDeep)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(configuration.isPressed ? KabuyomiTheme.accent.opacity(0.82) : KabuyomiTheme.accent)
             )
     }
 }

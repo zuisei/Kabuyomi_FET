@@ -2284,78 +2284,97 @@ private struct RedesignSettingsView: View {
     var body: some View {
         List {
             Section {
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text("アカウントとリサーチ")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(KabuyomiTheme.accentDeep)
+                        .kabuyomiMicroLabel()
                     Text("利用環境を確認・管理")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(KabuyomiTheme.ink)
                 }
-                .padding(.vertical, 8)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             }
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
 
-            Section("クレジット") {
+            Section {
                 NavigationLink(value: RedesignSettingsRoute.credits) {
-                    HStack(spacing: 14) {
+                    HStack(spacing: 11) {
                         Image(systemName: "bolt.fill")
-                            .foregroundStyle(KabuyomiTheme.accentDeep)
-                            .frame(width: 28)
-                        VStack(alignment: .leading, spacing: 3) {
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(KabuyomiTheme.accent)
+                            .frame(width: 22)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 1) {
                             Text("残高と購入")
-                                .font(.headline)
-                                .foregroundStyle(.primary)
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(KabuyomiTheme.ink)
                             Text(creditSummary)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .font(KabuyomiTheme.figure(.caption2))
+                                .foregroundStyle(KabuyomiTheme.inkMuted)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        Spacer()
+                        Spacer(minLength: 8)
                     }
-                    .frame(minHeight: 54)
+                    .padding(.vertical, 7)
+                    .frame(minHeight: 44)
                     .contentShape(Rectangle())
                 }
+                .listRowBackground(KabuyomiTheme.paper)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 .accessibilityIdentifier("redesign.settings.credits")
+            } header: {
+                RedesignListSectionHeader(title: "クレジット")
             }
 
-            Section("AI 利用") {
+            Section {
                 Toggle(isOn: Binding(
                     get: { appModel.aiConsentGranted },
                     set: { appModel.setAIConsent($0) }
                 )) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("AI 利用への同意")
-                        Text("質問と対象資料の抜粋を外部AIモデルへ送信します。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    SettingsToggleLabel(
+                        title: "AI 利用への同意",
+                        subtitle: "質問と対象資料の抜粋を外部AIモデルへ送信します。"
+                    )
                 }
+                .tint(KabuyomiTheme.accent)
+                .listRowBackground(KabuyomiTheme.paper)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 .accessibilityIdentifier("redesign.settings.aiConsent")
+            } header: {
+                RedesignListSectionHeader(title: "AI 利用")
             }
 
-            Section("表示") {
+            Section {
                 Toggle(isOn: Binding(
                     get: { appModel.showStarterCompanies },
                     set: { appModel.setShowStarterCompanies($0) }
                 )) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("スターター銘柄を表示")
-                        Text("リサーチ画面に代表的な会社を表示します。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    SettingsToggleLabel(
+                        title: "スターター銘柄を表示",
+                        subtitle: "リサーチ画面に代表的な会社を表示します。"
+                    )
                 }
+                .tint(KabuyomiTheme.accent)
+                .listRowBackground(KabuyomiTheme.paper)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 .accessibilityIdentifier("redesign.settings.starters")
+            } header: {
+                RedesignListSectionHeader(title: "表示")
             }
 
-            Section("サポートとデータ") {
+            Section {
                 NavigationLink(value: RedesignSettingsRoute.details) {
                     SettingsDestinationRow(
                         title: "端末情報とサポート",
                         subtitle: deviceAndSupportSummary
                     )
                 }
+                .listRowBackground(KabuyomiTheme.paper)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 .accessibilityIdentifier("redesign.settings.details")
 
                 if let status = appModel.installationAuthenticationStatus,
@@ -2363,35 +2382,65 @@ private struct RedesignSettingsView: View {
                     Button {
                         Task { await appModel.retryInstallationAuthentication() }
                     } label: {
-                        HStack(spacing: 10) {
+                        HStack(spacing: 9) {
                             if appModel.installationAuthenticationIsRetrying {
                                 ProgressView()
                                     .controlSize(.small)
+                                    .tint(KabuyomiTheme.accent)
                             } else {
                                 Image(systemName: "arrow.clockwise")
+                                    .font(.caption.weight(.bold))
                             }
                             Text(appModel.installationAuthenticationIsRetrying ? "端末認証を確認中" : retryTitle)
+                                .font(.footnote.weight(.semibold))
+                            Spacer(minLength: 8)
                         }
+                        // 端末認証の再試行はまだ結果が出ていない状態。保留の階調で出す。
+                        .foregroundStyle(
+                            appModel.installationAuthenticationIsRetrying
+                                ? KabuyomiTheme.caution
+                                : KabuyomiTheme.accent
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .disabled(appModel.installationAuthenticationIsRetrying)
-                    .frame(minHeight: 44)
+                    .listRowBackground(KabuyomiTheme.paper)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 }
 
-                Button("ローカルデータをリセット", role: .destructive) {
+                Button(role: .destructive) {
                     appModel.requestResetLocalDataConfirmation()
+                } label: {
+                    Text("ローカルデータをリセット")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(KabuyomiTheme.negative)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
-                .frame(minHeight: 44)
+                .buttonStyle(.plain)
+                .listRowBackground(KabuyomiTheme.paper)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 .accessibilityIdentifier("redesign.settings.reset")
+            } header: {
+                RedesignListSectionHeader(title: "サポートとデータ")
             }
 
             Section {
                 Text("Kabuyomi は公開された SEC 10-K / 10-Q を読みやすくする資料リーダーです。投資助言や売買推奨ではありません。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(.caption2)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 12)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             }
         }
         .listStyle(.plain)
+        .listRowSeparatorTint(KabuyomiTheme.separator)
+        .environment(\.defaultMinListRowHeight, 0)
         .scrollContentBackground(.hidden)
         .background(KabuyomiTheme.canvas)
         .navigationTitle("設定")
@@ -2420,25 +2469,43 @@ private struct RedesignSettingsView: View {
     }
 }
 
+/// トグルの見出し。説明文を副題に落として、行の高さを1行分に抑える。
+private struct SettingsToggleLabel: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(KabuyomiTheme.ink)
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 7)
+    }
+}
+
 private struct SettingsDestinationRow: View {
     let title: String
     let subtitle: String
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(KabuyomiTheme.ink)
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(minHeight: 48)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 
