@@ -24,8 +24,6 @@ struct AdMobBannerView: View {
     let placement: Placement
     var horizontalPadding: CGFloat = 16
     var verticalPadding: CGFloat = 6
-    /// 状態が変わったときに親へ返す。実機確認とテストのための報告口で、既定では誰も見ない。
-    var onStateChange: ((AdMobBannerLoadState) -> Void)?
 
     @State private var loadState: AdMobBannerLoadState = .loading
 
@@ -89,7 +87,6 @@ struct AdMobBannerView: View {
     private func handleStateChange(_ state: AdMobBannerLoadState) {
         guard loadState != state else { return }
         loadState = state
-        onStateChange?(state)
     }
 }
 

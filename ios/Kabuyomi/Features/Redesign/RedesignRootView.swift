@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// v2 IA Phase 4(docs/ui-redesign-v2/V2_IA_SPEC.md「Phase 4」節)。
+/// v2 IA Phase 5(docs/ui-redesign-v2/V2_IA_SPEC.md「Phase 5」節)。
 ///
-/// タブは無い。根の面は「自分の質問と回答」と「追っている会社に資料が出た事実」を
-/// 新しい順に1本へ流すストリームで、底には会社チップ・入力欄・送信を持つ
-/// アスクバーが貼りついている。会社ドキュメント(Phase 1)は中身を変えないまま、
-/// ストリームのカード・会社チップ・検索から push で開く行き先になった。
+/// 面は2枚。**ホーム**は Phase 4 のストリーム + アスクバーそのままで、
+/// **サマリー**は Phase 3 の盤面を密度の家として復活させたもの。
+/// 会社ドキュメント(Phase 1)は中身を変えないまま、どちらのタブからも push で開く。
+/// 設定・クレジット・会社ピッカーは引き続きシート(3枚目のタブは作らない)。
 private enum RedesignRoute: Hashable {
     case company(String)
     case sources(String)
@@ -38,30 +38,69 @@ private enum RedesignSheet: Identifiable {
     }
 }
 
+/// 根のタブ。7月ルール「タブは目的地、各タブが NavigationStack を持つ」に戻る。
+private enum RedesignTab: Hashable {
+    case home
+    case summary
+}
+
 struct RedesignRootView: View {
     @Environment(AppModel.self) private var appModel
-    @State private var path: [RedesignRoute] = []
+    @State private var selectedTab: RedesignTab = .home
+    /// タブごとに1本ずつ。1本を共有すると、タブを切り替えたときに
+    /// 片方で開いていたドキュメントがもう片方に出てきて、
+    /// 戻ったときに元のタブへ帰れなくなる(7月ルール「タブは目的地」)。
+    @State private var homePath: [RedesignRoute] = []
+    @State private var summaryPath: [RedesignRoute] = []
     @State private var sheet: RedesignSheet?
 
+    private var activePath: [RedesignRoute] {
+        selectedTab == .home ? homePath : summaryPath
+    }
+
     var body: some View {
-        NavigationStack(path: $path) {
-            RedesignStreamView(
-                openCompany: openCompany,
-                openConversation: openConversation,
-                openSource: { ticker, source in path.append(.source(ticker, source)) },
-                present: { sheet = $0 },
-                openCredits: openCredits
-            )
-            .navigationDestination(for: RedesignRoute.self) { route in
-                destination(for: route)
+        TabView(selection: $selectedTab) {
+            NavigationStack(path: $homePath) {
+                RedesignStreamView(
+                    openCompany: { openCompany($0, on: .home) },
+                    openConversation: { ticker, filingKey in
+                        openConversation(ticker, filingKey: filingKey, on: .home)
+                    },
+                    openSource: { ticker, source in push(.source(ticker, source), on: .home) },
+                    present: { sheet = $0 },
+                    openCredits: openCredits
+                )
+                .navigationDestination(for: RedesignRoute.self) { route in
+                    destination(for: route, on: .home)
+                }
             }
+            .tabItem { Label("ホーム", systemImage: "bubble.left.and.text.bubble.right") }
+            .tag(RedesignTab.home)
+
+            NavigationStack(path: $summaryPath) {
+                RedesignSummaryView(
+                    openCompany: { ticker in
+                        openConversation(ticker, filingKey: "", on: .summary)
+                    },
+                    present: { sheet = $0 }
+                )
+                .navigationDestination(for: RedesignRoute.self) { route in
+                    destination(for: route, on: .summary)
+                }
+            }
+            .tabItem { Label("サマリー", systemImage: "square.grid.2x2") }
+            .tag(RedesignTab.summary)
         }
         .tint(KabuyomiTheme.accent)
-        // 左端の戻りジェスチャは Phase 4 でも根から資料詳細まで同じように効く。
-        .kabuyomiEdgeSwipeBack(enabled: !path.isEmpty) {
-            guard !path.isEmpty else { return }
-            path.removeLast()
+        // 左端の戻りジェスチャは根から資料詳細まで同じように効く。
+        // 見ているタブの経路だけを見る。もう一方のタブが深くても、
+        // 今いる面が根なら戻すものは無い。
+        .kabuyomiEdgeSwipeBack(enabled: !activePath.isEmpty) {
+            popActiveTab()
         }
+        // シートと残高まわりのコールバックは TabView に付ける。
+        // どちらかのタブの中に入れると、もう一方を見ているあいだに起きた
+        // 残高不足やリワード復帰が黙って消える。
         .sheet(item: $sheet) { presented in
             sheetContent(presented)
         }
@@ -78,6 +117,26 @@ struct RedesignRootView: View {
         }
     }
 
+    private func push(_ route: RedesignRoute, on tab: RedesignTab) {
+        switch tab {
+        case .home:
+            homePath.append(route)
+        case .summary:
+            summaryPath.append(route)
+        }
+    }
+
+    private func popActiveTab() {
+        switch selectedTab {
+        case .home:
+            guard !homePath.isEmpty else { return }
+            homePath.removeLast()
+        case .summary:
+            guard !summaryPath.isEmpty else { return }
+            summaryPath.removeLast()
+        }
+    }
+
     @ViewBuilder
     private func sheetContent(_ presented: RedesignSheet) -> some View {
         switch presented {
@@ -91,9 +150,10 @@ struct RedesignRootView: View {
                     sheet = nil
                 },
                 openCompany: { ticker in
-                    appModel.openConversation(for: ticker)
                     sheet = nil
-                    openCompany(ticker)
+                    // ピッカーは今見ているタブの上に出ているので、
+                    // ドキュメントもそのタブへ push する。閉じたら元のタブに戻る。
+                    openConversation(ticker, filingKey: "", on: selectedTab)
                 }
             )
         case .settings:
@@ -105,52 +165,72 @@ struct RedesignRootView: View {
     }
 
     @ViewBuilder
-    private func destination(for route: RedesignRoute) -> some View {
-        switch route {
-        case .company(let ticker):
-            RedesignCompanyWorkspace(
-                ticker: ticker,
-                openCredits: openCredits,
-                openSources: { path.append(.sources(ticker)) },
-                openSource: { path.append(.source(ticker, $0)) }
-            )
-            .id(ticker)
-        case .sources(let ticker):
-            if let company = appModel.companyPayload(for: ticker) {
-                RedesignSourceBrowser(
-                    company: company,
-                    selectFiling: { filingKey in
-                        appModel.openConversation(for: ticker, filingKey: filingKey)
-                        path = [.company(ticker)]
-                    },
-                    openSource: { path.append(.source(ticker, $0)) }
+    private func destination(for route: RedesignRoute, on tab: RedesignTab) -> some View {
+        Group {
+            switch route {
+            case .company(let ticker):
+                RedesignCompanyWorkspace(
+                    ticker: ticker,
+                    openCredits: openCredits,
+                    openSources: { push(.sources(ticker), on: tab) },
+                    openSource: { push(.source(ticker, $0), on: tab) }
                 )
-            } else {
-                ProgressView("資料を準備しています")
-                    .task { await appModel.loadCompany(ticker: ticker) }
+                .id(ticker)
+            case .sources(let ticker):
+                if let company = appModel.companyPayload(for: ticker) {
+                    RedesignSourceBrowser(
+                        company: company,
+                        selectFiling: { filingKey in
+                            appModel.openConversation(for: ticker, filingKey: filingKey)
+                            setPath([.company(ticker)], on: tab)
+                        },
+                        openSource: { push(.source(ticker, $0), on: tab) }
+                    )
+                } else {
+                    ProgressView("資料を準備しています")
+                        .task { await appModel.loadCompany(ticker: ticker) }
+                }
+            case .source(let ticker, let source):
+                if let company = appModel.companyPayload(for: ticker) {
+                    RedesignSourceDetail(company: company, source: source)
+                } else {
+                    ProgressView("根拠を準備しています")
+                        .task { await appModel.loadCompany(ticker: ticker) }
+                }
             }
-        case .source(let ticker, let source):
-            if let company = appModel.companyPayload(for: ticker) {
-                RedesignSourceDetail(company: company, source: source)
-            } else {
-                ProgressView("根拠を準備しています")
-                    .task { await appModel.loadCompany(ticker: ticker) }
-            }
+        }
+        // push した面ではタブバーを畳む。会社ドキュメントは底に自前のコンポーザを
+        // 貼りつけているので、タブバーを残すと入力欄の下にもう1枚クロームが重なる。
+        // Phase 5 で拒んだ「3層クローム」と同じ形になるため、深い面ではタブを譲る。
+        .toolbar(.hidden, for: .tabBar)
+    }
+
+    private func setPath(_ routes: [RedesignRoute], on tab: RedesignTab) {
+        switch tab {
+        case .home:
+            homePath = routes
+        case .summary:
+            summaryPath = routes
         }
     }
 
-    private func openCompany(_ ticker: String) {
+    /// 会社ドキュメントをそのタブの1階層目として開く。
+    /// 呼ぶ側がすでに `appModel.openConversation` を済ませている経路
+    /// (資料イベントカード・送信直後の `deliver`)のために、ここでは面だけを動かす。
+    private func openCompany(_ ticker: String, on tab: RedesignTab) {
         let normalized = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !normalized.isEmpty else { return }
-        path = [.company(normalized)]
+        setPath([.company(normalized)], on: tab)
     }
 
-    /// ストリームの回答カードから、その会話(= その資料)を開く。
+    /// カード・板行・ピッカーから、その会話(= その資料)を開く。
     /// `openConversation` が `activeConversationFilingKeys` を立ててから push する、
     /// という順序は Phase 3 の研究タブと同じ。
-    private func openConversation(_ ticker: String, filingKey: String) {
-        appModel.openConversation(for: ticker, filingKey: filingKey.isEmpty ? nil : filingKey)
-        openCompany(ticker)
+    private func openConversation(_ ticker: String, filingKey: String, on tab: RedesignTab) {
+        let normalized = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !normalized.isEmpty else { return }
+        appModel.openConversation(for: normalized, filingKey: filingKey.isEmpty ? nil : filingKey)
+        setPath([.company(normalized)], on: tab)
     }
 
     /// クレジット画面を出す。
@@ -777,7 +857,12 @@ private struct RedesignStreamAnswerCard: View {
     }
 
     private var accessibilityText: String {
-        var parts = [entry.ticker, entry.companyName, attributionText, "質問、\(entry.question)"]
+        // 社名がまだ取れていない会社ではカードの社名に ticker が入っている。
+        // 画面と同じ抑制をかけないと「AAPL、AAPL、…」と2度名乗る。
+        let name = homeBoardCompanyName(companyName: entry.companyName, ticker: entry.ticker)
+        var parts = [entry.ticker]
+        if !name.isEmpty { parts.append(name) }
+        parts.append(contentsOf: [attributionText, "質問、\(entry.question)"])
         if let answerBody { parts.append("回答、\(answerBody)") } else { parts.append("回答なし") }
         parts.append(trailingText)
         return parts.joined(separator: "、")
@@ -787,7 +872,7 @@ private struct RedesignStreamAnswerCard: View {
         VStack(alignment: .leading, spacing: 9) {
             Button(action: open) {
                 VStack(alignment: .leading, spacing: 7) {
-                    identityRow
+                    companyHeader
                     questionBlock
                     if let answerBody {
                         // 行数は切らない。カードに出すのは
@@ -843,40 +928,18 @@ private struct RedesignStreamAnswerCard: View {
         .accessibilityElement(children: .contain)
     }
 
-    @ViewBuilder
-    private var identityRow: some View {
-        let identity = HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Text(entry.ticker)
-                .font(KabuyomiTheme.figure(.subheadline, weight: .semibold))
-                .foregroundStyle(KabuyomiTheme.ink)
-                .lineLimit(1)
-            Text(attributionText)
-                .font(KabuyomiTheme.figure(.caption2))
+    /// 会社ヘッダー行(Phase 5)。回答本文より先に「どの会社の話か」を出す。
+    private var companyHeader: some View {
+        RedesignStreamCompanyHeader(
+            ticker: entry.ticker,
+            companyName: homeBoardCompanyName(companyName: entry.companyName, ticker: entry.ticker),
+            attribution: attributionText
+        ) {
+            Text(trailingText)
+                .font(KabuyomiTheme.figure(.caption2, weight: .semibold))
                 .foregroundStyle(KabuyomiTheme.inkMuted)
-                .lineLimit(1)
-        }
-        let trailing = Text(trailingText)
-            .font(KabuyomiTheme.figure(.caption2, weight: .semibold))
-            .foregroundStyle(KabuyomiTheme.inkMuted)
-            .lineLimit(1)
-
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.ticker)
-                    .font(KabuyomiTheme.figure(.subheadline, weight: .semibold))
-                    .foregroundStyle(KabuyomiTheme.ink)
-                Text(attributionText)
-                    .font(KabuyomiTheme.figure(.caption2))
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-                trailing.fixedSize(horizontal: false, vertical: true)
-            }
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                identity
-                Spacer(minLength: 8)
-                trailing
-            }
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -917,8 +980,17 @@ private struct RedesignStreamFilingCard: View {
     private var accessibilityText: String {
         var parts: [String] = []
         if event.isUnread { parts.append("未読") }
+        // 社名が取れていない会社では headline の主語が ticker になる。
+        // そこで ticker を足すと「SOFI、SOFI の 10-K が出ました」と2度名乗る。
+        if !homeBoardCompanyName(companyName: event.companyName, ticker: event.ticker).isEmpty {
+            parts.append(event.ticker)
+        }
         parts.append(event.headline)
         parts.append(filedText)
+        // ピルは行の合成ラベルの内側にあり自前のラベルが届かないので、ここで読む。
+        if let delta = event.revenueDelta {
+            parts.append("売上高 前年同期比 \(delta.text)")
+        }
         parts.append(event.verdictLine)
         return parts.joined(separator: "、")
     }
@@ -926,7 +998,8 @@ private struct RedesignStreamFilingCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             Button(action: open) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 5) {
+                    companyHeader
                     badgeRow
                     Text(event.headline)
                         .font(.subheadline.weight(.semibold))
@@ -969,6 +1042,19 @@ private struct RedesignStreamFilingCard: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// 会社ヘッダー行(Phase 5)。売上 YoY のピルはこのカードにだけ添える。
+    private var companyHeader: some View {
+        RedesignStreamCompanyHeader(
+            ticker: event.ticker,
+            companyName: homeBoardCompanyName(companyName: event.companyName, ticker: event.ticker),
+            // form と提出日は下の badgeRow が持つ。ヘッダーで二度言わない。
+            attribution: "",
+            delta: event.revenueDelta
+        ) {
+            EmptyView()
+        }
+    }
+
     @ViewBuilder
     private var badgeRow: some View {
         let leading = HStack(spacing: 7) {
@@ -993,6 +1079,143 @@ private struct RedesignStreamFilingCard: View {
                 leading
                 Spacer(minLength: 8)
                 filed
+            }
+        }
+    }
+}
+
+// MARK: - サマリー(密度の家)
+
+/// サマリータブ。Phase 3 の盤面を増強して戻したもの。
+///
+/// ストリームが「大胆だが薄い」ことへの答えがこの面で、役割はひとつ:
+/// 追っている会社を**縦に読み下せる密度**で並べること。
+/// 行タップは会社ドキュメントへ真っ直ぐ push する(質問はホームでする)。
+/// 底には free プランのときだけバナー枠が1つ座る。
+private struct RedesignSummaryView: View {
+    @Environment(AppModel.self) private var appModel
+    let openCompany: (String) -> Void
+    let present: (RedesignSheet) -> Void
+
+    private var savedCards: [WatchlistCard] {
+        appModel.watchlist
+    }
+
+    private var recentCards: [WatchlistCard] {
+        appModel.recentCompanyCards(limit: 8, includeSaved: false)
+    }
+
+    private var boardRows: [HomeBoardRow] {
+        homeBoardRows(saved: savedCards, recent: recentCards, lastOpenedAt: appModel.lastOpenedAt)
+    }
+
+    /// バナー枠を出すか。判断そのものは `AdMobConfig` の純関数が持ち、
+    /// ここは AppModel の課金状態を渡すだけ。ビューはサービスを作らない。
+    private var showsBannerSlot: Bool {
+        AdMobConfig.bannerSlotIsVisible(
+            isFreePlan: appModel.shouldShowBannerAds,
+            hasBannerAdUnit: AdMobConfig.hasBannerAdConfig
+        )
+    }
+
+    var body: some View {
+        List {
+            if boardRows.isEmpty {
+                emptyBoardSections
+            } else {
+                boardSection
+            }
+        }
+        .listStyle(.plain)
+        .listRowSeparatorTint(KabuyomiTheme.separator)
+        .listSectionSpacing(10)
+        .environment(\.defaultMinListRowHeight, 0)
+        .scrollContentBackground(.hidden)
+        .background(KabuyomiTheme.canvas)
+        // 識別子はリスト自身に付ける。チェーンの末尾に置くと safeAreaInset の
+        // バナーまで降りていく(ストリームで踏んだのと同じ罠)。
+        .accessibilityIdentifier("redesign.summary")
+        .navigationTitle("サマリー")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    present(.companyPicker)
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .frame(minWidth: 32, minHeight: 44)
+                }
+                .accessibilityLabel("会社を検索")
+                .accessibilityIdentifier("redesign.summary.search")
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    present(.settings)
+                } label: {
+                    Image(systemName: "person.crop.circle")
+                        .frame(minWidth: 32, minHeight: 44)
+                }
+                .accessibilityLabel("アカウントと設定")
+                .accessibilityIdentifier("redesign.summary.profile")
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if showsBannerSlot {
+                AdMobBannerView(placement: .summary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var boardSection: some View {
+        Section {
+            ForEach(boardRows) { row in
+                RedesignBoardRow(
+                    row: row,
+                    identifierPrefix: "redesign.summary",
+                    showsAllDeltas: true,
+                    action: { openCompany(row.ticker) }
+                )
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    if row.isSaved {
+                        Button("削除", role: .destructive) {
+                            Task { await appModel.removeFromWatchlist(row.ticker) }
+                        }
+                        .accessibilityIdentifier("redesign.summary.remove.\(row.ticker)")
+                    }
+                }
+            }
+        } header: {
+            RedesignListSectionHeader(title: "盤面", trailing: "\(boardRows.count)社")
+        }
+    }
+
+    /// 盤面が空のときだけ、ミッション文とスターター企業に入れ替わる(Phase 3 のまま)。
+    @ViewBuilder
+    private var emptyBoardSections: some View {
+        Section {
+            RedesignDiscoveryMission()
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        }
+
+        if appModel.showStarterCompanies {
+            Section {
+                ForEach(appModel.starterCompanies) { company in
+                    RedesignCompanyRow(
+                        ticker: company.ticker,
+                        companyName: company.companyName,
+                        detail: "10-K / 10-Qを確認",
+                        isSaved: false,
+                        identifierPrefix: "redesign.summary"
+                    ) {
+                        openCompany(company.ticker)
+                    }
+                }
+            } header: {
+                RedesignListSectionHeader(title: "はじめに見る会社")
             }
         }
     }
@@ -1171,8 +1394,12 @@ private struct RedesignUnreadDot: View {
 
 /// 増減ピル。株価アプリの塗りつぶしピルの形に、Phase 1 の増減バッジを入れる。
 /// 矢印と符号は `RedesignDeltaBadge` 側が必ず併記する。
+///
+/// `label` を渡すとピルの頭に指標名が入る。3本並べる盤面では必須で、
+/// 3本の区別を色や位置に頼らせない(色は上げ下げに使い切っている)。
 private struct RedesignDeltaPill: View {
     let display: MetricYoYDisplay
+    var label: String?
 
     private var fill: Color {
         switch display.tone {
@@ -1186,23 +1413,90 @@ private struct RedesignDeltaPill: View {
     }
 
     var body: some View {
-        RedesignDeltaBadge(display: display, compact: true)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(fill, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        HStack(spacing: 3) {
+            if let label {
+                Text(label)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(KabuyomiTheme.inkSoft)
+                    .lineLimit(1)
+                    .accessibilityHidden(true)
+            }
+            RedesignDeltaBadge(display: display, compact: true)
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 3)
+        .background(fill, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
 }
 
-/// 盤面の1行。ticker(tabular)/ 社名 / 最新 filing / 売上 YoY のピル / 未読ドット。
+/// 盤面行の3本ピル。横に並べきれなければ縦へ落ちる。
 ///
-/// Phase 4 では会社ピッカーの中に置かれ、1行が2つの意味を持つ:
-/// 行そのもの = 質問の宛先にする、末尾の「開く」= 会社ドキュメントを開く。
+/// `ViewThatFits` に任せているのは、ピルの幅が指標の書き分け
+/// (「+16.6%」と「赤字縮小 84.8%」で倍近く違う)で決まり、
+/// 収まるかどうかを事前に決められないため。
+/// AX サイズでは測るまでもなく収まらないので、最初から縦積みにする。
+private struct RedesignDeltaPillRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let deltas: [HomeBoardDelta]
+
+    var body: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            stacked
+        } else {
+            // 候補に `Spacer` を入れない。`ViewThatFits` は候補の理想サイズで
+            // 判定するので、Spacer が入ると常に「入らない」と判断して
+            // 既定サイズでも縦積みになる(シミュレータ実機確認 2026-08-22)。
+            // 左寄せは `ViewThatFits` の外で決める。
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 4) {
+                    pills
+                }
+                stacked
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var stacked: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            pills
+        }
+    }
+
+    @ViewBuilder
+    private var pills: some View {
+        ForEach(deltas) { delta in
+            RedesignDeltaPill(display: delta.display, label: delta.label)
+                .fixedSize()
+        }
+    }
+}
+
+/// 盤面の1行。ticker(tabular・行内で最大)/ 社名 / 最新 filing /
+/// 売上・営業利益・純利益の YoY ピル / 未読ドット。
+///
+/// 2つの面が同じ行を使う:
+/// - **サマリータブ**: 行タップ = ドキュメントを開く(`open` を渡さない)
+/// - **会社ピッカー**: 行タップ = 質問の宛先にする、末尾の「開く」= ドキュメント
+///
+/// 面ごとに識別子がぶつからないよう `identifierPrefix` を分ける。
+/// ピッカーはサマリーの上にシートとして出るので、両方が同時に木の中に居る。
 private struct RedesignBoardRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let row: HomeBoardRow
+    var identifierPrefix: String = "redesign.company"
+    /// 3本ピル(売上・営業利益・純利益)を出すのは**サマリータブだけ**。
+    /// ピッカーは会社を選ぶための一覧なので、1画面に入る行数を落とさない
+    /// (3本並べると横に入りきらず縦積みへ落ち、行の高さがほぼ倍になる。
+    /// シミュレータ実機確認 2026-08-22)。ピッカーは Phase 4 と同じ売上1本のまま。
+    var showsAllDeltas: Bool = false
     let action: () -> Void
     /// 与えられたときだけ末尾に「開く」を出す。無ければ従来どおり行全体で開く。
     var open: (() -> Void)?
+
+    private var visibleDeltas: [HomeBoardDelta] {
+        showsAllDeltas ? row.deltas : row.deltas.filter { $0.logicalName == "revenue" }
+    }
 
     private var filingDetail: String {
         if row.isPlaceholder { return "資料を準備中" }
@@ -1216,9 +1510,11 @@ private struct RedesignBoardRow: View {
         parts.append(row.ticker)
         if !row.companyName.isEmpty { parts.append(row.companyName) }
         parts.append(filingDetail)
-        if let delta = row.delta {
-            parts.append("売上高 前年同期比 \(delta.text)")
-        }
+        // ピルは行の合成ラベルの中でしか読まれない
+        // (`accessibilityElement(children: .ignore)` の内側なので、
+        // ピル自身が持つラベルは VoiceOver に届かない)。
+        // どの指標かはここで名乗る。
+        parts.append(contentsOf: visibleDeltas.map(\.accessibilityText))
         if row.isSaved { parts.append("保存済み") }
         return parts.joined(separator: "、")
     }
@@ -1249,7 +1545,9 @@ private struct RedesignBoardRow: View {
             )
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier(
-                open == nil ? "redesign.company.open.\(row.ticker)" : "redesign.company.select.\(row.ticker)"
+                open == nil
+                    ? "\(identifierPrefix).open.\(row.ticker)"
+                    : "\(identifierPrefix).select.\(row.ticker)"
             )
 
             if let open {
@@ -1263,7 +1561,7 @@ private struct RedesignBoardRow: View {
                 .buttonStyle(.plain)
                 .fixedSize()
                 .accessibilityLabel("\(row.ticker) を開く")
-                .accessibilityIdentifier("redesign.company.open.\(row.ticker)")
+                .accessibilityIdentifier("\(identifierPrefix).open.\(row.ticker)")
             }
         }
         .listRowBackground(KabuyomiTheme.paper)
@@ -1272,14 +1570,17 @@ private struct RedesignBoardRow: View {
 
     @ViewBuilder
     private var content: some View {
+        // ticker は行内で最大の文字(v2 IA 仕様 Phase 5)。
+        // 密度の家では「どの会社か」がいちばん速く読めなければならない。
         let identity = HStack(spacing: 5) {
             Text(row.ticker)
-                .font(KabuyomiTheme.figure(.subheadline, weight: .semibold))
+                .font(KabuyomiTheme.figure(.title3, weight: .semibold))
                 .foregroundStyle(KabuyomiTheme.ink)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
             if row.isSaved {
                 Image(systemName: "bookmark.fill")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(KabuyomiTheme.accent)
                     .accessibilityHidden(true)
             }
@@ -1292,42 +1593,31 @@ private struct RedesignBoardRow: View {
             .font(KabuyomiTheme.figure(.caption2))
             .foregroundStyle(KabuyomiTheme.inkMuted)
 
-        if dynamicTypeSize.isAccessibilitySize {
-            // 拡大時に ticker とピルを同じ行へ押し込むと、どちらも省略記号に化ける。
-            VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 3) {
+            if dynamicTypeSize.isAccessibilitySize {
+                // 拡大時は ticker と提出情報を同じ行へ押し込まない。どちらも省略記号に化ける。
                 identity
                 // 会社名がまだ取れていない行では ticker と同じ文字が入っている。
                 // 同じ語を2段重ねない。
                 if !row.companyName.isEmpty { name }
                 detail.fixedSize(horizontal: false, vertical: true)
-                if let delta = row.delta {
-                    RedesignDeltaPill(display: delta)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 1) {
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
                     identity
-                    if !row.companyName.isEmpty { name.lineLimit(1) }
+                    Spacer(minLength: 8)
+                    detail.lineLimit(1).fixedSize()
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                if !row.companyName.isEmpty { name.lineLimit(1) }
+            }
 
-                VStack(alignment: .trailing, spacing: 3) {
-                    detail.lineLimit(1)
-                    if let delta = row.delta {
-                        RedesignDeltaPill(display: delta)
-                    } else {
-                        // 売上がキャッシュに無い会社。ピルの列を空けたままにすると
-                        // 板の右端が行ごとに揃わなくなるので、不在を1文字で置く。
-                        Text("—")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(KabuyomiTheme.inkMuted)
-                    }
-                }
-                .fixedSize(horizontal: true, vertical: false)
+            // ピルは会社名の下に1段取る。ticker の右へ寄せると、
+            // 3本のうち何本出るかが会社ごとに違うぶん行の右端が揃わない。
+            if !visibleDeltas.isEmpty {
+                RedesignDeltaPillRow(deltas: visibleDeltas)
+                    .padding(.top, 2)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1439,21 +1729,115 @@ private struct RedesignSearchResultRow: View {
 /// ticker の頭2文字を入れる小さな枠。
 /// 根拠チップのバッジと同じ塗り・同じ角丸にして、画面をまたいでも同じ体系に読めるようにする。
 private struct RedesignTickerMonogram: View {
+    /// 枠も文字と一緒に伸ばす。文字だけを大きくすると枠から溢れる。
+    /// 上限を付けているのは、装飾の枠が AX サイズで行の主役になってしまわないため。
+    @ScaledMetric(relativeTo: .caption2) private var boxScale: CGFloat = 1
+
     let ticker: String
+    /// 既定は一覧行の 28pt。ストリームのカードの会社ヘッダーだけ大きくする
+    /// (本文より先に「どの会社の話か」を目に入れるため)。
+    var size: CGFloat = 28
+
+    private var box: CGFloat { min(size * boxScale, size * 1.5) }
 
     var body: some View {
+        // フォントはテキストスタイル基準にする。`.system(size:)` の固定値だと
+        // 「文字サイズを変えられない要素」としてアクセシビリティ監査が拾う
+        // (`accessibilityHidden` を付けていても拾われる。
+        //  シミュレータ実機確認 2026-08-22)。既定サイズでの見た目は
+        // caption2 = 11pt / footnote = 13pt で従来と同じ。
         Text(String(ticker.prefix(2)))
-            .font(.system(size: 11, weight: .bold))
+            .font(size >= 32 ? .footnote.weight(.bold) : .caption2.weight(.bold))
             .tracking(0.4)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
             .foregroundStyle(KabuyomiTheme.accent)
-            .frame(width: 28, height: 28)
-            .background(KabuyomiTheme.accentMist, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .frame(width: box, height: box)
+            .background(KabuyomiTheme.accentMist, in: RoundedRectangle(cornerRadius: box * 0.21, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: box * 0.21, style: .continuous)
                     .stroke(KabuyomiTheme.accent.opacity(0.28), lineWidth: KabuyomiTheme.hairlineWidth)
             }
-            .padding(.top, 1)
             .accessibilityHidden(true)
+    }
+}
+
+/// ストリームのカードの頭に置く会社ヘッダー行(v2 IA 仕様 Phase 5)。
+///
+/// モノグラム + ticker(tabular・強め)+ 社名。本文より先に会社が目に入る。
+/// 抑制的に保つ: ティッカーごとの色分けはしない。モノグラムは teal 系ひとつだけで、
+/// 色は上げ下げのピルに残しておく。
+private struct RedesignStreamCompanyHeader<Trailing: View>: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let ticker: String
+    let companyName: String
+    let attribution: String
+    /// 資料イベントカードだけが売上 YoY のピルを持つ。
+    var delta: MetricYoYDisplay?
+    @ViewBuilder var trailing: () -> Trailing
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            RedesignTickerMonogram(ticker: ticker, size: 34)
+                .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 2) {
+                if dynamicTypeSize.isAccessibilitySize {
+                    tickerText
+                    identityDetails
+                    trailing()
+                    deltaPill
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        tickerText
+                        Spacer(minLength: 8)
+                        trailing()
+                    }
+                    HStack(spacing: 7) {
+                        identityDetails
+                        Spacer(minLength: 4)
+                        deltaPill
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var tickerText: some View {
+        Text(ticker)
+            .font(KabuyomiTheme.figure(.subheadline, weight: .semibold))
+            .foregroundStyle(KabuyomiTheme.ink)
+            .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private var identityDetails: some View {
+        let name = Text(companyName)
+            .font(.caption)
+            .foregroundStyle(KabuyomiTheme.inkSoft)
+        let attributed = Text(attribution)
+            .font(KabuyomiTheme.figure(.caption2))
+            .foregroundStyle(KabuyomiTheme.inkMuted)
+
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 1) {
+                if !companyName.isEmpty { name.fixedSize(horizontal: false, vertical: true) }
+                if !attribution.isEmpty { attributed.fixedSize(horizontal: false, vertical: true) }
+            }
+        } else {
+            HStack(spacing: 7) {
+                if !companyName.isEmpty { name.lineLimit(1) }
+                if !attribution.isEmpty { attributed.lineLimit(1).fixedSize() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var deltaPill: some View {
+        if let delta {
+            RedesignDeltaPill(display: delta).fixedSize()
+        }
     }
 }
 
@@ -1466,6 +1850,9 @@ private struct RedesignCompanyRow: View {
     let companyName: String
     let detail: String
     let isSaved: Bool
+    /// 同じスターター一覧がストリーム・ピッカー・サマリーの3か所に出るので、
+    /// 面ごとに識別子を分ける(`RedesignBoardRow` と同じ理由)。
+    var identifierPrefix: String = "redesign.company"
     let action: () -> Void
 
     private var accessibilityText: String {
@@ -1493,7 +1880,7 @@ private struct RedesignCompanyRow: View {
         .listRowBackground(KabuyomiTheme.paper)
         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
         .accessibilityLabel(accessibilityText)
-        .accessibilityIdentifier("redesign.company.open.\(ticker)")
+        .accessibilityIdentifier("\(identifierPrefix).open.\(ticker)")
     }
 
     @ViewBuilder
