@@ -19,7 +19,7 @@
     "d1:migrate:test": "npm run check:test-config && wrangler d1 migrations apply DB --config wrangler.test.toml --remote",
     "secrets:test:setup": "node ./scripts/setup-test-secrets.mjs",
     "testbench:live-full-smoke": "node ./scripts/run-test-full-smoke.mjs",
-    "smoke:test": "KABUYOMI_SMOKE_BASE_URL=${KABUYOMI_TEST_BASE_URL:-https://kabuyomi-api-test.dznqjmctk7.workers.dev} node ./smoke/staging-worker.js",
+    "smoke:test": "npm run smoke:test:identity && npm run smoke:test:release",
     "smoke:test:identity": "KABUYOMI_SMOKE_BASE_URL=${KABUYOMI_TEST_BASE_URL:-https://kabuyomi-api-test.dznqjmctk7.workers.dev} node ./smoke/test-worker-identity.mjs",
     "smoke:test:release": "KABUYOMI_SMOKE_BASE_URL=${KABUYOMI_TEST_BASE_URL:-https://kabuyomi-api-test.dznqjmctk7.workers.dev} node ./smoke/test-worker-release.mjs",
     "smoke:production:release": "KABUYOMI_SMOKE_BASE_URL=${KABUYOMI_PRODUCTION_BASE_URL:-https://kabuyomi-api.dznqjmctk7.workers.dev} node ./smoke/production-worker-release.mjs",
@@ -40,7 +40,6 @@
     "testbench:review-gate": "node ./testbench/scripts/human-review-gate.mjs",
     "testbench:review-seal": "node ./testbench/scripts/human-review-gate.mjs --seal",
     "testbench:full-smoke": "node ./testbench/scripts/run-full-smoke.mjs",
-    "smoke:staging": "node ./smoke/staging-worker.js",
     "test:quality-gate": "vitest run test/benchmark-quality.test.ts test/human-review-gate.test.ts test/testbench-report.test.ts test/testbench-run-metadata.test.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
