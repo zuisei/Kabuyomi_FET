@@ -12,10 +12,10 @@
 
 - [x] A. 回答品質バックログ(実機で見つかった劣化)がすべて解消
 - [x] B. iOS の既知不具合がすべて解消
-- [ ] C. 口語ベンチ(human-phrasing-12 × production-tracked-15)が新 LKG として記録され、
+- [x] C. 口語ベンチ(human-phrasing-12 × production-tracked-15)が新 LKG として記録され、
       綺麗版との経路差分が説明可能
 - [ ] D. Worker の改善がすべて本番に反映され、本番 smoke PASS
-- [ ] E. 全テスト緑(Worker / iOS unit / iOS UI / sec-fetcher)、docs と memory が現状と一致
+- [x] E. 全テスト緑(Worker / iOS unit / iOS UI / sec-fetcher)、docs と memory が現状と一致
 
 ## A. 回答品質バックログ
 
@@ -40,8 +40,12 @@
 
 ## C. ベンチ
 
-- [ ] C1. human-phrasing-12 × production-tracked-15 を full run、LKG として記録
-- [ ] C2. core-12 との経路差分を読み、A3 の効果を確認
+- [x] C1. human-phrasing-12 × production-tracked-15 を full run、LKG として記録
+      → `2026-08-22-human-phrasing-12x15-lkg`(+ AAPL/JPM/MA 取り直し `…-aapl-rerun`、
+      Q08 再検証 `2026-08-22-human-q08-segment-15`)。証跡は FULL_READ_AUDIT Q-2
+- [x] C2. core-12 との経路差分を読み、A3 の効果を確認 → `2026-08-22-core-12x15-lkg`。
+      意図 10/12 一致(残り 2 は口語の読みの違い)、経路差は Q08 のみ → 修正後 15/15 一致。
+      Q10/Q11 は両版とも 15/15 が liquidity_debt / risk_factors
 
 ## D. 本番反映
 
@@ -61,7 +65,8 @@
 
 ## E. 整合
 
-- [ ] E1. 全スイート緑、FULL_READ_AUDIT / V2_IA_SPEC / memory を最終状態に更新
+- [x] E1. 全スイート緑(Worker 1253 / typecheck / iOS unit / iOS UI 21 / sec-fetcher 15)、
+      FULL_READ_AUDIT Q 節 / V2_IA_SPEC Phase 7 / memory 更新済み
 
 ## 判明した外部制約(完全体の定義に含めない — 抽出側の作業)
 
@@ -74,3 +79,8 @@
 - AdMob 本番バナーユニットの発行
 - App Attest 拡張検査の flip(計測待ち)
 - 10/05 の remote config 失効対応(期日作業)
+
+## 最終状態(2026-08-22 深夜)
+
+A・B・C・E 完了。**残りは D1 のみ**で、それはリリースオーナーの明示 GO を待つ
+(手順は D1 に準備済み、所要 10 分)。GO が出たら D1 を実行して本ファイルを閉じる。
