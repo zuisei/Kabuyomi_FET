@@ -2,7 +2,6 @@ export {
   readQuotaIdentity,
   ensureChatQuotaAvailable,
   ensureStockQuotaAvailable,
-  consumeChatQuota,
   consumeCredit,
   consumeStockQuota,
   refundCredit,
