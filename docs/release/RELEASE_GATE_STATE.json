@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "phase": "FULL_PRODUCT_REMEDIATION",
-  "asOf": "2026-08-21",
+  "asOf": "2026-08-22",
   "auditSnapshot": "b61602ef55e2499cccd46e32f53e29bb61c83aa7",
   "releaseDecision": "GO",
-  "releaseCandidateId": "4c260689d84ebc29f515890c2361384f2e93d60132c0b2bc65be3d975db412c9",
+  "releaseCandidateId": "bb7d56286ef92082a084b70314ac8ecb9376a34d8bac41e37ed9f61236c46cac",
   "openP0Ids": [],
-  "nextLocalReleaseCandidateId": "4c260689d84ebc29f515890c2361384f2e93d60132c0b2bc65be3d975db412c9",
-  "lastValidatedCommit": "3964e45a8c8b5682ea78a59c62ec1204dd2d095b",
-  "validationScope": "Release candidate 4c260689 keeps the 38ff7db2 summary restoration and adds the fixes from the pre-submission code review. Validated: worker typecheck clean; 1146 unit tests pass with 4 pre-existing App Store Server Notifications V2 failures that also fail on an unmodified tree; iOS unit gate 204/204; new deploy guard asserts the App Attest bundle-version allowlist covers ios/project.yml CURRENT_PROJECT_VERSION, with 4 tests. NOT validated: row-by-row human review of the 150-row packet (unsealed, covered by the recorded waiver); the 150-row suite was not re-run after these fixes; iOS submission; StoreKit/TestFlight lifecycle; chat answer quality, which is unchanged (deterministic 112 / historical 15 / openai 23 of 150).",
+  "nextLocalReleaseCandidateId": "bb7d56286ef92082a084b70314ac8ecb9376a34d8bac41e37ed9f61236c46cac",
+  "lastValidatedCommit": "e8af61085ba608a856469fff1057b41df39ecc6d",
+  "validationScope": "Release candidate bb7d5628 carries the 2026-08-22 audit remediation: the sandbox credit-grant gate (sandbox-verified Apple transactions are refused on production posture; verification environment recorded in purchase_transactions via migration 0019, applied to production D1 before this deploy), removal of every constant-answer surface behind the source-backed claim (deterministic ticker tables, factual-pack seeds, fallback-known-business, the three durability syntheses, the identity-gated sector checklist) with an absence tripwire in the suite, the isBankLike/word-boundary/proper-noun answer fixes, the truncation-aware summary retry, the timing-safe migration-route auth, and the colloquial business-overview intent fix with a 12-pair clean/colloquial parity test. Validated: worker typecheck clean; 1239/1239 unit tests; iOS 206/206 (iPhone 17 Pro / iOS 26.2); sec-fetcher 15/15; migrations 0001-0019 ordered; three live canary runs against the test worker on the new production-tracked ticker set (clean 32 rows, colloquial 32 rows, post-intent-fix 8 rows) with zero constant leaks and zero infra errors, recorded under testbench/runs/2026-08-22-*. NOT validated: the 150-row full smoke was not re-run on this candidate; the human review packet remains unsealed; chat answer content for the formerly curated tickers is intentionally changed by the constant removal (thinner but source-derived), accepted by the release owner in conversation on 2026-08-22.",
   "authoritativeDocuments": [
     "docs/release/CURRENT_SHIPPING_TRUTH.md",
     "docs/release/FEATURE_PARITY_COMPATIBILITY_REPORT.md",
@@ -251,10 +251,10 @@
   },
   "oneTimeQualityRerunWaiver": {
     "status": "APPROVED_BY_RELEASE_OWNER",
-    "approvedAt": "2026-08-21",
-    "deployedCandidateId": "4c260689d84ebc29f515890c2361384f2e93d60132c0b2bc65be3d975db412c9",
+    "approvedAt": "2026-08-22",
+    "deployedCandidateId": "bb7d56286ef92082a084b70314ac8ecb9376a34d8bac41e37ed9f61236c46cac",
     "lastQualityCandidateId": "56c0c2090f26e087b6890534e1ff28dd23843671f84842f4b880f80adad1e049",
-    "scope": "Summary provider restoration plus the review fixes on top of it: App Attest bundle-version allowlist now covers the next iOS build and is asserted at deploy time against ios/project.yml, the summary upgrade records failures and backs off for 6 hours instead of retrying on every view, and the iOS trend chart encodes magnitude rather than distance from zero so all-negative series are no longer inverted. The 150-row full smoke WAS executed on 2026-08-21 as run 2026-08-21-summary-openai-baseline-r1 with 150 rows, 0.0% quality fallback, 0 hard-intent fallback, 0 weak source evidence, and quality gate pass; it was NOT re-run after these fixes, which do not touch the chat answer path. Row-by-row human review was NOT performed, so the human review packet is unsealed and the accepted manifest still points at candidate 56c0c209.",
+    "scope": "Release-owner GO recorded 2026-08-22 for candidate bb7d5628 (audit remediation batch, see validationScope). The accepted quality manifest still points at candidate 56c0c209; the 150-row suite was not re-run after the constant-answer removal, whose whole point is that those rows' curated answers change. Quality evidence for this candidate is the three 2026-08-22 canary runs on the production-tracked set: zero constant leaks, old-curated vs never-curated path distribution symmetric, colloquial Q01 restored to parity after ee11b11. Row-by-row human review NOT performed.",
     "normalDeployGuardExpectedToFailUntilRefreshed": true
   },
   "completionCriteria": {

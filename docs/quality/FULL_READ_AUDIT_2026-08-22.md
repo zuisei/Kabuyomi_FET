@@ -1086,3 +1086,41 @@ business-overview の boolean 一致は 12/12。enum 全体では6ペアに既�
 2. **口語語彙の隣接ギャップ**(パリティテストに pin 済): Q10「借金」が liquidity_debt に、
    Q11「やばい」が risk_factors に未対応 → 口語ではどちらも unknown に落ちる
 3. **投資助言ベイト**(「で、これ買い？」)と複数意図混在の口語セット — 未作成
+
+---
+
+# P. 本番デプロイ(2026-08-22)
+
+リリースオーナーの GO を受けて実施。
+
+| 手順 | 結果 |
+|---|---|
+| migration 0019 → 本番 D1 | 適用済み・`verification_environment` 列を実クエリで確認 |
+| release guard | waiver を候補 `bb7d5628` に更新(検証済み/未検証を scope に明記)して PASS |
+| deploy | **本番 `25586dc6`**(旧 `b33a391b` 系から更新) |
+| smoke:production:release | **全項目 PASS**(chargeable model requests: NONE) |
+
+## smoke が3回落ちた — すべて「古い smoke の前提」で、デプロイの退行はゼロ
+
+1. **legacy ブリッジ**: smoke は「開いている」前提だったが、本番 config は 8/21 更新で
+   `enabled: false` / 期限 8/11 切れ。**b33a391b でも同様に落ちる**。
+   → smoke を「設定されている側の契約を検証する」形に修正
+   (開: 読めるが付与なし / 閉: 全 legacy ルートで一貫 401・状態変化なし)
+2. **config バージョンのピン**: smoke が 7/13 版を固定したまま。8/21 の config 更新時に
+   smoke の追随を忘れていた。→ 8/21 版に更新、更新手順をコメントに明記
+3. **決定的 operationId の再利用**: chat の operationId が全実行で同一(UUIDv5 固定)のため、
+   7月実行が当時の filingKey で消費済み → filing 世代交代後は必ず
+   `409 operation_id_payload_mismatch`。**replay 保護が正しく働いた結果**であり、
+   smoke 側が「payload は不変」と仮定していたのが誤り。
+   → chat の operationId に filingKey を混ぜた uuidV5 に変更
+   (同一 filing は従来どおり exact replay、新 filing は新 ID)
+
+**診断中の副次確認**: 新規 installation(0クレジット)での本番 chat は
+`402 insufficient_credits` を正しく返す(手動再現で確認)。課金ゲート健在。
+
+## デプロイ後の運用メモ
+
+- `credit_purchase_grant_non_production_environment`(warn)が出たら ⑧ の遮断が実弾を止めた印
+- `app_attest_extensions_missing_allowed` の観察を開始(⑨ の flip 判断材料)
+- smoke を触ったので release candidate は変わる。次回 deploy 時は waiver 再更新が必要
+  (`normalDeployGuardExpectedToFailUntilRefreshed: true` は既に立ててある)
