@@ -46,7 +46,41 @@ final class HomeBoardSupportTests: XCTestCase {
         Date(timeIntervalSince1970: seconds)
     }
 
+    // MARK: - 書き出し1文
+
+    /// シミュレータ実機確認 2026-08-22 で出た欠陥。
+    /// 「約16.6%増」の小数点を文末と読んで「約16.」で切っていた。
+    func testLeadSentenceDoesNotCutAtADecimalPoint() {
+        XCTAssertEqual(
+            redesignLeadSentence("売上高は前年同期比で約16.6%増、主因は iPhone。次の四半期は不明。"),
+            "売上高は前年同期比で約16.6%増、主因は iPhone。"
+        )
+    }
+
+    func testLeadSentenceStopsAtRealSentenceBoundaries() {
+        XCTAssertEqual(redesignLeadSentence("増収でした。減益でした。"), "増収でした。")
+        XCTAssertEqual(redesignLeadSentence("Revenue rose. Margin fell."), "Revenue rose.")
+        XCTAssertEqual(redesignLeadSentence("Revenue rose 16.6%."), "Revenue rose 16.6%.")
+        XCTAssertEqual(redesignLeadSentence("句点のない一文"), "句点のない一文")
+        XCTAssertNil(redesignLeadSentence("   "))
+    }
+
     // MARK: - 盤面の並び
+
+    /// シミュレータ実機確認 2026-08-22 で出た欠陥。
+    /// 会社名未取得のカードは社名に ticker が入るので「AAPL / AAPL」と2段重なっていた。
+    func testBoardSuppressesACompanyNameThatIsJustTheTicker() {
+        XCTAssertEqual(homeBoardCompanyName(companyName: "AAPL", ticker: "AAPL"), "")
+        XCTAssertEqual(homeBoardCompanyName(companyName: " aapl ", ticker: "AAPL"), "")
+        XCTAssertEqual(homeBoardCompanyName(companyName: "Apple Inc.", ticker: "AAPL"), "Apple Inc.")
+
+        let rows = homeBoardRows(
+            saved: [card(ticker: "SOFI", companyName: "SOFI", filedAt: .distantPast, isPlaceholder: true)],
+            recent: [],
+            lastOpenedAt: [:]
+        )
+        XCTAssertEqual(rows[0].companyName, "")
+    }
 
     func testBoardPutsSavedCompaniesFirstAndKeepsTheGivenOrder() {
         let rows = homeBoardRows(

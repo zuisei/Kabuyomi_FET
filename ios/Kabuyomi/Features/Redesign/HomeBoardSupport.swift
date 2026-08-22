@@ -1,5 +1,35 @@
 import Foundation
 
+// MARK: - 1行に詰めるための書き出し
+
+/// 板行・新着行・アーカイブ行の2行目に使う「書き出し1文」。
+///
+/// `leadSentence` は ASCII のピリオドを無条件に文末として扱うので、
+/// 「売上高は前年同期比で約16.6%増、…」が「売上高は前年同期比で約16.」で切れる
+/// (シミュレータ実機確認 2026-08-22 で実際に出た)。
+/// 小数点で切らないよう、ASCII のピリオドは後ろが空白か終端のときだけ文末とみなす。
+/// `leadSentence` 自体は Phase 1/2 の別の画面が依存しているので、ここで閉じる。
+func redesignLeadSentence(_ text: String) -> String? {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    let characters = Array(trimmed)
+    for (index, character) in characters.enumerated() {
+        let isJapaneseTerminator = character == "。" || character == "！" || character == "？"
+        let isASCIITerminator: Bool = {
+            guard character == "." || character == "!" || character == "?" else { return false }
+            guard index + 1 < characters.count else { return true }
+            let next = characters[index + 1]
+            return next == " " || next == "\n" || next == "\t"
+        }()
+        guard isJapaneseTerminator || isASCIITerminator else { continue }
+        let sentence = String(characters[...index]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return sentence.isEmpty ? nil : sentence
+    }
+
+    return trimmed
+}
+
 // v2 IA(docs/ui-redesign-v2/V2_IA_SPEC.md)のホーム/研究タブの導出ロジック。
 //
 // ここには view も AppModel も持ち込まない。入力はすべて値(WatchlistCard /
@@ -52,7 +82,7 @@ private func homeBoardRow(
 ) -> HomeBoardRow {
     HomeBoardRow(
         ticker: card.ticker,
-        companyName: card.companyName,
+        companyName: homeBoardCompanyName(companyName: card.companyName, ticker: card.ticker),
         formType: card.formType,
         filedAt: card.filedAt,
         isPlaceholder: card.isPlaceholder,
@@ -64,6 +94,14 @@ private func homeBoardRow(
         ),
         delta: homeBoardDelta(metrics: card.metrics)
     )
+}
+
+/// 板行の社名。まだ会社名を取得できていない行のカードは社名に ticker が入るので、
+/// そのまま出すと「AAPL / AAPL」と2段同じ文字が並ぶ(シミュレータ実機確認 2026-08-22)。
+/// 名乗るものが無いときは空にして、行側で2行目を落とす。
+func homeBoardCompanyName(companyName: String, ticker: String) -> String {
+    let trimmed = companyName.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.caseInsensitiveCompare(ticker) == .orderedSame ? "" : trimmed
 }
 
 /// デルタピルは売上 YoY だけを出す(v2 IA 仕様)。
@@ -151,7 +189,7 @@ func homeFeedRows(
 /// 新着行の2行目。verdict の書き出し1文だけを使う。
 /// verdict が空(要約がまだ無い / 取得に失敗した)ときは社名を置く。
 func homeFeedVerdictLine(verdict: String, companyName: String) -> String {
-    guard let lead = leadSentence(from: verdict), !lead.isEmpty else { return companyName }
+    guard let lead = redesignLeadSentence(verdict) else { return companyName }
     return lead
 }
 
@@ -245,7 +283,7 @@ private func researchArchiveEntries(for record: LocalCompanyRecord) -> [Research
                 filedAt: record.company.filedAt,
                 question: question,
                 answerPreview: answers.first.flatMap { answer in
-                    leadSentence(from: localizedAssistantDisplayText(answer.content))
+                    redesignLeadSentence(localizedAssistantDisplayText(answer.content))
                 },
                 answerCount: answers.count,
                 askedAt: message.createdAt,

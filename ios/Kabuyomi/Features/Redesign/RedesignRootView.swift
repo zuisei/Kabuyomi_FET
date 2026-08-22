@@ -494,7 +494,7 @@ private struct RedesignBoardRow: View {
         var parts: [String] = []
         if row.isUnread { parts.append("未読") }
         parts.append(row.ticker)
-        parts.append(row.companyName)
+        if !row.companyName.isEmpty { parts.append(row.companyName) }
         parts.append(filingDetail)
         if let delta = row.delta {
             parts.append("売上高 前年同期比 \(delta.text)")
@@ -554,7 +554,9 @@ private struct RedesignBoardRow: View {
             // 拡大時に ticker とピルを同じ行へ押し込むと、どちらも省略記号に化ける。
             VStack(alignment: .leading, spacing: 3) {
                 identity
-                name
+                // 会社名がまだ取れていない行では ticker と同じ文字が入っている。
+                // 同じ語を2段重ねない。
+                if !row.companyName.isEmpty { name }
                 detail.fixedSize(horizontal: false, vertical: true)
                 if let delta = row.delta {
                     RedesignDeltaPill(display: delta)
@@ -565,7 +567,7 @@ private struct RedesignBoardRow: View {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 1) {
                     identity
-                    name.lineLimit(1)
+                    if !row.companyName.isEmpty { name.lineLimit(1) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -2397,7 +2399,8 @@ private struct RedesignArchiveView: View {
         List {
             if groups.isEmpty {
                 ContentUnavailableView {
-                    Label("質問の記録はまだありません", systemImage: "text.book.closed")
+                    // 拡大時に ContentUnavailableView の見出しは1行で省略されるので短く保つ。
+                    Label("記録はまだありません", systemImage: "text.book.closed")
                 } description: {
                     Text("会社に質問すると、ここに会社ごとの記録が残ります。")
                 } actions: {
