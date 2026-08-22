@@ -1,12 +1,15 @@
 import SwiftUI
 
+/// v2 IA(docs/ui-redesign-v2/V2_IA_SPEC.md)。
+/// 発見リストとしての「リサーチ」は消え、検索と空状態に吸収された。
+/// ホーム = 盤面 + 新着の1スクロール、研究 = 過去の Q&A アーカイブ。
 enum RedesignTab: Hashable {
-    case research
-    case history
+    case home
+    case archive
     case settings
 }
 
-private enum RedesignResearchRoute: Hashable {
+private enum RedesignHomeRoute: Hashable {
     case company(String)
     case sources(String)
     case source(String, LocalMessageSourceRef)
@@ -19,38 +22,41 @@ private enum RedesignSettingsRoute: Hashable {
 
 struct RedesignRootView: View {
     @Environment(AppModel.self) private var appModel
-    @State private var selectedTab: RedesignTab = .research
+    @State private var selectedTab: RedesignTab = .home
     @State private var creditsPresented = false
     @State private var creditInitialSheet: CreditInitialSheet?
-    @State private var requestedResearchTicker: String?
+    @State private var requestedHomeTicker: String?
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            RedesignResearchRoot(
+            RedesignHomeRoot(
                 openCredits: openCredits,
-                requestedTicker: $requestedResearchTicker
+                requestedTicker: $requestedHomeTicker
             )
-            .tag(RedesignTab.research)
+            .tag(RedesignTab.home)
             .tabItem {
-                Label("リサーチ", systemImage: "doc.text.magnifyingglass")
+                Label("ホーム", systemImage: "square.stack.3d.up")
             }
-            .accessibilityIdentifier("redesign.tab.research")
+            .accessibilityIdentifier("redesign.tab.home")
 
             NavigationStack {
-                RedesignHistoryView(
-                    openResearch: { selectedTab = .research },
+                RedesignArchiveView(
+                    openHome: { selectedTab = .home },
                     openCompany: { ticker, filingKey in
+                        // filingKey は route ではなく AppModel を通して渡る。
+                        // openConversation が activeConversationFilingKeys を立ててから
+                        // ホーム側の push を要求する、という順序を崩さない。
                         appModel.openConversation(for: ticker, filingKey: filingKey)
-                        requestedResearchTicker = ticker
-                        selectedTab = .research
+                        requestedHomeTicker = ticker
+                        selectedTab = .home
                     }
                 )
             }
-            .tag(RedesignTab.history)
+            .tag(RedesignTab.archive)
             .tabItem {
-                Label("履歴", systemImage: "clock.arrow.circlepath")
+                Label("研究", systemImage: "text.book.closed")
             }
-            .accessibilityIdentifier("redesign.tab.history")
+            .accessibilityIdentifier("redesign.tab.archive")
 
             RedesignSettingsRoot()
             .tag(RedesignTab.settings)
@@ -108,17 +114,17 @@ private struct RedesignSettingsRoot: View {
     }
 }
 
-private struct RedesignResearchRoot: View {
+private struct RedesignHomeRoot: View {
     @Environment(AppModel.self) private var appModel
     let openCredits: (CreditInitialSheet?) -> Void
     @Binding var requestedTicker: String?
-    @State private var path: [RedesignResearchRoute] = []
+    @State private var path: [RedesignHomeRoute] = []
     @State private var didRestoreNavigation = false
 
     var body: some View {
         NavigationStack(path: $path) {
-            RedesignCompanyDiscoveryView(openedCompany: openCompany)
-                .navigationDestination(for: RedesignResearchRoute.self) { route in
+            RedesignHomeView(openedCompany: openCompany)
+                .navigationDestination(for: RedesignHomeRoute.self) { route in
                     destination(for: route)
                 }
         }
@@ -146,7 +152,7 @@ private struct RedesignResearchRoot: View {
     }
 
     @ViewBuilder
-    private func destination(for route: RedesignResearchRoute) -> some View {
+    private func destination(for route: RedesignHomeRoute) -> some View {
         switch route {
         case .company(let ticker):
             RedesignCompanyWorkspace(
@@ -187,12 +193,12 @@ private struct RedesignResearchRoot: View {
     }
 }
 
-// MARK: - 発見(リサーチの根)
+// MARK: - ホーム(盤面 + 新着)
 
 /// ミッション文の出し方。
 /// 初めて開いた人には何のアプリかを言う必要があるが、
 /// 保存や履歴を持っている人には、毎回同じ2段落が一等地を占めるだけになる。
-/// 「初回のみ目立たせ、以降は控えめに」(v2仕様)をこの1関数で決める。
+/// v2 IA では盤面が空のときだけ出す = この関数が `.prominent` を返すときだけ出す。
 enum RedesignMissionProminence: Equatable {
     case prominent
     case receded
@@ -228,55 +234,60 @@ private struct RedesignListSectionHeader: View {
 }
 
 /// 「SEC資料から、会社を理解する」の節。
-/// 控えめ側でも文言は落とさない(法務上の断り書きを含むため)。
-/// 落とすのは大きさと階調だけ。
+/// 盤面が空の人にしか出ないので、常に一等地の大きさで置く。
+/// 文言は落とさない(法務上の断り書きを含むため)。
 private struct RedesignDiscoveryMission: View {
-    let prominence: RedesignMissionProminence
-
     var body: some View {
-        VStack(alignment: .leading, spacing: prominence == .prominent ? 7 : 3) {
+        VStack(alignment: .leading, spacing: 7) {
             Text("SEC資料から、会社を理解する")
-                .font(prominence == .prominent ? .title3.weight(.bold) : .footnote.weight(.semibold))
-                .foregroundStyle(prominence == .prominent ? KabuyomiTheme.ink : KabuyomiTheme.inkSoft)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(KabuyomiTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
             Text("10-K / 10-Qを日本語で読み、根拠を確認しながら質問できます。投資助言や売買推奨は行いません。")
-                .font(prominence == .prominent ? .subheadline : .caption2)
-                .foregroundStyle(prominence == .prominent ? KabuyomiTheme.inkSoft : KabuyomiTheme.inkMuted)
+                .font(.subheadline)
+                .foregroundStyle(KabuyomiTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, prominence == .prominent ? 10 : 6)
-        .padding(.bottom, prominence == .prominent ? 8 : 4)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
         .accessibilityElement(children: .combine)
     }
 }
 
-private struct RedesignCompanyDiscoveryView: View {
+/// ホーム。検索が最上部、その下が盤面(保存済み + 最近)、さらに下が新着。
+/// 盤面が空のときだけ、ミッション文とスターター企業に入れ替わる。
+private struct RedesignHomeView: View {
     @Environment(AppModel.self) private var appModel
     var openedCompany: (String) -> Void = { _ in }
     @State private var query = ""
     @State private var searchTask: Task<Void, Never>?
 
-    private var recentCompanies: [WatchlistCard] {
-        appModel.recentCompanyCards(limit: 5, includeSaved: true)
+    private var savedCards: [WatchlistCard] {
+        appModel.watchlist
+    }
+
+    private var recentCards: [WatchlistCard] {
+        appModel.recentCompanyCards(limit: 8, includeSaved: false)
+    }
+
+    private var boardRows: [HomeBoardRow] {
+        homeBoardRows(saved: savedCards, recent: recentCards, lastOpenedAt: appModel.lastOpenedAt)
+    }
+
+    private var feedRows: [HomeFeedRow] {
+        homeFeedRows(saved: savedCards, recent: recentCards, lastOpenedAt: appModel.lastOpenedAt)
     }
 
     private var missionProminence: RedesignMissionProminence {
         redesignMissionProminence(
-            hasRecentCompanies: !recentCompanies.isEmpty,
-            hasSavedCompanies: !appModel.watchlist.isEmpty
+            hasRecentCompanies: !recentCards.isEmpty,
+            hasSavedCompanies: !savedCards.isEmpty
         )
     }
 
     var body: some View {
         List {
-            Section {
-                RedesignDiscoveryMission(prominence: missionProminence)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-            }
-
             if appModel.searchIsLoading {
                 Section {
                     HStack(spacing: 10) {
@@ -311,42 +322,11 @@ private struct RedesignCompanyDiscoveryView: View {
                 } header: {
                     RedesignListSectionHeader(title: "検索結果", trailing: "\(appModel.searchResults.count)件")
                 }
+            } else if missionProminence == .prominent {
+                emptyBoardSections
             } else {
-                if !recentCompanies.isEmpty {
-                    Section {
-                        ForEach(recentCompanies) { company in
-                            RedesignCompanyRow(
-                                ticker: company.ticker,
-                                companyName: company.companyName,
-                                detail: filingDetail(company),
-                                isSaved: appModel.isTickerInWatchlist(company.ticker)
-                            ) {
-                                appModel.openConversation(for: company.ticker)
-                                openedCompany(company.ticker)
-                            }
-                        }
-                    } header: {
-                        RedesignListSectionHeader(title: "最近開いた会社", trailing: "\(recentCompanies.count)社")
-                    }
-                }
-
-                if appModel.showStarterCompanies {
-                    Section {
-                        ForEach(appModel.starterCompanies) { company in
-                            RedesignCompanyRow(
-                                ticker: company.ticker,
-                                companyName: company.companyName,
-                                detail: "10-K / 10-Qを確認",
-                                isSaved: false
-                            ) {
-                                appModel.openConversation(for: company.ticker)
-                                openedCompany(company.ticker)
-                            }
-                        }
-                    } header: {
-                        RedesignListSectionHeader(title: "はじめに見る会社")
-                    }
-                }
+                boardSection
+                feedSection
             }
         }
         .listStyle(.plain)
@@ -356,7 +336,7 @@ private struct RedesignCompanyDiscoveryView: View {
         .environment(\.defaultMinListRowHeight, 0)
         .scrollContentBackground(.hidden)
         .background(KabuyomiTheme.canvas)
-        .navigationTitle("リサーチ")
+        .navigationTitle("ホーム")
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "ティッカーまたは会社名")
         .textInputAutocapitalization(.characters)
         .autocorrectionDisabled()
@@ -372,7 +352,86 @@ private struct RedesignCompanyDiscoveryView: View {
         .onDisappear {
             searchTask?.cancel()
         }
-        .accessibilityIdentifier("redesign.research.discovery")
+        .accessibilityIdentifier("redesign.home")
+    }
+
+    /// 盤面が空のときだけ出る面。発見リストとしての旧「リサーチ」画面はここへ吸収された。
+    @ViewBuilder
+    private var emptyBoardSections: some View {
+        Section {
+            RedesignDiscoveryMission()
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        }
+
+        if appModel.showStarterCompanies {
+            Section {
+                ForEach(appModel.starterCompanies) { company in
+                    RedesignCompanyRow(
+                        ticker: company.ticker,
+                        companyName: company.companyName,
+                        detail: "10-K / 10-Qを確認",
+                        isSaved: false
+                    ) {
+                        appModel.openConversation(for: company.ticker)
+                        openedCompany(company.ticker)
+                    }
+                }
+            } header: {
+                RedesignListSectionHeader(title: "はじめに見る会社")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var boardSection: some View {
+        Section {
+            ForEach(boardRows) { row in
+                RedesignBoardRow(row: row) {
+                    appModel.openConversation(for: row.ticker)
+                    openedCompany(row.ticker)
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    if row.isSaved {
+                        Button("削除", role: .destructive) {
+                            Task { await appModel.removeFromWatchlist(row.ticker) }
+                        }
+                        .accessibilityIdentifier("redesign.board.remove.\(row.ticker)")
+                    }
+                }
+            }
+        } header: {
+            RedesignListSectionHeader(title: "盤面", trailing: "\(boardRows.count)社")
+        }
+    }
+
+    @ViewBuilder
+    private var feedSection: some View {
+        if feedRows.isEmpty {
+            Section {
+                Text("キャッシュ済みの決算資料がまだありません。会社を開くと、ここに提出順で並びます。")
+                    .font(.footnote)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 8)
+                    .listRowBackground(KabuyomiTheme.paper)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            } header: {
+                RedesignListSectionHeader(title: "新着")
+            }
+        } else {
+            Section {
+                ForEach(feedRows) { row in
+                    RedesignFeedRow(row: row) {
+                        appModel.openConversation(for: row.ticker)
+                        openedCompany(row.ticker)
+                    }
+                }
+            } header: {
+                RedesignListSectionHeader(title: "新着", trailing: "\(feedRows.count)件")
+            }
+        }
     }
 
     private func searchNow() {
@@ -381,12 +440,226 @@ private struct RedesignCompanyDiscoveryView: View {
             await appModel.search(query: query)
         }
     }
+}
 
-    private func filingDetail(_ company: WatchlistCard) -> String {
-        guard !company.formType.isEmpty else { return "資料を確認" }
-        return "\(company.formType) ・ \(company.filedAt.formatted(date: .abbreviated, time: .omitted))"
+/// 未読ドット。色だけに意味を持たせないよう、VoiceOver ラベルには行側で「未読」を含める。
+private struct RedesignUnreadDot: View {
+    let isUnread: Bool
+
+    var body: some View {
+        Circle()
+            .fill(isUnread ? KabuyomiTheme.accent : Color.clear)
+            .frame(width: 7, height: 7)
+            .accessibilityHidden(true)
     }
 }
+
+/// 増減ピル。株価アプリの塗りつぶしピルの形に、Phase 1 の増減バッジを入れる。
+/// 矢印と符号は `RedesignDeltaBadge` 側が必ず併記する。
+private struct RedesignDeltaPill: View {
+    let display: MetricYoYDisplay
+
+    private var fill: Color {
+        switch display.tone {
+        case .positive:
+            return KabuyomiTheme.gainSoft
+        case .negative:
+            return KabuyomiTheme.lossSoft
+        case .neutral:
+            return KabuyomiTheme.separator
+        }
+    }
+
+    var body: some View {
+        RedesignDeltaBadge(display: display, compact: true)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(fill, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+    }
+}
+
+/// 盤面の1行。ticker(tabular)/ 社名 / 最新 filing / 売上 YoY のピル / 未読ドット。
+private struct RedesignBoardRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let row: HomeBoardRow
+    let action: () -> Void
+
+    private var filingDetail: String {
+        if row.isPlaceholder { return "資料を準備中" }
+        guard !row.formType.isEmpty else { return "資料を確認" }
+        return "\(row.formType) ・ \(row.filedAt.formatted(date: .abbreviated, time: .omitted))"
+    }
+
+    private var accessibilityText: String {
+        var parts: [String] = []
+        if row.isUnread { parts.append("未読") }
+        parts.append(row.ticker)
+        parts.append(row.companyName)
+        parts.append(filingDetail)
+        if let delta = row.delta {
+            parts.append("売上高 前年同期比 \(delta.text)")
+        }
+        if row.isSaved { parts.append("保存済み") }
+        return parts.joined(separator: "、")
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 9) {
+                RedesignUnreadDot(isUnread: row.isUnread)
+                    .padding(.top, 7)
+                content
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .padding(.top, 5)
+                    .accessibilityHidden(true)
+            }
+            .padding(.vertical, 6)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(KabuyomiTheme.paper)
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("redesign.company.open.\(row.ticker)")
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        let identity = HStack(spacing: 5) {
+            Text(row.ticker)
+                .font(KabuyomiTheme.figure(.subheadline, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.ink)
+                .lineLimit(1)
+            if row.isSaved {
+                Image(systemName: "bookmark.fill")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.accent)
+                    .accessibilityHidden(true)
+            }
+        }
+        let name = Text(row.companyName)
+            .font(.footnote)
+            .foregroundStyle(KabuyomiTheme.inkSoft)
+            .multilineTextAlignment(.leading)
+        let detail = Text(filingDetail)
+            .font(KabuyomiTheme.figure(.caption2))
+            .foregroundStyle(KabuyomiTheme.inkMuted)
+
+        if dynamicTypeSize.isAccessibilitySize {
+            // 拡大時に ticker とピルを同じ行へ押し込むと、どちらも省略記号に化ける。
+            VStack(alignment: .leading, spacing: 3) {
+                identity
+                name
+                detail.fixedSize(horizontal: false, vertical: true)
+                if let delta = row.delta {
+                    RedesignDeltaPill(display: delta)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 1) {
+                    identity
+                    name.lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .trailing, spacing: 3) {
+                    detail.lineLimit(1)
+                    if let delta = row.delta {
+                        RedesignDeltaPill(display: delta)
+                    } else {
+                        // 売上がキャッシュに無い会社。ピルの列を空けたままにすると
+                        // 板の右端が行ごとに揃わなくなるので、不在を1文字で置く。
+                        Text("—")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(KabuyomiTheme.inkMuted)
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+    }
+}
+
+/// 新着の1行。会社 + form + 提出日 + 要約 verdict の書き出し1文。
+private struct RedesignFeedRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let row: HomeFeedRow
+    let action: () -> Void
+
+    private var filedText: String {
+        row.filedAt.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private var accessibilityText: String {
+        var parts: [String] = []
+        if row.isUnread { parts.append("未読") }
+        parts.append(contentsOf: [row.ticker, row.formType, filedText, row.verdictLine])
+        return parts.joined(separator: "、")
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 2) {
+                identityRow
+                Text(row.verdictLine)
+                    .font(.footnote)
+                    .foregroundStyle(KabuyomiTheme.ink)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+            }
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(KabuyomiTheme.paper)
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("redesign.feed.open.\(row.ticker)")
+    }
+
+    @ViewBuilder
+    private var identityRow: some View {
+        let identity = HStack(alignment: .firstTextBaseline, spacing: 7) {
+            RedesignUnreadDot(isUnread: row.isUnread)
+            Text(row.ticker)
+                .font(KabuyomiTheme.figure(.subheadline, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.ink)
+                .lineLimit(1)
+            Text(row.formType)
+                .font(.caption2.weight(.bold))
+                .tracking(0.5)
+                .foregroundStyle(KabuyomiTheme.accent)
+        }
+        let filed = Text(filedText)
+            .font(KabuyomiTheme.figure(.caption2))
+            .foregroundStyle(KabuyomiTheme.inkMuted)
+            .lineLimit(1)
+
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 2) {
+                identity
+                filed
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                identity
+                Spacer(minLength: 8)
+                filed
+            }
+        }
+    }
+}
+
 
 private struct RedesignSearchResultRow: View {
     @Environment(AppModel.self) private var appModel
@@ -2097,32 +2370,49 @@ func redesignHistoryActivityText(_ date: Date) -> String {
     return formatter.string(from: date)
 }
 
-private struct RedesignHistoryView: View {
+// MARK: - 研究(Q&A アーカイブ)
+
+/// 研究タブ。主役は会社ではなく、過去の質問と回答。
+/// 会社別のグループを最終活動の新しい順に並べ、各グループの中も新しい質問から並べる。
+private struct RedesignArchiveView: View {
     @Environment(AppModel.self) private var appModel
-    let openResearch: () -> Void
+    let openHome: () -> Void
     let openCompany: (String, String?) -> Void
 
-    private var history: [LocalCompanyRecord] {
+    private var groups: [ResearchArchiveGroup] {
         let recentCompanies = appModel.recentCompanyCards(limit: 10, includeSaved: false)
         let tickers = Array(
             Set((appModel.watchlist + recentCompanies).map { $0.ticker.uppercased() })
         )
-        return tickers
-            .flatMap { appModel.conversationHistory(for: $0) }
-            .sorted(by: historySort)
+        return researchArchiveGroups(
+            records: tickers.flatMap { appModel.conversationHistory(for: $0) }
+        )
+    }
+
+    private var questionCount: Int {
+        groups.reduce(0) { $0 + $1.questionCount }
     }
 
     var body: some View {
         List {
-            if !appModel.watchlist.isEmpty || !history.isEmpty {
+            if groups.isEmpty {
+                ContentUnavailableView {
+                    Label("質問の記録はまだありません", systemImage: "text.book.closed")
+                } description: {
+                    Text("会社に質問すると、ここに会社ごとの記録が残ります。")
+                } actions: {
+                    Button("ホームへ", action: openHome)
+                }
+                .listRowBackground(Color.clear)
+            } else {
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("保存と履歴")
+                        Text("研究")
                             .kabuyomiMicroLabel()
-                        Text("あとで読み返す")
+                        Text("質問と回答の記録")
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(KabuyomiTheme.ink)
-                        Text("\(appModel.watchlist.count)社を保存 ・ \(history.count)件のリサーチ")
+                        Text("\(groups.count)社 ・ \(questionCount)件の質問")
                             .font(KabuyomiTheme.figure(.footnote))
                             .foregroundStyle(KabuyomiTheme.inkSoft)
                     }
@@ -2134,52 +2424,23 @@ private struct RedesignHistoryView: View {
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 }
-            }
 
-            if appModel.watchlist.isEmpty,
-               history.isEmpty {
-                ContentUnavailableView {
-                    Label("保存・履歴はまだありません", systemImage: "clock.arrow.circlepath")
-                } description: {
-                    Text("会社を保存すると「保存した会社」に、質問すると「過去のリサーチ」に表示されます。")
-                } actions: {
-                    Button("リサーチを始める", action: openResearch)
-                }
-                .listRowBackground(Color.clear)
-            }
-
-            if !appModel.watchlist.isEmpty {
-                Section {
-                    ForEach(appModel.watchlist) { company in
-                        RedesignCompanyRow(
-                            ticker: company.ticker,
-                            companyName: company.companyName,
-                            detail: filingDetail(company),
-                            isSaved: true
-                        ) {
-                            openCompany(company.ticker, nil)
+                ForEach(groups) { group in
+                    Section {
+                        RedesignArchiveCompanyRow(group: group) {
+                            openCompany(group.ticker, nil)
                         }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button("削除", role: .destructive) {
-                                Task { await appModel.removeFromWatchlist(company.ticker) }
+                        ForEach(group.entries) { entry in
+                            RedesignArchiveQuestionRow(entry: entry) {
+                                openCompany(group.ticker, entry.filingKey)
                             }
-                            .accessibilityIdentifier("redesign.history.remove.\(company.ticker)")
                         }
+                    } header: {
+                        RedesignListSectionHeader(
+                            title: group.ticker,
+                            trailing: "\(group.questionCount)件"
+                        )
                     }
-                } header: {
-                    RedesignListSectionHeader(title: "保存した会社", trailing: "\(appModel.watchlist.count)社")
-                }
-            }
-
-            if !history.isEmpty {
-                Section {
-                    ForEach(history, id: \.company.filingKey) { record in
-                        RedesignHistoryRow(record: record) {
-                            openCompany(record.company.ticker, record.company.filingKey)
-                        }
-                    }
-                } header: {
-                    RedesignListSectionHeader(title: "過去のリサーチ", trailing: "\(history.count)件")
                 }
             }
         }
@@ -2190,67 +2451,100 @@ private struct RedesignHistoryView: View {
         .environment(\.defaultMinListRowHeight, 0)
         .scrollContentBackground(.hidden)
         .background(KabuyomiTheme.canvas)
-        .navigationTitle("履歴")
+        .navigationTitle("研究")
         .refreshable {
             await appModel.refreshCreditUsage()
         }
-        .accessibilityIdentifier("redesign.history")
-    }
-
-    private func filingDetail(_ company: WatchlistCard) -> String {
-        if company.isPlaceholder { return "資料を準備中" }
-        guard !company.formType.isEmpty else { return "資料を確認" }
-        return "\(company.formType) ・ \(company.filedAt.formatted(date: .abbreviated, time: .omitted))"
-    }
-
-    private func historySort(_ lhs: LocalCompanyRecord, _ rhs: LocalCompanyRecord) -> Bool {
-        switch (lhs.chatHistory.last?.createdAt, rhs.chatHistory.last?.createdAt) {
-        case let (left?, right?):
-            return left > right
-        case (.some, .none):
-            return true
-        case (.none, .some):
-            return false
-        case (.none, .none):
-            return lhs.company.filedAt > rhs.company.filedAt
-        }
+        .accessibilityIdentifier("redesign.archive")
     }
 }
 
-/// 過去のリサーチ1件。会社・最新の質問・回答数と最終活動を1行半に詰める。
-/// 以前は3段 + 余白で、1画面に4件しか入らなかった。
-private struct RedesignHistoryRow: View {
+/// グループの先頭に置く会社行。タップで会社ワークスペースの最新資料へ。
+private struct RedesignArchiveCompanyRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    let record: LocalCompanyRecord
+    let group: ResearchArchiveGroup
     let open: () -> Void
 
-    private var latestQuestion: String? {
-        record.chatHistory.last(where: { $0.role == "user" })?.content
+    private var trailingText: String {
+        redesignHistoryActivityText(group.latestActivity)
     }
 
-    private var answerCount: Int {
-        record.chatHistory.filter { $0.role == "assistant" }.count
+    var body: some View {
+        Button(action: open) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                content
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Spacer(minLength: 8)
+                    Text(trailingText)
+                        .font(KabuyomiTheme.figure(.caption2, weight: .semibold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .lineLimit(1)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .accessibilityHidden(true)
+            }
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(KabuyomiTheme.paper)
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(group.ticker)、\(group.companyName)、質問 \(group.questionCount)件、\(trailingText)。会社を開く")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("redesign.archive.company.\(group.ticker)")
     }
+
+    @ViewBuilder
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(group.ticker)
+                .font(KabuyomiTheme.figure(.subheadline, weight: .semibold))
+                .foregroundStyle(KabuyomiTheme.ink)
+                .lineLimit(1)
+            Text(group.companyName)
+                .font(.footnote)
+                .foregroundStyle(KabuyomiTheme.inkSoft)
+                .multilineTextAlignment(.leading)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+            if dynamicTypeSize.isAccessibilitySize {
+                Text(trailingText)
+                    .font(KabuyomiTheme.figure(.caption2, weight: .semibold))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// 過去の質問1件。質問と回答の書き出しを Phase 2 の1行半に詰める。
+private struct RedesignArchiveQuestionRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let entry: ResearchArchiveEntry
+    let open: () -> Void
 
     private var trailingText: String {
         redesignHistoryTrailingText(
-            answerCount: answerCount,
-            latestActivity: record.chatHistory.last?.createdAt,
+            answerCount: entry.answerCount,
+            latestActivity: entry.latestActivity,
             formatted: redesignHistoryActivityText
         )
     }
 
     private var secondLine: String {
-        latestQuestion.map { "「\($0)」" } ?? record.company.companyName
+        entry.answerPreview ?? "\(entry.formType) ・ \(formattedFilingDate(entry.filedAt))"
     }
 
     var body: some View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 2) {
-                identityRow
+                questionRow
                 Text(secondLine)
                     .font(.footnote)
-                    .foregroundStyle(latestQuestion == nil ? KabuyomiTheme.inkSoft : KabuyomiTheme.ink)
+                    .foregroundStyle(entry.answerPreview == nil ? KabuyomiTheme.inkMuted : KabuyomiTheme.inkSoft)
                     .multilineTextAlignment(.leading)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
             }
@@ -2261,26 +2555,18 @@ private struct RedesignHistoryRow: View {
         .buttonStyle(.plain)
         .listRowBackground(KabuyomiTheme.paper)
         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-        .accessibilityLabel("\(record.company.ticker)、\(record.company.formType)、\(secondLine)、\(trailingText)")
-        .accessibilityIdentifier("redesign.history.item.\(record.company.filingKey)")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("「\(entry.question)」、\(secondLine)、\(trailingText)")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("redesign.archive.question.\(entry.id)")
     }
 
     @ViewBuilder
-    private var identityRow: some View {
-        let identity = HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Text(record.company.ticker)
-                .font(KabuyomiTheme.figure(.subheadline, weight: .semibold))
-                .foregroundStyle(KabuyomiTheme.ink)
-                .lineLimit(1)
-            Text(record.company.formType)
-                .font(.caption2.weight(.bold))
-                .tracking(0.5)
-                .foregroundStyle(KabuyomiTheme.accent)
-            Text(formattedFilingDate(record.company.filedAt))
-                .font(KabuyomiTheme.figure(.caption2))
-                .foregroundStyle(KabuyomiTheme.inkMuted)
-                .lineLimit(1)
-        }
+    private var questionRow: some View {
+        let question = Text("「\(entry.question)」")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(KabuyomiTheme.ink)
+            .multilineTextAlignment(.leading)
         let trailing = Text(trailingText)
             .font(KabuyomiTheme.figure(.caption2, weight: .semibold))
             .foregroundStyle(KabuyomiTheme.inkMuted)
@@ -2288,12 +2574,12 @@ private struct RedesignHistoryRow: View {
 
         if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 2) {
-                identity
+                question
                 trailing
             }
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                identity
+                question.lineLimit(1)
                 Spacer(minLength: 8)
                 trailing
             }

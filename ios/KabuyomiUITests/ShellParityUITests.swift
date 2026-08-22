@@ -8,7 +8,7 @@ final class ShellParityUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func testProductionShellCompanyDiscoveryWorkspaceAndSourcesAreReachable() throws {
+    func testProductionShellCompanyBoardWorkspaceAndSourcesAreReachable() throws {
         launch()
         reachCompanySearch()
         searchAndOpenAAPL()
@@ -30,7 +30,7 @@ final class ShellParityUITests: XCTestCase {
     func testResearchSupportsNativeEdgeSwipeNavigation() throws {
         launch()
         reachCompanySearch()
-        openAAPLFromDiscovery()
+        openAAPLFromBoard()
 
         XCTAssertTrue(app.buttons["redesign.company.sources"].waitForExistence(timeout: 15))
         app.buttons["redesign.company.sources"].tap()
@@ -43,7 +43,7 @@ final class ShellParityUITests: XCTestCase {
     func testResearchCompanySupportsNativeEdgeSwipeNavigation() throws {
         launch()
         reachCompanySearch()
-        openAAPLFromDiscovery()
+        openAAPLFromBoard()
 
         XCTAssertTrue(app.buttons["redesign.company.sources"].waitForExistence(timeout: 15))
         edgeSwipeBack()
@@ -53,7 +53,7 @@ final class ShellParityUITests: XCTestCase {
     func testResearchSourceDetailSupportsNativeEdgeSwipeNavigation() throws {
         launch()
         reachCompanySearch()
-        openAAPLFromDiscovery()
+        openAAPLFromBoard()
 
         XCTAssertTrue(app.buttons["redesign.company.sources"].waitForExistence(timeout: 15))
         app.buttons["redesign.company.sources"].tap()
@@ -73,7 +73,7 @@ final class ShellParityUITests: XCTestCase {
     func testResearchSecondaryActionsRemainReachable() throws {
         launch()
         reachCompanySearch()
-        openAAPLFromDiscovery()
+        openAAPLFromBoard()
 
         XCTAssertTrue(app.buttons["redesign.company.save"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.buttons["redesign.company.more"].waitForExistence(timeout: 15))
@@ -86,8 +86,8 @@ final class ShellParityUITests: XCTestCase {
         launch()
         reachTopLevelTabs()
 
-        app.tabBars.buttons["履歴"].tap()
-        XCTAssertTrue(element("redesign.history").waitForExistence(timeout: 8))
+        app.tabBars.buttons["研究"].tap()
+        XCTAssertTrue(element("redesign.archive").waitForExistence(timeout: 8))
 
         app.tabBars.buttons["設定"].tap()
         XCTAssertTrue(element("redesign.settings").waitForExistence(timeout: 8))
@@ -109,17 +109,17 @@ final class ShellParityUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["設定"].exists)
     }
 
-    func testResearchAndHistoryHaveDistinctRoles() throws {
+    func testHomeAndArchiveHaveDistinctRoles() throws {
         launch()
         reachCompanySearch()
 
         XCTAssertTrue(app.searchFields.firstMatch.exists)
 
-        app.tabBars.buttons["履歴"].tap()
-        XCTAssertTrue(element("redesign.history").waitForExistence(timeout: 8))
+        app.tabBars.buttons["研究"].tap()
+        XCTAssertTrue(element("redesign.archive").waitForExistence(timeout: 8))
         XCTAssertFalse(app.searchFields.firstMatch.exists)
-        XCTAssertFalse(app.staticTexts["最近開いた会社"].exists)
-        capture("History")
+        XCTAssertFalse(app.staticTexts["盤面"].exists)
+        capture("Archive")
     }
 
     func testProductionDeviceAuthenticationStatusIsReachable() throws {
@@ -183,9 +183,9 @@ final class ShellParityUITests: XCTestCase {
             return
         }
 
-        let researchBackButton = app.navigationBars.buttons["リサーチ"]
-        if researchBackButton.waitForExistence(timeout: 5) {
-            researchBackButton.tap()
+        let homeBackButton = app.navigationBars.buttons["ホーム"]
+        if homeBackButton.waitForExistence(timeout: 5) {
+            homeBackButton.tap()
         }
 
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 8))
@@ -196,9 +196,9 @@ final class ShellParityUITests: XCTestCase {
             return
         }
 
-        let researchBackButton = app.navigationBars.buttons["リサーチ"]
-        if researchBackButton.waitForExistence(timeout: 3) {
-            researchBackButton.tap()
+        let homeBackButton = app.navigationBars.buttons["ホーム"]
+        if homeBackButton.waitForExistence(timeout: 3) {
+            homeBackButton.tap()
         } else {
             edgeSwipeBack()
         }
@@ -215,7 +215,7 @@ final class ShellParityUITests: XCTestCase {
         app.buttons["redesign.search.open.AAPL"].tap()
     }
 
-    private func openAAPLFromDiscovery() {
+    private func openAAPLFromBoard() {
         let recentOrStarterAAPL = app.buttons["redesign.company.open.AAPL"]
         if recentOrStarterAAPL.waitForExistence(timeout: 5) {
             recentOrStarterAAPL.tap()
