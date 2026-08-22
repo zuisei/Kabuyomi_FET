@@ -25,14 +25,15 @@ enum InvestorOverviewTone {
         }
     }
 
+    /// 相場の向きなので状態色ではなく gain / loss を使う。
     var tint: Color {
         switch self {
         case .positive:
-            return KabuyomiTheme.positive
+            return KabuyomiTheme.gain
         case .mixed:
-            return KabuyomiTheme.accentDeep
+            return KabuyomiTheme.accent
         case .negative:
-            return KabuyomiTheme.negative
+            return KabuyomiTheme.loss
         }
     }
 
@@ -173,12 +174,14 @@ enum MetricDeltaTone: Equatable {
     case negative
     case neutral
 
+    /// 増減は相場慣習の gain / loss で塗る(日本式は上げ=赤 / 下げ=青)。
+    /// 色だけで読ませないため、表示側は必ず矢印か符号を併記すること。
     var tint: Color {
         switch self {
         case .positive:
-            return KabuyomiTheme.positive
+            return KabuyomiTheme.gain
         case .negative:
-            return KabuyomiTheme.negative
+            return KabuyomiTheme.loss
         case .neutral:
             return KabuyomiTheme.inkMuted
         }

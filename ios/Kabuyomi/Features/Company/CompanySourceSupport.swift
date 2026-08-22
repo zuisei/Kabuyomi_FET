@@ -558,3 +558,173 @@ private func translatedItemLabel(from raw: String) -> String {
         .replacingOccurrences(of: "  ", with: " ")
         .trimmingCharacters(in: .whitespacesAndNewlines)
 }
+
+// MARK: - 根拠チップの識別性
+//
+// 監査(2026-08-22)で「利益率」が3つ並び、どれを開いても分からない状態になっていた。
+// `investorFacingSourceLabel` はキーワードで総称に畳むので、別の抜粋が同じラベルに
+// 落ちるのは仕様上避けられない。ラベルに
+//   セクション種別バッジ + 決定論的な抜粋の先頭断片
+// を添えて、開く前に1つずつ見分けられるようにする。
+
+/// 根拠チップに添えるセクション種別バッジ。
+/// `sectionType` は Worker 側の閉じた集合(`md_a` / `xbrl_metric` /
+/// `historical_metric` / `historical_segment` / `web_search`)。
+func sourceSectionBadge(sectionType: String, sectionTitle: String = "", sourceLabel: String = "") -> String {
+    switch sectionType {
+    case "xbrl_metric":
+        return "XBRL"
+    case "historical_metric":
+        return "履歴"
+    case "historical_segment":
+        return "セグメント"
+    case "web_search":
+        return "WEB"
+    default:
+        break
+    }
+
+    let raw = (sectionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? sourceLabel : sectionTitle)
+        .lowercased()
+    if raw.contains("risk") || raw.contains("リスク") { return "リスク" }
+    if raw.contains("management's discussion")
+        || raw.contains("results of operations")
+        || raw.contains("md&a")
+        || raw.contains("mda") { return "MD&A" }
+    if raw.contains("segment") || raw.contains("セグメント") { return "セグメント" }
+    if raw.contains("cash flow") || raw.contains("liquidity") { return "CF" }
+    return "本文"
+}
+
+func sourceSectionBadge(for chunk: SourceChunkPayload) -> String {
+    sourceSectionBadge(
+        sectionType: chunk.sectionType,
+        sectionTitle: chunk.sectionTitle,
+        sourceLabel: chunk.sourceLabel
+    )
+}
+
+func sourceSectionBadge(for source: LocalMessageSourceRef, in company: CompanyPayload) -> String {
+    if let chunk = matchedSourceChunk(for: source, in: company) {
+        return sourceSectionBadge(for: chunk)
+    }
+    switch source.sourceKind {
+    case .secFiling:
+        return sourceSectionBadge(sectionType: "md_a", sourceLabel: source.sourceLabelSnapshot)
+    case .historicalFiling:
+        return "履歴"
+    case .webSupplement:
+        return "WEB"
+    }
+}
+
+/// 1行に収まる長さの、決定論的な抜粋の先頭断片。
+/// 同じ入力からは常に同じ断片が出る(要約でも AI 呼び出しでもない)。
+/// ラベルと同じ文字列にしかならないときは `nil` を返し、呼び出し側で別の手掛かりに逃がす。
+func sourceFragmentText(text: String, sectionTitle: String, label: String, limit: Int = 72) -> String? {
+    let preview = sourceListPreviewText(text: text, sectionTitle: sectionTitle, fallback: "", limit: limit)
+    let trimmed = preview.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    guard trimmed.caseInsensitiveCompare(label) != .orderedSame else { return nil }
+    return trimmed
+}
+
+/// 根拠チップ1つ分の表示内容。ラベルが衝突した組にだけ `ordinal` が入る。
+struct SourceChipDescriptor: Identifiable, Hashable {
+    let key: String
+    let label: String
+    let badge: String
+    let fragment: String?
+    let ordinal: Int?
+    let source: LocalMessageSourceRef?
+
+    var id: String { key }
+
+    /// VoiceOver 用。色や配置に頼らず、行の区別がそのまま読み上げられるようにする。
+    var accessibilityText: String {
+        var parts = [label, badge]
+        if let ordinal { parts.append("抜粋\(ordinal)") }
+        if let fragment { parts.append(fragment) }
+        return parts.joined(separator: "、")
+    }
+}
+
+private func assignedOrdinals(_ descriptors: [SourceChipDescriptor]) -> [SourceChipDescriptor] {
+    // ラベル・バッジ・断片まで同じ行が残ったときだけ通し番号を振る。
+    // 断片で区別できている行に番号を足すとノイズにしかならない。
+    var collisionCounts: [String: Int] = [:]
+    for descriptor in descriptors {
+        let signature = "\(descriptor.label)|\(descriptor.badge)|\(descriptor.fragment ?? "")"
+        collisionCounts[signature, default: 0] += 1
+    }
+
+    var running: [String: Int] = [:]
+    return descriptors.map { descriptor in
+        let signature = "\(descriptor.label)|\(descriptor.badge)|\(descriptor.fragment ?? "")"
+        guard (collisionCounts[signature] ?? 0) > 1 else { return descriptor }
+        let index = (running[signature] ?? 0) + 1
+        running[signature] = index
+        return SourceChipDescriptor(
+            key: descriptor.key,
+            label: descriptor.label,
+            badge: descriptor.badge,
+            fragment: descriptor.fragment,
+            ordinal: index,
+            source: descriptor.source
+        )
+    }
+}
+
+func sourceChipDescriptors(
+    for chunks: [SourceChunkPayload],
+    in company: CompanyPayload,
+    fragmentLimit: Int = 72
+) -> [SourceChipDescriptor] {
+    var seen = Set<String>()
+    let base = chunks.compactMap { chunk -> SourceChipDescriptor? in
+        guard seen.insert(chunk.sourceId).inserted else { return nil }
+        let label = investorFacingSourceLabel(for: chunk, in: company)
+        return SourceChipDescriptor(
+            key: chunk.sourceId,
+            label: label,
+            badge: sourceSectionBadge(for: chunk),
+            fragment: sourceFragmentText(
+                text: chunk.text,
+                sectionTitle: chunk.sectionTitle,
+                label: label,
+                limit: fragmentLimit
+            ),
+            ordinal: nil,
+            source: sourceReference(from: chunk, in: company)
+        )
+    }
+    return assignedOrdinals(base)
+}
+
+func sourceChipDescriptors(
+    for sources: [LocalMessageSourceRef],
+    in company: CompanyPayload,
+    fragmentLimit: Int = 72
+) -> [SourceChipDescriptor] {
+    let base = sources.map { source -> SourceChipDescriptor in
+        let label = investorFacingSourceLabel(for: source, in: company)
+        let chunk = matchedSourceChunk(for: source, in: company)
+        let excerpt = source.excerpt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? (chunk?.text ?? "")
+            : source.excerpt
+        return SourceChipDescriptor(
+            key: source.id.uuidString,
+            label: label,
+            badge: sourceSectionBadge(for: source, in: company),
+            fragment: sourceFragmentText(
+                text: excerpt,
+                sectionTitle: chunk?.sectionTitle ?? "",
+                label: label,
+                limit: fragmentLimit
+            ),
+            ordinal: nil,
+            source: source
+        )
+    }
+    return assignedOrdinals(base)
+}
