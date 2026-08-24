@@ -76,10 +76,14 @@
 
 - アプリアイコン / App Store 素材の v2 化
 - ~~AdMob 本番バナーユニットの発行~~ → 2026-08-24 オーナー「すでにある」。休眠実装が持っていた
-  `ca-app-pub-1248492954379402/4700244637` を `productionBannerAdUnitID` に配線(F14)。
+  `ca-app-pub-1248492954379402/4700244637` を `productionBannerAdUnitID` に配線(F16)。
   実配信の確認は TestFlight / App Store ビルド初回
-- App Attest 拡張検査の flip(計測待ち)
-- 10/05 の remote config 失効対応(期日作業)
+- ~~App Attest 拡張検査の flip(計測待ち)~~ → 2026-08-24 オーナー判断で **やらない**。
+  `APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS = "true"` のまま据え置く。理由: 締めると
+  extensions を持たない端末が **assertion(毎リクエスト)で即落ちる**。本番 D1 実測で
+  verified/full は 4 件しかなく、外して壊すと全数に当たる。判断材料のログは
+  wrangler の OAuth トークンに Workers Observability 権限が無く読めない
+- ~~10/05 の remote config 失効対応(期日作業)~~ → 2026-08-24、**期日そのものを廃止**(F15)
 
 ## F. UI 再監査(2026-08-24、オーナー「全てにおいてゴミ」)
 
@@ -106,6 +110,20 @@
       accent バブル(onAccent 文字)、回答・作成中=elevated の角丸カード
 - [x] F9. オーナー再確認 OK(2026-08-24「いいねやっとよくなった」)。F 節完了。
       掃除候補(旧ストリームの不要コード、ようこそ文言)は非緊急の別タスクとして残す
+- [x] F16. 「3(AdMob ユニット)はすでにある」→ 休眠実装(commit 50711ec)が持っていた
+      `ca-app-pub-1248492954379402/4700244637` を `productionBannerAdUnitID` に配線。
+      空を固定していたテストを、綴り・パブリッシャ一致・報酬型と別 ID の3本に差し替え。
+      Debug はテストユニットのまま = **変わるのは Release だけ**。実配信の確認は
+      TestFlight / App Store ビルドの初回(出ない場合に疑うのは綴りではなく AdMob 側の紐付け)
+- [x] F15. 「1(config 失効)はめんどいし殺していい」→ **期限で止まるのをやめた**。
+      45 日を過ぎた remote config は `maintenanceMode: true` / `chatEnabled: false` の
+      `safe-fail-closed-v1` に落ちる = 見直し忘れがそのまま全ユーザー障害、という自爆タイマーだった
+      (2026-10-05 に発火予定だった)。`isEnvelopeFresh` を `isEnvelopeUsable` に置き換え、
+      **古いだけの envelope は KV も D1 LKG も配信し続ける**。拒むのは未来日付だけ
+      (時計狂い・改竄の兆候)。値の壊れた config / KV 消失は従来どおり fail-closed。
+      督促は `remote_config_review_overdue_still_served` の warn と、
+      既存の `remote-config-lifecycle-monitor` ワークフロー(毎朝 09:00 JST、CI が赤くなる)が担う。
+      Worker 1261 / typecheck 緑。**反映には本番 deploy(D1)が必要**
 - [x] F14. 「その分クレジット消費は多くしろ(採算)」→ premium レーンの1問単価を
       `PREMIUM_CHAT_CREDIT_COST`(既定5、標準は2)に。予約・requestHash・請求は同じ値を通る。
       ベンチ識別は標準単価のまま。usage が chatCreditCost / premiumChatCreditCost を返し、
@@ -128,6 +146,7 @@
 - [x] F10. 「広告表示はどこへ？」→ 真犯人は Dev クォータが plan=pro を名乗ること
       (8/22 の Dev モード付与以降ずっとバナーが消えていた)。DEBUG の dev モード中は
       free 扱いで表示。ロード中も枠を保持(「広告」プレースホルダ、失敗時のみ畳む)
+
 
 ## G. モデル検討(2026-08-24、オーナー「5.6 luna も検討」)
 
