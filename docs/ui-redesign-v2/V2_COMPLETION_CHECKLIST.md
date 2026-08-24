@@ -108,6 +108,16 @@
       accent バブル(onAccent 文字)、回答・作成中=elevated の角丸カード
 - [x] F9. オーナー再確認 OK(2026-08-24「いいねやっとよくなった」)。F 節完了。
       掃除候補(旧ストリームの不要コード、ようこそ文言)は非緊急の別タスクとして残す
+- [x] F18. 「premium もいいよやって」→ 本番の wrangler.toml に
+      `OPENAI_CHAT_MODEL_PREMIUM = "gpt-5.4"` を設定。無料以外の識別(有料プラン + dev)は
+      本番でも上位モデルで回答する。無料枠 250k tok/日は全モデル共有 = premium 回答
+      **約 55 問/日**、超過は従量課金。無料プランは gpt-5-nano のままなので枠を食うのは
+      課金ユーザーだけで、そのぶん 1 問 5 クレジット(標準 2、F14)を払う。
+      ベンチ識別は標準レーン固定のまま(LKG の比較可能性)。本番 smoke は premium の
+      capability を見ていないので、deploy 後に smoke が壊れることはない(確認済み)。
+      **止め方は wrangler.toml のこの 1 行を消して deploy** で全員標準モデルに戻る。
+      Worker 1263 / typecheck 緑、deploy:check PASS(候補 b73e7838)
+
 - [x] F17. 「App Attest は無視できる形にするべきでは」→ そのとおりだった。旧ポリシーは
       **証明に成功した端末ほど壊れやすい**逆転を持っていた: `unavailable`(一度も証明して
       いない)は core パスの assertion を免除される一方、`verified` になった端末は以後
@@ -144,8 +154,7 @@
       ベンチ識別は標準レーンに固定(LKG の比較可能性を守る)。プランシートは Worker の
       capability(premiumChatModelEnabled)が true の時だけ特典カードを出す。
       実測: アプリ dev 識別=gpt-5.4 / ベンチ識別=gpt-5-nano。
-      **本番で有効にするには wrangler.toml に OPENAI_CHAT_MODEL_PREMIUM を設定**
-      (250k tok/日 ≈ premium 回答 55問/日の無料枠を全モデル共有 — 超過は従量課金、オーナー判断)
+      本番有効化は F18 で完了
 - [x] F12. 「サブスクとの差別化がない」→ 月額プランの実利を明文化: プランシートの
       ピルを 広告非表示/毎月自動付与/いつでも解約 に、各プラン行の先頭に「広告非表示」、
       パック節に「特典は月額プランのみ」。※単価比較は StoreKit 価格が動的なため未表示
