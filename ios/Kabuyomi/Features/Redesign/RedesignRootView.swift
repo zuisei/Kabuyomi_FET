@@ -2545,17 +2545,39 @@ private struct RedesignCompanyWorkspace: View {
         !messages.isEmpty || pendingChat != nil
     }
 
+    /// 資料/会話の切替。標準の segmented control は灰色の錠剤が世界観から
+    /// 浮いていた(2026-08-24 オーナー再監査)。テキスト+アクセント下線の
+    /// 2タブに置き換える。選択は色と下線の両方で示す(色覚だけに頼らない)。
     private var surfacePicker: some View {
-        Picker("表示", selection: $surface) {
-            Text("資料").tag(CompanySurface.document)
-            Text("会話").tag(CompanySurface.conversation)
+        HStack(spacing: 0) {
+            surfaceTab("資料", surface: .document)
+            surfaceTab("会話", surface: .conversation)
         }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 16)
-        .padding(.top, 6)
-        .padding(.bottom, 8)
         .background(KabuyomiTheme.paper)
+        .overlay(alignment: .bottom) { KabuyomiHairline() }
         .accessibilityIdentifier("redesign.company.surface")
+    }
+
+    private func surfaceTab(_ title: String, surface target: CompanySurface) -> some View {
+        let isSelected = surface == target
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) { surface = target }
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? KabuyomiTheme.ink : KabuyomiTheme.inkMuted)
+                .frame(maxWidth: .infinity, minHeight: 42)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(isSelected ? KabuyomiTheme.accent : .clear)
+                        .frame(height: 2)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityIdentifier("redesign.company.surface.\(target == .document ? "document" : "conversation")")
     }
 
     private func documentSurface(company: CompanyPayload) -> some View {
