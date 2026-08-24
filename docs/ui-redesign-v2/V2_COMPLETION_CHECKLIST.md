@@ -75,7 +75,9 @@
 ## スコープ外(完全体の定義に含めない — オーナー作業)
 
 - アプリアイコン / App Store 素材の v2 化
-- AdMob 本番バナーユニットの発行
+- ~~AdMob 本番バナーユニットの発行~~ → 2026-08-24 オーナー「すでにある」。休眠実装が持っていた
+  `ca-app-pub-1248492954379402/4700244637` を `productionBannerAdUnitID` に配線(F14)。
+  実配信の確認は TestFlight / App Store ビルド初回
 - App Attest 拡張検査の flip(計測待ち)
 - 10/05 の remote config 失効対応(期日作業)
 
@@ -104,6 +106,10 @@
       accent バブル(onAccent 文字)、回答・作成中=elevated の角丸カード
 - [x] F9. オーナー再確認 OK(2026-08-24「いいねやっとよくなった」)。F 節完了。
       掃除候補(旧ストリームの不要コード、ようこそ文言)は非緊急の別タスクとして残す
+- [x] F14. 「その分クレジット消費は多くしろ(採算)」→ premium レーンの1問単価を
+      `PREMIUM_CHAT_CREDIT_COST`(既定5、標準は2)に。予約・requestHash・請求は同じ値を通る。
+      ベンチ識別は標準単価のまま。usage が chatCreditCost / premiumChatCreditCost を返し、
+      iOS はコンポーザ・特典カード(1問5クレジット)・プラン行の「約N回/月」に反映
 - [x] F13. 「クレジットだけだと特別感がない」→ **有料プランは上位AIモデルで回答**する
       premium レーンを実装(`OPENAI_CHAT_MODEL_PREMIUM`、未設定なら従来どおり)。
       test は gpt-5.4(オーナーの OpenAI 無料枠 250k tok/日の最上位。luna は枠外=課金で不採用)。
