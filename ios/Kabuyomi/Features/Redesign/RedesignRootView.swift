@@ -81,27 +81,28 @@ struct RedesignRootView: View {
     }
 
     var body: some View {
+        // 2026-08-24 オーナー再監査でホームのストリーム+質問バーを撤去。
+        // 「ホームに質問バーがある理由がわからん」「送信後どこに行ったかわからない」
+        // 「同じ銘柄のカードだらけ」— 質問と回答は会社の中(会話面)で完結させ、
+        // ホームは自分の銘柄の盤面にする。
         TabView(selection: $selectedTab) {
             NavigationStack(path: $homePath) {
-                RedesignStreamView(
-                    openCompany: { openCompany($0, on: .home) },
-                    openConversation: { ticker, filingKey in
-                        openConversation(ticker, filingKey: filingKey, on: .home)
+                RedesignHomeView(
+                    openCompany: { ticker in
+                        openConversation(ticker, filingKey: "", on: .home)
                     },
-                    openSource: { ticker, source in push(.source(ticker, source), on: .home) },
-                    present: { sheet = $0 },
-                    openCredits: openCredits
+                    present: { sheet = $0 }
                 )
                 .navigationDestination(for: RedesignRoute.self) { route in
                     destination(for: route, on: .home)
                 }
             }
-            .tabItem { Label("ホーム", systemImage: "bubble.left.and.text.bubble.right") }
+            .tabItem { Label("ホーム", systemImage: "square.grid.2x2") }
             .tag(RedesignTab.home)
 
             NavigationStack(path: $summaryPath) {
-                RedesignSummaryView(
-                    openCompany: { ticker in
+                RedesignConversationsView(
+                    openConversation: { ticker in
                         openConversation(ticker, filingKey: "", on: .summary)
                     },
                     present: { sheet = $0 }
@@ -110,7 +111,7 @@ struct RedesignRootView: View {
                     destination(for: route, on: .summary)
                 }
             }
-            .tabItem { Label("サマリー", systemImage: "square.grid.2x2") }
+            .tabItem { Label("会話", systemImage: "bubble.left.and.bubble.right") }
             .tag(RedesignTab.summary)
         }
         .tint(KabuyomiTheme.accent)
@@ -202,12 +203,11 @@ struct RedesignRootView: View {
         case .companyPicker(let mode):
             RedesignCompanyPickerSheet(
                 initialMode: mode,
+                // アスクバー廃止(2026-08-24)で「宛先にするだけ」の道は消えた。
+                // どこから選んでも、その会社を開く1本道。
                 selectCompany: { ticker in
-                    // 宛先を選ぶだけ。開かずにストリームへ戻る。
-                    // 「最後に開いた会社」がそのままアスクバーのチップなので、
-                    // 選択は `openConversation` に一本化して別の状態を作らない。
-                    appModel.openConversation(for: ticker)
                     sheet = nil
+                    openConversation(ticker, filingKey: "", on: selectedTab)
                 },
                 openCompany: { ticker in
                     sheet = nil
@@ -231,6 +231,9 @@ struct RedesignRootView: View {
             case .company(let ticker):
                 RedesignCompanyWorkspace(
                     ticker: ticker,
+                    // 会話タブから開いたら会話面に着地する(質問と回答が
+                    // 並んでいる場所へ真っ直ぐ)。ホームからは従来どおり資料面。
+                    prefersConversation: tab == .summary,
                     openCredits: openCredits,
                     openSources: { push(.sources(ticker), on: tab) },
                     openSource: { push(.source(ticker, $0), on: tab) }
@@ -1318,7 +1321,177 @@ struct RedesignStreamFilingCard: View {
 /// 追っている会社を**縦に読み下せる密度**で並べること。
 /// 行タップは会社ドキュメントへ真っ直ぐ push する(質問はホームでする)。
 /// 底には free プランのときだけバナー枠が1つ座る。
-private struct RedesignSummaryView: View {
+/// 会話タブ。会社ごとに1行 — 「同じ銘柄のカードがいくつも並ぶ」問題(2026-08-24
+/// オーナー再監査)への答えで、履歴は会社単位に畳み、開けば会話面(質問と回答が
+/// 時系列で並ぶ場所)に着地する。
+private struct RedesignConversationsView: View {
+    @Environment(AppModel.self) private var appModel
+    let openConversation: (String) -> Void
+    let present: (RedesignSheet) -> Void
+
+    private struct ConversationRow: Identifiable {
+        let ticker: String
+        let companyName: String
+        let latestQuestion: String
+        let answerCount: Int
+        let latestActivity: Date?
+        let isPending: Bool
+
+        var id: String { ticker }
+    }
+
+    private var rows: [ConversationRow] {
+        var tickers: [String] = []
+        var seen = Set<String>()
+        for ticker in appModel.watchlist.map(\.ticker)
+            + appModel.recentCompanyCards(limit: 20, includeSaved: false).map(\.ticker)
+            + appModel.pendingChats.values.map(\.ticker) {
+            let normalized = ticker.uppercased()
+            if seen.insert(normalized).inserted { tickers.append(normalized) }
+        }
+        return tickers.compactMap { ticker -> ConversationRow? in
+            let messages = appModel.chatHistory(for: ticker)
+            let pending = appModel.pendingChat(for: ticker)
+            guard !messages.isEmpty || pending != nil else { return nil }
+            let latestQuestion = pending?.question
+                ?? messages.last(where: { $0.role == "user" })?.content
+                ?? ""
+            let name = (appModel.watchlist + appModel.recentCompanyCards(limit: 20, includeSaved: true))
+                .first { $0.ticker.caseInsensitiveCompare(ticker) == .orderedSame }?
+                .companyName ?? ""
+            return ConversationRow(
+                ticker: ticker,
+                companyName: homeBoardCompanyName(companyName: name, ticker: ticker),
+                latestQuestion: latestQuestion,
+                answerCount: messages.filter { $0.role != "user" }.count,
+                latestActivity: pending?.submittedAt ?? messages.last?.createdAt,
+                isPending: pending != nil
+            )
+        }
+        .sorted { ($0.latestActivity ?? .distantPast) > ($1.latestActivity ?? .distantPast) }
+    }
+
+    var body: some View {
+        List {
+            if rows.isEmpty {
+                emptySection
+            } else {
+                Section {
+                    ForEach(rows) { row in conversationRow(row) }
+                } header: {
+                    RedesignListSectionHeader(title: "会話", trailing: "\(rows.count)社")
+                }
+            }
+        }
+        .listStyle(.plain)
+        .listRowSeparatorTint(KabuyomiTheme.separator)
+        .listSectionSpacing(10)
+        .environment(\.defaultMinListRowHeight, 0)
+        .scrollContentBackground(.hidden)
+        .background(KabuyomiTheme.canvas)
+        .accessibilityIdentifier("redesign.conversations")
+        .navigationTitle("会話")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    present(.settings)
+                } label: {
+                    Image(systemName: "person.crop.circle")
+                        .frame(minWidth: 32, minHeight: 44)
+                }
+                .accessibilityLabel("アカウントと設定")
+                .accessibilityIdentifier("redesign.conversations.profile")
+            }
+        }
+    }
+
+    private func conversationRow(_ row: ConversationRow) -> some View {
+        Button {
+            openConversation(row.ticker)
+        } label: {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Text(row.ticker)
+                        .font(KabuyomiTheme.figure(.subheadline, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    if !row.companyName.isEmpty {
+                        Text(row.companyName)
+                            .font(.footnote)
+                            .foregroundStyle(KabuyomiTheme.inkSoft)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Text(
+                        row.isPending
+                            ? "回答を作成中"
+                            : redesignHistoryTrailingText(
+                                answerCount: row.answerCount,
+                                latestActivity: row.latestActivity,
+                                formatted: redesignHistoryActivityText
+                            )
+                    )
+                    .font(KabuyomiTheme.figure(.caption2))
+                    .foregroundStyle(row.isPending ? KabuyomiTheme.caution : KabuyomiTheme.inkMuted)
+                    .lineLimit(1)
+                    .fixedSize()
+                }
+                if !row.latestQuestion.isEmpty {
+                    Text(row.latestQuestion)
+                        .font(.footnote)
+                        .foregroundStyle(KabuyomiTheme.ink)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(KabuyomiTheme.inputWell, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+            }
+            .padding(.vertical, 9)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(row.ticker)、\(row.companyName)、\(row.latestQuestion)、\(row.isPending ? "回答を作成中" : "回答 \(row.answerCount)件")")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("redesign.conversations.open.\(row.ticker)")
+        .listRowBackground(KabuyomiTheme.paper)
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+    }
+
+    @ViewBuilder
+    private var emptySection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("まだ会話がありません")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                Text("ホームで会社を開くと、資料の下の入力欄から質問できます。質問と回答はここに会社ごとに並びます。")
+                    .font(.footnote)
+                    .foregroundStyle(KabuyomiTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    present(.companyPicker(.select))
+                } label: {
+                    Label("会社をひらく", systemImage: "building.2")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(KabuyomiTheme.accent)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("redesign.conversations.empty.find")
+            }
+            .padding(.vertical, 14)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        }
+    }
+}
+
+private struct RedesignHomeView: View {
     @Environment(AppModel.self) private var appModel
     let openCompany: (String) -> Void
     let present: (RedesignSheet) -> Void
@@ -1338,7 +1511,15 @@ private struct RedesignSummaryView: View {
     /// バナー枠を出すか。判断そのものは `AdMobConfig` の純関数が持ち、
     /// ここは AppModel の課金状態を渡すだけ。ビューはサービスを作らない。
     private var showsBannerSlot: Bool {
-        AdMobConfig.bannerSlotIsVisible(
+        #if DEBUG
+        // アクセシビリティ監査の UI テストは自分の UI を測る。Google のデモ広告の
+        // 中身(HTML)は Dynamic Type もコントラストも直せないので、
+        // テストが明示したときだけ枠ごと外す。
+        if ProcessInfo.processInfo.arguments.contains("-KabuyomiUITestDisableBannerAds") {
+            return false
+        }
+        #endif
+        return AdMobConfig.bannerSlotIsVisible(
             isFreePlan: appModel.shouldShowBannerAds,
             hasBannerAdUnit: AdMobConfig.hasBannerAdConfig
         )
@@ -1360,8 +1541,8 @@ private struct RedesignSummaryView: View {
         .background(KabuyomiTheme.canvas)
         // 識別子はリスト自身に付ける。チェーンの末尾に置くと safeAreaInset の
         // バナーまで降りていく(ストリームで踏んだのと同じ罠)。
-        .accessibilityIdentifier("redesign.summary")
-        .navigationTitle("サマリー")
+        .accessibilityIdentifier("redesign.home")
+        .navigationTitle("ホーム")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -1372,7 +1553,7 @@ private struct RedesignSummaryView: View {
                         .frame(minWidth: 32, minHeight: 44)
                 }
                 .accessibilityLabel("会社を検索")
-                .accessibilityIdentifier("redesign.summary.search")
+                .accessibilityIdentifier("redesign.home.search")
             }
 
             ToolbarItem(placement: .topBarTrailing) {
@@ -1383,12 +1564,7 @@ private struct RedesignSummaryView: View {
                         .frame(minWidth: 32, minHeight: 44)
                 }
                 .accessibilityLabel("アカウントと設定")
-                .accessibilityIdentifier("redesign.summary.profile")
-            }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if showsBannerSlot {
-                AdMobBannerView(placement: .summary)
+                .accessibilityIdentifier("redesign.home.profile")
             }
         }
     }
@@ -1406,27 +1582,45 @@ private struct RedesignSummaryView: View {
                         Button("削除", role: .destructive) {
                             Task { await appModel.removeFromWatchlist(row.ticker) }
                         }
-                        .accessibilityIdentifier("redesign.summary.remove.\(row.ticker)")
+                        .accessibilityIdentifier("redesign.home.remove.\(row.ticker)")
                     }
                 }
+            }
+
+            // バナーは盤面の下・追加導線の上の1行。safeAreaInset に置くと
+            // iOS 26 の浮遊タブバーとの間で枠が描かれない(ロード成功ログは
+            // 出るのに画面に出ない — 2026-08-24 実測)ため、リストの行にする。
+            if showsBannerSlot {
+                AdMobBannerView(placement: .summary)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
             }
 
             // 盤面の下に常に追加導線を1つ。1社だけの画面が「終わり」に見えないように。
             Button {
                 present(.companyPicker(.select))
             } label: {
-                Label("銘柄を追加", systemImage: "plus")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(KabuyomiTheme.accent)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(KabuyomiTheme.separatorStrong, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                HStack(spacing: 7) {
+                    Image(systemName: "plus")
+                        .font(.footnote.weight(.semibold))
+                        .accessibilityHidden(true)
+                    Text("銘柄を追加")
+                        .font(.footnote.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.center)
+                }
+                .foregroundStyle(KabuyomiTheme.accent)
+                .padding(.vertical, 13)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(KabuyomiTheme.separatorStrong, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
-            .accessibilityIdentifier("redesign.summary.add")
+            .accessibilityIdentifier("redesign.home.add")
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
@@ -1443,7 +1637,7 @@ private struct RedesignSummaryView: View {
         Section {
             RedesignEmptyCallToAction(
                 action: { present(.companyPicker(.starter)) },
-                identifierPrefix: "redesign.summary"
+                identifierPrefix: "redesign.home"
             )
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
@@ -1759,8 +1953,7 @@ private struct RedesignCompanyPickerSheet: View {
             ForEach(boardRows) { row in
                 RedesignBoardRow(
                     row: row,
-                    action: { selectCompany(row.ticker) },
-                    open: { openCompany(row.ticker) }
+                    action: { openCompany(row.ticker) }
                 )
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     if row.isSaved {
@@ -1958,7 +2151,7 @@ private struct RedesignSummaryCompanyCard: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
         .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("redesign.summary.open.\(row.ticker)")
+        .accessibilityIdentifier("redesign.home.open.\(row.ticker)")
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
@@ -1975,7 +2168,7 @@ private struct RedesignSummaryCompanyCard: View {
                     .minimumScaleFactor(0.7)
                 if row.isSaved {
                     Image(systemName: "bookmark.fill")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.caption2.weight(.bold))
                         .foregroundStyle(KabuyomiTheme.accent)
                         .accessibilityHidden(true)
                 }
@@ -2027,7 +2220,8 @@ private struct RedesignSummaryCompanyCard: View {
                 .kabuyomiMicroLabel()
             HStack(spacing: 3) {
                 Image(systemName: delta.display.direction == .negative ? "arrow.down.right" : "arrow.up.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.caption2.weight(.bold))
+                    .imageScale(.small)
                 Text(delta.display.text)
                     .font(KabuyomiTheme.figure(.callout, weight: .semibold))
             }
@@ -2502,6 +2696,7 @@ private struct RedesignCompanyWorkspace: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
     let ticker: String
+    var prefersConversation: Bool = false
     let openCredits: (CreditInitialSheet?) -> Void
     let openSources: () -> Void
     let openSource: (LocalMessageSourceRef) -> Void
@@ -2712,7 +2907,12 @@ private struct RedesignCompanyWorkspace: View {
                     let next = redesignHeaderCollapsed(current: isHeaderCollapsed, offset: offset)
                     if next != isHeaderCollapsed { isHeaderCollapsed = next }
                 }
-                .onChange(of: hasConversation) { _, exists in
+                .onAppear {
+                if prefersConversation && hasConversation {
+                    surface = .conversation
+                }
+            }
+            .onChange(of: hasConversation) { _, exists in
                     // 最初の質問を送ったら回答の面へ連れていく。
                     // 逆に会話が消えたら資料へ戻す。選択したまま会話タグが外れると
                     // TabView に対応するページが無くなり、空の面から戻れなくなる。

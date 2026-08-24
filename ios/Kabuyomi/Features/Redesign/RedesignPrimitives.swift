@@ -322,7 +322,7 @@ struct RedesignCompactSourceChips: View {
         } label: {
             HStack(spacing: 6) {
                 Text(descriptor.badge + (descriptor.ordinal.map { " \($0)" } ?? ""))
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.caption2.weight(.bold))
                     .tracking(0.5)
                     .foregroundStyle(KabuyomiTheme.accent)
                 Text(descriptor.label)

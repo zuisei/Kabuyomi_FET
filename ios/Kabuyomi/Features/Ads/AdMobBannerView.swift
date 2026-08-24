@@ -153,6 +153,7 @@ private struct BannerViewContainer: UIViewRepresentable {
         }
 
         func bannerViewDidReceiveAd(_ bannerView: BannerView) {
+            RewardedAdDiagnostics.log("banner_ad_loaded")
             report(.loaded)
         }
 
