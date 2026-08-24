@@ -136,7 +136,7 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
   try {
     const raw = await env.KABUYOMI_CACHE.get("remote_config", "json");
     const envelope = normalizeEnvelope(raw, now, deployed);
-    if (envelope && isEnvelopeFresh(envelope, now)) {
+    if (envelope && isEnvelopeUsable(envelope, now)) {
       const config = normalizeConfig(envelope.config, {
         version: envelope.version,
         updatedAt: envelope.updatedAt,
@@ -164,7 +164,7 @@ export async function loadRemoteConfig(env: Env): Promise<RemoteConfig> {
     logWarnEvent("remote_config_lkg_read_failed", { failureClass: error instanceof Error ? error.name : typeof error });
     return null;
   });
-  if (lkg && isEnvelopeFresh(lkg, now)) {
+  if (lkg && isEnvelopeUsable(lkg, now)) {
     const config = normalizeConfig(lkg.config, {
       version: lkg.version,
       updatedAt: lkg.updatedAt,
@@ -420,9 +420,24 @@ async function loadLkg(env: Env): Promise<StoredEnvelope | null> {
   } catch { return null; }
 }
 
-function isEnvelopeFresh(envelope: StoredEnvelope, now: number): boolean {
+/// 「古いだけの config」は使う。「壊れた config」だけ拒む。
+///
+/// 2026-08-24 のオーナー判断で、45 日を過ぎた config でアプリ全体を止めるのをやめた。
+/// 期限の目的は「人間が定期的に config を見直す」ことだったが、失敗の形が
+/// `maintenanceMode: true` / `chatEnabled: false` への転落だったため、
+/// **見直しを忘れた瞬間に課金ユーザー全員が使えなくなる**という自爆タイマーになっていた
+/// (実際 2026-10-05 に落ちる状態だった)。
+///
+/// 見直しの督促は .github/workflows/remote-config-lifecycle-monitor.yml が
+/// 毎朝 09:00 JST に CI を赤くして担う。督促はそちら、配信はこちら、と役割を分けた。
+/// 古さは `remote_config_review_overdue_still_served` で毎回警告に出す。
+///
+/// ここで拒むのは「未来の日付」だけ。端末やサーバの時計狂い・改竄の兆候であって、
+/// 単なる放置とは意味が違う。値の壊れた config は従来どおり normalizeConfig が弾き、
+/// KV ごと消えた場合も従来どおり fail-closed に落ちる。
+function isEnvelopeUsable(envelope: StoredEnvelope, now: number): boolean {
   const age = now - Date.parse(envelope.updatedAt);
-  return Number.isFinite(age) && age >= -5 * 60_000 && age <= envelope.maxStaleAgeSeconds * 1_000;
+  return Number.isFinite(age) && age >= -5 * 60_000;
 }
 
 function logConfigSelection(config: RemoteConfig, now: number): void {
@@ -439,8 +454,16 @@ function logConfigSelection(config: RemoteConfig, now: number): void {
 
 function logConfigLifecycle(config: Pick<RemoteConfig, "configVersion" | "configUpdatedAt" | "configSource" | "maxStaleAgeSeconds">, now: number): void {
   const lifecycle = remoteConfigLifecycle(config.configUpdatedAt, config.maxStaleAgeSeconds, now);
-  if (lifecycle.status !== "review_due" && lifecycle.status !== "critical") return;
-  logWarnEvent(lifecycle.status === "critical" ? "remote_config_refresh_critical" : "remote_config_refresh_due", {
+  const event = lifecycle.status === "expired"
+    // 期限切れでも配信は続ける。止めない代わりに、ここが一番強い督促になる。
+    ? "remote_config_review_overdue_still_served"
+    : lifecycle.status === "critical"
+      ? "remote_config_refresh_critical"
+      : lifecycle.status === "review_due"
+        ? "remote_config_refresh_due"
+        : null;
+  if (!event) return;
+  logWarnEvent(event, {
     configVersion: config.configVersion,
     configSource: config.configSource,
     configAgeSeconds: lifecycle.ageSeconds,
@@ -451,12 +474,10 @@ function logConfigLifecycle(config: Pick<RemoteConfig, "configVersion" | "config
   });
 }
 
+/// 古さでは拒まなくなったので、ここに来るのは未来日付の envelope だけ。
 function logRejectedEnvelopeLifecycle(envelope: StoredEnvelope, source: "kv" | "d1_lkg", now: number): void {
   const lifecycle = remoteConfigLifecycle(envelope.updatedAt, envelope.maxStaleAgeSeconds, now);
-  const event = lifecycle.status === "future_invalid"
-    ? "remote_config_timestamp_invalid"
-    : "remote_config_expired";
-  logWarnEvent(event, {
+  logWarnEvent("remote_config_timestamp_invalid", {
     configVersion: envelope.version,
     configSource: source,
     configAgeSeconds: lifecycle.ageSeconds,
