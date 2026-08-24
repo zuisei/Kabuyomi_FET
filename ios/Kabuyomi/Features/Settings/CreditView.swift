@@ -484,7 +484,7 @@ struct CreditView: View {
                         Text("追加クレジット")
                             .font(.headline.weight(.bold))
                             .foregroundStyle(KabuyomiTheme.ink)
-                        Text("月額分とは別に、必要な時だけ買い切りで追加できます。")
+                        Text("月額分とは別に、必要な時だけ買い切りで追加できます。広告非表示・毎月自動付与などの特典は月額プランのみです。")
                             .font(.footnote)
                             .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
@@ -1183,17 +1183,19 @@ private struct PlanSheetHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // 「サブスクとの差別化がない」(2026-08-24 オーナー)。パックとの違いは
+            // クレジットの量ではなく特典 — 広告非表示・毎月自動付与・保存枠。ここで言う。
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
-                    CreditFeaturePill(text: "毎月自動補充")
+                    CreditFeaturePill(text: "広告非表示")
+                    CreditFeaturePill(text: "毎月自動付与")
                     CreditFeaturePill(text: "いつでも解約")
-                    CreditFeaturePill(text: "復元対応")
                 }
 
                 VStack(spacing: 8) {
-                    CreditFeaturePill(text: "毎月自動補充")
+                    CreditFeaturePill(text: "広告非表示")
+                    CreditFeaturePill(text: "毎月自動付与")
                     CreditFeaturePill(text: "いつでも解約")
-                    CreditFeaturePill(text: "復元対応")
                 }
             }
         }
@@ -1307,7 +1309,7 @@ private struct SubscriptionPlanRow: View {
 
     private var limitSummary: String {
         let approximateQuestions = product.tier.monthlyCredits / 2
-        return "通常質問 約\(approximateQuestions)回/月 / 保存 \(product.tier.stockLimit)銘柄 / 1日上限 \(product.tier.chatLimit)回"
+        return "広告非表示 / 通常質問 約\(approximateQuestions)回/月 / 保存 \(product.tier.stockLimit)銘柄 / 1日上限 \(product.tier.chatLimit)回"
     }
 
     private var useCaseText: String {
