@@ -202,3 +202,51 @@ TSM・SAP・トヨタ。`ITEM 5. OPERATING AND FINANCIAL REVIEW AND PROSPECTS` �
   `normalizeForm` は 10-K/10-Q しか通さないので、本番の挙動は不変)
 - 20-F の MD&A パターンを追加。Type A 3 社で実物確認、Type B 2 社は意図的に null
 - テスト: Worker 1266 / typecheck 緑
+
+---
+
+# Stage 2 着手: 6-K を本文にも使う(オーナー「3 でいいかと」)
+
+Type B(ASML / Shell)の本文をどうするか → **案 3「6-K の業績プレスリリースを使う」で決定**。
+
+## 前提を確認した: Type B も 6-K で業績を出している
+
+| | 四半期の 6-K | 中身 |
+|---|---|---|
+| ASML | `form6-kquarterlyfilings.htm` 9.1MB | **`pressreleasefinancialresul.htm`(業績プレスリリース)** + `financialstatementsusgaa.htm` + 統計的中間報告 + 説明会資料 |
+| Shell | `shel-20260630_d2.htm` 8.8MB | **`isXBRL=1 / isInlineXBRL=1`** — 四半期の数字が XBRL で取れる唯一の会社 |
+| TSM | 1.4MB | EX-99.1 に損益表(前掲) |
+
+**Type B の 2 社とも救える。** しかも Shell は XBRL があるので HTML 解析すら要らない。
+20-F の本文が読めない会社でも、四半期のプレスリリースなら読める。
+
+## 「どの 6-K か」の判別
+
+6-K は「その月に起きたことの報告」という器なので中身が定まっていない。TSM の直近 3 か月で
+四半期業績・月次売上速報・取締役会決議・配当調整・株主総会の 5 種類が出てくる。
+
+**サイズは使えない**(TSM は月次速報 100KB / 四半期業績 1.4MB / 四半期財務諸表 4.9MB で重なる)。
+**本体も使えない** — 3 社とも本体は表紙と署名だけで、中身は必ず添付に入っている。
+
+`workers/src/lib/filings/six-k.ts` に判定を実装した。手掛かりは 3 つ:
+
+1. **期の言及**(`second quarter` / `Q2 2026`)— **文書内で一番早いもの**を採る
+2. **売上の語**(revenue / net sales / total net sales — 会社ごとに呼び方が違う)
+3. **最終利益の語**(net income / profit attributable)— 月次速報はここで落ちる
+
+実物 5 本で検証し、全部意図どおりに出た。作る過程で 2 回外している:
+
+- **期を本文から拾って 1 年ずれた**。ASML は自社株買いの段でも "second quarter" に触れ、
+  そこから一番近い "ended" が末尾のリスク要因の「Form 20-F for the year ended December 31, 2025」。
+  → 一番早い言及を採り、締め日は**近く(2,000 字以内)に無ければ null**にした。
+  日付が分からないと言う方が、捏造するよりよい
+- **取締役会決議を業績と誤判定した** … と思ったが、**中身を読んだら同じ売上・純利益・EPS が
+  載っていた**。「業績ではない」と切り捨てるのは嘘になるので、`kind` を
+  `results_release` / `board_resolution` に分けて呼ぶ側が選べるようにした。
+  同じ四半期に両方あればプレスリリースを優先する
+
+## 次
+
+- 損益表(EX-99.1 のテーブル)から数字を取り、**原文の抜粋に結びつける**
+- Shell は XBRL 経路に分岐
+- 提出書類の門を開ける(まだ閉じている = 本番挙動は不変)
