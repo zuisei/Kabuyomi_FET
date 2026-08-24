@@ -250,3 +250,64 @@ Type B(ASML / Shell)の本文をどうするか → **案 3「6-K の業績プ�
 - 損益表(EX-99.1 のテーブル)から数字を取り、**原文の抜粋に結びつける**
 - Shell は XBRL 経路に分岐
 - 提出書類の門を開ける(まだ閉じている = 本番挙動は不変)
+
+---
+
+# Stage 1 完了: 門を開けた(2026-08-24)
+
+**外国企業(20-F)が実際に扱えるようになった。** 本番挙動が変わるのはデプロイ後。
+
+## 訂正: 門は `hasEnoughSupportedHistory` ではなかった
+
+このファイルの前半で「提出書類の門(`sec-fetcher-service.ts:645`)が最初に効く」と書いたが、**間違い**。
+あれは `expandSubmissionHistory` の**ページ送り打ち切り条件**で、銘柄の可否は決めていない。
+
+実際に弾いていたのは **`normalizeForm`**(`src/clients/sec.ts`)で、
+`"10-K"` と `"10-Q"` 以外を null にしていた。`pickLatestSupportedFiling` がここを通るので、
+20-F しか出さない会社は「対応する提出書類が無い」として落ちていた。
+
+打ち切り条件の方も直した。放置すると 20-F 提出者では**永久に条件を満たさず履歴を全部取りに行く**
+(正しさではなく通信量の問題)。
+
+## 変えたところ
+
+| 場所 | 内容 |
+|---|---|
+| `clients/sec.ts` `normalizeForm` | **20-F を受け付ける**(訂正版 `20-F/A` は従来どおり通さない) |
+| `clients/sec.ts` `METRIC_TAGS` | 8 指標に ifrs-full のタグを追加。**us-gaap を先に置く**(トヨタ・ソニーは両方で出す) |
+| `clients/sec.ts` `resolveFact` | `companyfacts` を us-gaap → ifrs-full の順で探す |
+| `clients/sec.ts` `durationScore` / 期間分類 | 20-F を 10-K と同じ**年次**扱い(四半期の窓だと年次の事実が全部落ちる) |
+| `lib/sec-fetcher-service.ts` | 同上のタクソノミ対応 + `companyconcept` を両タクソノミで引く |
+| `lib/sec-fetcher-service.ts` | 打ち切り条件に 20-F 3 本の経路を追加 |
+| `lib/contracts.ts` | backfill の `forms` に 20-F |
+| `sec-fetcher/src/*.mjs` | 未使用側の実装も対で更新(ファイル冒頭の指示どおり) |
+| iOS `APIModels.swift` / `AppModel.swift` | 20-F を対応済みに。「10-K / 10-Q のみ対応」の文言を修正 |
+
+## 通貨は何もしなくてよかった
+
+`selectBestFact` が **USD(EPS は USD/shares)しか通さない**設計だったので、
+**TSMC が自分で併記している USD 換算値がそのまま乗る**。為替をこちらで持つ必要がない。
+
+代わりに **EPS は落ちる**(TSMC は EPS を TWD でしか出さない)。
+換算すれば数字は作れるが**出典の無い数字**になるので、落とすのが正しい。
+NVO のように USD をまったく出さない会社は指標が空になる。これも黙って推測しないという同じ判断。
+
+## 検証
+
+TSMC の**実データ**(20-F `0001193125-25-083423` / FY2024、SEC の companyfacts から取得)で
+`test/foreign-issuer-metrics.test.ts` を書いた。作文した値だと、IFRS のタグ名や
+USD 併記の有無を取り違えても気づけない。
+
+- 6-K だらけの提出履歴から 20-F を選ぶ
+- ifrs-full から売上 882.68 億ドル / 営業利益 403.19 億 / 純利益 353.01 億 / 営業CF 556.93 億を読む
+- 期間が `annual` になる
+- **TWD しか無い EPS は出さない**
+- **両タクソノミを持つ会社では us-gaap が勝つ**
+
+全スイート: Worker 1278 / typecheck / sec-fetcher 15 / iOS 319。
+
+## 残り(Stage 2)
+
+- 6-K の損益表から**四半期**の数字を取る(判別は実装済み、抽出はこれから)
+- Shell は 6-K に XBRL があるので別経路
+- ASML / Shell の**本文**は 20-F からは取れないまま(Type B)。6-K のプレスリリースを使う方針

@@ -1,5 +1,6 @@
 import type {
   Env,
+  FilingFormType,
   FilingReference,
   FinancialFactPeriodKind,
   FinancialFiscalQuarter,
@@ -27,26 +28,43 @@ import { logWarnEvent } from "../lib/logging";
 import { AppError } from "../lib/errors";
 import { loadSearchFormTypeCache, upsertSearchFormTypeCache } from "../lib/search-form-type-cache";
 
+/// 各指標を表す XBRL タグ。**並び順が優先順位**で、先にあるものが勝つ。
+///
+/// 後半の ifrs-full 系は外国企業(20-F)向け。トヨタとソニーのように
+/// **両方のタクソノミで出す会社がある**ので、us-gaap を先に置いて挙動を変えない。
+/// 2026-08-24 に TSMC の実データで 8 指標すべて対応物があることを確認済み
+/// (docs/quality/FOREIGN_ISSUER_SUPPORT_2026-08-24.md)。
+///
+/// 単位は `selectBestFact` が USD(EPS は USD/shares)だけを通す。TSMC は自社で
+/// USD 換算値を出しているのでそのまま乗るが、**EPS は現地通貨しか無いので落ちる**。
+/// 換算せず落とすのは意図的で、為替をこちらで当てると出典のない数字になる。
 const METRIC_TAGS = {
   revenue: [
     "Revenues",
     "SalesRevenueNet",
     // Prefer total top-line metrics before contract-only revenue components.
-    "RevenueFromContractWithCustomerExcludingAssessedTax"
+    "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "Revenue",
+    "RevenueFromContractsWithCustomers"
   ],
-  netIncome: ["NetIncomeLoss", "ProfitLoss"],
-  epsBasic: ["EarningsPerShareBasic"],
-  operatingIncome: ["OperatingIncomeLoss"],
+  netIncome: ["NetIncomeLoss", "ProfitLoss", "ProfitLossAttributableToOwnersOfParent"],
+  epsBasic: ["EarningsPerShareBasic", "BasicEarningsLossPerShare"],
+  operatingIncome: ["OperatingIncomeLoss", "ProfitLossFromOperatingActivities"],
   operatingCashFlow: [
     "NetCashProvidedByUsedInOperatingActivities",
-    "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"
+    "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+    "CashFlowsFromUsedInOperatingActivities"
   ],
   // Do not conflate restricted cash with freely available cash equivalents.
-  cashAndCashEquivalents: ["CashAndCashEquivalentsAtCarryingValue"],
+  cashAndCashEquivalents: ["CashAndCashEquivalentsAtCarryingValue", "CashAndCashEquivalents"],
   // These concepts intentionally exclude lease obligations and aggregate debt.
-  currentDebt: ["LongTermDebtCurrent"],
-  longTermDebt: ["LongTermDebtNoncurrent"]
+  currentDebt: ["LongTermDebtCurrent", "CurrentPortionOfLongtermBorrowings"],
+  longTermDebt: ["LongTermDebtNoncurrent", "LongtermBorrowings"]
 } as const;
+
+/// `companyfacts` が指標を載せうるタクソノミ。米国企業は us-gaap、
+/// 外国企業(20-F)は ifrs-full。順序は METRIC_TAGS と同じ理由で us-gaap が先。
+const METRIC_TAXONOMIES = ["us-gaap", "ifrs-full"] as const;
 
 const METRIC_TAG_LIST = [...new Set(Object.values(METRIC_TAGS).flat())];
 
@@ -708,7 +726,9 @@ function resolveFact(
   companyFacts: CompanyFactsResponse | null,
   requiredTag?: string
 ): { tagUsed: string; unit: string; fact: ConceptFact } | null {
-  const usGaap = companyFacts?.facts?.["us-gaap"] ?? {};
+  const taxonomyFacts = METRIC_TAXONOMIES
+    .map((taxonomy) => companyFacts?.facts?.[taxonomy])
+    .filter((facts): facts is NonNullable<typeof facts> => Boolean(facts));
   let bestCandidate:
     | {
         tagUsed: string;
@@ -721,7 +741,7 @@ function resolveFact(
 
   const candidateTags = requiredTag ? [requiredTag] : METRIC_TAGS[logicalName];
   for (const [tagPriority, tag] of candidateTags.entries()) {
-    const sources = [concepts[tag] ?? null, usGaap[tag] ?? null];
+    const sources = [concepts[tag] ?? null, ...taxonomyFacts.map((facts) => facts[tag] ?? null)];
 
     for (const concept of sources) {
       const fact = selectBestFact(
@@ -891,7 +911,8 @@ function durationScore(
   }
 
   const durationDays = Math.round((end - start) / 86_400_000);
-  if (formType === "10-K") {
+  // 20-F は 10-K と同じ年次。四半期の窓で採ると年次の事実が全部落ちる。
+  if (formType === "10-K" || formType === "20-F") {
     return durationDays >= 300 && durationDays <= 400
       ? Math.abs(durationDays - 380) * 10_000
       : null;
@@ -954,7 +975,7 @@ function inferFactPeriodKind(
   }
 
   const durationDays = Math.round((end - start) / 86_400_000);
-  if (filing.formType === "10-K" && durationDays >= 300 && durationDays <= 400) {
+  if ((filing.formType === "10-K" || filing.formType === "20-F") && durationDays >= 300 && durationDays <= 400) {
     return "annual";
   }
   if (periodType === "cash_flow_ytd" && filing.formType === "10-Q") {
@@ -1141,7 +1162,11 @@ function allSupportedFilings(tickerRecord: TickerRecord, submissions: Submission
   return filings;
 }
 
-function normalizeForm(form: string | undefined): "10-K" | "10-Q" | null {
+/// 取り込む提出書類はこの 3 つだけ。修正版(`10-K/A` `20-F/A`)は従来どおり通さない。
+/// **20-F は外国企業の年次報告**で、10-K の位置にあたる(2026-08-24)。
+/// 20-F 提出者は 10-K / 10-Q をまったく出さないので、これを通さない限り
+/// TSM・ASML・SAP・トヨタ・BABA・Shell・NVO・ソニーは 1 社も扱えない。
+function normalizeForm(form: string | undefined): FilingFormType | null {
   if (!form) {
     return null;
   }
@@ -1151,6 +1176,9 @@ function normalizeForm(form: string | undefined): "10-K" | "10-Q" | null {
   }
   if (normalized === "10-Q") {
     return "10-Q";
+  }
+  if (normalized === "20-F") {
+    return "20-F";
   }
   return null;
 }

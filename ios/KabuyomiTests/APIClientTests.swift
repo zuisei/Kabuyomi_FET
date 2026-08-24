@@ -102,8 +102,25 @@ final class APIClientTests: XCTestCase {
         XCTAssertFalse(item.isSupportedInV1)
         XCTAssertTrue(item.canAttemptInV1)
         XCTAssertTrue(item.requiresFilingVerification)
-        XCTAssertEqual(item.supportDisplayLabel, "10-K / 10-Q 未確認")
-        XCTAssertEqual(item.availabilityNote, "保存または表示時に 10-K / 10-Q を確認します。")
+        XCTAssertEqual(item.supportDisplayLabel, "対応書類 未確認")
+        XCTAssertEqual(item.availabilityNote, "保存または表示時に対応書類を確認します。")
+    }
+
+    /// 20-F は外国企業(ADR)の年次報告で、10-K に相当する。
+    /// TSM・ASML・SAP・トヨタ等は 10-K / 10-Q を 1 本も出さないので、
+    /// ここが未対応のままだと検索しても「未対応」としか出ない(2026-08-24 に対応)。
+    func testSearchItemTreatsTwentyFAsSupported() {
+        let item = SearchItem(
+            ticker: "TSM",
+            companyName: "Taiwan Semiconductor Manufacturing Co Ltd",
+            cik: "0001046179",
+            exchange: "NYSE",
+            latestFormType: "20-F"
+        )
+
+        XCTAssertTrue(item.hasSupportedLatestFiling)
+        XCTAssertEqual(item.supportDisplayLabel, "最新 20-F")
+        XCTAssertEqual(item.availabilityBadgeTitle, "保存可")
     }
 
     func testSearchItemBlocksKnownUnsupportedFilingStatus() {

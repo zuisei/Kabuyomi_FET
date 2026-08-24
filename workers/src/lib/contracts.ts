@@ -97,7 +97,7 @@ export const RequestExecutionRequestSchema = z.discriminatedUnion("action", [
 export const BackfillHistoryRequestSchema = z.object({
   tickers: z.array(z.string().trim().min(1).max(16)).max(50).optional(),
   years: z.number().int().min(1).max(5).default(3),
-  forms: z.array(z.enum(["10-K", "10-Q"])).min(1).max(2).optional(),
+  forms: z.array(z.enum(["10-K", "10-Q", "20-F"])).min(1).max(3).optional(),
   maxFilingsPerTicker: z.number().int().min(1).max(8).default(1),
   maxTotalFilings: z.number().int().min(1).max(20).default(8),
   cursorByTicker: z.record(z.string(), z.number().int().min(0)).optional(),

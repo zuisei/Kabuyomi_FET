@@ -25,7 +25,10 @@ struct SearchItem: Decodable, Identifiable, Hashable {
             return .unknown
         }
 
-        if latestFormType == "10-K" || latestFormType == "10-Q" {
+        // 20-F は外国企業(ADR)の年次報告で、10-K に相当する。
+        // TSM・ASML・SAP・トヨタ等は 10-K / 10-Q を 1 本も出さないので、
+        // これを対応済みに数えないと検索しても「未対応」としか出ない。
+        if latestFormType == "10-K" || latestFormType == "10-Q" || latestFormType == "20-F" {
             return .supported(formType: latestFormType)
         }
 
@@ -64,7 +67,7 @@ struct SearchItem: Decodable, Identifiable, Hashable {
         case .unsupported(let formType):
             return "\(formType) 対象"
         case .unknown:
-            return "10-K / 10-Q 未確認"
+            return "対応書類 未確認"
         }
     }
 
@@ -84,9 +87,9 @@ struct SearchItem: Decodable, Identifiable, Hashable {
         case .supported:
             return "v1 でそのまま保存して会話できます。"
         case .unsupported(let formType):
-            return "最新 \(formType) は v1 の対象外です。10-K / 10-Q のみ対応しています。"
+            return "最新 \(formType) は対象外です。10-K / 10-Q / 20-F に対応しています。"
         case .unknown:
-            return "保存または表示時に 10-K / 10-Q を確認します。"
+            return "保存または表示時に対応書類を確認します。"
         }
     }
 
@@ -95,9 +98,9 @@ struct SearchItem: Decodable, Identifiable, Hashable {
         case .supported:
             return ""
         case .unsupported(let formType):
-            return "この銘柄の最新開示は \(formType) で、Kabuyomi v1 の対象外です。10-K / 10-Q のみ対応しています。"
+            return "この銘柄の最新開示は \(formType) で、対象外です。10-K / 10-Q / 20-F に対応しています。"
         case .unknown:
-            return "この銘柄は 10-K / 10-Q をまだ確認できませんでした。時間を置いてもう一度お試しください。"
+            return "この銘柄は対応書類をまだ確認できませんでした。時間を置いてもう一度お試しください。"
         }
     }
 }

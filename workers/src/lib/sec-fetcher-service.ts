@@ -24,6 +24,8 @@ const CACHE_TTL = {
 const SUBMISSIONS_LOOKBACK_YEARS = 4;
 const MIN_RECENT_10K_FILINGS = 3;
 const MIN_RECENT_10Q_FILINGS = 4;
+/// 20-F は年 1 回。4 年遡って 3 本あれば履歴としては十分。
+const MIN_RECENT_20F_FILINGS = 3;
 const DEFAULT_RETRY_COUNT = 2;
 const DEFAULT_INITIAL_BACKOFF_MS = 400;
 const DEFAULT_REQUEST_TIMEOUT_MS = 12_000;
@@ -282,14 +284,20 @@ function readSecFetcherConfig(env: Env): SecFetcherConfig {
   };
 }
 
+/// 指標が載りうるタクソノミ。米国企業は us-gaap、外国企業(20-F)は ifrs-full。
+/// トヨタとソニーのように両方で出す会社があるので、**us-gaap を先に見て挙動を変えない**。
+const METRIC_TAXONOMIES = ["us-gaap", "ifrs-full"] as const;
+
 function extractRequestedConceptsFromCompanyFacts(companyFacts: CompanyFactsResponse | null, tags: string[]) {
-  const usGaap = companyFacts?.facts?.["us-gaap"];
   const concepts: Record<string, ConceptResponse> = {};
   const missingTags: string[] = [];
 
   for (const tag of tags) {
-    if (usGaap && Object.prototype.hasOwnProperty.call(usGaap, tag)) {
-      concepts[tag] = usGaap[tag]!;
+    const found = METRIC_TAXONOMIES
+      .map((taxonomy) => companyFacts?.facts?.[taxonomy])
+      .find((facts) => facts && Object.prototype.hasOwnProperty.call(facts, tag));
+    if (found) {
+      concepts[tag] = found[tag]!;
       continue;
     }
 
@@ -308,14 +316,19 @@ async function fetchConceptFallbacks(
     return { concepts: {}, fulfilledCount: 0, failedCount: 0 };
   }
 
+  // タグ名だけではどちらのタクソノミのものか決まらない(ProfitLoss は両方に存在する)。
+  // us-gaap を先に引き、404 なら ifrs-full を引く。両方無ければ null。
   const settled = await Promise.allSettled(
-    tags.map(async (tag): Promise<[string, ConceptResponse | null]> => [
-      tag,
-      await secJson(`https://data.sec.gov/api/xbrl/companyconcept/CIK${normalizedCik}/us-gaap/${tag}.json`, {
-        allowNotFound: true,
-        cacheTtlMs: CACHE_TTL.concept
-      }) as ConceptResponse | null
-    ])
+    tags.map(async (tag): Promise<[string, ConceptResponse | null]> => {
+      for (const taxonomy of METRIC_TAXONOMIES) {
+        const concept = await secJson(
+          `https://data.sec.gov/api/xbrl/companyconcept/CIK${normalizedCik}/${taxonomy}/${tag}.json`,
+          { allowNotFound: true, cacheTtlMs: CACHE_TTL.concept }
+        ) as ConceptResponse | null;
+        if (concept) return [tag, concept];
+      }
+      return [tag, null];
+    })
   );
   const concepts: Record<string, ConceptResponse | null> = {};
   let fulfilledCount = 0;
@@ -633,9 +646,16 @@ function hasEnoughSupportedHistory(recent: SubmissionRecent): boolean {
   return hasEnoughSupportedHistoryEntries(toSubmissionEntries(recent));
 }
 
+/// これ以上ページを辿らなくてよいか、という**打ち切り条件**であって、
+/// 銘柄を扱えるかどうかの門ではない(門は `normalizeForm`)。
+///
+/// 外国企業は 10-K も 10-Q も 1 本も出さないので、米国企業の条件だけを見ていると
+/// **永久に満たされず、履歴ファイルを全部取りに行ってしまう**。正しさではなく
+/// 通信量の問題だが、20-F だけを出す会社には 20-F の本数で打ち切る。
 function hasEnoughSupportedHistoryEntries(entries: SubmissionEntry[]): boolean {
   let tenKCount = 0;
   let tenQCount = 0;
+  let twentyFCount = 0;
 
   for (const entry of entries) {
     if (!entry.filingDate || entry.filingDate < isoDateYearsAgo(SUBMISSIONS_LOOKBACK_YEARS)) {
@@ -649,10 +669,20 @@ function hasEnoughSupportedHistoryEntries(entries: SubmissionEntry[]): boolean {
 
     if (entry.form.startsWith("10-Q")) {
       tenQCount += 1;
+      continue;
+    }
+
+    // "20-F/A"(訂正版)は取り込み対象ではないが、履歴が十分あることの証拠にはなる。
+    if (entry.form.startsWith("20-F")) {
+      twentyFCount += 1;
     }
   }
 
-  return tenKCount >= MIN_RECENT_10K_FILINGS && tenQCount >= MIN_RECENT_10Q_FILINGS;
+  if (tenKCount >= MIN_RECENT_10K_FILINGS && tenQCount >= MIN_RECENT_10Q_FILINGS) {
+    return true;
+  }
+
+  return twentyFCount >= MIN_RECENT_20F_FILINGS;
 }
 
 function isoDateYearsAgo(years: number): string {

@@ -18,6 +18,8 @@ const CACHE_TTL = {
 const SUBMISSIONS_LOOKBACK_YEARS = 4;
 const MIN_RECENT_10K_FILINGS = 3;
 const MIN_RECENT_10Q_FILINGS = 4;
+// 20-F は年 1 回。4 年で 3 本あれば履歴として十分。
+const MIN_RECENT_20F_FILINGS = 3;
 
 export function readConfig(env = process.env) {
   return {
@@ -174,14 +176,20 @@ export function createSecService(config = readConfig()) {
   };
 }
 
+// 米国企業は us-gaap、外国企業(20-F)は ifrs-full。両方で出す会社(トヨタ・ソニー)が
+// あるので us-gaap を先に見る。Worker 側 `sec-fetcher-service.ts` と対。
+const METRIC_TAXONOMIES = ["us-gaap", "ifrs-full"];
+
 function extractRequestedConceptsFromCompanyFacts(companyFacts, tags) {
-  const usGaap = companyFacts?.facts?.["us-gaap"];
   const concepts = {};
   const missingTags = [];
 
   for (const tag of tags) {
-    if (usGaap && Object.prototype.hasOwnProperty.call(usGaap, tag)) {
-      concepts[tag] = usGaap[tag];
+    const found = METRIC_TAXONOMIES
+      .map((taxonomy) => companyFacts?.facts?.[taxonomy])
+      .find((facts) => facts && Object.prototype.hasOwnProperty.call(facts, tag));
+    if (found) {
+      concepts[tag] = found[tag];
       continue;
     }
 
@@ -516,6 +524,7 @@ function hasEnoughSupportedHistory(recent) {
 function hasEnoughSupportedHistoryEntries(entries) {
   let tenKCount = 0;
   let tenQCount = 0;
+  let twentyFCount = 0;
 
   for (const entry of entries) {
     if (!entry.filingDate || entry.filingDate < isoDateYearsAgo(SUBMISSIONS_LOOKBACK_YEARS)) {
@@ -529,10 +538,19 @@ function hasEnoughSupportedHistoryEntries(entries) {
 
     if (entry.form.startsWith("10-Q")) {
       tenQCount += 1;
+      continue;
+    }
+
+    if (entry.form.startsWith("20-F")) {
+      twentyFCount += 1;
     }
   }
 
-  return tenKCount >= MIN_RECENT_10K_FILINGS && tenQCount >= MIN_RECENT_10Q_FILINGS;
+  if (tenKCount >= MIN_RECENT_10K_FILINGS && tenQCount >= MIN_RECENT_10Q_FILINGS) {
+    return true;
+  }
+
+  return twentyFCount >= MIN_RECENT_20F_FILINGS;
 }
 
 function isoDateYearsAgo(years) {

@@ -115,6 +115,23 @@ function normalizeFilingTextWithDiagnostics(html) {
 }
 
 function getPatterns(formType) {
+  // 20-F の MD&A 相当は Item 5「Operating and Financial Review and Prospects」。
+  // TSMC は様式名と違って "Reviews"(複数形)で書く。章題の後にダッシュか閉じ引用符が
+  // 続くものは相互参照なので入口にしない。Worker 側 `src/extractors/mda.ts` と対。
+  if (formType === "20-F") {
+    return {
+      start: [
+        /item\s+5\b[\s.: -]*operating and financial reviews? and prospects(?!\s*[–—”"'-])/gi,
+        /operating and financial reviews? and prospects(?!\s*[–—”"'-])/gi
+      ],
+      end: [
+        /item\s+6\b[\s.: -]*directors,? senior management and employees/gi,
+        /item\s+6\b/gi,
+        /directors,? senior management and employees/gi
+      ]
+    };
+  }
+
   if (formType === "10-K") {
     return {
       start: [
