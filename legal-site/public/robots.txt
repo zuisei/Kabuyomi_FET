@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://kabuyomi-legal-site.pages.dev/sitemap.xml

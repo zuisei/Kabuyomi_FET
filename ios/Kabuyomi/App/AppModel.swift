@@ -393,7 +393,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var billingAPIHealthReport: BillingAPIHealthReport?
     var billingAPIHealthCheckInFlight = false
     var activeAlert: AppAlertState?
+    /// レビュー依頼を出したい瞬間だけ true になる。実際に依頼を出すのは
+    /// SwiftUI の `requestReview` を持つ view 側(モデルは UI を呼ばない)。
+    var pendingReviewRequest = false
     private(set) var accountCredential: AccountCredential?
+    @ObservationIgnored private let reviewPromptGate = ReviewPromptGate()
     var aiConsentGranted = UserDefaults.standard.bool(forKey: "kabuyomi.aiConsentGranted")
     var showStarterCompanies = UserDefaults.standard.object(forKey: "kabuyomi.showStarterCompanies") as? Bool ?? true
     var hasCompletedInitialEntry = UserDefaults.standard.bool(forKey: "kabuyomi.hasCompletedInitialEntry")
@@ -497,7 +501,9 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             appLaunchCountKey,
             starterCompaniesAutoHiddenKey,
             showStarterCompaniesKey,
-            aiConsentKey
+            aiConsentKey,
+            ReviewPromptGate.successfulAnswerCountKey,
+            ReviewPromptGate.lastPromptedVersionKey
         ]
         for key in keys {
             defaults.removeObject(forKey: key)
@@ -1821,6 +1827,16 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         await fetchCompanyRemote(ticker: normalized, forceRefresh: forceRefresh)
     }
 
+    /// 回答が成功した直後にだけ呼ぶ。失敗直後や起動直後に依頼すると
+    /// 低い評価を集めにいくことになるので、成功体験以外からは呼ばない。
+    private func noteSuccessfulAnswerForReviewPrompt() {
+        guard !AppModel.isRunningTests else { return }
+        guard reviewPromptGate.recordSuccessfulAnswer(
+            appVersion: ReviewPromptGate.currentAppVersion()
+        ) else { return }
+        pendingReviewRequest = true
+    }
+
     func sendChat(question: String, ticker: String) async -> Bool {
         await sendChat(question: question, ticker: ticker, recoverMissingFilingOnce: true)
     }
@@ -1903,6 +1919,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             storeUsage(response.usage, source: .chat)
             chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized, filingKey: company.filingKey)?.chatHistory ?? []
             clearRetryableChatOperation(ticker: normalized, operationId: operationId)
+            noteSuccessfulAnswerForReviewPrompt()
             await ensureMinimumPendingChatDuration(since: pendingStartedAt)
             return true
         } catch {

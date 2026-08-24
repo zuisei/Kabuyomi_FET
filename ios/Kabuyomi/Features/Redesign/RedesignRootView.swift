@@ -1,3 +1,4 @@
+import StoreKit
 import SwiftUI
 
 /// v2 IA Phase 5(docs/ui-redesign-v2/V2_IA_SPEC.md「Phase 5」節)。
@@ -63,6 +64,7 @@ private enum RedesignTab: Hashable {
 
 struct RedesignRootView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.requestReview) private var requestReview
     @State private var selectedTab: RedesignTab = .home
     /// タブごとに1本ずつ。1本を共有すると、タブを切り替えたときに
     /// 片方で開いていたドキュメントがもう片方に出てきて、
@@ -159,6 +161,18 @@ struct RedesignRootView: View {
                   appModel.shouldRestoreRewardedAdReturnDestination else { return }
             openCredits(nil)
             appModel.confirmRewardedAdReturnDestinationRestored(visibleSurface: "redesign_credits")
+        }
+        // レビュー依頼。出す条件は `ReviewPromptGate`(回答が3件成功して以降、
+        // 1バージョンにつき1回まで)。回答が画面に出てから少し置く —
+        // 読む前に被せると、評価したのは回答ではなく割り込みになる。
+        .onChange(of: appModel.pendingReviewRequest) { _, wantsReview in
+            guard wantsReview else { return }
+            appModel.pendingReviewRequest = false
+            guard !showsWelcome, sheet == nil else { return }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                requestReview()
+            }
         }
     }
 
@@ -2989,6 +3003,21 @@ private struct RedesignChatScreen: View {
         appModel.pendingChat(for: normalizedTicker)
     }
 
+    /// 回答を共有するとき、答えだけでは何を聞いたのか分からない。
+    /// 回答 ID → 直前の質問文の対応を作っておく。
+    private var precedingQuestions: [UUID: String] {
+        var result: [UUID: String] = [:]
+        var lastQuestion = ""
+        for message in messages {
+            if message.role == "user" {
+                lastQuestion = message.content
+            } else {
+                result[message.id] = lastQuestion
+            }
+        }
+        return result
+    }
+
     private var navigationTitleText: String {
         guard let company else { return normalizedTicker }
         let curated = homeBoardCompanyName(companyName: company.companyName, ticker: company.ticker)
@@ -3012,7 +3041,11 @@ private struct RedesignChatScreen: View {
                             }
 
                             ForEach(messages) { message in
-                                RedesignResearchMessage(message: message, company: company) { source in
+                                RedesignResearchMessage(
+                                    message: message,
+                                    company: company,
+                                    precedingQuestion: precedingQuestions[message.id] ?? ""
+                                ) { source in
                                     openSource(source)
                                 }
                             }
@@ -3689,6 +3722,7 @@ private struct RedesignComposer: View {
 private struct RedesignResearchMessage: View {
     let message: LocalChatMessage
     let company: CompanyPayload
+    var precedingQuestion: String = ""
     let openSource: (LocalMessageSourceRef) -> Void
 
     private var displayedAnswer: String {
@@ -3717,6 +3751,15 @@ private struct RedesignResearchMessage: View {
     /// 太さで立てる。
     private var conclusionFont: Font {
         structuredAnswer.conclusion.count < 65 ? .body.weight(.medium) : .body
+    }
+
+    private var shareMessage: String {
+        AppPromotion.shareText(
+            ticker: company.ticker,
+            companyName: homeBoardCompanyName(companyName: company.companyName, ticker: company.ticker),
+            question: precedingQuestion,
+            conclusion: structuredAnswer.conclusion
+        )
     }
 
     var body: some View {
@@ -3800,6 +3843,17 @@ private struct RedesignResearchMessage: View {
                         }
                     }
                 }
+
+                // 口コミの経路。共有本文には出所と「助言ではない」断りが必ず入る
+                // (`AppPromotion.shareText`)。アプリの外には画面の注意書きが
+                // 付いていかないため。
+                ShareLink(item: shareMessage) {
+                    Label("共有", systemImage: "square.and.arrow.up")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("redesign.answer.share")
             }
             .padding(13)
             .frame(maxWidth: .infinity, alignment: .leading)

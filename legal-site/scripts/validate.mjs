@@ -22,6 +22,11 @@ const reviewDocumentPaths = [
   new URL("../../docs/release/CURRENT_SHIPPING_TRUTH.md", import.meta.url),
   new URL("../../docs/legal/TESTFLIGHT_STOREKIT_DIAGNOSTICS.md", import.meta.url)
 ];
+// 法務ページと違い、LP は外部リンク(App Store)と canonical を持つ。
+// 最終更新日も持たない。よって同じループには入れず、
+// 「主張の禁止」と「価格ベタ書き禁止」だけを別枠でかける。
+const marketingPages = ["lp/index.html"];
+const appStoreAppURL = "https://apps.apple.com/jp/app/kabuyomi/id6762764426";
 const pages = [
   "index.html",
   "privacy/index.html",
@@ -111,6 +116,56 @@ for (const page of pages) {
 
   if (/(?:JPY\s*[\d,]+|[¥￥]\s*[\d,]+|[\d,]+\s*円)/iu.test(html)) {
     failures.push(`${page}: hard-coded shipping price found; use StoreKit localized display authority`);
+  }
+}
+
+for (const page of marketingPages) {
+  const filePath = join(publicDir.pathname, page);
+  if (!existsSync(filePath)) {
+    failures.push(`Missing marketing page: ${page}`);
+    continue;
+  }
+
+  const html = readFileSync(filePath, "utf8");
+  if (/<script[\s>]/i.test(html)) {
+    failures.push(`${page}: must not include scripts`);
+  }
+  if (!html.includes(appStoreAppURL)) {
+    failures.push(`${page}: missing App Store link ${appStoreAppURL}`);
+  }
+  if (!html.includes('rel="canonical"')) {
+    failures.push(`${page}: missing canonical link`);
+  }
+  for (const match of html.matchAll(/TODO_[A-Z0-9_]+/g)) {
+    failures.push(`${page}: unexpected TODO placeholder ${match[0]}`);
+  }
+  for (const claim of forbiddenClaims) {
+    if (html.includes(claim)) {
+      failures.push(`${page}: forbidden v1 claim text found: ${claim}`);
+    }
+  }
+  if (/(?:JPY\s*[\d,]+|[¥￥]\s*[\d,]+|[\d,]+\s*円)/iu.test(html)) {
+    failures.push(`${page}: hard-coded shipping price found; use StoreKit localized display authority`);
+  }
+}
+
+// 発見されるための最低条件。LP が孤児のままだと検索から辿れない。
+{
+  const robotsPath = join(publicDir.pathname, "robots.txt");
+  const sitemapPath = join(publicDir.pathname, "sitemap.xml");
+  if (!existsSync(robotsPath)) {
+    failures.push("Missing robots.txt");
+  } else if (!readFileSync(robotsPath, "utf8").includes("sitemap.xml")) {
+    failures.push("robots.txt must point at sitemap.xml");
+  }
+  if (!existsSync(sitemapPath)) {
+    failures.push("Missing sitemap.xml");
+  } else if (!readFileSync(sitemapPath, "utf8").includes("/lp/")) {
+    failures.push("sitemap.xml must list the /lp/ landing page");
+  }
+  const rootIndex = pageContents.get("index.html") ?? "";
+  if (!rootIndex.includes('href="./lp/"')) {
+    failures.push("index.html: must link to the /lp/ landing page");
   }
 }
 

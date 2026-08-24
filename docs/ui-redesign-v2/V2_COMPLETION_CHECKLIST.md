@@ -74,6 +74,9 @@
 
 ## スコープ外(完全体の定義に含めない — オーナー作業)
 
+- **App Store Connect のマーケ枠**(`docs/release/MARKETING_PLAN_2026-08.md`):
+  Web サイト欄(`sellerUrl`)を法務ページ → `/lp/` に、プロモーションテキスト 170 字の投入、
+  `kabuyomi.app` の名前解決、App Analytics の Campaigns に `ct=lp` / `ct=app-share` が出るかの確認
 - アプリアイコン / App Store 素材の v2 化
 - ~~AdMob 本番バナーユニットの発行~~ → 2026-08-24 オーナー「すでにある」。休眠実装が持っていた
   `ca-app-pub-1248492954379402/4700244637` を `productionBannerAdUnitID` に配線(F16)。
@@ -172,6 +175,29 @@
 - [x] G1. gpt-5.6-luna A/B 36行 → `docs/quality/MODEL_EVAL_LUNA_2026-08-24.md`。
       結論: 保留(ガード同等・日本語は締まる・数値表現の乱れ1件・単価未確認)。
       切り替えるなら 180行 LKG を luna で1本流してから。単価確認はオーナー作業
+
+## H. 発見される導線(2026-08-24、オーナー「このアプリのマーケが必要だ」)
+
+診断は `docs/quality/USAGE_REALITY_2026-08-24.md`、計画は
+`docs/release/MARKETING_PLAN_2026-08.md`。**転換率は正常で、
+インプレッションだけが足りていない**(294 × 10.2% × 13.3% = DL 4 が実数と一致)。
+よって判断基準は「その施策はインプレッションを作るか」の一点。
+
+- [x] H1. LP が検索から辿れない(robots.txt も sitemap.xml も無い・どこからもリンクされていない)
+      → `legal-site/public/robots.txt` / `sitemap.xml` を新規作成し、ルート `index.html` から
+      `/lp/` へリンク。`validate.mjs` に「LP が孤児でないこと」の検査を追加
+- [x] H2. LP の流入が測れない → CTA に campaign token(`ct=lp` / `ct=lp-footer`)、
+      末尾に2枚目の CTA。LP の「8-K」表記は `forbiddenClaims` の部分一致に当たるため
+      意味を変えずに書き換え、LP 自体を `validate.mjs` の検査対象に入れた
+- [x] H3. 口コミの経路がゼロ(`ShareLink` 0件)→ 回答カードに共有。本文は
+      `AppPromotion.shareText`(出所と「投資助言ではありません」を必ず含む、`ct=app-share`)
+- [x] H4. 評価2件(`requestReview` 0件)→ `ReviewPromptGate`。
+      回答が3件成功して以降・1バージョン1回まで・失敗直後や起動直後には出さない
+- [ ] H5. **2026-09-07 以降に ASO を再測定**。v1.2(新名称)の公開が 8/24 なので、
+      それまで名前・サブタイトル・キーワードは触らない。見るのは
+      `米国株` / `米国株 決算` / `決算書 AI` / `SEC 決算` の順位とインプレッション推移
+- [ ] H6. **v2 提出と同時**: スクリーンショットの v2 化(現行 `appstore-assets/raw/*` は v1 UI で
+      新名称と食い違う)、キーワード欄の差し替え(H5 の結果を見てから)
 
 ## 最終状態(2026-08-22 深夜)
 
