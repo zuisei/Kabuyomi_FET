@@ -3721,25 +3721,21 @@ private struct RedesignResearchMessage: View {
 
     var body: some View {
         if message.role == "user" {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("質問")
-                    .kabuyomiMicroLabel()
+            // 自分の発言は右寄せのバブル。薄い引用カードでは回答との境界が
+            // 消えて壁の文になる(2026-08-24 オーナー「境界線がうすすぎて醜い」)。
+            // 色(accent 塗り)と形(右寄せ・角丸)と余白の3つで境界を立てる。
+            HStack {
+                Spacer(minLength: 44)
                 Text(message.content)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(KabuyomiTheme.ink)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(KabuyomiTheme.onAccent)
+                    .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(KabuyomiTheme.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 9)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(KabuyomiTheme.inputWell, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(KabuyomiTheme.accent.opacity(0.55))
-                    .frame(width: 2)
-                    .accessibilityHidden(true)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .frame(maxWidth: .infinity, alignment: .trailing)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("質問、\(message.content)")
         } else {
@@ -3805,6 +3801,9 @@ private struct RedesignResearchMessage: View {
                     }
                 }
             }
+            .padding(13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(KabuyomiTheme.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .accessibilityElement(children: .contain)
         }
     }
@@ -3815,13 +3814,18 @@ private struct RedesignPendingResearch: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("質問")
-                    .kabuyomiMicroLabel()
+            HStack {
+                Spacer(minLength: 44)
                 Text(question)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(KabuyomiTheme.ink)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(KabuyomiTheme.onAccent)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(KabuyomiTheme.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
+            .frame(maxWidth: .infinity, alignment: .trailing)
             HStack(spacing: 10) {
                 ProgressView()
                     .controlSize(.small)
@@ -3835,7 +3839,9 @@ private struct RedesignPendingResearch: View {
                         .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
             }
-            .padding(.vertical, 4)
+            .padding(13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(KabuyomiTheme.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("回答を作成中。提出資料の根拠を確認しています")
