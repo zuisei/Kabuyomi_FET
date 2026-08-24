@@ -561,7 +561,13 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     var shouldShowBannerAds: Bool {
-        currentBillingTier.plan == BillingCatalog.free.plan
+        #if DEBUG
+        // Dev クォータは Worker 上 plan=pro を名乗るため、素通しにすると
+        // 開発機だけバナーが消えて広告の確認ができない(2026-08-24 オーナー
+        // 「広告表示はどこへ？」の正体)。DEBUG の dev モード中は free 扱いで出す。
+        if isDetachedDevAccessActive { return true }
+        #endif
+        return currentBillingTier.plan == BillingCatalog.free.plan
     }
 
     var currentPlanBadgeTitle: String {

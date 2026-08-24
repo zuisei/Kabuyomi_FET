@@ -65,17 +65,25 @@ struct AdMobBannerView: View {
         )
         .frame(width: adSize.size.width, height: adSize.size.height)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        // ロード中は同じ寸法のプレースホルダを重ねる。高さ0で隠すと、
+        // シミュレータのようにロードが遅い環境で「広告どこ？」になる
+        // (2026-08-24 オーナー指摘)。枠は最初から場所を持ち、失敗時だけ畳む。
+        .opacity(isVisible ? 1 : 0)
+        .overlay {
+            if !isVisible {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(KabuyomiTheme.inputWell)
+                    .frame(width: adSize.size.width, height: adSize.size.height)
+                    .overlay {
+                        Text("広告")
+                            .kabuyomiMicroLabel()
+                    }
+            }
+        }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, horizontalPadding)
-        .padding(.vertical, isVisible ? verticalPadding : 0)
-        // ロードが返るまでは高さ 0。空の枠を先に見せない。
-        // 中身は生かしたまま潰すので、ロードは進む。
-        .frame(height: isVisible ? adSize.size.height + verticalPadding * 2 : 0)
-        .clipped()
+        .padding(.vertical, verticalPadding)
         .background(KabuyomiTheme.paper)
-        .overlay(alignment: .top) {
-            if isVisible { KabuyomiHairline(color: KabuyomiTheme.separatorStrong) }
-        }
         .allowsHitTesting(isVisible)
         // 読めていないあいだは VoiceOver からも消す。
         // 高さ 0 の枠に「広告」だけが残るのを避ける。
