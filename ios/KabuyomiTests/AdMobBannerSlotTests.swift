@@ -5,7 +5,7 @@ import XCTest
 ///
 /// 表示条件は画面ではなく純関数が持つので、シミュレータを起こさずにここで固定できる。
 /// 固定したいのは2つ: 課金している人には出ないこと、
-/// ユニット ID が空の Release ビルドでは枠そのものが生まれないこと。
+/// ユニット ID が空なら枠そのものが生まれないこと。
 final class AdMobBannerSlotTests: XCTestCase {
     // MARK: - 表示条件
 
@@ -28,14 +28,29 @@ final class AdMobBannerSlotTests: XCTestCase {
 
     // MARK: - ユニット ID の配線
 
-    /// Release の production 定数は現状 **空**。
-    /// AdMob コンソールでの発行はリリースオーナーの作業で、
-    /// 空のあいだはサマリータブに枠が出ない、というのがこのフェーズの合意。
-    func testProductionBannerAdUnitIsUnissuedSoTheReleaseSlotNeverRenders() {
-        XCTAssertTrue(
-            AdMobConfig.productionBannerAdUnitID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-            "production のバナーユニットが埋まったなら、この期待もリリースノートも更新すること"
+    /// Release の production 定数(2026-08-24 にリリースオーナーの
+    /// 「ユニットはもうある」で配線した)。
+    /// 綴りを固定するのは、AdMob のユニット ID は 1 文字違っても
+    /// 「ロード失敗 → 枠を畳む」に落ちるだけで、画面上は「広告が無い」としか見えないから。
+    func testProductionBannerAdUnitIsTheIssuedUnit() {
+        XCTAssertEqual(
+            AdMobConfig.productionBannerAdUnitID,
+            "ca-app-pub-1248492954379402/4700244637"
         )
+    }
+
+    /// バナーは報酬型と同じアプリ(パブリッシャ)配下でなければ配信されない。
+    /// 別アカウントのユニットを貼り間違えるとロード失敗が続くだけなので、接頭辞で縛る。
+    func testProductionAdUnitsShareThePublisherOfTheApp() {
+        let publisher = "ca-app-pub-1248492954379402"
+        XCTAssertTrue(AdMobConfig.appID.hasPrefix("\(publisher)~"))
+        XCTAssertTrue(AdMobConfig.productionBannerAdUnitID.hasPrefix("\(publisher)/"))
+        XCTAssertTrue(AdMobConfig.productionRewardedCreditAdUnitID.hasPrefix("\(publisher)/"))
+    }
+
+    /// バナーと報酬型は別の枠。同じ ID を貼ると、どちらかが必ず意図しない広告を出す。
+    func testBannerAndRewardedUnitsAreDistinct() {
+        XCTAssertNotEqual(AdMobConfig.productionBannerAdUnitID, AdMobConfig.productionRewardedCreditAdUnitID)
     }
 
     /// Debug は Google 公式のテストバナー(固定 320x50)。

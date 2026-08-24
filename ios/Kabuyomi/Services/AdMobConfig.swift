@@ -72,15 +72,19 @@ enum AdMobConfig {
 
     /// Release ビルドのバナー枠のユニット ID。
     ///
-    /// **現状は空**。空文字は `hasBannerAdConfig` が false になり、
-    /// サマリータブのバナー枠はそもそも描かれない(v2 IA 仕様 Phase 5)。
-    /// 実ユニットの発行は AdMob コンソール側の作業で、リリースオーナーの管轄。
+    /// 空文字のあいだは `hasBannerAdConfig` が false になり、サマリータブの
+    /// バナー枠はそもそも描かれない(v2 IA 仕様 Phase 5)。
     ///
-    /// 2026-04-26 の休眠実装(commit 50711ec)はここに
-    /// `"ca-app-pub-1248492954379402/4700244637"` を持っていた。
-    /// 一度も画面に載っていない値で、コンソールで発行済みかどうかの裏が取れていないため、
-    /// Phase 5 では採用せずここに記録だけ残す。有効だと確認できたらこの定数に入れる。
-    static let productionBannerAdUnitID = ""
+    /// 2026-08-24、リリースオーナーが「ユニットはすでに AdMob コンソールにある」と
+    /// 明言したため、2026-04-26 の休眠実装(commit 50711ec)が持っていたこの ID を採用した。
+    /// アプリ ID (`appID`) と同じパブリッシャ `1248492954379402` 配下で、
+    /// 報酬型 (`productionRewardedCreditAdUnitID`) と並ぶバナー枠にあたる。
+    ///
+    /// **Release でしか使われない**(Debug は Google 公式テストユニット固定)ため、
+    /// 実配信の裏取りは TestFlight / App Store ビルドでの初回確認になる。
+    /// 表示されない場合に疑うのは、この ID の綴りではなく AdMob 側の
+    /// 「アプリとユニットの紐付け」と審査ステータス。
+    static let productionBannerAdUnitID = "ca-app-pub-1248492954379402/4700244637"
     #if DEBUG
     static let testRewardedCreditAdUnitID = "ca-app-pub-3940256099942544/1712485313"
     static let debugDemoAdUnitCannotVerifyProductionSSVReason = "debug_demo_ad_unit_cannot_verify_production_ssv"
@@ -117,7 +121,7 @@ enum AdMobConfig {
         !rewardedCreditAdUnitID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// バナーユニットが設定されているか。Release で `productionBannerAdUnitID` が空のあいだは false。
+    /// バナーユニットが設定されているか(Debug はテストユニット、Release は発行済みユニット)。
     static var hasBannerAdConfig: Bool {
         !bannerAdUnitID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
