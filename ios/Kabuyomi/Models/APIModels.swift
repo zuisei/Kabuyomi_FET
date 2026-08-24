@@ -399,6 +399,9 @@ struct UsagePayload: Decodable, Hashable {
     let accessMode: String?
     let credits: CreditUsagePayload?
     let creditBillingEnabled: Bool?
+    /// この端末が1問に払うクレジット(旧 Worker には無い)。capabilities と同じく
+    /// 既定 nil の var — 既存のフィクスチャ・コピー箇所を全部書き換えないため。
+    var chatCreditCost: Int? = nil
     var capabilities: UsageCapabilitiesPayload? = nil
 
     var detachedAccessMode: DetachedAccessMode? {
@@ -442,6 +445,8 @@ struct UsageCapabilitiesPayload: Decodable, Hashable {
     /// 有料プランが上位AIモデルで回答するか(Worker の OPENAI_CHAT_MODEL_PREMIUM 設定時のみ)。
     /// 旧 Worker には無いフィールドなので optional。
     let premiumChatModelEnabled: Bool?
+    /// 上位モデル回答の1問あたりクレジット(premium 有効時のみ)。
+    let premiumChatCreditCost: Int?
     let rewardedCredit: RewardedCreditCapabilityPayload
 }
 

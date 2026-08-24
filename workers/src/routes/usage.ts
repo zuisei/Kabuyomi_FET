@@ -2,7 +2,7 @@ import { loadUsage, readQuotaIdentity } from "../lib/quota";
 import type { Env } from "../env";
 import type { RemoteConfig } from "../lib/remote-config";
 import { isCreditBillingEnabledForIdentity } from "../lib/remote-config";
-import { premiumChatModelEnabled } from "../lib/chat/premium-model";
+import { chatCreditCostForIdentity, premiumChatCreditCost, premiumChatModelEnabled } from "../lib/chat/premium-model";
 import { json } from "../lib/response";
 import type { RouteHandler } from "./types";
 import { buildRewardedCreditCapability } from "./admob-rewards";
@@ -18,6 +18,7 @@ export const handleUsageRoute: RouteHandler = async ({ request, url, env, config
   const payload: Record<string, unknown> = {
     ...usage,
     creditBillingEnabled: runtime.creditBillingEnabled && isCreditBillingEnabledForIdentity(config, identity),
+    chatCreditCost: chatCreditCostForIdentity(env, identity),
     capabilities: {
       configVersion: config.configVersion,
       configSource: config.configSource,
@@ -26,6 +27,7 @@ export const handleUsageRoute: RouteHandler = async ({ request, url, env, config
       consumablePurchasesEnabled: runtime.consumablePurchasesEnabled,
       accountRecoveryReady: runtime.accountRecoveryReady,
       premiumChatModelEnabled: premiumChatModelEnabled(env),
+      premiumChatCreditCost: premiumChatModelEnabled(env) ? premiumChatCreditCost(env) : null,
       rewardedCredit: await buildRewardedCreditCapability(env, config, identity)
     }
   };

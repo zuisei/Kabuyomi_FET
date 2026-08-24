@@ -1372,7 +1372,8 @@ final class AppModelTests: XCTestCase {
                 totalRemaining: 150,
                 resetsAt: "2026-06-01T00:00:00+09:00"
             ),
-            creditBillingEnabled: true
+            creditBillingEnabled: true,
+            chatCreditCost: nil
         )
 
         let viewModel = AccountStatusDisplayModel(
@@ -3878,6 +3879,7 @@ final class AppModelTests: XCTestCase {
                 resetsAt: "2026-08-01T00:00:00+09:00"
             ),
             creditBillingEnabled: creditBillingEnabled,
+            chatCreditCost: nil,
             capabilities: UsageCapabilitiesPayload(
                 configVersion: "test",
                 configSource: "unit-test",
@@ -3886,6 +3888,7 @@ final class AppModelTests: XCTestCase {
                 consumablePurchasesEnabled: consumablePurchasesEnabled,
                 accountRecoveryReady: consumablePurchasesEnabled,
                 premiumChatModelEnabled: nil,
+                premiumChatCreditCost: nil,
                 rewardedCredit: RewardedCreditCapabilityPayload(
                     enabled: false,
                     rewardedCreditEnabled: false,

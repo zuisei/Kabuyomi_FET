@@ -15,6 +15,8 @@ export interface Env {
   OPENAI_CHAT_MODEL?: string;
   /** 有料プラン(free 以外)と dev_unlimited に使う上位チャットモデル。未設定なら全員 OPENAI_CHAT_MODEL。 */
   OPENAI_CHAT_MODEL_PREMIUM?: string;
+  /** 上位モデル回答の1問あたりクレジット(既定5)。 */
+  PREMIUM_CHAT_CREDIT_COST?: string;
   OPENAI_PROMPT_ID?: string;
   OPENAI_PROMPT_VERSION?: string;
   OPENAI_TIMEOUT_MS?: string;

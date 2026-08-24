@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chatEnvForIdentity, identityUsesPremiumChatModel, premiumChatModelEnabled } from "../src/lib/chat/premium-model";
+import { chatCreditCostForIdentity, chatEnvForIdentity, identityUsesPremiumChatModel, premiumChatModelEnabled } from "../src/lib/chat/premium-model";
 import type { Env } from "../src/env";
 
 // 2026-08-24 オーナー「サブスクを買ってもクレジットだけだと特別感がない」。
@@ -30,6 +30,15 @@ describe("premium chat model lane", () => {
     const bench = { plan: "pro", accessMode: "dev_unlimited", quotaSubject: "pro:test-automation:abc" };
     expect(identityUsesPremiumChatModel(bench)).toBe(false);
     expect(chatEnvForIdentity(base, bench).OPENAI_CHAT_MODEL).toBe("gpt-5-nano");
+  });
+
+  it("charges the premium price only on the premium lane", () => {
+    // 標準 2 / 上位 5(既定)。ベンチと無料は premium 設定下でも標準単価のまま。
+    expect(chatCreditCostForIdentity(base, { plan: "pro" })).toBe(5);
+    expect(chatCreditCostForIdentity(base, { plan: "free" })).toBe(2);
+    expect(chatCreditCostForIdentity(base, { plan: "pro", quotaSubject: "pro:test-automation:x" })).toBe(2);
+    expect(chatCreditCostForIdentity({ OPENAI_CHAT_MODEL: "gpt-5-nano" } as Env, { plan: "pro" })).toBe(2);
+    expect(chatCreditCostForIdentity({ ...base, PREMIUM_CHAT_CREDIT_COST: "8" } as Env, { plan: "pro" })).toBe(8);
   });
 
   it("does not mutate the original env", () => {

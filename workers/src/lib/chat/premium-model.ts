@@ -1,4 +1,10 @@
 import type { Env } from "../../env";
+import { CHAT_CREDIT_COST } from "./usecase";
+
+/// 上位モデル回答の既定単価。標準(2)の2.5倍 — 上位モデルは無料枠が1桁少なく、
+/// 超過は従量課金になるため(2026-08-24 オーナー「その分クレジット消費は多くしろ」)。
+/// env の PREMIUM_CHAT_CREDIT_COST で調整できる。
+export const PREMIUM_CHAT_CREDIT_COST_DEFAULT = 5;
 
 /// サブスクの「クレジット以外の実利」その1: 有料プランは上位モデルで回答する
 /// (2026-08-24 オーナー「クレジットだけだと特別感がない」)。
@@ -29,4 +35,19 @@ export function chatEnvForIdentity(env: Env, identity: PremiumModelIdentity): En
   const premium = env.OPENAI_CHAT_MODEL_PREMIUM?.trim();
   if (!premium || !identityUsesPremiumChatModel(identity)) return env;
   return { ...env, OPENAI_CHAT_MODEL: premium };
+}
+
+export function premiumChatCreditCost(env: Pick<Env, "PREMIUM_CHAT_CREDIT_COST">): number {
+  const parsed = Number.parseInt(env.PREMIUM_CHAT_CREDIT_COST?.trim() ?? "", 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : PREMIUM_CHAT_CREDIT_COST_DEFAULT;
+}
+
+/// この識別が1問に払うクレジット。上位モデルで答える相手には上位単価、
+/// それ以外(無料・ベンチ・premium 未設定)は標準単価。予約・requestHash・
+/// 完了時の請求はすべてこの1点を通る。
+export function chatCreditCostForIdentity(env: Env, identity: PremiumModelIdentity): number {
+  if (premiumChatModelEnabled(env) && identityUsesPremiumChatModel(identity)) {
+    return premiumChatCreditCost(env);
+  }
+  return CHAT_CREDIT_COST;
 }

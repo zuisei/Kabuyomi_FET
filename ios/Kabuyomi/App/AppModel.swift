@@ -624,7 +624,9 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     #endif
 
     var chatCreditCost: Int {
-        2
+        // 上位モデルで答える相手(有料プラン)は単価が上がる。値はサーバーが決め、
+        // 端末は表示と残高判定に使うだけ。旧 Worker 相手は従来の 2。
+        usage?.chatCreditCost ?? 2
     }
 
     var creditUsage: CreditUsagePayload? {
@@ -3065,6 +3067,7 @@ credit残高に使う端末識別情報は維持されます。
                 accessMode: usage.accessMode,
                 credits: nil,
                 creditBillingEnabled: usage.creditBillingEnabled,
+                chatCreditCost: usage.chatCreditCost,
                 capabilities: usage.capabilities
             )
         }
@@ -3100,6 +3103,7 @@ credit残高に使う端末識別情報は維持されます。
             accessMode: usage.accessMode,
             credits: normalizedCredits,
             creditBillingEnabled: usage.creditBillingEnabled,
+            chatCreditCost: usage.chatCreditCost,
             capabilities: usage.capabilities
         )
     }
@@ -3131,6 +3135,7 @@ credit残高に使う端末識別情報は維持されます。
             accessMode: usage.accessMode,
             credits: usage.credits,
             creditBillingEnabled: usage.creditBillingEnabled,
+            chatCreditCost: usage.chatCreditCost,
             capabilities: usage.capabilities
         )
     }

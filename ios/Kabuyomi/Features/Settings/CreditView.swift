@@ -413,12 +413,13 @@ struct CreditView: View {
                     PlanSheetHeader()
 
                     if premiumModelPerkEnabled {
-                        PremiumModelPerkCard()
+                        PremiumModelPerkCard(creditCost: appModel.usage?.capabilities?.premiumChatCreditCost)
                     }
 
                     ForEach(appModel.subscriptionProducts) { product in
                         SubscriptionPlanRow(
                             product: product,
+                            questionCreditCost: appModel.usage?.capabilities?.premiumChatCreditCost ?? appModel.chatCreditCost,
                             loadState: appModel.subscriptionProductLoadState,
                             isCurrent: isCurrentSubscription(product),
                             isPurchasing: appModel.billingActionInFlight,
@@ -1181,6 +1182,9 @@ struct CreditView: View {
 /// サブスク限定の実利(クレジット以外)。Worker が premium モデルを設定している時だけ出す —
 /// 出せない約束を先に書かない(2026-08-24 オーナー「クレジットだけだと特別感がない」)。
 private struct PremiumModelPerkCard: View {
+    /// 上位モデル回答の単価(サーバー決定)。正直に価格も一緒に言う。
+    var creditCost: Int?
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             // sparkles は Phase 6 で「AI 臭」として全廃した字形。ここも使わない。
@@ -1192,7 +1196,8 @@ private struct PremiumModelPerkCard: View {
                 Text("有料プランは上位AIモデルで回答")
                     .font(.footnote.weight(.bold))
                     .foregroundStyle(KabuyomiTheme.ink)
-                Text("同じ質問でも、読み解きの深い上位モデルが日本語で答えます。無料プランは標準モデルです。")
+                Text(creditCost.map { "同じ質問でも、読み解きの深い上位モデルが答えます(1問\($0)クレジット)。無料プランは標準モデル(1問2クレジット)です。" }
+                    ?? "同じ質問でも、読み解きの深い上位モデルが日本語で答えます。無料プランは標準モデルです。")
                     .font(.caption)
                     .foregroundStyle(KabuyomiTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1251,6 +1256,8 @@ private struct PlanSheetHeader: View {
 private struct SubscriptionPlanRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let product: SubscriptionProduct
+    /// 1問あたりのクレジット(premium 有効時は上位単価)。「約N回/月」の分母。
+    var questionCreditCost: Int = 2
     let loadState: SubscriptionProductLoadState
     let isCurrent: Bool
     let isPurchasing: Bool
@@ -1349,8 +1356,8 @@ private struct SubscriptionPlanRow: View {
     }
 
     private var limitSummary: String {
-        let approximateQuestions = product.tier.monthlyCredits / 2
-        return "広告非表示 / 通常質問 約\(approximateQuestions)回/月 / 保存 \(product.tier.stockLimit)銘柄 / 1日上限 \(product.tier.chatLimit)回"
+        let approximateQuestions = product.tier.monthlyCredits / max(1, questionCreditCost)
+        return "広告非表示 / 質問 約\(approximateQuestions)回/月 / 保存 \(product.tier.stockLimit)銘柄 / 1日上限 \(product.tier.chatLimit)回"
     }
 
     private var useCaseText: String {
