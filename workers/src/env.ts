@@ -90,12 +90,31 @@ export interface TickerRecord {
   latestFormType?: string;
 }
 
+/// 取り込み対象の提出書類。
+///
+/// 10-K / 10-Q は米国企業。**20-F は外国企業(ADR)の年次報告**で、10-K に相当する
+/// (2026-08-24 オーナー「TSM とかそのへんの企業に対応したい」)。TSM・ASML・SAP・
+/// トヨタ・BABA・Shell・NVO・ソニーはいずれも 10-K / 10-Q をまったく出さず 20-F だけを出す。
+///
+/// 20-F は**年 1 回**しか出ないので、四半期の数字は 6-K(業績プレスリリース)から
+/// 別途取る。6-K は XBRL を持たないため経路がまったく違い、この union には
+/// その扱いを実装する Stage 2 まで入れない
+/// (docs/quality/FOREIGN_ISSUER_SUPPORT_2026-08-24.md)。
+export type FilingFormType = "10-K" | "10-Q" | "20-F";
+
+/// その提出書類が扱う期間の長さ。20-F と 10-K は年次、10-Q は四半期。
+export type FilingPeriodKind = "annual" | "quarterly";
+
+export function filingPeriodKind(formType: FilingFormType): FilingPeriodKind {
+  return formType === "10-Q" ? "quarterly" : "annual";
+}
+
 export interface FilingReference {
   cik: string;
   ticker: string;
   companyName: string;
   exchange: string;
-  formType: "10-K" | "10-Q";
+  formType: FilingFormType;
   accessionNumber: string;
   primaryDocument: string;
   filedAt: string;
@@ -219,7 +238,7 @@ export interface FilingCacheRecord {
   ticker: string;
   companyName: string;
   cik: string;
-  formType: "10-K" | "10-Q";
+  formType: FilingFormType;
   filedAt: string;
   periodOfReport: string;
   primaryDocumentUrl: string;

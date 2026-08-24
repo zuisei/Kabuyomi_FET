@@ -1,3 +1,5 @@
+import type { FilingFormType } from "../env";
+
 const TOKEN_BUDGET = 15_000;
 const MIN_SECTION_CHARS = 2_400;
 
@@ -67,13 +69,13 @@ function normalizeFilingTextWithDiagnostics(
   };
 }
 
-export function extractMDASection(html: string, formType: "10-K" | "10-Q"): ExtractedMDA | null {
+export function extractMDASection(html: string, formType: FilingFormType): ExtractedMDA | null {
   return extractMDASectionWithDiagnostics(html, formType).result;
 }
 
 export function extractMDASectionWithDiagnostics(
   html: string,
-  formType: "10-K" | "10-Q"
+  formType: FilingFormType
 ): { result: ExtractedMDA | null; diagnostics: MDAExtractionDiagnostics } {
   const startedAt = nowMs();
   const { text: normalizedText, diagnostics: normalizationDiagnostics } = normalizeFilingTextWithDiagnostics(html);
@@ -174,7 +176,7 @@ function stripLeadingNoise(candidate: string, startPatterns: RegExp[]): string {
   return replacement ? candidate.slice(replacement.index).trim() : candidate;
 }
 
-function getPatterns(formType: "10-K" | "10-Q"): PatternPair {
+function getPatterns(formType: FilingFormType): PatternPair {
   if (formType === "10-K") {
       return {
         start: [

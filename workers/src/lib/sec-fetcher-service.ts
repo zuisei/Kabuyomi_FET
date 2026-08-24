@@ -1,4 +1,4 @@
-import type { Env } from "../env";
+import type { Env, FilingFormType } from "../env";
 import { extractMDASectionWithDiagnostics, normalizeFilingText } from "../extractors/mda";
 import type { CompanyFactsResponse, ConceptResponse } from "../clients/sec";
 
@@ -178,7 +178,7 @@ export function createCloudflareSecFetcherService(
       cik: string;
       accessionNumber: string;
       primaryDocument: string;
-      formType: "10-K" | "10-Q";
+      formType: FilingFormType;
       tags: string[];
     }): Promise<{
       primaryDocumentUrl: string;

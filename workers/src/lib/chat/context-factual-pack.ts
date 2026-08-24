@@ -1,4 +1,4 @@
-import type { FilingCacheRecord, SourceChunkRecord } from "../../env";
+import type { FilingCacheRecord, FilingFormType, SourceChunkRecord } from "../../env";
 import { isAccountingEstimateRiskDistractor } from "./context-patterns";
 import {
   assessNarrativeQuality,
@@ -29,7 +29,7 @@ export interface ChatFactualPack {
   kind: "business_overview" | "revenue_breakdown" | "risk_factors";
   companyName: string;
   ticker: string;
-  formType: "10-K" | "10-Q";
+  formType: FilingFormType;
   periodOfReport: string;
   productsServices?: string[];
   reportableSegments?: string[];

@@ -1,4 +1,5 @@
 import type {
+  FilingFormType,
   FinancialFactPeriodKind,
   FinancialFactRole,
   FinancialFiscalQuarter,
@@ -9,7 +10,7 @@ export const HISTORICAL_FINANCIAL_FACT = Symbol.for("kabuyomi.historicalFinancia
 
 export interface HistoricalFinancialFactEvidence {
   filingKey: string;
-  formType: "10-K" | "10-Q";
+  formType: FilingFormType;
   logicalName: MetricSnapshot["logicalName"];
   tagUsed: string;
   value: number;
