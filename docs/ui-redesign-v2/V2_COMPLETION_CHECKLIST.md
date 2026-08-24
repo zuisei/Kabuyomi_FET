@@ -78,11 +78,9 @@
 - ~~AdMob 本番バナーユニットの発行~~ → 2026-08-24 オーナー「すでにある」。休眠実装が持っていた
   `ca-app-pub-1248492954379402/4700244637` を `productionBannerAdUnitID` に配線(F16)。
   実配信の確認は TestFlight / App Store ビルド初回
-- ~~App Attest 拡張検査の flip(計測待ち)~~ → 2026-08-24 オーナー判断で **やらない**。
-  `APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS = "true"` のまま据え置く。理由: 締めると
-  extensions を持たない端末が **assertion(毎リクエスト)で即落ちる**。本番 D1 実測で
-  verified/full は 4 件しかなく、外して壊すと全数に当たる。判断材料のログは
-  wrangler の OAuth トークンに Workers Observability 権限が無く読めない
+- ~~App Attest 拡張検査の flip(計測待ち)~~ → **論点ごと消滅(F17)**。core パスを advisory に
+  したので、`APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS` はもう「実ユーザーがアプリを使えるか」を
+  決めない。値は `"true"` のまま据え置き
 - ~~10/05 の remote config 失効対応(期日作業)~~ → 2026-08-24、**期日そのものを廃止**(F15)
 
 ## F. UI 再監査(2026-08-24、オーナー「全てにおいてゴミ」)
@@ -110,6 +108,18 @@
       accent バブル(onAccent 文字)、回答・作成中=elevated の角丸カード
 - [x] F9. オーナー再確認 OK(2026-08-24「いいねやっとよくなった」)。F 節完了。
       掃除候補(旧ストリームの不要コード、ようこそ文言)は非緊急の別タスクとして残す
+- [x] F17. 「App Attest は無視できる形にするべきでは」→ そのとおりだった。旧ポリシーは
+      **証明に成功した端末ほど壊れやすい**逆転を持っていた: `unavailable`(一度も証明して
+      いない)は core パスの assertion を免除される一方、`verified` になった端末は以後
+      /v1/chat が assertion 必須 → Apple 側の不調・extensions・counter 競合のどれかで 403。
+      本番の verified は 4 件、真面目に証明した人だけが人質。
+      core パス(chat / translate-quote / watchlist / refresh)を **advisory** に降格:
+      検証は走らせ、失敗は `app_attest_assertion_ignored`(failureClass 付き)に必ず残し、
+      リクエストは通す。守る対象が無い — チャットはクレジットを**消費**する側で、
+      クレジットは購入か付与でしか増えない。
+      `required` のまま残すのは `/v1/admob/reward-intents` だけ(クレジットが**増える**唯一の経路)。
+      ようこそクレジットも verified 限定のまま(accessMode 経由)。Worker 1263 / typecheck 緑
+
 - [x] F16. 「3(AdMob ユニット)はすでにある」→ 休眠実装(commit 50711ec)が持っていた
       `ca-app-pub-1248492954379402/4700244637` を `productionBannerAdUnitID` に配線。
       空を固定していたテストを、綴り・パブリッシャ一致・報酬型と別 ID の3本に差し替え。
