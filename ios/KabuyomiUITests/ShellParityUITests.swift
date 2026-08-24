@@ -26,11 +26,21 @@ final class ShellParityUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["AAPL"].exists)
         XCTAssertTrue(app.buttons["redesign.company.sources"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["redesign.company.more"].exists)
-        // 質問の道はワークスペースのコンポーザ1本。
-        XCTAssertTrue(app.buttons["redesign.composer.expand"].exists)
+        // 資料パネルに会話は埋め込まない。あるのは会話画面への入口だけ。
+        XCTAssertTrue(app.buttons["redesign.company.chat"].exists)
+        XCTAssertFalse(app.buttons["redesign.composer.expand"].exists)
         XCTAssertFalse(app.tabBars.firstMatch.exists)
         XCTAssertFalse(app.staticTexts["このアプリの署名を確認できません"].exists)
         capture("Research workspace")
+
+        // 会話画面はチャットの形: メッセージ面+下に固定のコンポーザ。
+        app.buttons["redesign.company.chat"].tap()
+        XCTAssertTrue(element("redesign.chat").waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["redesign.composer.expand"].waitForExistence(timeout: 8))
+        capture("Chat")
+
+        edgeSwipeBack()
+        XCTAssertTrue(app.buttons["redesign.company.sources"].waitForExistence(timeout: 8))
 
         app.buttons["redesign.company.sources"].tap()
         XCTAssertTrue(app.navigationBars["資料と根拠"].waitForExistence(timeout: 8))

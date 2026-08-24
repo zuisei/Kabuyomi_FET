@@ -8,6 +8,9 @@ import SwiftUI
 /// 設定・クレジット・会社ピッカーは引き続きシート(3枚目のタブは作らない)。
 private enum RedesignRoute: Hashable {
     case company(String)
+    /// 会社の会話画面。資料パネルに会話を埋め込まない(2026-08-24 オーナー
+    /// 「なんで情報パネルの中に会話UIまで埋め込もうとするわけ」)。
+    case chat(String)
     case sources(String)
     case source(String, LocalMessageSourceRef)
 }
@@ -103,7 +106,9 @@ struct RedesignRootView: View {
             NavigationStack(path: $summaryPath) {
                 RedesignConversationsView(
                     openConversation: { ticker in
-                        openConversation(ticker, filingKey: "", on: .summary)
+                        // 会話タブは会話画面へ直行。戻れば資料が下にいる。
+                        appModel.openConversation(for: ticker)
+                        setPath([.company(ticker), .chat(ticker)], on: .summary)
                     },
                     present: { sheet = $0 }
                 )
@@ -231,14 +236,19 @@ struct RedesignRootView: View {
             case .company(let ticker):
                 RedesignCompanyWorkspace(
                     ticker: ticker,
-                    // 会話タブから開いたら会話面に着地する(質問と回答が
-                    // 並んでいる場所へ真っ直ぐ)。ホームからは従来どおり資料面。
-                    prefersConversation: tab == .summary,
                     openCredits: openCredits,
                     openSources: { push(.sources(ticker), on: tab) },
+                    openChat: { push(.chat(ticker), on: tab) },
                     openSource: { push(.source(ticker, $0), on: tab) }
                 )
                 .id(ticker)
+            case .chat(let ticker):
+                RedesignChatScreen(
+                    ticker: ticker,
+                    openCredits: openCredits,
+                    openSource: { push(.source(ticker, $0), on: tab) }
+                )
+                .id("chat-\(ticker)")
             case .sources(let ticker):
                 if let company = appModel.companyPayload(for: ticker) {
                     RedesignSourceBrowser(
@@ -2696,28 +2706,19 @@ private struct RedesignCompanyWorkspace: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
     let ticker: String
-    var prefersConversation: Bool = false
     let openCredits: (CreditInitialSheet?) -> Void
     let openSources: () -> Void
+    let openChat: () -> Void
     let openSource: (LocalMessageSourceRef) -> Void
-    @State private var question = ""
-    /// コンポーザを開いているか。`RedesignComposer` 側の @State に持たせると
-    /// safeAreaInset の再生成で毎回初期値に戻り、開いた直後に畳まれてしまう。
-    @State private var composerExpanded = false
-    @State private var surface: CompanySurface = .document
-    @State private var deferredConsentQuestion: String?
     @State private var pendingNewFiling: CompanyPayload?
-    /// 面ごとのスクロール位置。表示中の面の値だけを見てヘッダの収束を決める。
     @State private var scrollOffsets: [String: CGFloat] = [:]
     @State private var isHeaderCollapsed = false
-    @FocusState private var composerFocused: Bool
 
     private static let documentSurfaceID = "document"
-    private static let conversationSurfaceID = "conversation"
     private static let scrollSpace = "redesign.company.scroll"
 
     private var activeScrollOffset: CGFloat {
-        scrollOffsets[surface == .conversation ? Self.conversationSurfaceID : Self.documentSurfaceID] ?? 0
+        scrollOffsets[Self.documentSurfaceID] ?? 0
     }
 
     private var normalizedTicker: String {
@@ -2740,55 +2741,11 @@ private struct RedesignCompanyWorkspace: View {
         !messages.isEmpty || pendingChat != nil
     }
 
-    /// 資料/会話の切替。標準の segmented control は灰色の錠剤が世界観から
-    /// 浮いていた(2026-08-24 オーナー再監査)。テキスト+アクセント下線の
-    /// 2タブに置き換える。選択は色と下線の両方で示す(色覚だけに頼らない)。
-    private var surfacePicker: some View {
-        HStack(spacing: 0) {
-            surfaceTab("資料", surface: .document)
-            surfaceTab("会話", surface: .conversation)
-        }
-        .background(KabuyomiTheme.paper)
-        .overlay(alignment: .bottom) { KabuyomiHairline() }
-        .accessibilityIdentifier("redesign.company.surface")
-    }
-
-    private func surfaceTab(_ title: String, surface target: CompanySurface) -> some View {
-        let isSelected = surface == target
-        return Button {
-            withAnimation(.easeInOut(duration: 0.15)) { surface = target }
-        } label: {
-            Text(title)
-                .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? KabuyomiTheme.ink : KabuyomiTheme.inkMuted)
-                .frame(maxWidth: .infinity, minHeight: 42)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(isSelected ? KabuyomiTheme.accent : .clear)
-                        .frame(height: 2)
-                }
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-        .accessibilityIdentifier("redesign.company.surface.\(target == .document ? "document" : "conversation")")
-    }
-
     private func documentSurface(company: CompanyPayload) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 RedesignResearchOverview(company: company) { source in
                     openSource(source)
-                }
-
-                if !hasConversation {
-                    KabuyomiHairline().padding(.horizontal, 18)
-                    RedesignQuestionStarters(company: company) { prompt in
-                        question = prompt
-                        composerExpanded = true
-                        composerFocused = true
-                    }
                 }
 
                 Color.clear.frame(height: 12)
@@ -2802,46 +2759,6 @@ private struct RedesignCompanyWorkspace: View {
         // 本文より短い資料でも読み面が途中で切れないよう、面ごと paper で塗る。
         .background(KabuyomiTheme.paper)
         .scrollDismissesKeyboard(.interactively)
-    }
-
-    private func conversationSurface(company: CompanyPayload) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    conversationSection(company: company)
-                    Color.clear
-                        .frame(height: 12)
-                        .id("research-end")
-                }
-                .frame(maxWidth: 760)
-                .frame(maxWidth: .infinity)
-                .background(KabuyomiTheme.paper)
-                .redesignScrollOffsetReader(id: Self.conversationSurfaceID, in: Self.scrollSpace)
-            }
-            .coordinateSpace(name: Self.scrollSpace)
-            .background(KabuyomiTheme.paper)
-            .scrollDismissesKeyboard(.interactively)
-            // 最新に貼りつくのは会話の面だけ。資料の読み位置は動かさない。
-            // 開いた瞬間も末尾へ。会話は古い順に積むので、ここが無いと
-            // 「会話」を開くたびに最初の質問が見え、最新は画面外になる
-            // (2026-08-22 実機レビュー)。LazyVStack の末尾はまだ実体化して
-            // いないことがあるので、1ターン遅らせてから寄せる。
-            .onAppear {
-                DispatchQueue.main.async {
-                    proxy.scrollTo("research-end", anchor: .bottom)
-                }
-            }
-            .onChange(of: pendingChat?.id) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo("research-end", anchor: .bottom)
-                }
-            }
-            .onChange(of: messages.count) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo("research-end", anchor: .bottom)
-                }
-            }
-        }
     }
 
     var body: some View {
@@ -2882,41 +2799,14 @@ private struct RedesignCompanyWorkspace: View {
                     .frame(maxWidth: .infinity)
                     .background(KabuyomiTheme.paper)
 
-                    if hasConversation {
-                        surfacePicker
-                    }
-
-                    // 資料と会話は読み方が逆。資料は据え置きで参照したいが、
-                    // 会話は下へ伸び最新に貼りつきたい。1本のスクロールに入れると
-                    // 回答が増えるほど業績が上へ押し流され、数字を見るたびに
-                    // 会話を全部遡ることになる。面を分けて横で行き来する。
-                    TabView(selection: $surface) {
-                        documentSurface(company: company)
-                            .tag(CompanySurface.document)
-                        if hasConversation {
-                            conversationSurface(company: company)
-                                .tag(CompanySurface.conversation)
+                    documentSurface(company: company)
+                        .onPreferenceChange(RedesignScrollOffsetKey.self) { offsets in
+                            scrollOffsets = offsets
                         }
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                    .onPreferenceChange(RedesignScrollOffsetKey.self) { offsets in
-                        scrollOffsets = offsets
-                    }
                 }
                 .onChange(of: activeScrollOffset) { _, offset in
                     let next = redesignHeaderCollapsed(current: isHeaderCollapsed, offset: offset)
                     if next != isHeaderCollapsed { isHeaderCollapsed = next }
-                }
-                .onAppear {
-                if prefersConversation && hasConversation {
-                    surface = .conversation
-                }
-            }
-            .onChange(of: hasConversation) { _, exists in
-                    // 最初の質問を送ったら回答の面へ連れていく。
-                    // 逆に会話が消えたら資料へ戻す。選択したまま会話タグが外れると
-                    // TabView に対応するページが無くなり、空の面から戻れなくなる。
-                    surface = exists ? .conversation : .document
                 }
             } else if let state = appModel.companyLoadState(for: normalizedTicker) {
                 RedesignCompanyLoadState(state: state) {
@@ -2976,6 +2866,200 @@ private struct RedesignCompanyWorkspace: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
+            // 資料パネルに会話を埋め込まない。ここは会話への入口だけ。
+            if company != nil {
+                Button(action: openChat) {
+                    HStack(spacing: 8) {
+                        Image(systemName: hasConversation ? "bubble.left.and.bubble.right.fill" : "bubble.left")
+                            .font(.footnote.weight(.semibold))
+                            .accessibilityHidden(true)
+                        Text(hasConversation ? "会話を続ける" : "この資料について質問する")
+                            .font(.subheadline.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                        if hasConversation && !messages.isEmpty {
+                            Text("回答 \(messages.filter { $0.role != "user" }.count)件")
+                                .font(KabuyomiTheme.figure(.caption2, weight: .semibold))
+                                .foregroundStyle(KabuyomiTheme.onAccent.opacity(0.75))
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .accessibilityHidden(true)
+                    }
+                    .foregroundStyle(KabuyomiTheme.onAccent)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 13)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(KabuyomiTheme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(KabuyomiTheme.paper)
+                .overlay(alignment: .top) { KabuyomiHairline(color: KabuyomiTheme.separatorStrong) }
+                .accessibilityIdentifier("redesign.company.chat")
+            }
+        }
+        .task(id: normalizedTicker) {
+            await appModel.loadCompany(ticker: normalizedTicker)
+            appModel.recordCompanyVisit(ticker: normalizedTicker)
+        }
+        .alert(
+            "新しい決算資料が見つかりました",
+            isPresented: Binding(
+                get: { pendingNewFiling != nil },
+                set: { if !$0 { pendingNewFiling = nil } }
+            ),
+            presenting: pendingNewFiling
+        ) { filing in
+            Button("新しい会話を開始") {
+                appModel.startNewConversation(with: filing)
+                pendingNewFiling = nil
+            }
+            Button("今の会話を続ける", role: .cancel) {
+                pendingNewFiling = nil
+            }
+        } message: { _ in
+            Text("現在の会話は前の資料に紐づいています。新しい資料で別の会話を開始しますか？")
+        }
+    }
+
+    private func toggleSavedState() {
+        Task {
+            if appModel.isTickerInWatchlist(normalizedTicker) {
+                await appModel.removeFromWatchlist(normalizedTicker)
+            } else {
+                await appModel.saveTicker(normalizedTicker)
+            }
+        }
+    }
+
+    private func refresh() {
+        Task {
+            let result = await appModel.refreshConversationCompany(ticker: normalizedTicker)
+            if case .needsConfirmation(let company) = result {
+                pendingNewFiling = company
+            } else if case .unchanged = result {
+                appModel.recordCompanyVisit(ticker: normalizedTicker)
+            }
+        }
+    }
+}
+
+private func formattedFilingDate(_ raw: String) -> String {
+    let prefix = String(raw.prefix(10))
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "ja_JP")
+    formatter.dateFormat = "yyyy-MM-dd"
+    guard let date = formatter.date(from: prefix) else { return prefix }
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .none
+    return formatter.string(from: date)
+}
+
+/// 会社の会話画面。メッセージが上に積み、入力欄が下に固定される普通のチャットの形。
+/// 資料パネル(ワークスペース)には埋め込まない — 資料は読む場所、ここは話す場所。
+private struct RedesignChatScreen: View {
+    @Environment(AppModel.self) private var appModel
+    let ticker: String
+    let openCredits: (CreditInitialSheet?) -> Void
+    let openSource: (LocalMessageSourceRef) -> Void
+
+    @State private var question = ""
+    /// コンポーザを開いているか。`RedesignComposer` 側の @State に持たせると
+    /// safeAreaInset の再生成で毎回初期値に戻り、開いた直後に畳まれてしまう。
+    @State private var composerExpanded = false
+    @State private var deferredConsentQuestion: String?
+    @FocusState private var composerFocused: Bool
+
+    private var normalizedTicker: String {
+        ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private var company: CompanyPayload? {
+        appModel.companyPayload(for: normalizedTicker)
+    }
+
+    private var messages: [LocalChatMessage] {
+        appModel.chatHistory(for: normalizedTicker)
+    }
+
+    private var pendingChat: PendingChatState? {
+        appModel.pendingChat(for: normalizedTicker)
+    }
+
+    private var navigationTitleText: String {
+        guard let company else { return normalizedTicker }
+        let curated = homeBoardCompanyName(companyName: company.companyName, ticker: company.ticker)
+        return curated.isEmpty ? normalizedTicker : curated
+    }
+
+    var body: some View {
+        Group {
+            if let company {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 16) {
+                            // どの資料に基づく会話かの1行。資料そのものは戻れば下にいる。
+                            Text("\(company.formType) ・ \(formattedFilingDate(company.filedAt)) に基づく会話")
+                                .font(KabuyomiTheme.figure(.caption2))
+                                .foregroundStyle(KabuyomiTheme.inkMuted)
+                                .padding(.top, 14)
+
+                            if messages.isEmpty && pendingChat == nil {
+                                emptyState(company: company)
+                            }
+
+                            ForEach(messages) { message in
+                                RedesignResearchMessage(message: message, company: company) { source in
+                                    openSource(source)
+                                }
+                            }
+
+                            if let pendingChat {
+                                RedesignPendingResearch(question: pendingChat.question)
+                                    .id(pendingChat.id)
+                            }
+
+                            Color.clear
+                                .frame(height: 10)
+                                .id("chat-end")
+                        }
+                        .padding(.horizontal, 18)
+                        .frame(maxWidth: 760)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .background(KabuyomiTheme.paper)
+                    .scrollDismissesKeyboard(.interactively)
+                    // 開いた瞬間もメッセージ追加時も末尾へ(チャットの常識に合わせる)。
+                    .onAppear {
+                        DispatchQueue.main.async {
+                            proxy.scrollTo("chat-end", anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: pendingChat?.id) { _, _ in
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo("chat-end", anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: messages.count) { _, _ in
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo("chat-end", anchor: .bottom)
+                        }
+                    }
+                }
+            } else {
+                ProgressView()
+                    .tint(KabuyomiTheme.accent)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(KabuyomiTheme.paper)
+        .navigationTitle(navigationTitleText)
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("redesign.chat")
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if company != nil {
                 RedesignComposer(
                     question: $question,
@@ -2999,7 +3083,6 @@ private struct RedesignCompanyWorkspace: View {
                 question = pending
             }
             await appModel.loadCompany(ticker: normalizedTicker)
-            appModel.recordCompanyVisit(ticker: normalizedTicker)
         }
         .onChange(of: appModel.activeAlert?.id) { _, alertID in
             guard alertID == nil, let deferredConsentQuestion else { return }
@@ -3010,51 +3093,23 @@ private struct RedesignCompanyWorkspace: View {
                 question = deferredConsentQuestion
             }
         }
-        .alert(
-            "新しい決算資料が見つかりました",
-            isPresented: Binding(
-                get: { pendingNewFiling != nil },
-                set: { if !$0 { pendingNewFiling = nil } }
-            ),
-            presenting: pendingNewFiling
-        ) { filing in
-            Button("新しい会話を開始") {
-                appModel.startNewConversation(with: filing)
-                pendingNewFiling = nil
+    }
+
+    /// まだ何も聞いていないとき。提案チップは入力欄に載せるだけ(自動送信禁止は7月ルール)。
+    private func emptyState(company: CompanyPayload) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("この資料について気になることを聞いてください")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(KabuyomiTheme.ink)
+            RedesignQuestionStarters(company: company) { prompt in
+                question = prompt
+                composerExpanded = true
+                composerFocused = true
             }
-            Button("今の会話を続ける", role: .cancel) {
-                pendingNewFiling = nil
-            }
-        } message: { _ in
-            Text("現在の会話は前の資料に紐づいています。新しい資料で別の会話を開始しますか？")
         }
     }
 
-    @ViewBuilder
-    private func conversationSection(company: CompanyPayload) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("リサーチノート")
-                .font(.footnote.weight(.bold))
-                .tracking(KabuyomiTheme.microLabelTracking)
-                .foregroundStyle(KabuyomiTheme.inkMuted)
-                .padding(.top, 16)
-
-            ForEach(messages) { message in
-                RedesignResearchMessage(message: message, company: company) { source in
-                    openSource(source)
-                }
-            }
-
-            if let pendingChat {
-                RedesignPendingResearch(question: pendingChat.question)
-                    .id(pendingChat.id)
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 20)
-    }
-
-    /// ストリームのアスクバーと同じ関数。文言も優先順位もここでは決めない。
+    /// ストリーム時代と同じ判定関数。文言も優先順位もここでは決めない。
     private var composerDisabledReason: String? {
         redesignComposerDisabledReason(
             isSending: pendingChat != nil,
@@ -3094,38 +3149,6 @@ private struct RedesignCompanyWorkspace: View {
             }
         }
     }
-
-    private func toggleSavedState() {
-        Task {
-            if appModel.isTickerInWatchlist(normalizedTicker) {
-                await appModel.removeFromWatchlist(normalizedTicker)
-            } else {
-                await appModel.saveTicker(normalizedTicker)
-            }
-        }
-    }
-
-    private func refresh() {
-        Task {
-            let result = await appModel.refreshConversationCompany(ticker: normalizedTicker)
-            if case .needsConfirmation(let company) = result {
-                pendingNewFiling = company
-            } else if case .unchanged = result {
-                appModel.recordCompanyVisit(ticker: normalizedTicker)
-            }
-        }
-    }
-}
-
-private func formattedFilingDate(_ raw: String) -> String {
-    let prefix = String(raw.prefix(10))
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "ja_JP")
-    formatter.dateFormat = "yyyy-MM-dd"
-    guard let date = formatter.date(from: prefix) else { return prefix }
-    formatter.dateStyle = .medium
-    formatter.timeStyle = .none
-    return formatter.string(from: date)
 }
 
 private struct RedesignWorkspaceContextHeader: View {
