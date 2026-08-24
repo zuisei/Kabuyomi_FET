@@ -6,7 +6,7 @@ const PRODUCTION_HOSTNAME = "kabuyomi-api.dznqjmctk7.workers.dev";
 // refresh (expiry extension, legacy bridge sunset) shipped without updating
 // this pin, so the smoke failed on version identity while asserting a stale
 // review. Update this line whenever remote-config:refresh-reviewed runs.
-const REVIEWED_CONFIG_VERSION = "production-config-refresh-20260821-v1";
+const REVIEWED_CONFIG_VERSION = "production-config-refresh-20260824-v1";
 const SMOKE_UUID_NAMESPACE = "713f632d-4c5c-5d90-9e9c-11d8fc7f6750";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const CHECK_ONLY = process.argv.includes("--check-only");
