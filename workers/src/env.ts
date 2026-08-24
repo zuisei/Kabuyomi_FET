@@ -13,6 +13,8 @@ export interface Env {
   LLM_PROVIDER?: "gemini-legacy" | "gemini" | "openai" | "disabled";
   OPENAI_API_KEY?: string;
   OPENAI_CHAT_MODEL?: string;
+  /** 有料プラン(free 以外)と dev_unlimited に使う上位チャットモデル。未設定なら全員 OPENAI_CHAT_MODEL。 */
+  OPENAI_CHAT_MODEL_PREMIUM?: string;
   OPENAI_PROMPT_ID?: string;
   OPENAI_PROMPT_VERSION?: string;
   OPENAI_TIMEOUT_MS?: string;

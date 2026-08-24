@@ -439,6 +439,9 @@ struct UsageCapabilitiesPayload: Decodable, Hashable {
     let webSupplementEnabled: Bool
     let consumablePurchasesEnabled: Bool
     let accountRecoveryReady: Bool
+    /// 有料プランが上位AIモデルで回答するか(Worker の OPENAI_CHAT_MODEL_PREMIUM 設定時のみ)。
+    /// 旧 Worker には無いフィールドなので optional。
+    let premiumChatModelEnabled: Bool?
     let rewardedCredit: RewardedCreditCapabilityPayload
 }
 

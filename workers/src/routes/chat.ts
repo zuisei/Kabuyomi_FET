@@ -23,6 +23,7 @@ import { QUESTION_TOO_SHORT_MESSAGE, questionHasSubstance } from "../lib/chat/qu
 import { hashForLog, logErrorEvent, suffixForLog } from "../lib/logging";
 import { json, notFound, serverError, unavailable } from "../lib/response";
 import type { Env } from "../env";
+import { chatEnvForIdentity } from "../lib/chat/premium-model";
 import { isCreditBillingEnabledForIdentity, type RemoteConfig } from "../lib/remote-config";
 import type { RouteHandler } from "./types";
 
@@ -103,7 +104,8 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
       filing: requestedFiling,
       identity,
       operationId: payload.operationId,
-      env,
+      // 有料プランは上位モデル(OPENAI_CHAT_MODEL_PREMIUM)で回答する。
+      env: chatEnvForIdentity(env, identity),
       config,
       ctx
     });

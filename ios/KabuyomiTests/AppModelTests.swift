@@ -3885,6 +3885,7 @@ final class AppModelTests: XCTestCase {
                 webSupplementEnabled: false,
                 consumablePurchasesEnabled: consumablePurchasesEnabled,
                 accountRecoveryReady: consumablePurchasesEnabled,
+                premiumChatModelEnabled: nil,
                 rewardedCredit: RewardedCreditCapabilityPayload(
                     enabled: false,
                     rewardedCreditEnabled: false,

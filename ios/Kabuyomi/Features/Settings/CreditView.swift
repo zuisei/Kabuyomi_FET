@@ -412,6 +412,10 @@ struct CreditView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     PlanSheetHeader()
 
+                    if premiumModelPerkEnabled {
+                        PremiumModelPerkCard()
+                    }
+
                     ForEach(appModel.subscriptionProducts) { product in
                         SubscriptionPlanRow(
                             product: product,
@@ -975,6 +979,10 @@ struct CreditView: View {
         RewardedCreditReviewUI.isVisible(capability: appModel.usage?.capabilities?.rewardedCredit)
     }
 
+    private var premiumModelPerkEnabled: Bool {
+        appModel.usage?.capabilities?.premiumChatModelEnabled == true
+    }
+
     private var billingActionsCanRun: Bool {
         appModel.isCreditBillingEnabled
             && appModel.authenticatedCreditActionsAvailable
@@ -1167,6 +1175,39 @@ struct CreditView: View {
         formatter.timeZone = TimeZone(identifier: "Asia/Tokyo")
         formatter.dateFormat = "MM/dd HH:mm"
         return formatter.string(from: date)
+    }
+}
+
+/// サブスク限定の実利(クレジット以外)。Worker が premium モデルを設定している時だけ出す —
+/// 出せない約束を先に書かない(2026-08-24 オーナー「クレジットだけだと特別感がない」)。
+private struct PremiumModelPerkCard: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            // sparkles は Phase 6 で「AI 臭」として全廃した字形。ここも使わない。
+            Image(systemName: "cpu")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(KabuyomiTheme.accent)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("有料プランは上位AIモデルで回答")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                Text("同じ質問でも、読み解きの深い上位モデルが日本語で答えます。無料プランは標準モデルです。")
+                    .font(.caption)
+                    .foregroundStyle(KabuyomiTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(KabuyomiTheme.accentMist)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(KabuyomiTheme.accent.opacity(0.3), lineWidth: 1)
+        )
     }
 }
 
