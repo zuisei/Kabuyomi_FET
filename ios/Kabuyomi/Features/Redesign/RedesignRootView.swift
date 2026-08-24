@@ -1138,21 +1138,8 @@ private struct RedesignStreamAnswerCard: View {
             .accessibilityIdentifier("redesign.stream.answer.\(entry.id)")
 
             if !entry.sourceChips.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    RedesignSectionHeader(
-                        title: "根拠",
-                        trailing: "\(entry.sourceChips.count)件",
-                        showsRule: false
-                    )
-                    ForEach(entry.sourceChips) { descriptor in
-                        RedesignSourceChip(descriptor: descriptor) {
-                            if let source = descriptor.source { openSource(source) }
-                        }
-                        .accessibilityIdentifier("redesign.citation.\(descriptor.id)")
-                        if descriptor.id != entry.sourceChips.last?.id {
-                            KabuyomiHairline()
-                        }
-                    }
+                RedesignCompactSourceChips(descriptors: entry.sourceChips) { descriptor in
+                    if let source = descriptor.source { openSource(source) }
                 }
             }
         }
@@ -1410,10 +1397,8 @@ private struct RedesignSummaryView: View {
     private var boardSection: some View {
         Section {
             ForEach(boardRows) { row in
-                RedesignBoardRow(
+                RedesignSummaryCompanyCard(
                     row: row,
-                    identifierPrefix: "redesign.summary",
-                    showsAllDeltas: true,
                     action: { openCompany(row.ticker) }
                 )
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -1425,6 +1410,26 @@ private struct RedesignSummaryView: View {
                     }
                 }
             }
+
+            // 盤面の下に常に追加導線を1つ。1社だけの画面が「終わり」に見えないように。
+            Button {
+                present(.companyPicker(.select))
+            } label: {
+                Label("銘柄を追加", systemImage: "plus")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(KabuyomiTheme.accent)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(KabuyomiTheme.separatorStrong, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("redesign.summary.add")
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
         } header: {
             RedesignListSectionHeader(title: "盤面", trailing: "\(boardRows.count)社")
         }
@@ -1908,6 +1913,127 @@ private struct RedesignDeltaPillRow: View {
             RedesignDeltaPill(display: delta.display, label: delta.label)
                 .fixedSize()
         }
+    }
+}
+
+/// サマリータブの会社カード。行+ピル3連は「1社しか無い画面」で情報が痩せて
+/// 見えた(2026-08-24 オーナー指摘「全てにおいてゴミ」)。カード1枚に
+/// 指標3列を面で置き、数字を主役にする。ピッカーは従来の行のまま。
+private struct RedesignSummaryCompanyCard: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let row: HomeBoardRow
+    let action: () -> Void
+
+    private var filingDetail: String {
+        if row.isPlaceholder { return "資料を準備中" }
+        guard !row.formType.isEmpty else { return "資料を確認" }
+        return "\(row.formType) ・ \(row.filedAt.formatted(date: .abbreviated, time: .omitted))"
+    }
+
+    private var accessibilityText: String {
+        var parts: [String] = []
+        if row.isUnread { parts.append("未読") }
+        parts.append(row.ticker)
+        if !row.companyName.isEmpty { parts.append(row.companyName) }
+        parts.append(filingDetail)
+        parts.append(contentsOf: row.deltas.map(\.accessibilityText))
+        if row.isSaved { parts.append("保存済み") }
+        return parts.joined(separator: "、")
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                header
+                if !row.deltas.isEmpty {
+                    metricStrip
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(KabuyomiTheme.paper, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("redesign.summary.open.\(row.ticker)")
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                RedesignUnreadDot(isUnread: row.isUnread)
+                Text(row.ticker)
+                    .font(KabuyomiTheme.figure(.title2, weight: .bold))
+                    .foregroundStyle(KabuyomiTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                if row.isSaved {
+                    Image(systemName: "bookmark.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(KabuyomiTheme.accent)
+                        .accessibilityHidden(true)
+                }
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Spacer(minLength: 8)
+                    Text(filingDetail)
+                        .font(KabuyomiTheme.figure(.caption2))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+            }
+            if !row.companyName.isEmpty {
+                Text(row.companyName)
+                    .font(.footnote)
+                    .foregroundStyle(KabuyomiTheme.inkSoft)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+            }
+            if dynamicTypeSize.isAccessibilitySize {
+                Text(filingDetail)
+                    .font(KabuyomiTheme.figure(.caption2))
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// 指標3列。ラベルを上、数字を下に置き、色は数字と矢印だけに使う
+    /// (ピルの面塗りは廃止 — 小豆色の箱が並ぶと濁って見えた)。
+    @ViewBuilder
+    private var metricStrip: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(row.deltas) { delta in metricCell(delta) }
+            }
+        } else {
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(row.deltas) { delta in
+                    metricCell(delta)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    private func metricCell(_ delta: HomeBoardDelta) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(delta.label)
+                .kabuyomiMicroLabel()
+            HStack(spacing: 3) {
+                Image(systemName: delta.display.direction == .negative ? "arrow.down.right" : "arrow.up.right")
+                    .font(.system(size: 11, weight: .bold))
+                Text(delta.display.text)
+                    .font(KabuyomiTheme.figure(.callout, weight: .semibold))
+            }
+            .foregroundStyle(delta.display.tint)
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -2785,9 +2911,16 @@ private struct RedesignWorkspaceContextHeader: View {
     let company: CompanyPayload
     let openSources: () -> Void
 
+    /// 盤面・ストリームと同じ表記の関所。畳んだバーだけ関所を通り、
+    /// 展開ヘッダが生の SEC 名(AMAZON COM INC)で叫んでいた(2026-08-24)。
+    private var displayName: String {
+        let curated = homeBoardCompanyName(companyName: company.companyName, ticker: company.ticker)
+        return curated.isEmpty ? company.companyName : curated
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(company.companyName)
+            Text(displayName)
                 .font(.title3.weight(.bold))
                 .foregroundStyle(KabuyomiTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
@@ -3334,15 +3467,11 @@ private struct RedesignResearchMessage: View {
     /// `structureAssistantMessage` が複数文を意図的に結論へまとめる仕様のため、
     /// 常に .title3 で描くと見出しサイズの塊が数行続いて読みにくくなる。
     /// 長さで段階的に落とし、短い結論だけを見出しとして立てる。
+    /// 回答は読み物。見出しサイズ(.title3)で数行続くと威圧的で読みにくい
+    /// (2026-08-24 オーナー指摘)。常に本文サイズに置き、短い結論だけ
+    /// 太さで立てる。
     private var conclusionFont: Font {
-        switch structuredAnswer.conclusion.count {
-        case ..<65:
-            return .title3.weight(.regular)
-        case ..<141:
-            return .subheadline.weight(.semibold)
-        default:
-            return .subheadline
-        }
+        structuredAnswer.conclusion.count < 65 ? .body.weight(.medium) : .body
     }
 
     var body: some View {
@@ -3387,7 +3516,7 @@ private struct RedesignResearchMessage: View {
                 Text(structuredAnswer.conclusion)
                     .font(conclusionFont)
                     .foregroundStyle(KabuyomiTheme.ink)
-                    .lineSpacing(4)
+                    .lineSpacing(5)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -3423,16 +3552,10 @@ private struct RedesignResearchMessage: View {
                 }
 
                 if !sourceChips.isEmpty {
-                    VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 6) {
                         RedesignSectionHeader(title: "根拠", trailing: "\(sourceChips.count)件", showsRule: false)
-                        ForEach(sourceChips) { descriptor in
-                            RedesignSourceChip(descriptor: descriptor) {
-                                if let source = descriptor.source { openSource(source) }
-                            }
-                            .accessibilityIdentifier("redesign.citation.\(descriptor.id)")
-                            if descriptor.id != sourceChips.last?.id {
-                                KabuyomiHairline()
-                            }
+                        RedesignCompactSourceChips(descriptors: sourceChips) { descriptor in
+                            if let source = descriptor.source { openSource(source) }
                         }
                     }
                 }

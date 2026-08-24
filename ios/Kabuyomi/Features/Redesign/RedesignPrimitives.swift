@@ -293,6 +293,54 @@ struct RedesignSourceChip: View {
     }
 }
 
+/// 根拠チップの横並び版。回答ごとに全文断片つきの縦積みが繰り返されると、
+/// どのカードも下半分が同じ灰色の帯になる(2026-08-24 オーナー指摘)。
+/// 一覧ではバッジ+ラベルの1行に畳み、断片は開いた先(引用詳細)に任せる。
+struct RedesignCompactSourceChips: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let descriptors: [SourceChipDescriptor]
+    let open: (SourceChipDescriptor) -> Void
+
+    var body: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(descriptors) { descriptor in chip(descriptor) }
+            }
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(descriptors) { descriptor in chip(descriptor) }
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        }
+    }
+
+    private func chip(_ descriptor: SourceChipDescriptor) -> some View {
+        Button {
+            open(descriptor)
+        } label: {
+            HStack(spacing: 6) {
+                Text(descriptor.badge + (descriptor.ordinal.map { " \($0)" } ?? ""))
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(0.5)
+                    .foregroundStyle(KabuyomiTheme.accent)
+                Text(descriptor.label)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(KabuyomiTheme.inkSoft)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 9)
+            .frame(minHeight: 30)
+            .background(KabuyomiTheme.inputWell, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(descriptor.accessibilityText)
+        .accessibilityIdentifier("redesign.citation.\(descriptor.id)")
+    }
+}
+
 /// セクション種別バッジ。根拠チップと引用詳細の見出しで同じ形を使い、
 /// 一覧で見た行と開いた画面が同じものだと分かるようにする。
 struct RedesignSourceBadge: View {
