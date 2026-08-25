@@ -7,9 +7,16 @@ import type {
   MetricSnapshot,
   TickerRecord
 } from "../env";
+import { normalizeFilingText } from "../extractors/mda";
+import {
+  findLatestQuarterlyNarrative,
+  type QuarterlyNarrative,
+  type SixKFilingRef
+} from "../lib/filings/quarterly-narrative";
 import {
   fetchFilingAssetsFromFetcher,
   fetchFilingHtmlFromFetcher,
+  listFilingDocumentsFromFetcher,
   fetchMetricsFromFetcher,
   fetchPreparedFilingFromFetcher,
   fetchSubmissionsFromFetcher,
@@ -587,6 +594,46 @@ export function buildPrimaryDocumentUrl(filing: FilingReference): string {
   return `https://www.sec.gov/Archives/edgar/data/${Number(filing.cik)}/${accessionWithoutDashes(
     filing.accessionNumber
   )}/${filing.primaryDocument}`;
+}
+
+/// 20-F 提出者の直近四半期を、会話が引用できる文章として拾ってくる。
+///
+/// 20-F は年 1 回なので、これが無いと外国企業は 1 年前の話しかできない。
+/// **数値は取り込まない**(プレスリリースは現地通貨で、指標は USD で揃えてある)。
+export async function loadQuarterlyNarrative(
+  filing: FilingReference,
+  env: Env
+): Promise<QuarterlyNarrative | null> {
+  const submissions = await fetchSubmissions(filing.cik, env);
+  const recent = submissions.filings.recent;
+  const sixKFilings: SixKFilingRef[] = [];
+  for (let index = 0; index < recent.form.length; index += 1) {
+    if (recent.form[index]?.trim().toUpperCase() !== "6-K") continue;
+    sixKFilings.push({
+      accessionNumber: recent.accessionNumber[index]!,
+      filedAt: recent.filingDate[index]!,
+      primaryDocument: recent.primaryDocument[index] ?? ""
+    });
+  }
+  if (sixKFilings.length === 0) return null;
+
+  const documentUrl = (accessionNumber: string, documentName: string) =>
+    `https://www.sec.gov/Archives/edgar/data/${Number(filing.cik)}/${accessionWithoutDashes(
+      accessionNumber
+    )}/${documentName}`;
+
+  return findLatestQuarterlyNarrative(sixKFilings, {
+    listDocuments: async (accessionNumber) =>
+      (await listFilingDocumentsFromFetcher(filing.cik, accessionNumber, env)).documents,
+    readDocumentText: async (accessionNumber, documentName) => {
+      const response = await fetchFilingHtmlFromFetcher(
+        { ...filing, accessionNumber, primaryDocument: documentName },
+        env
+      );
+      return normalizeFilingText(response.html);
+    },
+    buildDocumentUrl: documentUrl
+  });
 }
 
 export async function fetchFilingHtml(filing: FilingReference, env: Env): Promise<string> {

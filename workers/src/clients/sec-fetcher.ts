@@ -75,6 +75,14 @@ export async function fetchFilingHtmlFromFetcher(filing: FilingReference, env: E
   });
 }
 
+export async function listFilingDocumentsFromFetcher(
+  cik: string,
+  accessionNumber: string,
+  env: Env
+): Promise<{ documents: string[] }> {
+  return fetcherRequest(env, "/internal/sec/filing-documents", { cik, accessionNumber });
+}
+
 export async function fetchMetricsFromFetcher(
   cik: string,
   tags: string[],

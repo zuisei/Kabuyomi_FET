@@ -1,12 +1,22 @@
 import type { Env, FilingCacheRecord, FilingReference, MetricSnapshot, SourceChunkRecord } from "../../env";
 import { generateModelSummary } from "../../clients/llm/provider";
-import { buildPrimaryDocumentUrl, fetchFilingAssets, fetchMetricSnapshots, fetchPreparedFiling } from "../../clients/sec";
+import {
+  buildPrimaryDocumentUrl,
+  fetchFilingAssets,
+  fetchMetricSnapshots,
+  fetchPreparedFiling,
+  loadQuarterlyNarrative
+} from "../../clients/sec";
 import { extractMDASectionWithDiagnostics, normalizeFilingText } from "../../extractors/mda";
 import { AppError } from "../errors";
 import { extractCompanyWebsiteUrl } from "./company-website";
 import { logLlmUsage } from "../llm-usage";
 import { logEvent } from "../logging";
 import { metricLabel } from "../metrics";
+import {
+  quarterlyNarrativeSectionTitle,
+  type QuarterlyNarrative
+} from "./quarterly-narrative";
 import type { RemoteConfig } from "../remote-config";
 
 export async function ingestFiling(
@@ -124,6 +134,32 @@ export async function ingestFiling(
     marginDriverSearchText: html ? normalizeFilingText(html) : extractedText,
     primaryDocumentUrl
   });
+
+  // 20-F は年 1 回しか出ない。会話が直近の四半期に答えられるよう、
+  // 6-K の業績プレスリリースを**本文として**足す(2026-08-25)。
+  // 数値は取り込まない — プレスリリースは現地通貨で、指標は USD で揃えてある。
+  // 取れなくても取り込みは続ける。四半期が無いのは、資料が開けないより軽い。
+  if (filing.formType === "20-F") {
+    try {
+      const quarterly = await loadQuarterlyNarrative(filing, env);
+      if (quarterly) {
+        sourceChunks.push(...buildQuarterlyNarrativeChunks(quarterly, sourceChunks.length));
+        logEvent("quarterly_narrative_attached", {
+          ticker: filing.ticker,
+          accessionNumber: quarterly.accessionNumber,
+          kind: quarterly.kind,
+          quarter: quarterly.period.quarter,
+          calendarYear: quarterly.period.calendarYear
+        });
+      }
+    } catch (error) {
+      logEvent("quarterly_narrative_skipped", {
+        ticker: filing.ticker,
+        failureClass: error instanceof Error ? error.name : typeof error
+      });
+    }
+  }
+
   const summaryStartedAt = Date.now();
   // 以前は GEMINI_API_KEY を undefined にしてフォールバックへ落としていたが、
   // プロバイダが増えると成立しないため意図を引数で表す。
@@ -196,6 +232,39 @@ export async function ingestFiling(
     extractorVersion: config.extractorVersion,
     promptVersion: config.promptVersion
   };
+}
+
+/// 6-K の本文を、引用できる単位に割って source chunk にする。
+///
+/// `sectionType` は `md_a` のまま。会話側の引用選択が全部この型で書かれており、
+/// 新しい型を足すと**どの選択にも引っかからず、足した意味が無くなる**。
+/// 年次報告書と取り違えられないための区別は、見出し・ラベル・出典 URL・
+/// accession が担う(いずれも 6-K のものを持たせる)。
+export function buildQuarterlyNarrativeChunks(
+  narrative: QuarterlyNarrative,
+  startIndex: number
+): SourceChunkRecord[] {
+  const title = quarterlyNarrativeSectionTitle(narrative);
+  const paragraphs = splitMdaParagraphs(narrative.text).slice(0, 6);
+  let offset = 0;
+
+  return paragraphs.map((paragraph, index) => {
+    const excerpt = paragraph.slice(0, 1_100);
+    const chunk: SourceChunkRecord = {
+      sourceId: `Q${index + 1}`,
+      sectionType: "md_a",
+      sectionTitle: title,
+      sourceLabel: `6-K ${title}, filed ${narrative.filedAt}`,
+      text: excerpt,
+      startOffset: offset,
+      endOffset: offset + excerpt.length,
+      sourceUrl: narrative.documentUrl,
+      filingAccessionNumber: narrative.accessionNumber,
+      sortOrder: startIndex + index + 1
+    };
+    offset += paragraph.length;
+    return chunk;
+  });
 }
 
 export function buildSourceChunks(

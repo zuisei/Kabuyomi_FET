@@ -142,6 +142,21 @@ export function createCloudflareSecFetcherService(
       return options.includeHistory === true ? expandSubmissionHistory(root, secJson) : root;
     },
 
+    /// 提出物に含まれる添付の名前だけを返す。
+    /// 6-K は本体が表紙で、中身が添付に入っているため、名前が分からないと本文に辿り着けない。
+    async listFilingDocuments({ cik, accessionNumber }: { cik: string; accessionNumber: string }): Promise<{ documents: string[] }> {
+      const accessionNoDash = accessionNumber.replace(/-/g, "");
+      const index = await secJson(
+        `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${accessionNoDash}/index.json`,
+        { allowNotFound: true, cacheTtlMs: CACHE_TTL.filing }
+      ) as { directory?: { item?: Array<{ name?: unknown }> } } | null;
+      const items = index?.directory?.item ?? [];
+      const documents = items
+        .map((item) => (typeof item?.name === "string" ? item.name : ""))
+        .filter((name) => name.length > 0);
+      return { documents };
+    },
+
     async fetchFiling({
       cik,
       accessionNumber,
