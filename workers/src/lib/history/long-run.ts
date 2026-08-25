@@ -25,6 +25,9 @@ export interface LongRunPoint {
   periodEnd: string;
   value: number;
   tagUsed: string;
+  /// その年を報告した提出書類。年表の各行から原文へ辿れるようにするために持つ。
+  /// **数字だけの年表は、このアプリが出していい形ではない。**
+  accessionNumber?: string;
   /// 後から修正された年は、最初に報告された値を残す。
   restatedFrom?: number;
 }
@@ -76,6 +79,7 @@ export function buildLongRunSeries(
       periodEnd: chosen.fact.end!,
       value: chosen.fact.val,
       tagUsed: chosen.tag,
+      ...(chosen.fact.accn ? { accessionNumber: chosen.fact.accn } : {}),
       ...(distinct.length > 1 && earliest.fact.val !== chosen.fact.val
         ? { restatedFrom: earliest.fact.val }
         : {})
@@ -100,10 +104,12 @@ export type TurningPointKind =
   | "first_decline"
   /// 減ったあとの底。
   | "trough"
-  /// 過去最高を更新した年。
-  | "record"
-  /// 底から戻して最高を更新した年。単なる record より重い。
-  | "recovery";
+  /// 底から戻して過去最高を更新した年。
+  | "recovery"
+  /// 成長の速さが変わった年。伸び続けている会社で、唯一の目印になる。
+  | "growth_shift"
+  /// 桁が変わった年(10 億 → 100 億 など)。
+  | "milestone";
 
 export interface TurningPoint {
   fiscalYear: number;
@@ -112,23 +118,36 @@ export interface TurningPoint {
   changePercent: number | null;
 }
 
-/// 語る価値のある年だけを拾う。
+/// 年表で目を留めさせる年だけを拾う。
 ///
-/// **19 年ぶんの本文を取り込むのは高い。**どの年を語るかを先に決めれば、
-/// 取りに行く提出書類は 2〜3 本で済む。ここはそのための絞り込み。
+/// **「過去最高を更新」は、伸び続けている会社では印にならない。**
+/// Netflix の実データ(2007〜2025、19 年連続増収)に当てたら **19 行すべてが
+/// 「最高更新」**になり、印が全部付いている = 何も指していない状態になった。
+/// なので最高更新は**一度落ちてから戻した時(recovery)だけ**にして、
+/// 単調に伸びる会社は「速さが変わった年」と「桁が変わった年」で語る。
+///
+/// 19 年ぶんの本文を取り込むのは高い。ここで年を絞れば、取りに行く提出書類は数本で済む。
+const MAX_TURNING_POINTS = 6;
+
+/// 成長率がこれだけ動いたら「変わった」とみなす(前年までの平均との差、%ポイント)。
+const GROWTH_SHIFT_POINTS = 25;
+
 export function findTurningPoints(series: LongRunSeries): TurningPoint[] {
   const points = series.points;
   if (points.length < 3) return [];
 
   const turning: TurningPoint[] = [];
+  const growth: number[] = [];
   let peak = points[0]!.value;
   let sawDecline = false;
   let inDrawdown = false;
+  let awaitingRecovery = false;
 
   for (const [index, point] of points.entries()) {
     if (index === 0) continue;
     const previous = points[index - 1]!;
-    const changePercent = previous.value === 0 ? null : ((point.value - previous.value) / Math.abs(previous.value)) * 100;
+    const changePercent =
+      previous.value === 0 ? null : ((point.value - previous.value) / Math.abs(previous.value)) * 100;
 
     if (point.value < previous.value) {
       if (!sawDecline) {
@@ -136,30 +155,63 @@ export function findTurningPoints(series: LongRunSeries): TurningPoint[] {
         sawDecline = true;
       }
       inDrawdown = true;
+      awaitingRecovery = true;
     } else if (point.value > previous.value) {
-      // 減ったあと最初に増えた年の「ひとつ前」が底。
       if (inDrawdown) {
-        turning.push({
-          fiscalYear: previous.fiscalYear,
-          kind: "trough",
-          value: previous.value,
-          changePercent: null
-        });
+        turning.push({ fiscalYear: previous.fiscalYear, kind: "trough", value: previous.value, changePercent: null });
         inDrawdown = false;
       }
-      if (point.value > peak) {
-        turning.push({
-          fiscalYear: point.fiscalYear,
-          // 一度落ちてから最高値に戻したのか、伸び続けているだけなのかを分ける。
-          kind: sawDecline ? "recovery" : "record",
-          value: point.value,
-          changePercent
-        });
+    }
+
+    // 戻すのに何年かかっても「戻した年」は拾う。**直後の 1 年だけを見ていると
+    // 落ち込みが深い会社ほど取りこぼす** — Apple は 2016 年に減収し、
+    // 過去最高に戻したのは 2 年後の 2018 年で、そこが物語の山だった。
+    if (awaitingRecovery && point.value > peak) {
+      turning.push({ fiscalYear: point.fiscalYear, kind: "recovery", value: point.value, changePercent });
+      awaitingRecovery = false;
+    }
+
+    // 速さの変化。前年までの平均と比べて大きく動いた年を拾う。
+    if (changePercent !== null) {
+      if (growth.length >= 2) {
+        const average = growth.reduce((sum, value) => sum + value, 0) / growth.length;
+        if (Math.abs(changePercent - average) >= GROWTH_SHIFT_POINTS) {
+          turning.push({ fiscalYear: point.fiscalYear, kind: "growth_shift", value: point.value, changePercent });
+        }
       }
+      growth.push(changePercent);
+    }
+
+    if (crossedOrderOfMagnitude(previous.value, point.value)) {
+      turning.push({ fiscalYear: point.fiscalYear, kind: "milestone", value: point.value, changePercent });
     }
 
     peak = Math.max(peak, point.value);
   }
 
-  return turning;
+  // 多すぎると年表が印だらけになって読めない。**新しい順に切ってはいけない** —
+  // Apple で試したら、いちばん意味のある「2016 年の初の減収」が
+  // 直近の小さな上下に押し出されて消えた。**種類の重みで残す。**
+  return turning
+    .sort((left, right) => {
+      const weight = KIND_WEIGHT[left.kind] - KIND_WEIGHT[right.kind];
+      return weight !== 0 ? weight : right.fiscalYear - left.fiscalYear;
+    })
+    .slice(0, MAX_TURNING_POINTS)
+    .sort((left, right) => left.fiscalYear - right.fiscalYear);
+}
+
+/// 小さいほど残る。**初の減収は一社に一度しかない**ので最優先。
+/// 底は「減って戻した」の途中経過にすぎないので最後に落とす。
+const KIND_WEIGHT: Record<TurningPointKind, number> = {
+  first_decline: 0,
+  recovery: 1,
+  milestone: 2,
+  growth_shift: 3,
+  trough: 4
+};
+
+function crossedOrderOfMagnitude(previous: number, current: number): boolean {
+  if (previous <= 0 || current <= 0) return false;
+  return Math.floor(Math.log10(current)) > Math.floor(Math.log10(previous));
 }
