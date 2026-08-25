@@ -74,7 +74,7 @@
 
 ## スコープ外(完全体の定義に含めない — オーナー作業)
 
-- **App Store Connect のマーケ枠**(`docs/release/MARKETING_PLAN_2026-08.md`):
+- **App Store Connect のマーケ枠**(`docs/growth/MARKETING_PLAN_2026-08.md`):
   Web サイト欄(`sellerUrl`)を法務ページ → `/lp/` に、プロモーションテキスト 170 字の投入、
   `kabuyomi.app` の名前解決、App Analytics の Campaigns に `ct=lp` / `ct=app-share` が出るかの確認
 - アプリアイコン / App Store 素材の v2 化
@@ -179,7 +179,7 @@
 ## H. 発見される導線(2026-08-24、オーナー「このアプリのマーケが必要だ」)
 
 診断は `docs/quality/USAGE_REALITY_2026-08-24.md`、計画は
-`docs/release/MARKETING_PLAN_2026-08.md`。**転換率は正常で、
+`docs/growth/MARKETING_PLAN_2026-08.md`。**転換率は正常で、
 インプレッションだけが足りていない**(294 × 10.2% × 13.3% = DL 4 が実数と一致)。
 よって判断基準は「その施策はインプレッションを作るか」の一点。
 

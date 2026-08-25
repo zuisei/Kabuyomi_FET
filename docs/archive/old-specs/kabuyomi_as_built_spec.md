@@ -1,6 +1,6 @@
 # Kabuyomi 実装実態仕様書 (as-built)
 
-> Historical / stale document. Not current v1 release truth. See `docs/release/RELEASE_TRUTH.md`.
+> Historical / stale document. Not current v1 release truth. See `docs/archive/v1/RELEASE_TRUTH.md`.
 >
 > Status (2026-04-18): historical reference only. This file is not the current shipping contract.
 > The local coordination docs (`docs/current_shipping_truth.md`, `CURRENT_SLICE.md`) are intentionally not tracked in Git. Use `docs/testflight_readiness_checklist.md` and the live code as the authoritative source.

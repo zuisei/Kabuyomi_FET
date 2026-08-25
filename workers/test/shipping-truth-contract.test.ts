@@ -22,7 +22,11 @@ describe("authoritative shipping truth contract", () => {
     expect(truth).toContain("Sign in with Apple account principals");
     expect(truth).toContain("complete, typed, dated envelope");
     expect(truth).toContain("Missing, malformed, partial, unsupported, or stale configuration");
-    expect(index).toContain("Current truth is [release/CURRENT_SHIPPING_TRUTH.md]");
+    // 索引が出荷状態の正を指していること。**文面ではなくリンクで確かめる** —
+    // 2026-08-25 に索引を日本語で書き直したとき、英文だけを見ていたこの表明が
+    // 「正を指していない」ではなく「英語が消えた」で落ちた。
+    expect(index).toContain("release/CURRENT_SHIPPING_TRUTH.md");
+    expect(index).toMatch(/正|authoritative|Current truth/u);
     expect(index).not.toContain("release-visible optional rewarded ads");
     expect(review).toContain("Status: HOLD");
     expect(readme).toContain("reset does not create a new welcome balance");
