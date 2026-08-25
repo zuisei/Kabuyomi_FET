@@ -45,9 +45,23 @@ export function premiumChatCreditCost(env: Pick<Env, "PREMIUM_CHAT_CREDIT_COST">
 /// この識別が1問に払うクレジット。上位モデルで答える相手には上位単価、
 /// それ以外(無料・ベンチ・premium 未設定)は標準単価。予約・requestHash・
 /// 完了時の請求はすべてこの1点を通る。
+///
+/// **払わない相手には 0 を返す。** dev は `buildChatReservation` が unmetered に
+/// するので 1 クレジットも減らないのに、ここが単価を返していたせいで
+/// `/v1/usage` が「1問 5 クレジット」と報告し、**端末側の
+/// 「残高 >= 単価」判定に引っかかってコンポーザが「残高不足」で塞がっていた**
+/// (2026-08-25 実機で発覚: 1問目は通り、2問目が送れない)。
+/// 単価が 2 から 5 に上がって境界に当たりやすくなり、表に出た。
 export function chatCreditCostForIdentity(env: Env, identity: PremiumModelIdentity): number {
+  if (identityPaysNothingPerQuestion(identity)) return 0;
   if (premiumChatModelEnabled(env) && identityUsesPremiumChatModel(identity)) {
     return premiumChatCreditCost(env);
   }
   return CHAT_CREDIT_COST;
+}
+
+/// 予約が unmetered になる識別。`buildChatReservation`(routes/chat.ts)と対。
+/// **片方だけ変えると、また表示と実際がずれる。**
+function identityPaysNothingPerQuestion(identity: PremiumModelIdentity): boolean {
+  return identity.accessMode === "dev_unlimited";
 }

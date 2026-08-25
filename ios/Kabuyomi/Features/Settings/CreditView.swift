@@ -116,6 +116,22 @@ enum CreditInitialSheet {
     case insufficientCredits(requiredCredits: Int)
 }
 
+/// 広告クレジットの説明。**回数・付与量・期限はサーバーが決める。**
+/// 直書きしていたので、2026-08-25 に上限を 20 回へ上げても画面は 3 回のままだった。
+func rewardedCreditRuleText(
+    _ capability: RewardedCreditCapabilityPayload?,
+    includesPaidNote: Bool = true
+) -> String {
+    let paidNote = includesPaidNote ? "広告を見なくてもpaid creditはそのまま使えます。" : ""
+    guard let capability else {
+        return "任意で広告を最後まで見ると、サーバー確認後に無料/ad creditを獲得できます。"
+            + "付与量・1日の上限・有効期限はサーバーの設定に従います。" + paidNote
+    }
+    return "任意で広告を最後まで見ると、サーバー確認後に無料/ad creditを"
+        + "\(capability.rewardCredits)クレジット獲得できます。"
+        + "1日\(capability.dailyCap)回まで、獲得から\(capability.expiryDays)日間有効です。" + paidNote
+}
+
 struct CreditView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
@@ -785,7 +801,7 @@ struct CreditView: View {
                 Text("広告報酬（任意）")
                     .font(.headline.weight(.bold))
                     .foregroundStyle(KabuyomiTheme.ink)
-                Text("任意で広告を最後まで見ると、サーバー確認後に無料/ad creditを2クレジット獲得できます。1日3回まで、獲得から30日間有効です。広告を見なくてもpaid creditはそのまま使えます。")
+                Text(rewardedCreditRuleText(appModel.usage?.capabilities?.rewardedCredit))
                     .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -957,7 +973,7 @@ struct CreditView: View {
                     RuleText(title: "ウェルカムクレジット", body: "App Attestで確認できたinstallationには、50クレジットを一度だけ付与します。月ごとに繰り返す無料付与ではありません。")
                     RuleText(title: "購入分クレジット", body: "買い切りのクレジットはApple検証とサーバー確認後にだけ付与されます。現在のサーバー会計では失効しません。")
                     if shouldShowRewardedCreditUI {
-                        RuleText(title: "広告クレジット", body: "広告報酬クレジットは任意の無料/ad creditです。アプリ内の広告完了だけでは付与せず、サーバー側でGoogle AdMobの確認が完了した場合だけ反映されます。1日3回まで、獲得から30日間有効です。")
+                        RuleText(title: "広告クレジット", body: rewardedCreditRuleText(appModel.usage?.capabilities?.rewardedCredit, includesPaidNote: false))
                     }
                     RuleText(title: "復元", body: "購入の復元はStoreKitの権利情報を読み取り、サーバーに同期します。アプリ内ではクレジットを直接付与しません。")
                 }

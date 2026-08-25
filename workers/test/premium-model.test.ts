@@ -46,4 +46,20 @@ describe("premium chat model lane", () => {
     chatEnvForIdentity(env, { plan: "pro" });
     expect(env.OPENAI_CHAT_MODEL).toBe("gpt-5-nano");
   });
+
+  /// dev は unmetered で 1 クレジットも減らない。なのに単価を報告していたので、
+  /// 端末の「残高 >= 単価」判定に引っかかって**2 問目が送れなくなっていた**
+  /// (2026-08-25 実機で発覚)。払わない相手の単価は 0。
+  it("charges nothing to an identity whose reservation is unmetered", () => {
+    const env = { OPENAI_CHAT_MODEL: "gpt-5-nano", OPENAI_CHAT_MODEL_PREMIUM: "gpt-5.4" } as never;
+    expect(chatCreditCostForIdentity(env, { plan: "pro", accessMode: "dev_unlimited" })).toBe(0);
+    // 上位モデルは使う。単価だけが 0。
+    expect(identityUsesPremiumChatModel({ plan: "pro", accessMode: "dev_unlimited" })).toBe(true);
+  });
+
+  it("still charges an ordinary paid identity the premium price", () => {
+    const env = { OPENAI_CHAT_MODEL: "gpt-5-nano", OPENAI_CHAT_MODEL_PREMIUM: "gpt-5.4" } as never;
+    expect(chatCreditCostForIdentity(env, { plan: "pro" })).toBe(5);
+    expect(chatCreditCostForIdentity(env, { plan: "free" })).toBe(2);
+  });
 });

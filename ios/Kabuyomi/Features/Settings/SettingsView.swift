@@ -1,5 +1,19 @@
 import SwiftUI
 
+/// 広告クレジットの説明文。**回数と付与量はサーバーが決める。**
+/// 以前ここに「1日3回まで」と直書きしていたため、2026-08-25 に上限を
+/// 20 回へ上げても**画面は 3 回のままだった**。数字を文面に埋め込まない。
+func rewardedCreditDisclosure(_ capability: RewardedCreditCapabilityPayload?) -> String {
+    let base = "購入復元アカウント機能が有効な場合だけ、購入クレジットの復元と新規購入にSign in with Appleを利用します。"
+        + "通常利用にサインインは不要です。広告クレジットは任意で、Google AdMob SSVをWorkerが確認した場合だけ"
+    guard let capability else {
+        return base + "クレジットを付与します。付与量・1日の上限・有効期限はサーバーの設定に従います。"
+    }
+    return base
+        + "\(capability.rewardCredits) creditsを付与し、1日\(capability.dailyCap)回まで、"
+        + "獲得から\(capability.expiryDays)日間有効です。"
+}
+
 struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
@@ -458,7 +472,7 @@ struct SettingsView: View {
             ),
             LegalSection(
                 title: "購入復元と広告クレジット",
-                body: "購入復元アカウント機能が有効な場合だけ、購入クレジットの復元と新規購入にSign in with Appleを利用します。通常利用にサインインは不要です。広告クレジットは任意で、Google AdMob SSVをWorkerが確認した場合だけ2 creditsを付与し、1日3回まで、獲得から30日間有効です。"
+                body: rewardedCreditDisclosure(appModel.usage?.capabilities?.rewardedCredit)
             ),
             LegalSection(
                 title: "外部サービス",
