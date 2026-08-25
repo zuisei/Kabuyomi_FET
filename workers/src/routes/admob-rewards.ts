@@ -17,7 +17,23 @@ import type { RemoteConfig } from "../lib/remote-config";
 import type { RouteHandler } from "./types";
 
 const REWARD_CREDITS = 2;
-const DAILY_REWARD_CAP = 3;
+
+/// 広告を見てクレジットをもらえる 1 日あたりの回数。
+///
+/// 2026-08-25 オーナー「広告の3回制限撤廃していいよ」。3 回は実際に渋く、
+/// 使ってもらう前から上限に当てるのは順序が逆だった。**環境変数で動かせる形にして、
+/// 既定を実質当たらない値まで上げる。**
+///
+/// ゼロにはしていない。ここは **クレジットが増える唯一の経路**で、
+/// App Attest の assertion を required のまま残したのと同じ理由がある
+/// (偽装がそのままモデルの原価になる)。20 回は動画にして 10 分ぶんで、
+/// 人間が普通に使って当たる数字ではない。もっと開けたければ環境変数を上げる。
+const DEFAULT_DAILY_REWARD_CAP = 20;
+
+function dailyRewardCap(env: Env): number {
+  const parsed = Number.parseInt(env.REWARDED_AD_DAILY_CAP?.trim() ?? "", 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_DAILY_REWARD_CAP;
+}
 const INTENT_TTL_MS = 30 * 60 * 1000;
 const PROMO_CREDIT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const REQUEST_MAX_BYTES = 512;
@@ -61,7 +77,8 @@ export const handleAdMobRewardRoutes: RouteHandler = async ({ request, url, env,
     }
     const dateKey = buildQuotaDateJST();
     const grantedToday = await countGrantedRewards(env, identity.quotaSubject, dateKey);
-    if (grantedToday >= DAILY_REWARD_CAP) {
+    const cap = dailyRewardCap(env);
+    if (grantedToday >= cap) {
       return json(
         {
           error: "daily_cap_reached",
@@ -103,14 +120,14 @@ export const handleAdMobRewardRoutes: RouteHandler = async ({ request, url, env,
     logEvent("rewarded_ad_intent_created", {
       quotaSubjectHash: hashForLog(identity.quotaSubject),
       rewardIntentIdSuffix: suffixForLog(rewardIntentId),
-      dailyRemaining: DAILY_REWARD_CAP - grantedToday
+      dailyRemaining: cap - grantedToday
     });
 
     return json({
       rewardIntentId,
       customData,
       rewardCredits: REWARD_CREDITS,
-      dailyRemaining: DAILY_REWARD_CAP - grantedToday
+      dailyRemaining: cap - grantedToday
     });
   }
 
@@ -133,7 +150,7 @@ export const handleAdMobRewardRoutes: RouteHandler = async ({ request, url, env,
       dailyRemaining:
         intent.status === "rejected"
           ? 0
-          : Math.max(0, DAILY_REWARD_CAP - (await countGrantedRewards(env, identity.quotaSubject, intent.daily_date_key))),
+          : Math.max(0, dailyRewardCap(env) - (await countGrantedRewards(env, identity.quotaSubject, intent.daily_date_key))),
       usage
     });
   }
@@ -167,7 +184,8 @@ export async function buildRewardedCreditCapability(
   const ssvConfigured = Boolean(env.ADMOB_REWARDED_AD_UNIT_ID?.trim());
   const emergencyDisabled = truthy(env.EMERGENCY_DISABLE_ADS) || truthy(env.EMERGENCY_DISABLE_REWARDS);
   const enabled = config.adsEnabled && config.rewardedCreditEnabled && config.rewardedSsvReady && ssvConfigured && !emergencyDisabled;
-  const grantedToday = await countGrantedRewards(env, identity.quotaSubject, buildQuotaDateJST()).catch(() => DAILY_REWARD_CAP);
+  const cap = dailyRewardCap(env);
+  const grantedToday = await countGrantedRewards(env, identity.quotaSubject, buildQuotaDateJST()).catch(() => cap);
   const reasonCode = enabled
     ? undefined
     : emergencyDisabled
@@ -184,8 +202,8 @@ export async function buildRewardedCreditCapability(
     rewardedCreditEnabled: config.rewardedCreditEnabled,
     ssvReady: config.rewardedSsvReady && ssvConfigured,
     environment,
-    dailyCap: DAILY_REWARD_CAP,
-    dailyRemaining: Math.max(0, DAILY_REWARD_CAP - grantedToday),
+    dailyCap: cap,
+    dailyRemaining: Math.max(0, cap - grantedToday),
     rewardCredits: REWARD_CREDITS,
     expiryDays: 30,
     reasonCode,
@@ -313,13 +331,14 @@ async function processSsvGrant(url: URL, env: Env, config: RemoteConfig) {
 
   const identity = identityFromQuotaSubject(intent.user_id);
   const expiresAt = new Date(Date.now() + PROMO_CREDIT_TTL_MS).toISOString();
+  const cap = dailyRewardCap(env);
   const grant = await grantRewardedAdCredits(identity, env, config, {
     rewardIntentId: intent.id,
     transactionId,
     credits: REWARD_CREDITS,
     expiresAt,
     dailyDateKey: intent.daily_date_key,
-    dailyCap: DAILY_REWARD_CAP
+    dailyCap: cap
   });
 
   if (grant.status === "cap_reached") {
@@ -330,7 +349,7 @@ async function processSsvGrant(url: URL, env: Env, config: RemoteConfig) {
       rewardIntentIdSuffix: suffixForLog(intent.id),
       dailyRewardsUsed: grant.dailyRewardsUsed,
       dailyRewardsRemaining: grant.dailyRewardsRemaining,
-      dailyCap: DAILY_REWARD_CAP
+      dailyCap: cap
     });
     throw new AppError(429, "Rewarded ad daily cap reached");
   }

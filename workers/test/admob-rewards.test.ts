@@ -187,12 +187,18 @@ function createDb(seed?: {
   return { db: { prepare }, intents, transactions, repairQueue };
 }
 
-function envWithDb(db: unknown) {
+/// 上限は環境変数で動くようになった(2026-08-25)。既定は 20 だが、
+/// 上限まわりのテストは 3 回で書かれているので、**明示的に 3 に固定**して
+/// 既定値の変更でテストの意味が変わらないようにする。
+/// 既定値そのものは専用のテストで固定する。
+function envWithDb(db: unknown, overrides: Record<string, unknown> = {}) {
   return {
     DB: db,
     ADMOB_REWARDED_AD_UNIT_ID: "ca-app-pub-3940256099942544/1712485313",
     ADMOB_SSV_PUBLIC_KEYS_URL: "https://www.gstatic.com/admob/reward/verifier-keys.json",
-    KABUYOMI_ENV: "production"
+    KABUYOMI_ENV: "production",
+    REWARDED_AD_DAILY_CAP: "3",
+    ...overrides
   } as never;
 }
 
@@ -1321,6 +1327,32 @@ describe("AdMob rewarded credits route", () => {
       status: "rejected",
       dailyRemaining: 0
     });
+  });
+
+  /// 3 回は渋すぎたので既定を上げた(2026-08-25 オーナー「3回制限撤廃していいよ」)。
+  /// ゼロにはしていない。ここはクレジットが**増える**唯一の経路で、
+  /// 偽装がそのままモデルの原価になる。人間が当たらない値まで開けて、環境変数で動かす。
+  /// 3 回は渋すぎたので既定を上げた(2026-08-25 オーナー「3回制限撤廃していいよ」)。
+  /// ゼロにはしていない。ここはクレジットが**増える**唯一の経路で、
+  /// 偽装がそのままモデルの原価になる。人間が当たらない値まで開けて、環境変数で動かす。
+  it("no longer stops at three, and takes the cap from the environment", async () => {
+    const { db } = createDb();
+    const identity = { quotaSubject: "free:local:device-123", plan: "free" as const, identityKind: "local_device" as const };
+    const base = {
+      DB: db,
+      ADMOB_REWARDED_AD_UNIT_ID: "ca-app-pub-3940256099942544/1712485313",
+      KABUYOMI_ENV: "production"
+    };
+
+    const byDefault = await buildRewardedCreditCapability(base as never, ENABLED_REMOTE_CONFIG, identity as never);
+    expect(byDefault.dailyCap).toBe(20);
+
+    const overridden = await buildRewardedCreditCapability(
+      { ...base, REWARDED_AD_DAILY_CAP: "7" } as never,
+      ENABLED_REMOTE_CONFIG,
+      identity as never
+    );
+    expect(overridden.dailyCap).toBe(7);
   });
 
   it("allows the third same-day reward and then reports zero remaining", async () => {

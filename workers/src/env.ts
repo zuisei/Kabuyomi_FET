@@ -57,6 +57,8 @@ export interface Env {
   APP_ATTEST_ALLOWED_VALIDATION_CATEGORIES?: string;
   APP_ATTEST_ALLOWED_BUNDLE_VERSIONS?: string;
   APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS?: string;
+  /// 広告視聴でクレジットをもらえる 1 日あたりの回数。未設定なら既定 20。
+  REWARDED_AD_DAILY_CAP?: string;
   EMERGENCY_DISABLE_CHAT?: string;
   EMERGENCY_DISABLE_ADS?: string;
   EMERGENCY_DISABLE_REWARDS?: string;
