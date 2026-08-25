@@ -160,6 +160,21 @@ func formattedMetricValue(_ value: Double, logicalName: String, unit: String = "
     return formattedCurrencyLikeMetric(value, unit: unit)
 }
 
+/// 計算指標の金額(FCF など)。既存の通貨整形にそのまま乗せる。
+/// 別の整形を作ると、同じ画面で桁の出方が指標ごとに変わる。
+func formattedDerivedAmount(_ value: Double, unit: String) -> String {
+    formattedCurrencyLikeMetric(value, unit: unit)
+}
+
+/// 計算の材料。単位が `USD/shares` のような1株あたりの値なら小数、
+/// それ以外は金額として整形する。
+func formattedDerivedOperandValue(_ operand: DerivedMetricOperandPayload) -> String {
+    if operand.unit.contains("/") {
+        return operand.value.formatted(.number.precision(.fractionLength(2)))
+    }
+    return formattedCurrencyLikeMetric(operand.value, unit: operand.unit)
+}
+
 func formattedYoY(_ yoyPercent: Double) -> String {
     "\(yoyPercent.formatted(.number.precision(.fractionLength(1))))%"
 }

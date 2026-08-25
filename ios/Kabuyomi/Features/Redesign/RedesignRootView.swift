@@ -3307,6 +3307,7 @@ private struct RedesignResearchOverview: View {
     @State private var isMetricsExpanded = true
     @State private var areHighlightsExpanded = true
     @State private var areChangesExpanded = true
+    @State private var areDerivedExpanded = true
 
     private var metrics: [MetricPayload] {
         orderedInvestorMetrics(for: company)
@@ -3353,6 +3354,10 @@ private struct RedesignResearchOverview: View {
                         }
                     }
                 }
+            }
+
+            if let derived = company.derivedMetrics, !derived.isEmpty {
+                RedesignDerivedMetrics(metrics: derived, isExpanded: $areDerivedExpanded)
             }
 
             if !company.summary.highlights.isEmpty {
@@ -3494,6 +3499,102 @@ private struct RedesignMetricView: View {
             return "\(title)、\(value)、前年同期比 \(display.text)"
         }
         return "\(title)、\(value)、期末 \(formattedFilingDate(metric.periodEnd))"
+    }
+}
+
+/// 計算で求めた指標。ROE のような値は**提出書類のどこにも書かれていない**ので、
+/// 数字だけを出すと、このアプリで唯一「出典の無い数字」になってしまう。
+///
+/// なので式を畳んで隠さず、**タップで材料まで開く**。有料端末は 24.5% をくれるが
+/// 何を何で割ったかは見せない。開いて見せられることがこの画面の意味になっている。
+private struct RedesignDerivedMetrics: View {
+    let metrics: [DerivedMetricPayload]
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            RedesignSectionHeader(
+                title: "計算指標",
+                subtitle: "提出書類の数値から算出",
+                trailing: "\(metrics.count)件",
+                isExpanded: $isExpanded,
+                identifier: "redesign.company.derived.toggle"
+            )
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(metrics) { metric in
+                        RedesignDerivedMetricRow(metric: metric)
+                            .padding(.vertical, 12)
+                        if metric.id != metrics.last?.id {
+                            KabuyomiHairline()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct RedesignDerivedMetricRow: View {
+    let metric: DerivedMetricPayload
+    /// 既定は畳む。式を常に開くと1指標が3行を占め、5指標で画面が埋まる。
+    @State private var showsWorking = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                showsWorking.toggle()
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(metric.label)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                    Spacer(minLength: 8)
+                    Text(displayValue)
+                        .font(.title3.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Image(systemName: showsWorking ? "chevron.up" : "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("redesign.company.derived.\(metric.logicalName)")
+            .accessibilityLabel("\(metric.label)、\(displayValue)。\(metric.formula)")
+            .accessibilityHint(showsWorking ? "計算の内訳を閉じる" : "計算の内訳を開く")
+
+            // 式は常に出す。畳むのは材料の数値だけ。
+            Text(metric.formula)
+                .font(.caption)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
+
+            if showsWorking {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(metric.operands) { operand in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(operand.label)
+                                .font(.caption)
+                                .foregroundStyle(KabuyomiTheme.inkMuted)
+                            Spacer(minLength: 8)
+                            Text(formattedDerivedOperandValue(operand))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(KabuyomiTheme.ink)
+                        }
+                    }
+                    Text(metric.definitionNote)
+                        .font(.caption2)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 2)
+                .accessibilityElement(children: .contain)
+            }
+        }
+    }
+
+    private var displayValue: String {
+        metric.ratioText ?? formattedDerivedAmount(metric.value, unit: metric.unit)
     }
 }
 

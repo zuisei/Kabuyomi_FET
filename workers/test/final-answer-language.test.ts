@@ -5250,7 +5250,10 @@ function withTypedMetrics(filing: FilingCacheRecord, metrics: MetricSnapshot[]):
     operatingCashFlow: "営業CF",
     cashAndCashEquivalents: "現金及び現金同等物",
     currentDebt: "1年内返済予定の長期債務",
-    longTermDebt: "長期債務（非流動）"
+    longTermDebt: "長期債務（非流動）",
+    equity: "自己資本",
+    totalAssets: "総資産",
+    capitalExpenditure: "設備投資"
   };
   const metricSources: SourceChunkRecord[] = metrics.map((metric, index) => ({
     sourceId: `MX${index + 1}`,

@@ -117,6 +117,8 @@ struct CompanyPayload: Codable, Hashable {
     let companyWebsiteUrl: String?
     let summary: SummaryPayload
     let metrics: [MetricPayload]
+    /// 旧 Worker には無いフィールドなので既定 nil の var にする。
+    var derivedMetrics: [DerivedMetricPayload]? = nil
     let historicalOverview: HistoricalOverviewPayload?
     let sourceChunks: [SourceChunkPayload]
     let lastUpdatedAt: String
@@ -256,6 +258,45 @@ struct MetricPayload: Codable, Identifiable, Hashable {
     let periodEnd: String
     let comparisonValue: Double?
     let yoyPercent: Double?
+
+    var id: String { logicalName }
+}
+
+/// 計算で求めた指標。**提出書類には書かれていない値**なので、
+/// 答えだけでなく式と材料を一緒に持つ(2026-08-25)。
+/// 画面はこれを開いて見せる責任がある。数字だけ出すと、
+/// 「すべての記述に出典がある」という建て付けをこの指標だけが破ることになる。
+struct DerivedMetricPayload: Codable, Identifiable, Hashable {
+    let logicalName: String
+    let label: String
+    let value: Double
+    /// `ratio` なら比率(0.245 = 24.5%)。金額なら通貨コード。
+    let unit: String
+    /// 「純利益 ÷ 自己資本」。数字は入っていない。
+    let formula: String
+    /// 「分母は期末の自己資本」。定義を書かない指標は比べようがない。
+    let definitionNote: String
+    let periodEnd: String
+    let operands: [DerivedMetricOperandPayload]
+
+    var id: String { logicalName }
+
+    var isRatio: Bool { unit == "ratio" }
+
+    /// 比率は %、金額は呼び出し側の既存の整形に任せる。
+    var ratioText: String? {
+        guard isRatio else { return nil }
+        return String(format: "%.1f%%", value * 100)
+    }
+}
+
+struct DerivedMetricOperandPayload: Codable, Identifiable, Hashable {
+    let logicalName: String
+    let label: String
+    let value: Double
+    let unit: String
+    let periodEnd: String
+    let tagUsed: String
 
     var id: String { logicalName }
 }

@@ -59,7 +59,21 @@ const METRIC_TAGS = {
   cashAndCashEquivalents: ["CashAndCashEquivalentsAtCarryingValue", "CashAndCashEquivalents"],
   // These concepts intentionally exclude lease obligations and aggregate debt.
   currentDebt: ["LongTermDebtCurrent", "CurrentPortionOfLongtermBorrowings"],
-  longTermDebt: ["LongTermDebtNoncurrent", "LongtermBorrowings"]
+  longTermDebt: ["LongTermDebtNoncurrent", "LongtermBorrowings"],
+  /// 親会社株主に帰属する自己資本を先に採る。非支配株主持分を含む `Equity` を
+  /// 先に採ると、ROE の分母が実態より大きくなる会社が出る。
+  equity: [
+    "StockholdersEquity",
+    "EquityAttributableToOwnersOfParent",
+    "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+    "Equity"
+  ],
+  totalAssets: ["Assets"],
+  /// 設備投資。キャッシュフロー計算書では支出額(正の数)で載る。
+  capitalExpenditure: [
+    "PaymentsToAcquirePropertyPlantAndEquipment",
+    "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"
+  ]
 } as const;
 
 /// `companyfacts` が指標を載せうるタクソノミ。米国企業は us-gaap、
@@ -73,6 +87,9 @@ type MetricName = keyof typeof METRIC_TAGS;
 type MetricPeriodType = "duration" | "cash_flow_ytd" | "instant";
 
 const INSTANT_METRICS = new Set<MetricName>([
+  // 貸借対照表の項目は時点の値。期間の窓で採ると1件も一致しない。
+  "equity",
+  "totalAssets",
   "cashAndCashEquivalents",
   "currentDebt",
   "longTermDebt"
@@ -837,7 +854,10 @@ function metricPeriodType(logicalName: MetricName): MetricPeriodType {
   if (INSTANT_METRICS.has(logicalName)) {
     return "instant";
   }
-  return logicalName === "operatingCashFlow" ? "cash_flow_ytd" : "duration";
+  // 設備投資はキャッシュフロー計算書の項目なので、営業CFと同じく期中累計で載る。
+  return logicalName === "operatingCashFlow" || logicalName === "capitalExpenditure"
+    ? "cash_flow_ytd"
+    : "duration";
 }
 
 function matchesFilingIdentity(fact: ConceptFact, filing: FilingReference): boolean {

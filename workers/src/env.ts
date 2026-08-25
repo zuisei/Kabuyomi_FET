@@ -130,7 +130,12 @@ export interface MetricSnapshot {
     | "operatingCashFlow"
     | "cashAndCashEquivalents"
     | "currentDebt"
-    | "longTermDebt";
+    | "longTermDebt"
+    // 派生指標(ROE / ROA / FCF)の材料。それ自体も提出書類に載っている事実なので
+    // MetricSnapshot として扱う。計算結果は DerivedMetric に分けてある。
+    | "equity"
+    | "totalAssets"
+    | "capitalExpenditure";
   tagUsed: string;
   value: number;
   unit: string;
