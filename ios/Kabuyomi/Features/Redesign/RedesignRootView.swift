@@ -1557,6 +1557,8 @@ private struct RedesignHomeView: View {
 
     var body: some View {
         List {
+            quotaRow
+
             if boardRows.isEmpty {
                 emptyBoardSections
             } else {
@@ -1596,6 +1598,40 @@ private struct RedesignHomeView: View {
                 .accessibilityLabel("アカウントと設定")
                 .accessibilityIdentifier("redesign.home.profile")
             }
+        }
+    }
+
+    /// 残りをホームに1行。**設定を開かないと分からない**のが分かりにくさの中心だった
+    /// (2026-08-26 オーナー「ホームにクレジット表示でいいのでは(何回分)」)。
+    /// 数えるのは回数。クレジット数は押した先の画面が持っている。
+    @ViewBuilder
+    private var quotaRow: some View {
+        Section {
+            Button {
+                present(.credits(nil))
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "bolt.fill")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(KabuyomiTheme.accent)
+                        .accessibilityHidden(true)
+                    Text(appModel.chatQuotaText)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(KabuyomiTheme.ink)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                        .accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("redesign.home.quota")
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
         }
     }
 
