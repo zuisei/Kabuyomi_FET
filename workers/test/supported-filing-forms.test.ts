@@ -23,3 +23,16 @@ describe("対応書類の判定", () => {
     expect(isSupportedFilingForm(undefined)).toBe(false);
   });
 });
+
+// 2026-08-26: 本文を用意する経路の振り分けも 10-K / 10-Q の直書きで、
+// 20-F は 400 で弾かれていた。`sec-fetcher/src/prepared-filing.mjs` は
+// Item 5 を読む実装を既に持っているのに、手前で届いていなかった。
+describe("prepared-filing の振り分け", () => {
+  it("対応書類は全部 prepared-filing まで届く", () => {
+    for (const form of SUPPORTED_FILING_FORMS) {
+      expect(isSupportedFilingForm(form)).toBe(true);
+    }
+    // 20-F を明示。ここが false に戻ると TSM の本文が空に戻る。
+    expect(isSupportedFilingForm("20-F")).toBe(true);
+  });
+});

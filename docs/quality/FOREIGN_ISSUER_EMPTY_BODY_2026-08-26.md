@@ -1,4 +1,4 @@
-# 20-F は保存できるが本文が出ない(2026-08-26・未解決)
+# 20-F は保存できるが本文が出ない(2026-08-26・**解決済み**)
 
 TSM(台湾積体電路)を追加しても `資料と根拠 0件` で、要約も指標も出ない。
 **推測ではなく、シミュレータで再現してワーカーのログを取った結果**を残す。
@@ -66,13 +66,30 @@ latest_filing_ready  source: "archive_after_remote_check"
 `prepareLatestRecordForReturn` に昇格路はあるが、`deferFullContent: true` だと
 素通りする。呼び出し3か所は全部 true。
 
-## 次にやること
+## 原因(確定)
 
-1. TSM の archived record が**いつ・どの経路で**書かれたのか特定する。
-   有力: 履歴バックフィル。`history-store.ts` の `DEFAULT_BACKFILL_FORMS` は
-   10-K のみ、`:526` の絞り込みも 10-K/10-Q だけを通す — **20-F がどう入ったのか**
-   ここと整合しない。まずそこを読む
-2. 昇格路を通す条件を決める。`deferFullContent` が true でも、
-   **本文が無い記録を返そうとしているなら昇格させる**のが素直
-3. `markFilingPrepJobReady` が「読める」を確かめずに ready にしている点も直す。
-   ready の意味を「本文がある」に寄せる
+```ts
+// clients/sec-fetcher.ts:315
+const formType = payload.formType === "10-K" || payload.formType === "10-Q" ? payload.formType : null;
+if (!formType) throw new AppError(400, "prepared filing formType must be 10-K or 10-Q");
+```
+
+**本文を用意する経路の振り分けが 20-F を 400 で弾いていた。**
+`sec-fetcher/src/prepared-filing.mjs:121` は Item 5 を読む実装を**既に持っている**のに、
+手前の振り分けだけが古いままで、実装まで届いていなかった。
+
+保存の関所(`watchlist/usecase.ts`)と**まったく同じ形の取りこぼし**。
+20-F を足したとき、`normalizeForm` と抽出器は直したが、
+**間にある2つの振り分けを両方とも見落としていた。**
+
+## 直した結果(シミュレータで実測)
+
+TSM 20-F: 資料と根拠 **8件**、要約
+「2025年の純売上高は前年比で31.6%増となり、主因はASPの上昇である。」
+本文引用「Our net revenue in 2025 increased by 31.6% from 2024...」
+
+## 再発防止
+
+判定は `env.ts` の `SUPPORTED_FILING_FORMS` / `isSupportedFilingForm` に集約した。
+`test/supported-filing-forms.test.ts` が 20-F を固定している。
+**書類を増やすときはこの1か所だけを触る。**

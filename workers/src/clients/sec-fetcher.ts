@@ -1,4 +1,5 @@
 import type { Env, FilingReference } from "../env";
+import { SUPPORTED_FILING_FORMS, isSupportedFilingForm } from "../env";
 import { AppError } from "../lib/errors";
 import { logErrorEvent } from "../lib/logging";
 import { createCloudflareSecFetcherService } from "../lib/sec-fetcher-service";
@@ -312,10 +313,19 @@ async function fetchFromCloudflareInternalSecFetcher(
     }
 
     if (path === "/internal/sec/prepared-filing") {
-      const formType = payload.formType === "10-K" || payload.formType === "10-Q" ? payload.formType : null;
-      if (!formType) {
-        throw new AppError(400, "Invalid SEC fetcher payload", "prepared filing formType must be 10-K or 10-Q");
+      // **`isSupportedFilingForm` を使う。** ここを 10-K / 10-Q の直書きにしていたため、
+      // 20-F は 400 で弾かれ、本文の用意まで届いていなかった。
+      // `sec-fetcher/src/prepared-filing.mjs` は Item 5 を読む実装を**既に持っている**のに、
+      // 手前の振り分けだけが古いままだった(2026-08-26)。
+      const rawFormType = typeof payload.formType === "string" ? payload.formType : null;
+      if (!isSupportedFilingForm(rawFormType)) {
+        throw new AppError(
+          400,
+          "Invalid SEC fetcher payload",
+          `prepared filing formType must be one of ${SUPPORTED_FILING_FORMS.join(", ")}`
+        );
       }
+      const formType = rawFormType;
 
       return service.fetchPreparedFiling({
         cik: String(payload.cik ?? ""),
