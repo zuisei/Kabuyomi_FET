@@ -4599,15 +4599,16 @@ private struct RedesignSettingsView: View {
         .accessibilityIdentifier("redesign.settings")
     }
 
+    /// 残高は回数で言う。クレジット数は開いた先の画面が持っている。
     private var creditSummary: String {
-        if let credits = appModel.usage?.credits {
-            return "残り \(credits.totalRemaining)クレジット ・ \(appModel.currentPlanBadgeTitle)"
+        if appModel.usage?.credits != nil {
+            return "\(appModel.chatQuotaText) ・ \(appModel.currentPlanBadgeTitle)"
         }
         switch appModel.usageLoadState {
         case .failed:
-            return "残高を取得できませんでした"
+            return "残りを取得できませんでした"
         case .loading:
-            return "残高を確認中"
+            return "残りを確認中"
         default:
             return appModel.currentPlanBadgeTitle
         }

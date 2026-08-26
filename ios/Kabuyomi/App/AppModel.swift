@@ -639,11 +639,40 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         usage?.credits
     }
 
-    var chatCreditStatusText: String {
-        guard let credits = usage?.credits else {
-            return "\(chatCreditCost)クレジット"
+    /// 残高の言い方。**人が数えたいのは質問の回数**で、クレジットはその単位でしかない。
+    /// 「2クレジット / 残り 0」では、あと何回聞けるのかが読み手の暗算になっていた
+    /// (2026-08-26 オーナー「クレジットの残りが全体的にわかりにくい」)。
+    ///
+    /// 3 つの状態を混ぜないこと。0回・不明・無制限は別のことを意味する。
+    enum ChatQuota: Equatable {
+        /// 1問あたり 0 クレジット。回数で数える相手ではない。
+        case unlimited
+        /// 残高をまだサーバーから受け取っていない。
+        case unknown
+        case questions(Int)
+    }
+
+    var chatQuota: ChatQuota {
+        // 単価 0 は「無料で聞ける相手」。ここで割ると 0 除算になる。
+        guard chatCreditCost > 0 else { return .unlimited }
+        guard let credits = usage?.credits else { return .unknown }
+        return .questions(max(0, credits.totalRemaining / chatCreditCost))
+    }
+
+    /// 残りを1行で言う。コンポーザにも設定にも同じ文を出す。
+    var chatQuotaText: String {
+        switch chatQuota {
+        case .unlimited:
+            return "回数の上限なし"
+        case .unknown:
+            return "残りを確認中"
+        case .questions(let count):
+            return "あと\(count)回質問できます"
         }
-        return "\(chatCreditCost)クレジット / 残り \(credits.totalRemaining)"
+    }
+
+    var chatCreditStatusText: String {
+        chatQuotaText
     }
 
     var hasChatCreditAvailable: Bool {

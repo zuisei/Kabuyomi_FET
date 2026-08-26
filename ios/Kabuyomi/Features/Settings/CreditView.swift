@@ -344,6 +344,12 @@ struct CreditView: View {
                             .minimumScaleFactor(0.6)
                             .accessibilityLabel("合計 \(credits.totalRemaining) クレジット")
 
+                        // 数字だけでは「何ができるか」が分からない。回数に翻訳して添える。
+                        Text(appModel.chatQuotaText)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(KabuyomiTheme.ink)
+                            .accessibilityIdentifier("credit.balance.quota")
+
                         HStack(spacing: 8) {
                             BadgeText(currentPlanDisplayTitle)
                             if let renewal = nextRenewalText {
@@ -397,11 +403,25 @@ struct CreditView: View {
             Text("現在のプラン")
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(KabuyomiTheme.ink)
-            Text(activeSubscriptionSummary ?? "Free / 月次0 / 認証済み初回50クレジット")
+            Text(activeSubscriptionSummary ?? freePlanSummary)
                 .font(.footnote)
-                .foregroundStyle(KabuyomiTheme.inkMuted)
+                .foregroundStyle(
+                    appModel.installationAuthenticationStatus == nil
+                        ? KabuyomiTheme.inkMuted
+                        : KabuyomiTheme.caution
+                )
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// Free の説明。以前は「Free / 月次0 / 認証済み初回50クレジット」と、
+    /// **受け取っていない付与を宣伝し続けていた** — 端末認証が通らないと 50 は付かず、
+    /// 残高 0 の理由がどこにも書かれていなかった(2026-08-26)。
+    private var freePlanSummary: String {
+        if appModel.installationAuthenticationStatus != nil {
+            return "Free ・ この端末は認証できていないため、初回50クレジットが付いていません。"
+        }
+        return "Free ・ 毎月の付与はありません。初回50クレジットは認証済みの端末に一度だけ付きます。"
     }
 
     private var planComparisonButton: some View {
