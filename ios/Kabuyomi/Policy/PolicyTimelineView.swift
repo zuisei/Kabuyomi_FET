@@ -8,6 +8,8 @@ struct TimelineView: View {
     @EnvironmentObject private var store: SavedEventStore
     @EnvironmentObject private var eventStore: EventDataStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var showSearch = false
+    @State private var requestedSearchQuery: String?
     @State private var filter: TimelineFilter
     @State private var path: [PolicyEventSummary] = []
     @State private var agencyFilters: Set<String>
@@ -41,9 +43,14 @@ struct TimelineView: View {
         _advancedFilters = State(initialValue: TimelineAdvancedFilters(tier: mode == "timelineArchive" ? .archive : nil))
     }
 
+    /// データの中で一番新しい活動時刻。「新着」の基準日になる。
+    private var latestActivityAt: Date? {
+        events.map(\.lastActivityAt).max()
+    }
+
     private var filtered: [PolicyEventSummary] {
         events.filter { event in
-            filter.includes(event, store: store)
+            filter.includes(event, store: store, latestActivityAt: latestActivityAt)
                 && (agencyFilters.isEmpty || agencyFilters.contains(event.agency.code))
                 && (advancedFilters.tier == nil || event.productAnalysis.presentationTier == advancedFilters.tier)
                 && (advancedFilters.domain == nil || event.domain?.slug == advancedFilters.domain)
@@ -62,7 +69,7 @@ struct TimelineView: View {
     }
 
     private var emptyStateTitle: String {
-        if filter == .recent && !events.isEmpty { return "直近24時間の新着はありません" }
+        if filter == .recent && !events.isEmpty { return "新着はありません" }
         if filter == .deadlines && !events.isEmpty { return "表示できる期限はありません" }
         if filter == .signal && !events.isEmpty { return "自動選定された注目政策はまだありません" }
         if filter == .market && !events.isEmpty { return "市場データ付きの政策はまだありません" }
@@ -190,11 +197,33 @@ struct TimelineView: View {
             .navigationTitle("政策ウォッチ").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    // 検索は MarketDocket ではタブの1枚だった。Kabuyomi ではタブを
+                    // 増やさず、ホームと同じくツールバーから開く(2026-08-26)。
+                    Button {
+                        showSearch = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .accessibilityLabel("政策を検索")
+                    .accessibilityIdentifier("policy.search.open")
+
                     agencyFilterButton
                     advancedFilterMenu
                 }
             }
             .navigationDestination(for: PolicyEventSummary.self) { EventDetailLoader(summary: $0) }
+        }
+        .sheet(isPresented: $showSearch) {
+            NavigationStack {
+                SearchView(events: events, requestedQuery: $requestedSearchQuery)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("閉じる") { showSearch = false }
+                                .accessibilityIdentifier("policy.search.close")
+                        }
+                    }
+            }
+            .tint(KabuyomiTheme.accent)
         }
         .sheet(isPresented: $showAgencyFilter) {
             AgencyFilterSheet(
@@ -216,7 +245,7 @@ struct TimelineView: View {
             let mode = ProcessInfo.processInfo.arguments.value(after: "-screenshotMode")
             if mode == nil, !didResolveInitialFilter, !events.isEmpty {
                 if eventStore.dataMode == .live {
-                    filter = events.contains { TimelineFilter.isRecent($0.lastActivityAt) } ? .recent : .all
+                    filter = latestActivityAt == nil ? .all : .recent
                 } else {
                     filter = .signal
                 }
@@ -316,7 +345,7 @@ struct TimelineView: View {
 
         let visibleCount = filter == .deadlines ? deadlineItems.count : filtered.count
         let scope = switch filter {
-        case .recent: "新着24時間"
+        case .recent: "新着"
         case .deadlines: "期限"
         default: filter.compactTitle
         }

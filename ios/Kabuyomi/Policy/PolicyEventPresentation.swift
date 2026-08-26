@@ -72,10 +72,14 @@ enum TimelineFilter: String, CaseIterable, Identifiable {
         case .all: "tray.full"
         }
     }
-    @MainActor func includes(_ event: PolicyEvent, store: SavedEventStore) -> Bool {
+    @MainActor func includes(
+        _ event: PolicyEvent,
+        store: SavedEventStore,
+        latestActivityAt: Date? = nil
+    ) -> Bool {
         switch self {
         case .recent:
-            Self.isRecent(event.lastActivityAt)
+            Self.isRecent(event.lastActivityAt, latestActivityAt: latestActivityAt)
         case .deadlines:
             PolicyDeadlinePresentation.hasRelevantDate(
                 event.relatedDocuments.flatMap(PolicyLegalDateSummary.dates(for:)),
@@ -94,10 +98,14 @@ enum TimelineFilter: String, CaseIterable, Identifiable {
         case .all: true
         }
     }
-    @MainActor func includes(_ event: PolicyEventSummary, store: SavedEventStore) -> Bool {
+    @MainActor func includes(
+        _ event: PolicyEventSummary,
+        store: SavedEventStore,
+        latestActivityAt: Date? = nil
+    ) -> Bool {
         switch self {
         case .recent:
-            Self.isRecent(event.lastActivityAt)
+            Self.isRecent(event.lastActivityAt, latestActivityAt: latestActivityAt)
         case .deadlines:
             PolicyDeadlinePresentation.hasRelevantDate(event.legalDates ?? [], relativeTo: .now)
         case .signal:
@@ -113,9 +121,34 @@ enum TimelineFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    static func isRecent(_ lastActivityAt: Date, relativeTo referenceDate: Date = .now) -> Bool {
-        lastActivityAt >= referenceDate.addingTimeInterval(-24 * 60 * 60)
-            && lastActivityAt <= referenceDate.addingTimeInterval(5 * 60)
+    /// 「新着」= **直近の公示日に出たもの**。
+    ///
+    /// 以前はここが現在時刻からの24時間窓だった。ところが Federal Register の
+    /// 文書は**日付精度で入る**(公式のタイムスタンプが無いものは `00:00Z`)。
+    /// 朝に開くと、前日に出た91件が丸ごと「30時間前」になって窓から落ち、
+    /// たまたま実時刻を持つ1件しか残らない — 2689件あるのに新着1件、という
+    /// 見え方をしていた(2026-08-26 オーナー「あと少なくね？」)。
+    ///
+    /// 日付精度のデータを時間窓で切ってはいけない。**データの中で一番新しい日**を
+    /// 見て、その日のものを新着とする。何時に開いても丸1日ぶんが揃う。
+    /// **日の切り方は UTC。** 端末のカレンダー(JST)で切ると、`00:00Z` の束は
+    /// 前日の 09:00 JST、実時刻を持つ 20:42Z は翌日の 05:42 JST になり、
+    /// **同じ公示日のものが2日に割れる**。ET で切っても同じことが起きる
+    /// (`00:00Z` = 前日 20:00 ET)。データが UTC の 0 時に寄せて入る以上、
+    /// 束ね直すのも UTC でなければ合わない。
+    private static let dataDayCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        return calendar
+    }()
+
+    static func isRecent(
+        _ lastActivityAt: Date,
+        latestActivityAt: Date?,
+        calendar: Calendar = dataDayCalendar
+    ) -> Bool {
+        guard let latestActivityAt else { return false }
+        return calendar.isDate(lastActivityAt, inSameDayAs: latestActivityAt)
     }
 }
 
