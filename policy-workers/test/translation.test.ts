@@ -344,3 +344,14 @@ test("固有名詞を引き継いだ訳は excessive_english にしない", () =
   assert.equal(untranslated.accepted, false);
   assert.ok(untranslated.warnings.includes("title_has_no_japanese_script"));
 });
+
+// 2026-08-26: 過去資料を `awaiting_batch` で積むのをやめた。
+// 積んだところで Batch は明示確認まで送らない決まりで、354件が動かないまま溜まっていた。
+// 自動は新着だけ。過去のは人が押したときだけ訳す。
+test("cutoff より古い資料は自動の対象にしない", () => {
+  const cutoff = "2026-07-21T15:00:00.000Z";
+  assert.equal(translationLane("2026-08-25T00:00:00.000Z", cutoff), "realtime");
+  assert.equal(translationLane("2026-07-01T00:00:00.000Z", cutoff), "batch");
+  // 人が指名したものは、古くても即時レーンへ乗る。
+  assert.equal(translationLane("2026-07-01T00:00:00.000Z", cutoff, true), "manual_priority");
+});

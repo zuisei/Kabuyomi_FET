@@ -185,8 +185,21 @@ export async function queueTranslationCandidates(env: TranslationEnv): Promise<T
     if (!source) { summary.skipped += 1; continue; }
     if (translated.has(`${source.eventID}:${source.sourceContentHash}`)) { summary.alreadyTranslated += 1; continue; }
     const lane = translationLane(source.sourceAvailableAt, cutoff);
+
+    // **過去資料は自動で積まない。**
+    //
+    // 以前は cutoff より古いものを `awaiting_batch` として並べていたが、
+    // その Batch は明示確認まで送らない決まりで、結果 354件が動かないまま
+    // 溜まっていた。自動翻訳は新着だけにして、過去のは**人が押したときだけ**
+    // 訳す(2026-08-26 オーナー「これからは新着だけ翻訳して過去のは自分でやらせて」)。
+    //
+    // 積まなくても画面は困らない: job が無い過去資料は
+    // `publicTranslationRequestStatus` が `available` を返し、
+    // 「日本語に翻訳」のボタンが出る。押されたぶんだけトークンを使う。
+    if (lane === "batch") { summary.batch += 1; continue; }
+
     const tokens = estimatedTranslationTokens(source);
-    const status = lane === "batch" ? "awaiting_batch" : "queued";
+    const status = "queued";
     statements.push(env.OPS.prepare(`INSERT INTO translation_jobs(
       id,event_id,source_content_hash,source_available_at,lane,status,prompt_version,
       estimated_input_tokens,estimated_output_tokens,attempt_count,created_at,updated_at
@@ -194,8 +207,7 @@ export async function queueTranslationCandidates(env: TranslationEnv): Promise<T
     ON CONFLICT(event_id,source_content_hash,prompt_version) DO NOTHING`)
       .bind(jobID(source), source.eventID, source.sourceContentHash, source.sourceAvailableAt, lane, status,
         translationPromptVersion, tokens.input, tokens.output, now, now));
-    if (lane === "batch") summary.batch += 1;
-    else summary.realtime += 1;
+    summary.realtime += 1;
   }
   for (const batch of chunks(statements, 80)) await env.OPS.batch(batch);
   return summary;
