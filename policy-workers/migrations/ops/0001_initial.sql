@@ -84,4 +84,3 @@ CREATE TABLE dead_letters (
   retained_until TEXT NOT NULL
 );
 CREATE INDEX dead_letters_retention_idx ON dead_letters(retained_until);
-

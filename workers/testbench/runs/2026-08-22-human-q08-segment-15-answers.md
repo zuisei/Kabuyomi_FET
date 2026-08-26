@@ -517,4 +517,3 @@ Answer:
 Sources:
 
 - S10: XBRL 売上高 (RevenueFromContractWithCustomerExcludingAssessedTax) (xbrl_metric)
-

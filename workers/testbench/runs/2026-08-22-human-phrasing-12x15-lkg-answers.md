@@ -133,7 +133,7 @@
 
 ### q05TypedMarginDirectionMissing
 
-- AAPL-Q05 AAPL Q05 margin_driver (none): 
+- AAPL-Q05 AAPL Q05 margin_driver (none):
 - MSFT-Q05 MSFT Q05 margin_driver (openai/none/none): 要因として、売上高が前年比で増加したことに加え、営業費用は投資拡大の影響を受けつつも、売上の伸びがそれを相殺して margins が改善した点が挙げられます。 なお、研究開発・AI関連投資やCopilot関連広告費の増加など、オペレーション費用の増加要因が継続している点には注意が必要です。
 - NVDA-Q05 NVDA Q05 margin_driver (fallback/low_quality/numeric_alignment_failed): 回答内の重要な数値を提出資料と安全に照合できなかったため、未確認の数値は表示しません。確認できる数値は、売上高は816.2億ドルです。
 - AMZN-Q05 AMZN Q05 margin_driver (openai/none/none): 売上高は1815.2億ドル、営業利益は238.5億ドル、純利益は302.6億ドルです。営業利益率はQ1 2026で13.14%、前年同期は11.82%で改善しました。 改善の要因として、売上高は前年同期比16.6%増、営業利益は29.6%増、純利益は76.7%増と大幅に増加しており、利益率の押し上げに寄与しています。注意点として、セグメント別の影響や長期的な持続性の判断には、追加の管理説明やバックログ等の情報が必要です。
@@ -145,7 +145,7 @@
 
 ### q05CitedFactorMissing
 
-- AAPL-Q05 AAPL Q05 margin_driver (none): 
+- AAPL-Q05 AAPL Q05 margin_driver (none):
 - NVDA-Q05 NVDA Q05 margin_driver (fallback/low_quality/numeric_alignment_failed): 回答内の重要な数値を提出資料と安全に照合できなかったため、未確認の数値は表示しません。確認できる数値は、売上高は816.2億ドルです。
 - GOOG-Q05 GOOG Q05 margin_driver (openai/none/none): 営業利益率は約36.12%、純利益率は約56.94%とともに、前年と比べて上昇しています。理由は、売上高が前年同期比で約21.8%増と大きく伸び、特に Google Cloud の成長が強かったことにあります。 これに伴い営業利益も前年同期比で約29.7%増となり、純利益も約81.2%増加しました。なお、売上総額の増加が主要な要因で、コストの増加もあるものの利益率の押し上げに寄与しています。
 - AMZN-Q05 AMZN Q05 margin_driver (openai/none/none): 売上高は1815.2億ドル、営業利益は238.5億ドル、純利益は302.6億ドルです。営業利益率はQ1 2026で13.14%、前年同期は11.82%で改善しました。 改善の要因として、売上高は前年同期比16.6%増、営業利益は29.6%増、純利益は76.7%増と大幅に増加しており、利益率の押し上げに寄与しています。注意点として、セグメント別の影響や長期的な持続性の判断には、追加の管理説明やバックログ等の情報が必要です。
@@ -160,7 +160,7 @@
 - AAPL-Q08 AAPL Q08 segment_driver (fallback/low_quality/revenue_breakdown_sources_missing): 売上高の増減は確認できますが、選択された資料だけでは会社固有の売上の柱までは特定できません。見るべき箇所は、事業別の実績表、製品・サービス別の売上表、地域別の実績表、MD&Aの売上説明です。分類名だけでは、どの事業が大きいか・どこが伸びたかまでは判断しません。
 - MSFT-Q08 MSFT Q08 segment_driver (openai/none/none): 主な売上区分は Microsoft 365 Commercial products and cloud services および Search advertising です。 大きい区分として、Microsoft 365 Commercial products and cloud services の売上が大きく、クラウドも成長しています。変化の方向としては、Microsoft 365 Commercial 全体で成長、クラウドの成長も
 - NVDA-Q08 NVDA Q08 segment_driver (openai/none/none): 主な売上区分は Compute & Networking と Graphics です。大きい区分としては Compute & Networking がデータセンター向けの AI/ accelerated computing 製品で成長を牽引していると説明されています。 変化の方向としては、データセンター製品の売上が成長要因として挙げられています。この資料だけでは、各セグメントの内訳や比率、マージンの違いといった細部内訳は分かりません。
-- GOOG-Q08 GOOG Q08 segment_driver (openai/none/none): 主な売上区分は Googleサービス と Google Cloud、その他の事業は Other Bets。現状で大きい区分は Googleサービス で、全体売上高は前年同期比で増加しています。 特に YouTube ads は direct response および brand advertising の成長により増収要因となっています。一方、Google Network の収益は AdSense の減少で前年同期比で減少しています。 
+- GOOG-Q08 GOOG Q08 segment_driver (openai/none/none): 主な売上区分は Googleサービス と Google Cloud、その他の事業は Other Bets。現状で大きい区分は Googleサービス で、全体売上高は前年同期比で増加しています。 特に YouTube ads は direct response および brand advertising の成長により増収要因となっています。一方、Google Network の収益は AdSense の減少で前年同期比で減少しています。
 - AMZN-Q08 AMZN Q08 segment_driver (openai/none/none): 主な売上区分はAWS、北米、Internationalの3セグメントです。 この資料だけではセグメント別の内訳（どの区分が全体のどれくらいを占めるか）は分かりません。
 - JPM-Q08 JPM Q08 segment_driver (openai/none/none): 主な売上区分は Consumer & Community Banking、Commercial & Investment Bank、Asset & Wealth Management の3区分です。 大きい区分の特定はこの資料だけでは明示されていませんが、NIRの増加は Asset & Wealth Management および Consumer & Community Banking の資産運用報酬の増加に支えられています（NIRは全
 - CAT-Q08 CAT Q08 segment_driver (openai/none/none): 調子は 建設機械 と Power & Energy が売上の成長を支えています。 一方、資源産業 の利益は製造コストの影響で前年同四半期から減少しており、利益率の低下が課題として示されています。 これらは売上高の構成とセグメント別の利益動向に基づく観察です。
@@ -172,7 +172,7 @@
 - AAPL-Q08 AAPL Q08 segment_driver (fallback/low_quality/revenue_breakdown_sources_missing): 売上高の増減は確認できますが、選択された資料だけでは会社固有の売上の柱までは特定できません。見るべき箇所は、事業別の実績表、製品・サービス別の売上表、地域別の実績表、MD&Aの売上説明です。分類名だけでは、どの事業が大きいか・どこが伸びたかまでは判断しません。
 - MSFT-Q08 MSFT Q08 segment_driver (openai/none/none): 主な売上区分は Microsoft 365 Commercial products and cloud services および Search advertising です。 大きい区分として、Microsoft 365 Commercial products and cloud services の売上が大きく、クラウドも成長しています。変化の方向としては、Microsoft 365 Commercial 全体で成長、クラウドの成長も
 - NVDA-Q08 NVDA Q08 segment_driver (openai/none/none): 主な売上区分は Compute & Networking と Graphics です。大きい区分としては Compute & Networking がデータセンター向けの AI/ accelerated computing 製品で成長を牽引していると説明されています。 変化の方向としては、データセンター製品の売上が成長要因として挙げられています。この資料だけでは、各セグメントの内訳や比率、マージンの違いといった細部内訳は分かりません。
-- GOOG-Q08 GOOG Q08 segment_driver (openai/none/none): 主な売上区分は Googleサービス と Google Cloud、その他の事業は Other Bets。現状で大きい区分は Googleサービス で、全体売上高は前年同期比で増加しています。 特に YouTube ads は direct response および brand advertising の成長により増収要因となっています。一方、Google Network の収益は AdSense の減少で前年同期比で減少しています。 
+- GOOG-Q08 GOOG Q08 segment_driver (openai/none/none): 主な売上区分は Googleサービス と Google Cloud、その他の事業は Other Bets。現状で大きい区分は Googleサービス で、全体売上高は前年同期比で増加しています。 特に YouTube ads は direct response および brand advertising の成長により増収要因となっています。一方、Google Network の収益は AdSense の減少で前年同期比で減少しています。
 - AMZN-Q08 AMZN Q08 segment_driver (openai/none/none): 主な売上区分はAWS、北米、Internationalの3セグメントです。 この資料だけではセグメント別の内訳（どの区分が全体のどれくらいを占めるか）は分かりません。
 - JPM-Q08 JPM Q08 segment_driver (openai/none/none): 主な売上区分は Consumer & Community Banking、Commercial & Investment Bank、Asset & Wealth Management の3区分です。 大きい区分の特定はこの資料だけでは明示されていませんが、NIRの増加は Asset & Wealth Management および Consumer & Community Banking の資産運用報酬の増加に支えられています（NIRは全
 - CAT-Q08 CAT Q08 segment_driver (openai/none/none): 調子は 建設機械 と Power & Energy が売上の成長を支えています。 一方、資源産業 の利益は製造コストの影響で前年同四半期から減少しており、利益率の低下が課題として示されています。 これらは売上高の構成とセグメント別の利益動向に基づく観察です。
@@ -229,7 +229,7 @@
 
 ### qualitySourceEvidenceWeak
 
-- AAPL-Q05 AAPL Q05 margin_driver (none): 
+- AAPL-Q05 AAPL Q05 margin_driver (none):
 - AAPL-Q06 AAPL Q06 margin_durability_followup (deterministic/none/none): 提出資料だけでは一時要因か構造的変化かは断定できません。利益率要因候補として確認できるのは、粗利益率 です。次に見るべき指標は、粗利益率 です。
 - JPM-Q01 JPM Q01 business_model (fallback/low_quality/answer_too_metric_only): 一言概要: JPMは主に金利収入と非金利収入の両輪で稼ぐ金融 holding 企業です。 主な収益源: Net interest income（市場業務を含む、預金残高増加・カードなどの revolving バランス寄与）とNoninterest revenue（資産運用 手数料、投資銀行 手数料、市場業務の非金利収益、オペレーティングリース、Payments 手数料 など）。 注意点: 収益は金利環境や市場業務の寄与に左右され、貸倒引
 - CAT-Q01 CAT Q01 business_model (fallback/low_quality/answer_too_metric_only): Caterpillarは重機・発電・油ガス機器などの製造・販売で稼いでいます。 主な収益源はPower & Energy、建設機械、資源産業の三大セグメントの売上です。
@@ -6021,4 +6021,3 @@ Sources:
 - S11: XBRL 純利益 (NetIncomeLoss) (xbrl_metric)
 - S13: XBRL 営業利益 (OperatingIncomeLoss) (xbrl_metric)
 - CTX1: 10-Q Filing context, filed 2026-08-04 (md_a)
-

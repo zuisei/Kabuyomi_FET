@@ -329,4 +329,3 @@ private enum LibrarySection: String, CaseIterable, Identifiable {
 
     var id: Self { self }
 }
-

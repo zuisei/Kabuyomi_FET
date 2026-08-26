@@ -299,4 +299,3 @@ Mastercard Incは、決済・取引サービスを主な事業にする会社で
 Sources:
 
 - S1: 10-Q Revenue driver discussion, filed 2026-07-30 (md_a)
-

@@ -1093,4 +1093,3 @@ Sources:
 - S5: 10-Q Margin and profitability discussion, filed 2026-07-30 (md_a)
 - S7: 10-Q Margin and profitability discussion, filed 2026-07-30 (md_a)
 - S8: 10-Q Margin and profitability discussion, filed 2026-07-30 (md_a)
-

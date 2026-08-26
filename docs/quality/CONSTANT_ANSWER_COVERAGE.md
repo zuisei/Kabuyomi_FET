@@ -33,4 +33,3 @@
 |---|---|---|
 | `issuerSignalLabels` | `lib/chat/deterministic.ts` | MD&A の実文から抽出済みのシグナルを、その発行体にとって意味のあるものだけに絞る。追加はできず、削るだけ。 |
 | `normalizeSector` | `lib/chat/source-gate.ts` | どの根拠タイプを要求するかを決める sector 判定。回答文そのものを供給しない。 |
-

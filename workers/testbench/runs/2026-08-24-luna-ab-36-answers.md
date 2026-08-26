@@ -1275,4 +1275,3 @@ Sources:
 - S10: XBRL 売上高 (Revenues) (xbrl_metric)
 - S13: XBRL 営業利益 (OperatingIncomeLoss) (xbrl_metric)
 - CTX1: 10-Q Filing context, filed 2026-07-30 (md_a)
-

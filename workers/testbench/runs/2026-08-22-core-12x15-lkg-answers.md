@@ -5917,4 +5917,3 @@ Sources:
 - S11: XBRL 純利益 (NetIncomeLoss) (xbrl_metric)
 - S13: XBRL 営業利益 (OperatingIncomeLoss) (xbrl_metric)
 - CTX1: 10-Q Filing context, filed 2026-08-04 (md_a)
-

@@ -38,4 +38,3 @@ WHEN NEW.agency_code NOT IN ('BIS', 'WH', 'USTR', 'DOC', 'FR', 'GOVINFO')
 BEGIN
   SELECT RAISE(ABORT, 'unsupported agency_code');
 END;
-

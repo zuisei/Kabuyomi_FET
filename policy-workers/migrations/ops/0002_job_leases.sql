@@ -6,4 +6,3 @@ ALTER TABLE jobs ADD COLUMN idempotency_key TEXT;
 
 CREATE UNIQUE INDEX jobs_idempotency_idx ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX jobs_lease_claim_idx ON jobs(status, next_attempt_at, lease_expires_at);
-

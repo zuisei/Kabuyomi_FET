@@ -28,4 +28,3 @@ test("temporary keys are scoped to a run and job", () => {
   );
   assert.throws(() => StorageKey.temp("not-a-uuid", fromRevisionId, "parser-debug.json"), /runId/);
 });
-

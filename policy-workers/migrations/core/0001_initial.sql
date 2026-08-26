@@ -213,4 +213,3 @@ CREATE TABLE event_read_models (
   published_at TEXT
 );
 CREATE INDEX event_read_models_public_idx ON event_read_models(published_at);
-
