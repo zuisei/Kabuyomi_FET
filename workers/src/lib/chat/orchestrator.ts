@@ -15,7 +15,7 @@ import {
 import { maybeBuildHistoricalChatResponseWithHydration } from "./historical";
 import { classifyQuestionIntent } from "./intent";
 import { buildValidatedModelAnswer } from "./model-attempt";
-import { finalizeChatResponse } from "./response-finalizer";
+import { buildPreModelLiquidityAnswer, finalizeChatResponse } from "./response-finalizer";
 import {
   fallbackReasonForMissingValidSourceIds,
   fallbackReasonForNoSources,
@@ -142,6 +142,46 @@ export async function buildChatResponse(
     });
     const finalResponse = await finalize(
       deterministic.response,
+      "deterministic",
+      {
+        questionIntent,
+        responsePath: "deterministic",
+        fallbackReason: null,
+        sourceIdsValid: true,
+        contentMode,
+        geminiCalled: false,
+        geminiSucceeded: false,
+        schemaValid: true
+      }
+    );
+    logDecision({
+      filing,
+      questionIntent,
+      responsePath: "deterministic",
+      geminiCalled: false,
+      geminiSucceeded: false,
+      fallbackReason: null,
+      schemaValid: true,
+      sourceIdsValid: true,
+      sourceCount: finalResponse.sources.length,
+      contentMode
+    });
+    return finalResponse;
+  }
+
+  // 資金繰り・負債の質問で型付き事実が揃っているときは、モデルを呼んでも
+  // その答えは finalizer が必ず捨てる(buildPreModelLiquidityAnswer の説明を参照)。
+  // 捨てるものを 4 秒待たない。揃っていなければ null が返り、従来どおりモデルに回る。
+  const preModelLiquidity = buildPreModelLiquidityAnswer(filing, question, questionIntent);
+  if (preModelLiquidity) {
+    logEvent("chat_path_selected", {
+      filingKey: filing.filingKey,
+      ticker: filing.ticker,
+      path: "deterministic",
+      strategy: "liquidity_pre_model"
+    });
+    const finalResponse = await finalize(
+      preModelLiquidity,
       "deterministic",
       {
         questionIntent,
