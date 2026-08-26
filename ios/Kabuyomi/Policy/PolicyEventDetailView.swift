@@ -1,0 +1,113 @@
+import SwiftUI
+
+enum DetailSection: String, CaseIterable, Identifiable { case overview = "概要", replay = "リプレイ", evidence = "証拠"; var id: Self { self } }
+
+struct EventDetailView: View {
+    let event: PolicyEvent
+    let translationStatus: TranslationRequestStatus?
+    let translationIsSubmitting: Bool
+    let translationErrorMessage: String?
+    let requestTranslation: (() -> Void)?
+    let refresh: (() async -> Void)?
+    @EnvironmentObject private var store: SavedEventStore
+    @State private var section: DetailSection
+    @State private var replayStart: ReplayMilestone?
+
+    init(
+        event: PolicyEvent,
+        translationStatus: TranslationRequestStatus? = nil,
+        translationIsSubmitting: Bool = false,
+        translationErrorMessage: String? = nil,
+        requestTranslation: (() -> Void)? = nil,
+        refresh: (() async -> Void)? = nil
+    ) {
+        self.event = event
+        self.translationStatus = translationStatus
+        self.translationIsSubmitting = translationIsSubmitting
+        self.translationErrorMessage = translationErrorMessage
+        self.requestTranslation = requestTranslation
+        self.refresh = refresh
+        let mode = ProcessInfo.processInfo.arguments.value(after: "-screenshotMode")
+        let replayModes = ["replayOriginal", "replayReport", "replayRevision", "replayMarket", "replayDay", "marketDaily", "marketNotApplicable"]
+        _section = State(initialValue: mode.map(replayModes.contains) == true ? .replay : mode?.hasPrefix("evidence") == true ? .evidence : .overview)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("詳細セクション", selection: $section) { ForEach(DetailSection.allCases) { Text($0.rawValue).tag($0) } }
+                .pickerStyle(.segmented).padding(.horizontal).padding(.bottom, 8)
+            switch section {
+            case .overview:
+                EventOverviewView(
+                    event: event,
+                    translationStatus: translationStatus,
+                    translationIsSubmitting: translationIsSubmitting,
+                    translationErrorMessage: translationErrorMessage,
+                    requestTranslation: requestTranslation,
+                    refresh: refresh,
+                    goToReplay: { replayStart = .marketReaction; section = .replay },
+                    goToEvidence: { section = .evidence }
+                )
+            case .replay: EventReplayView(event: event, requestedMilestone: replayStart)
+            case .evidence: EventEvidenceView(event: event)
+            }
+        }
+        .navigationTitle(event.displayAgencyCode).navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                ShareLink(item: PolicyEvidenceBriefBuilder.text(for: event)) {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .accessibilityLabel("根拠付き要約を共有")
+                .accessibilityIdentifier("event.shareButton")
+                Button { store.toggle(event.id) } label: {
+                    Image(systemName: store.contains(event.id) ? "bookmark.fill" : "bookmark")
+                }
+                .accessibilityLabel(store.contains(event.id) ? "保存を解除" : "イベントを保存")
+                .accessibilityIdentifier("event.saveButton")
+            }
+        }
+        .onAppear { store.markRead(event); store.recordViewed(event.id) }
+    }
+}
+
+struct EventHeader: View {
+    let event: PolicyEvent
+    @EnvironmentObject private var eventStore: EventDataStore
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                if event.isSynthetic {
+                    if eventStore.environment == .syntheticLocal { DemoBadge() }
+                    else { Label("プレビュー環境・デモデータ", systemImage: "testtube.2").font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
+                }
+                else {
+                    Label(event.coverageState?.labelJA ?? "確認済み公開データ", systemImage: event.coverageState?.systemImage ?? "checkmark.seal")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(event.agency.displayNameJA).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(event.displayTitleJA).font(.title2.bold()).fixedSize(horizontal: false, vertical: true)
+            if let translation = event.titleTranslationLabelJA {
+                Label(translation, systemImage: "globe")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            if let primary = event.relatedDocuments.first(where: { $0.relationship == .primary }), primary.timePrecision == .day {
+                Label("\(primary.publishedOn ?? "日付不明") 掲載日", systemImage: "calendar")
+                    .font(.subheadline.monospacedDigit())
+            } else {
+                HStack(spacing: 18) {
+                    Label("\(AppFormatters.et.string(from: event.anchorDate)) ET", systemImage: "globe.americas")
+                    Label("\(AppFormatters.jst.string(from: event.anchorDate)) JST", systemImage: "globe.asia.australia")
+                }.font(.subheadline.monospacedDigit())
+            }
+            HStack(spacing: 10) {
+                StatusBadge(text: event.timestampState == .officialExact ? "公式時刻あり" : "正確な公式時刻未確認", systemImage: event.timestampState == .officialExact ? "checkmark.seal" : "clock.badge.questionmark", tint: event.timestampState == .officialExact ? AppColors.official : .secondary)
+                if event.status == .corrected { StatusBadge(text: "訂正文書あり", systemImage: "doc.badge.gearshape", tint: AppColors.revision) }
+                else if event.status == .revised { StatusBadge(text: "同一文書の改訂あり", systemImage: "pencil.line", tint: AppColors.revision) }
+            }
+        }
+    }
+}
