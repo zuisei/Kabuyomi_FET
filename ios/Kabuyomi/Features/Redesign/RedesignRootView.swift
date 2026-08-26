@@ -1489,23 +1489,11 @@ private struct RedesignConversationsView: View {
     }
 
     @ViewBuilder
-    /// 会話がまだ無いときに、この面から1タップで質問へ行ける相手。
-    /// 盤面にもピッカーにも同じ会社が並んでいるので、ここで**一覧をもう1つ作らない**。
-    /// 出すのは「次にどこへ行くか」1本だけ。
-    private var askableTicker: String? {
-        // 盤面と同じ母集団を見る。保存だけを見ていると、直近に開いただけの会社
-        // (ホームには出ている)がここでは存在しないことになる。
-        let candidates = appModel.watchlist + appModel.recentCompanyCards(limit: 8, includeSaved: false)
-        if let last = appModel.lastViewedTicker,
-           !last.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           candidates.contains(where: { $0.ticker.caseInsensitiveCompare(last) == .orderedSame }) {
-            return last.uppercased()
-        }
-        return candidates.first?.ticker.uppercased()
-    }
-
     /// 説明文は置かない。以前は「資料の下の入力欄から質問できます」と書いてあったが、
     /// 入力欄は会話画面に移っていて、文だけが取り残されていた(2026-08-26)。
+    ///
+    /// **ここは履歴の面**。質問への導線は置かない — 一度「〇〇に質問する」を出したが、
+    /// 会話を見に来た面で会社を1社選んで見せるのは筋が違う(2026-08-26 オーナー)。
     private var emptySection: some View {
         Section {
             VStack(alignment: .leading, spacing: 12) {
@@ -1513,31 +1501,17 @@ private struct RedesignConversationsView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(KabuyomiTheme.ink)
 
-                if let askableTicker {
-                    Button {
-                        openConversation(askableTicker)
-                    } label: {
-                        Label("\(askableTicker) に質問する", systemImage: "text.bubble")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(KabuyomiTheme.accent)
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("redesign.conversations.empty.ask")
-                } else {
-                    Button {
-                        present(.companyPicker(.select))
-                    } label: {
-                        Label("会社をひらく", systemImage: "building.2")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(KabuyomiTheme.accent)
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("redesign.conversations.empty.find")
+                Button {
+                    present(.companyPicker(.select))
+                } label: {
+                    Label("会社をひらく", systemImage: "building.2")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(KabuyomiTheme.accent)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("redesign.conversations.empty.find")
             }
             .padding(.vertical, 14)
             .listRowBackground(Color.clear)
