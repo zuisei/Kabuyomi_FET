@@ -248,6 +248,60 @@ async function relationshipCandidatesForEvent(env: Env, eventID: string): Promis
   return rows.results;
 }
 
+/// 1件に解説を載せる。全件版と単件版で同じ判断を通すための1か所。
+function withEditorialAnalysis(
+  env: Env,
+  event: PolicyEvent,
+  editorial: { analyses: Map<string, PolicyAnalysisRow>; relations: Map<string, PolicyCompanyRelation[]> }
+): PolicyEvent {
+  const persisted = editorial.analyses.get(event.id);
+  const embedded = event.analysis && isAnalysisVisible(event.analysis.analysisStatus, env.ENVIRONMENT)
+    ? event.analysis
+    : defaultPublicAnalysis(event);
+  const selectedAnalysis = persisted
+    ? publicAnalysis(persisted, editorial.relations.get(event.id) ?? [])
+    : embedded;
+  const sourceSafeAnalysis = selectedAnalysis.presentationTier === "signal" && !isAutomaticallySelectedSignal(selectedAnalysis)
+    ? { ...selectedAnalysis, presentationTier: "monitor" as const }
+    : selectedAnalysis;
+  const analysis = env.ENVIRONMENT.toLowerCase() === "production" && sourceSafeAnalysis.analysisStatus === "unreviewed"
+    ? { ...sourceSafeAnalysis, presentationTier: sourcePresentationTier(event.instrumentType) }
+    : sourceSafeAnalysis;
+  return mergeAnalysis(event, analysis);
+}
+
+/// **1件だけ欲しいときに全件を読まない。**
+///
+/// 詳細・証拠・市場・リプレイ・翻訳は、どれも1件しか要らないのに
+/// `availableEvents` を通していた。iOS の詳細画面はこのうち4本を**並行で**投げるので、
+/// 文書を1つ開くたびに全件パースが4回走っていた(2026-08-26)。
+///
+/// 並び順の話が入らないので、ここは意味を変えずに落とせる。
+async function availableEvent(env: Env, eventID: string): Promise<PolicyEvent | null> {
+  // **`COLLATE NOCASE` は必須。** 全件版の `eventByID` は大文字小文字を無視して
+  // 照合していて、保存されている UUID は大文字・端末が投げるのは小文字。
+  // 素の `=` にすると 1件も見つからず 404 になる(移行時に踏んだ)。
+  const row = await env.CORE.prepare(
+    "SELECT payload_json FROM event_read_models WHERE event_id = ? COLLATE NOCASE AND published_at IS NOT NULL"
+  ).bind(eventID).first<{ payload_json: string }>();
+
+  let event: PolicyEvent | null = null;
+  if (row) {
+    try { event = JSON.parse(row.payload_json) as PolicyEvent; }
+    catch { event = null; }
+  }
+  if (!event) {
+    // local / preview だけは同梱の架空イベントに落ちる。全件版と同じ関所。
+    const permitsFixtureFallback = ["local", "preview"].includes(env.ENVIRONMENT.toLowerCase());
+    return permitsFixtureFallback ? eventByID(events, eventID) ?? null : null;
+  }
+
+  const [translated] = await applyLatestTranslations(env, [event]);
+  const resolved = translated ?? event;
+  const editorial = await editorialDataForEvents(env, [resolved.id]);
+  return withEditorialAnalysis(env, resolved, editorial);
+}
+
 async function availableEvents(env: Env): Promise<AvailableEvents> {
   const rows = await env.CORE.prepare("SELECT payload_json, source_updated_at FROM event_read_models WHERE published_at IS NOT NULL ORDER BY source_updated_at DESC").all<{ payload_json: string; source_updated_at: string }>();
   const live = rows.results.flatMap((row) => {
@@ -258,22 +312,7 @@ async function availableEvents(env: Env): Promise<AvailableEvents> {
   const baseRecords = live.length > 0 ? live : permitsFixtureFallback ? events : [];
   const translatedRecords = live.length > 0 ? await applyLatestTranslations(env, baseRecords) : baseRecords;
   const editorial = await editorialDataForEvents(env, translatedRecords.map((event) => event.id));
-  const records = translatedRecords.map((event) => {
-    const persisted = editorial.analyses.get(event.id);
-    const embedded = event.analysis && isAnalysisVisible(event.analysis.analysisStatus, env.ENVIRONMENT)
-      ? event.analysis
-      : defaultPublicAnalysis(event);
-    const selectedAnalysis = persisted
-      ? publicAnalysis(persisted, editorial.relations.get(event.id) ?? [])
-      : embedded;
-    const sourceSafeAnalysis = selectedAnalysis.presentationTier === "signal" && !isAutomaticallySelectedSignal(selectedAnalysis)
-      ? { ...selectedAnalysis, presentationTier: "monitor" as const }
-      : selectedAnalysis;
-    const analysis = env.ENVIRONMENT.toLowerCase() === "production" && sourceSafeAnalysis.analysisStatus === "unreviewed"
-      ? { ...sourceSafeAnalysis, presentationTier: sourcePresentationTier(event.instrumentType) }
-      : sourceSafeAnalysis;
-    return mergeAnalysis(event, analysis);
-  });
+  const records = translatedRecords.map((event) => withEditorialAnalysis(env, event, editorial));
   return {
     records,
     datasetRevision: [
@@ -448,27 +487,66 @@ export default {
       }
     }
 
+    // ---- ここから下は1件だけ要るルート。全件ロードを通さない ----
+    // `datasetRevision` は最大値の集約1本で出す。全件を読んで並べ直す必要はない。
+    const singleEventRevision = async (): Promise<string> => {
+      const row = await env.CORE.prepare(
+        "SELECT MAX(source_updated_at) AS latest FROM event_read_models WHERE published_at IS NOT NULL"
+      ).first<{ latest: string | null }>();
+      return row?.latest
+        ?? (["local", "preview"].includes(env.ENVIRONMENT.toLowerCase()) ? "synthetic-fixture-v1" : "empty-live-dataset");
+    };
+
+    const singleEventRouteID = translationID
+      ?? routeId(url.pathname, "replay")
+      ?? routeId(url.pathname, "evidence")
+      ?? routeId(url.pathname, "market")
+      ?? routeId(url.pathname);
+
+    if (singleEventRouteID) {
+      const event = await availableEvent(env, singleEventRouteID);
+      if (!event) return error(request, 404, "event_not_found", "Policy event was not found");
+      const metadata = responseMetadata(env, await singleEventRevision());
+      const mode: DataMode = event.isSynthetic ? "synthetic" : "live";
+
+      if (translationID) {
+        if (event.isSynthetic) return error(request, 409, "translation_unavailable", "Synthetic events are not sent for translation");
+        if (translationMutation) {
+          let status = await requestPublicTranslation(env, event.id);
+          if (status.state === "queued" || status.state === "retry") {
+            await triggerImmediateTranslation(env, event.id);
+            status = await publicTranslationRequestStatus(env, event.id);
+          }
+          const responseStatus = status.state === "translated" ? 200 : status.state === "unavailable" ? 409 : 202;
+          return json(request, status, responseStatus, false, mode, metadata);
+        }
+        return json(request, await publicTranslationRequestStatus(env, event.id), 200, false, mode, metadata);
+      }
+
+      if (routeId(url.pathname, "replay")) {
+        const asOf = url.searchParams.get("as_of");
+        if (!asOf) return error(request, 400, "missing_as_of", "as_of is required");
+        try { return json(request, replaySnapshot(event, asOf), 200, true, mode, metadata); }
+        catch { return error(request, 400, "invalid_as_of", "as_of must be an ISO-8601 timestamp"); }
+      }
+
+      if (routeId(url.pathname, "evidence")) {
+        const relationshipCandidates = event.isSynthetic ? [] : await relationshipCandidatesForEvent(env, event.id);
+        return json(request, { documents: event.documents ?? [], documentInfo: event.documentInfo, documentVersions: event.documentVersions ?? [], documentDiff: event.documentDiff, relationshipCandidates, exposures: event.exposures, confounders: event.confounders, correctionNotes: event.correctionNotes }, 200, true, mode, metadata);
+      }
+
+      if (routeId(url.pathname, "market")) {
+        return json(request, marketPayloadForEvent(event), 200, true, mode, metadata);
+      }
+
+      return json(request, detailForEvent(event), 200, true, mode, metadata);
+    }
+
+    // ---- ここから下は全件が要るルート(一覧・検索・分類) ----
     const available = await availableEvents(env);
     const records = available.records;
     const metadata = responseMetadata(env, available.datasetRevision);
     const mode = dataModeFor(records, env.ENVIRONMENT);
-    const byId = (id: string): PolicyEvent | undefined => eventByID(records, id);
-
-    if (translationID) {
-      const event = byId(translationID);
-      if (!event) return error(request, 404, "event_not_found", "Policy event was not found");
-      if (event.isSynthetic) return error(request, 409, "translation_unavailable", "Synthetic events are not sent for translation");
-      if (translationMutation) {
-        let status = await requestPublicTranslation(env, event.id);
-        if (status.state === "queued" || status.state === "retry") {
-          await triggerImmediateTranslation(env, event.id);
-          status = await publicTranslationRequestStatus(env, event.id);
-        }
-        const responseStatus = status.state === "translated" ? 200 : status.state === "unavailable" ? 409 : 202;
-        return json(request, status, responseStatus, false, mode, metadata);
-      }
-      return json(request, await publicTranslationRequestStatus(env, event.id), 200, false, mode, metadata);
-    }
 
     if (url.pathname === "/v1/events" || url.pathname === "/v1/search") {
       const usesUpdateOrder = url.searchParams.has("updated_since") || url.searchParams.has("filter[updated_since]");
@@ -477,37 +555,6 @@ export default {
         : right.lastActivityAt.localeCompare(left.lastActivityAt));
       const result = paginate(filtered.map(summaryForEvent), url);
       return json(request, result.page, 200, true, mode, metadata, { pagination: result.pagination });
-    }
-
-    const replayId = routeId(url.pathname, "replay");
-    if (replayId) {
-      const event = byId(replayId);
-      if (!event) return error(request, 404, "event_not_found", "Policy event was not found");
-      const asOf = url.searchParams.get("as_of");
-      if (!asOf) return error(request, 400, "missing_as_of", "as_of is required");
-      try { return json(request, replaySnapshot(event, asOf), 200, true, event.isSynthetic ? "synthetic" : "live", metadata); }
-      catch { return error(request, 400, "invalid_as_of", "as_of must be an ISO-8601 timestamp"); }
-    }
-
-    const evidenceId = routeId(url.pathname, "evidence");
-    if (evidenceId) {
-      const event = byId(evidenceId);
-      if (!event) return error(request, 404, "event_not_found", "Policy event was not found");
-      const relationshipCandidates = event.isSynthetic ? [] : await relationshipCandidatesForEvent(env, event.id);
-      return json(request, { documents: event.documents ?? [], documentInfo: event.documentInfo, documentVersions: event.documentVersions ?? [], documentDiff: event.documentDiff, relationshipCandidates, exposures: event.exposures, confounders: event.confounders, correctionNotes: event.correctionNotes }, 200, true, event.isSynthetic ? "synthetic" : "live", metadata);
-    }
-
-    const marketId = routeId(url.pathname, "market");
-    if (marketId) {
-      const event = byId(marketId);
-      if (!event) return error(request, 404, "event_not_found", "Policy event was not found");
-      return json(request, marketPayloadForEvent(event), 200, true, event.isSynthetic ? "synthetic" : "live", metadata);
-    }
-
-    const eventId = routeId(url.pathname);
-    if (eventId) {
-      const event = byId(eventId);
-      return event ? json(request, detailForEvent(event), 200, true, event.isSynthetic ? "synthetic" : "live", metadata) : error(request, 404, "event_not_found", "Policy event was not found");
     }
 
     if (url.pathname === "/v1/taxonomy") {
