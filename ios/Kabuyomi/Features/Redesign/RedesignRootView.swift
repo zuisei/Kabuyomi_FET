@@ -1615,16 +1615,6 @@ private struct RedesignHomeView: View {
                 }
             }
 
-            // バナーは盤面の下・追加導線の上の1行。safeAreaInset に置くと
-            // iOS 26 の浮遊タブバーとの間で枠が描かれない(ロード成功ログは
-            // 出るのに画面に出ない — 2026-08-24 実測)ため、リストの行にする。
-            if showsBannerSlot {
-                AdMobBannerView(placement: .summary)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets())
-            }
-
             // 盤面の下に常に追加導線を1つ。1社だけの画面が「終わり」に見えないように。
             Button {
                 present(.companyPicker(.select))
@@ -1652,6 +1642,20 @@ private struct RedesignHomeView: View {
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+
+            // バナーは**いちばん下**。safeAreaInset に置くと iOS 26 の浮遊タブバーとの
+            // 間で枠が描かれない(2026-08-24 実測)ので、リストの行にする。
+            //
+            // **押せるものより下に置くこと。** 以前は「銘柄を追加」の上にあり、
+            // 広告のロード成否で枠が伸縮するたび、**すぐ下のボタンが指の下から動いていた**
+            // (2026-08-26「押すところが不安定」として報告)。
+            // 最下段なら、伸縮しても動くのは何も無い余白だけ。
+            if showsBannerSlot {
+                AdMobBannerView(placement: .summary)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
+            }
         } header: {
             RedesignListSectionHeader(title: "盤面", trailing: "\(boardRows.count)社")
         }

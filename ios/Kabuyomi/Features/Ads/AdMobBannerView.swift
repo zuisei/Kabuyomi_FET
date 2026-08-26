@@ -49,8 +49,14 @@ struct AdMobBannerView: View {
     var body: some View {
         // 失敗したら枠ごと消す。`frame(height: 0)` で潰すのではなく
         // ビューツリーから外すので、再ロードも起きない。
+        //
+        // 消える瞬間に下の行が跳ねるので、**アニメーションを付ける**。
+        // 瞬間移動だと、指を置いた先が入れ替わったように見える
+        // (2026-08-26「押すところが不安定」)。移動先が最下段になったので
+        // 跳ねる対象は余白だけだが、視覚的な段差も残さない。
         if loadState != .failed {
             slot
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
     }
 
@@ -94,7 +100,9 @@ struct AdMobBannerView: View {
 
     private func handleStateChange(_ state: AdMobBannerLoadState) {
         guard loadState != state else { return }
-        loadState = state
+        withAnimation(.easeInOut(duration: 0.2)) {
+            loadState = state
+        }
     }
 }
 
