@@ -14,7 +14,8 @@ import {
   translationRequestBody,
   translationSourceForEvent,
   validateTranslation,
-  type PolicyTranslationRow
+  type PolicyTranslationRow,
+  type TranslationSource
 } from "../src/translation/model.ts";
 import { batchConfirmationText, submitBatchManifest, type TranslationEnv } from "../src/translation/service.ts";
 
@@ -308,4 +309,38 @@ test("historical Batch submission cannot call OpenAI without exact count-and-tok
   );
   assert.equal(fetchCalls, 0);
   assert.equal(batchConfirmationText(manifest), `SUBMIT BATCH ${manifest.id} ITEMS 12 TOKENS 15000`);
+});
+
+// 2026-08-26: 固有名詞だらけの題名が「英語が残りすぎ」で丸ごと捨てられていた。
+// 失敗1,545件の最大要因(title_excessive_english 1,065件)がこの形。
+test("固有名詞を引き継いだ訳は excessive_english にしない", () => {
+  const titleEN = "Bulk Manufacturer of Controlled Substances Application: "
+    + "Scottsdale Research Institute SRI Montana Satellite Laboratory";
+  const source: TranslationSource = {
+    eventID: "e",
+    sourceContentHash: hash,
+    sourceAvailableAt: "2026-08-25T00:00:00.000Z",
+    sourceLanguage: "en",
+    titleEN,
+    factualSourceEN: "The application concerns a bulk manufacturer registration.",
+    agencyCode: "DOJ",
+    documentNumber: null,
+    instrumentType: null
+  };
+
+  // 固有名詞は原文のまま、それ以外は日本語。これは**正しい訳**。
+  const good = validateTranslation(source, {
+    titleJA: "規制物質の大量製造業者の登録申請：Scottsdale Research Institute SRI Montana Satellite Laboratory",
+    factualSummaryJA: "本件は大量製造業者としての登録申請に関するものである。"
+  });
+  assert.deepEqual(good.warnings, []);
+  assert.equal(good.accepted, true);
+
+  // 原文をそのまま返しただけのものは、今までどおり弾く。
+  const untranslated = validateTranslation(source, {
+    titleJA: titleEN,
+    factualSummaryJA: "本件は大量製造業者としての登録申請に関するものである。"
+  });
+  assert.equal(untranslated.accepted, false);
+  assert.ok(untranslated.warnings.includes("title_has_no_japanese_script"));
 });

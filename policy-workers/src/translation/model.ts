@@ -310,6 +310,31 @@ function latinShareOfReadableTitle(text: string): number {
   return total === 0 ? 0 : latin / total;
 }
 
+/// 原文からそのまま引き継がれた固有名詞。
+///
+/// 大文字で始まる語の連なりのうち、原文にそのまま出てくるものを固有名詞とみなす。
+/// "Scottsdale Research Institute" や "SRI" は**日本語にしないのが正しい**。
+function carriedOverProperNouns(translated: string, sourceEN: string): string[] {
+  const runs = translated.match(/[A-Z][A-Za-z.'&-]*(?:\s+[A-Z][A-Za-z.'&-]*)*/g) ?? [];
+  return runs.filter((run) => run.length > 1 && sourceEN.includes(run));
+}
+
+/// 「訳されるべきだった部分」に、どれだけ英語が残っているか。
+///
+/// 素の比率で測ると、**固有名詞だらけの題名は正しく訳しても不合格になる**。
+/// 実際 `title_excessive_english` は失敗1,545件の最大要因で、
+/// 「Bulk Manufacturer of Controlled Substances Application:
+///  Scottsdale Research Institute SRI Montana Satellite Laboratory」のような、
+/// 中身がほぼ固有名詞の題名が丸ごと捨てられていた(2026-08-26)。
+/// 引き継いだ固有名詞は分母から外して測る。
+function untranslatedLatinShare(translated: string, sourceEN: string): number {
+  let remainder = translated;
+  for (const noun of carriedOverProperNouns(translated, sourceEN)) {
+    remainder = remainder.split(noun).join(" ");
+  }
+  return latinShareOfReadableTitle(remainder);
+}
+
 function sourceHasTerminalCorrection(source: Pick<TranslationSource, "titleEN" | "instrumentType">): boolean {
   return source.instrumentType === "correcting_amendment"
     || /(?:;\s*)?(?:Correction|Correcting Amendment)\s*$/i.test(source.titleEN);
@@ -380,10 +405,11 @@ export function validateTranslation(source: TranslationSource, value: GeneratedT
   if (factualSummaryJA.length === 0 || factualSummaryJA.length > 260) warnings.push("invalid_summary_length");
   if (!/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(titleJA)) warnings.push("title_has_no_japanese_script");
   if (!/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(factualSummaryJA)) warnings.push("summary_has_no_japanese_script");
-  if (latinShareOfReadableTitle(source.titleEN) > 0.8 && latinShareOfReadableTitle(titleJA) > 0.55) {
+  if (latinShareOfReadableTitle(source.titleEN) > 0.8 && untranslatedLatinShare(titleJA, source.titleEN) > 0.55) {
     warnings.push("title_excessive_english");
   }
-  if (latinShareOfReadableTitle(source.factualSourceEN) > 0.8 && latinShareOfReadableTitle(factualSummaryJA) > 0.45) {
+  if (latinShareOfReadableTitle(source.factualSourceEN) > 0.8
+    && untranslatedLatinShare(factualSummaryJA, source.factualSourceEN) > 0.45) {
     warnings.push("summary_excessive_english");
   }
   if (!/[?？]/.test(source.titleEN) && /[?？]/.test(titleJA)) warnings.push("title_added_question_mark");
