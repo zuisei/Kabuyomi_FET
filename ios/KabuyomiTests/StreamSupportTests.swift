@@ -819,4 +819,27 @@ final class StreamSupportTests: XCTestCase {
         XCTAssertNil(streamDraftHint(draft: "売上", disabledReason: nil))
         XCTAssertNil(streamDraftHint(draft: "H", disabledReason: "残高不足"), "コンポーザ側の理由が優先")
     }
+
+    /// 沈んだ送信ボタンは、必ず理由を持っていなければならない。
+    /// 宛先が無いと `streamSendIntent` は nil を返すのに `disabledReason` は nil のままで、
+    /// **残高が出たままボタンだけ沈み、画面のどこにも理由が無かった**
+    /// (2026-08-26「送信ボタンが押せない」として報告)。
+    func testDraftHintExplainsAMissingDestination() {
+        XCTAssertEqual(
+            streamDraftHint(draft: "売上はどう？", disabledReason: nil, hasDestination: false),
+            "銘柄を選んでください"
+        )
+        // 宛先があれば、実体のある質問には何も言わない。
+        XCTAssertNil(streamDraftHint(draft: "売上はどう？", disabledReason: nil, hasDestination: true))
+    }
+
+    /// 残高不足などコンポーザ側の理由があるときは、そちらが優先。
+    func testComposerReasonWinsOverTheDraftHint() {
+        XCTAssertNil(streamDraftHint(draft: "H", disabledReason: "残高不足", hasDestination: false))
+    }
+
+    /// 空欄には出さない。プレースホルダが言っている。
+    func testNoHintForAnEmptyDraft() {
+        XCTAssertNil(streamDraftHint(draft: "   ", disabledReason: nil, hasDestination: false))
+    }
 }

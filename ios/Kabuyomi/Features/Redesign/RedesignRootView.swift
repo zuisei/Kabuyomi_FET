@@ -592,6 +592,7 @@ private struct RedesignStreamView: View {
                     context: askContext,
                     disabledReason: askDisabledReason
                 ) != nil,
+                hasDestination: askContext != nil,
                 selectCompany: { present(.companyPicker(.select)) },
                 openCredits: { openCredits(nil) },
                 send: send
@@ -838,6 +839,9 @@ private struct RedesignAskBar: View {
     let disabledReason: String?
     let isSending: Bool
     let canSend: Bool
+    /// 宛先(会社)が決まっているか。無いと `streamSendIntent` は nil を返すが、
+    /// `disabledReason` は nil のままなので、理由を出さずにボタンだけ沈む。
+    var hasDestination: Bool = true
     let selectCompany: () -> Void
     let openCredits: () -> Void
     let send: () -> Void
@@ -847,7 +851,7 @@ private struct RedesignAskBar: View {
     }
 
     private var draftHint: String? {
-        streamDraftHint(draft: draft, disabledReason: disabledReason)
+        streamDraftHint(draft: draft, disabledReason: disabledReason, hasDestination: hasDestination)
     }
 
     var body: some View {
@@ -3687,8 +3691,16 @@ private struct RedesignComposer: View {
     }
 
     /// 送信可能な状態。塗り分けと disabled はここ1か所から決める。
+    /// ホームの質問バーと**同じ基準**にする。コメントでは「2つのコンポーザが
+    /// 同じ結論に至るための1か所」と言いながら、こちらは空でないことしか見ておらず、
+    /// 「H」1文字でも送信でき、Worker の 400 で往復していた(2026-08-26)。
     private var canSend: Bool {
-        disabledReason == nil && !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        disabledReason == nil && redesignQuestionHasSubstance(question)
+    }
+
+    /// 字はあるのにボタンが沈んでいる理由。沈んだボタンは理由を持つ。
+    private var draftHint: String? {
+        streamDraftHint(draft: question, disabledReason: disabledReason)
     }
 
     var body: some View {
@@ -3752,7 +3764,7 @@ private struct RedesignComposer: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(KabuyomiTheme.caution)
                 } else {
-                    Text(isSending ? "回答を作成中" : (disabledReason ?? creditText))
+                    Text(isSending ? "回答を作成中" : (disabledReason ?? draftHint ?? creditText))
                         .font(.caption2.weight(.medium))
                         .monospacedDigit()
                         .foregroundStyle(disabledReason == nil ? KabuyomiTheme.inkMuted : KabuyomiTheme.caution)

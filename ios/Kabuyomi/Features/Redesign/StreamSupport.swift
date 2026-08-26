@@ -352,10 +352,17 @@ func redesignQuestionHasSubstance(_ question: String) -> Bool {
 /// 「H」だけ残った入力欄で何も言わないと、壊れているように見える
 /// (2026-08-22 実機レビュー)。残高不足などコンポーザ側の理由があるときは
 /// そちらが優先で、この文言は出さない。空欄にも出さない(プレースホルダが言っている)。
-func streamDraftHint(draft: String, disabledReason: String?) -> String? {
+///
+/// **宛先が無い場合もここで言う。** `streamSendIntent` は宛先(会社)が決まらないと
+/// nil を返すが、そのとき `disabledReason` は nil なので**残高が出たままボタンだけ沈み、
+/// 画面に理由がどこにも出なかった**(2026-08-26 実機で「送信ボタンが押せない」として報告)。
+/// 沈んだボタンは、必ず理由を持っていなければならない。
+func streamDraftHint(draft: String, disabledReason: String?, hasDestination: Bool = true) -> String? {
     guard disabledReason == nil else { return nil }
     let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty, !redesignQuestionHasSubstance(trimmed) else { return nil }
+    guard !trimmed.isEmpty else { return nil }
+    if !hasDestination { return "銘柄を選んでください" }
+    guard !redesignQuestionHasSubstance(trimmed) else { return nil }
     // 会社チップと残高の間の1行に収める。長いと会社名が「Amazon.com,…」に潰れる。
     return "もう少し詳しく"
 }
