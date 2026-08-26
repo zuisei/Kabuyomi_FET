@@ -4406,21 +4406,34 @@ private struct RedesignSettingsView: View {
 
     var body: some View {
         List {
+            // AI 利用への同意。**この画面で唯一、切ると機能が止まるスイッチ**なので、
+            // 他の設定と同じ列に混ぜず先頭に単独で置く。オフのまま質問しに行って
+            // 初めて気づく、という順番をやめる(2026-08-26)。
             Section {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("アカウントとリサーチ")
-                        .kabuyomiMicroLabel()
-                    Text("利用環境を確認・管理")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(KabuyomiTheme.ink)
+                Toggle(isOn: Binding(
+                    get: { appModel.aiConsentGranted },
+                    set: { appModel.setAIConsent($0) }
+                )) {
+                    SettingsToggleLabel(
+                        title: "AI 利用への同意",
+                        subtitle: "質問と対象資料の抜粋を外部AIモデルへ送信します。"
+                    )
                 }
-                .padding(.top, 8)
-                .padding(.bottom, 6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityElement(children: .combine)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                .tint(KabuyomiTheme.accent)
+                .listRowBackground(KabuyomiTheme.paper)
                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                .accessibilityIdentifier("redesign.settings.aiConsent")
+
+                if !appModel.aiConsentGranted {
+                    Label("同意するまで質問できません", systemImage: "exclamationmark.circle.fill")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(KabuyomiTheme.caution)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .listRowBackground(KabuyomiTheme.paper)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                }
             }
 
             Section {
@@ -4449,29 +4462,7 @@ private struct RedesignSettingsView: View {
                 .listRowBackground(KabuyomiTheme.paper)
                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 .accessibilityIdentifier("redesign.settings.credits")
-            } header: {
-                RedesignListSectionHeader(title: "クレジット")
-            }
 
-            Section {
-                Toggle(isOn: Binding(
-                    get: { appModel.aiConsentGranted },
-                    set: { appModel.setAIConsent($0) }
-                )) {
-                    SettingsToggleLabel(
-                        title: "AI 利用への同意",
-                        subtitle: "質問と対象資料の抜粋を外部AIモデルへ送信します。"
-                    )
-                }
-                .tint(KabuyomiTheme.accent)
-                .listRowBackground(KabuyomiTheme.paper)
-                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                .accessibilityIdentifier("redesign.settings.aiConsent")
-            } header: {
-                RedesignListSectionHeader(title: "AI 利用")
-            }
-
-            Section {
                 Toggle(isOn: Binding(
                     get: { appModel.showStarterCompanies },
                     set: { appModel.setShowStarterCompanies($0) }
@@ -4486,7 +4477,7 @@ private struct RedesignSettingsView: View {
                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 .accessibilityIdentifier("redesign.settings.starters")
             } header: {
-                RedesignListSectionHeader(title: "表示")
+                RedesignListSectionHeader(title: "アプリ")
             }
 
             Section {
@@ -4533,25 +4524,37 @@ private struct RedesignSettingsView: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 }
 
+            } header: {
+                RedesignListSectionHeader(title: "データとサポート")
+            }
+
+            // 消す操作は他の行と同じ列に並べない。節ごと切り離して最後に置く
+            // (押した先の確認は `requestResetLocalDataConfirmation` が持っている)。
+            Section {
                 Button(role: .destructive) {
                     appModel.requestResetLocalDataConfirmation()
                 } label: {
-                    Text("ローカルデータをリセット")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(KabuyomiTheme.negative)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .contentShape(Rectangle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("ローカルデータをリセット")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(KabuyomiTheme.negative)
+                        Text("保存した銘柄と会話履歴がこの端末から消えます。購入したクレジットは残ります。")
+                            .font(.caption2)
+                            .foregroundStyle(KabuyomiTheme.inkMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .listRowBackground(KabuyomiTheme.paper)
                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 .accessibilityIdentifier("redesign.settings.reset")
-            } header: {
-                RedesignListSectionHeader(title: "サポートとデータ")
             }
 
             Section {
-                Text("Kabuyomi は公開された SEC 10-K / 10-Q を読みやすくする資料リーダーです。投資助言や売買推奨ではありません。")
+                Text("Kabuyomi は公開された SEC \(SupportedFilingForms.listed) を読みやすくする資料リーダーです。投資助言や売買推奨ではありません。")
                     .font(.caption2)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
