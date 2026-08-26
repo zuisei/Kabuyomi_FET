@@ -7,7 +7,8 @@ struct EventOverviewView: View {
     let translationErrorMessage: String?
     let requestTranslation: (() -> Void)?
     let refresh: (() async -> Void)?
-    let goToReplay: () -> Void
+    /// リプレイの面を消したので、渡されないことがある(2026-08-26)。
+    var goToReplay: (() -> Void)? = nil
     let goToEvidence: () -> Void
 
     var body: some View {

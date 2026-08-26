@@ -218,7 +218,7 @@ struct PolicyOverviewContent: View {
             case .unmapped:
                 MarketDataStateMessage(
                     title: "市場チャート未設定",
-                    detail: "関連銘柄は確定していません。リプレイで対象銘柄と比較対象を明示して実データを確認できます。",
+                    detail: "関連銘柄は確定していません。",
                     systemImage: "chart.xyaxis.line"
                 )
             case .notApplicable:
@@ -230,7 +230,7 @@ struct PolicyOverviewContent: View {
             case .disabled:
                 MarketDataStateMessage(
                     title: "市場データ未接続",
-                    detail: "共通配信データは未接続です。リプレイでは利用者自身のデータ提供元契約で実データを端末から取得できます。",
+                    detail: "共通配信データは未接続です。",
                     systemImage: "chart.xyaxis.line"
                 )
             }

@@ -61,9 +61,17 @@ struct TimelineView: View {
         events.map(\.lastActivityAt).max()
     }
 
-    /// 「新着」は最新1日ぶんで、1ページ目に収まっている。それ以外へ移ると
-    /// 手元にあるぶんだけでは足りないので、続きを取りにいく。
-    private var filterNeedsEverything: Bool { filter != .recent }
+    /// 最新の公示日ぶんを、まだ取り切れていないかもしれない状態。
+    ///
+    /// 絞り込みを新着だけにしたので(2026-08-26 オーナー「もう新着だけにしていいかも」)、
+    /// 2,447件を全部取る意味は無くなった。**手元の一番古いものがまだ最新日なら**、
+    /// その日の続きが次のページにいる可能性がある — そこまでは取る。
+    /// 前日まで届いていれば、その先はどれも新着に出ないので取らない。
+    private var mayHaveMoreOfLatestDay: Bool {
+        guard hasMore, let latestActivityAt else { return false }
+        guard let oldestLoaded = events.map(\.lastActivityAt).min() else { return false }
+        return TimelineFilter.isRecent(oldestLoaded, latestActivityAt: latestActivityAt)
+    }
 
     private var filtered: [PolicyEventSummary] {
         events.filter { event in
@@ -203,7 +211,7 @@ struct TimelineView: View {
 
                             // 末尾が見えたら続きを1ページ。開いた直後に25往復して
                             // 35秒かける代わりに、要る分だけ足していく(2026-08-26)。
-                            if hasMore {
+                            if mayHaveMoreOfLatestDay {
                                 HStack(spacing: 8) {
                                     ProgressView().controlSize(.small)
                                     Text("続きを読み込み中")
@@ -226,9 +234,6 @@ struct TimelineView: View {
                     .refreshable { await refresh() }
                     // 絞り込みを広げた瞬間にも続きを取る。末尾まで送らないと
                     // 出てこない、という形にはしない。
-                    .task(id: filterNeedsEverything) {
-                        if filterNeedsEverything && hasMore { await loadMore() }
-                    }
                     .accessibilityIdentifier("timeline.main")
                 }
             }
@@ -325,7 +330,6 @@ struct TimelineView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     headerTitleBlock
                     timezoneMenu
-                    filterMenu
                     Button { showFilterCriteria = true } label: {
                         Label("表示の基準", systemImage: "info.circle")
                     }
@@ -344,7 +348,6 @@ struct TimelineView: View {
                         .accessibilityIdentifier("timeline.filterCriteria")
                     }
                 }
-                filterRail
             }
         }
     }

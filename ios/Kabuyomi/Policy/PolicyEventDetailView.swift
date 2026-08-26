@@ -1,7 +1,5 @@
 import SwiftUI
 
-enum DetailSection: String, CaseIterable, Identifiable { case overview = "概要", replay = "リプレイ", evidence = "証拠"; var id: Self { self } }
-
 struct EventDetailView: View {
     let event: PolicyEvent
     let translationStatus: TranslationRequestStatus?
@@ -10,8 +8,9 @@ struct EventDetailView: View {
     let requestTranslation: (() -> Void)?
     let refresh: (() async -> Void)?
     @EnvironmentObject private var store: SavedEventStore
-    @State private var section: DetailSection
-    @State private var replayStart: ReplayMilestone?
+    /// 証拠は**タブではなく1段下**。上の3分割は消した(2026-08-26 オーナー)。
+    /// ただし公式URLと原文はここにしか無いので、面ごと消しはしない。
+    @State private var showsEvidence = false
 
     init(
         event: PolicyEvent,
@@ -28,29 +27,26 @@ struct EventDetailView: View {
         self.requestTranslation = requestTranslation
         self.refresh = refresh
         let mode = ProcessInfo.processInfo.arguments.value(after: "-screenshotMode")
-        let replayModes = ["replayOriginal", "replayReport", "replayRevision", "replayMarket", "replayDay", "marketDaily", "marketNotApplicable"]
-        _section = State(initialValue: mode.map(replayModes.contains) == true ? .replay : mode?.hasPrefix("evidence") == true ? .evidence : .overview)
+        _showsEvidence = State(initialValue: mode?.hasPrefix("evidence") == true)
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("詳細セクション", selection: $section) { ForEach(DetailSection.allCases) { Text($0.rawValue).tag($0) } }
-                .pickerStyle(.segmented).padding(.horizontal).padding(.bottom, 8)
-            switch section {
-            case .overview:
-                EventOverviewView(
-                    event: event,
-                    translationStatus: translationStatus,
-                    translationIsSubmitting: translationIsSubmitting,
-                    translationErrorMessage: translationErrorMessage,
-                    requestTranslation: requestTranslation,
-                    refresh: refresh,
-                    goToReplay: { replayStart = .marketReaction; section = .replay },
-                    goToEvidence: { section = .evidence }
-                )
-            case .replay: EventReplayView(event: event, requestedMilestone: replayStart)
-            case .evidence: EventEvidenceView(event: event)
-            }
+        EventOverviewView(
+            event: event,
+            translationStatus: translationStatus,
+            translationIsSubmitting: translationIsSubmitting,
+            translationErrorMessage: translationErrorMessage,
+            requestTranslation: requestTranslation,
+            refresh: refresh,
+            // `goToReplay` は既定の nil のまま。リプレイの面は消した —
+            // 市場データが全件ゼロで、再生するものが無い(2026-08-26)。
+            goToEvidence: { showsEvidence = true }
+        )
+        .navigationDestination(isPresented: $showsEvidence) {
+            EventEvidenceView(event: event)
+                .background(KabuyomiTheme.canvas)
+                .navigationTitle("原文と証拠")
+                .navigationBarTitleDisplayMode(.inline)
         }
         .background(KabuyomiTheme.canvas)
         .navigationTitle(event.displayAgencyCode).navigationBarTitleDisplayMode(.inline)
