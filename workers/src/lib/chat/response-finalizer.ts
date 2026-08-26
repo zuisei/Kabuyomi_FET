@@ -1368,6 +1368,40 @@ function buildSafeCashFlowNumericRecovery(
   };
 }
 
+/// 資金繰り・負債の質問に対して、**モデルを呼ぶ前に**確定回答を組み立てる。
+///
+/// この経路の答えはモデルの出力を1文字も使わない。`liquiditySemanticRecoveryRequired`
+/// (このファイル冒頭)が `isLiquidityDebtQuestion` と型付き流動性事実の有無だけで決まり、
+/// 成立したときは**常に**決定論的な比較文を出す、と決めてあるため
+/// (「Q10 conclusions are safety-sensitive」のコメント)。つまりモデルの答えは
+/// 必ず捨てられる。捨てるものを待つ理由がないので、呼ぶ前に打ち切る。
+///
+/// 2026-08-21〜24 のベンチ10本で、`liquidity_debt` は **51件中51件**が
+/// この経路に落ちていた(モデル採用ゼロ)。捨てていた待ち時間は合計 209 秒、p50 3.9 秒。
+///
+/// **型付き事実が揃わないときは null を返す。** そのときは従来どおりモデルに回るので、
+/// この打ち切りで答えが変わることはない(遅くなることも、内容が減ることもない)。
+export function buildPreModelLiquidityAnswer(
+  filing: FilingCacheRecord,
+  question: string,
+  questionIntent: string | null | undefined
+): ChatResponsePayload | null {
+  if (!isLiquidityDebtQuestion(question, questionIntent)) {
+    return null;
+  }
+  // モデル応答由来の additionalSources は渡さない。ここで拾えるのは filing だけで
+  // 確定する事実に限る — 拾えなければ打ち切らず、従来経路に落とす。
+  const facts = buildVerifiedFinancialFacts(filing);
+  const hasTypedLiquidityPosition = facts.some((fact) =>
+    fact.role === "current" &&
+    ["cashAndCashEquivalents", "currentDebt", "longTermDebt", "operatingCashFlow"].includes(fact.semanticLabel)
+  );
+  if (!hasTypedLiquidityPosition) {
+    return null;
+  }
+  return buildSafeLiquidityNumericRecovery(filing, question, questionIntent, facts, [])?.responseWithUrls ?? null;
+}
+
 function buildSafeLiquidityNumericRecovery(
   filing: FilingCacheRecord,
   question: string,
