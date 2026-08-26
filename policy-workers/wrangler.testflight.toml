@@ -1,0 +1,58 @@
+name = "md-api-testflight"
+main = "src/index.ts"
+compatibility_date = "2026-07-21"
+workers_dev = true
+
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[[ratelimits]]
+name = "PUBLIC_RATE_LIMITER"
+namespace_id = "43001"
+
+  [ratelimits.simple]
+  limit = 300
+  period = 60
+
+[[ratelimits]]
+name = "TRANSLATION_REQUEST_RATE_LIMITER"
+namespace_id = "43011"
+
+  [ratelimits.simple]
+  limit = 5
+  period = 60
+
+[vars]
+ENVIRONMENT = "testflight"
+TRANSLATION_REALTIME_CUTOFF = "2026-07-21T15:00:00.000Z"
+
+[[services]]
+binding = "TRANSLATION_ADMIN"
+service = "md-admin-testflight"
+
+[[d1_databases]]
+binding = "CORE"
+database_name = "market-docket-core-testflight"
+database_id = "7c5551d7-6aa8-45ac-a09c-bb53802c9fe9"
+migrations_dir = "migrations/core"
+
+[[d1_databases]]
+binding = "OPS"
+database_name = "market-docket-ops-testflight"
+database_id = "1b011ef4-37b6-4049-9c45-8b4d0e05ed2e"
+migrations_dir = "migrations/ops"
+
+[[r2_buckets]]
+binding = "RAW"
+bucket_name = "market-docket-raw-testflight"
+
+[[r2_buckets]]
+binding = "DERIVED"
+bucket_name = "market-docket-derived-testflight"
+
+[[r2_buckets]]
+binding = "TEMP"
+bucket_name = "market-docket-temp-testflight"
+
+[observability]
+enabled = true

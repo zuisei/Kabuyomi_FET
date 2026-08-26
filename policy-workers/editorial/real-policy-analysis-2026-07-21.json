@@ -1,0 +1,287 @@
+{
+  "datasetVersion": "2026-07-21.2",
+  "generatedBy": "codex-automated-editorial-draft",
+  "analysisStatus": "automated_draft",
+  "humanReviewed": false,
+  "note": "Official-source-grounded automated drafts for Preview, internal TestFlight, and the private Production editorial queue. These records must never be publicly presented as human reviewed before explicit approval.",
+  "events": [
+    {
+      "eventID": "81ead932-9542-528e-aa32-75399e377442",
+      "documentNumber": "WH-20260720-securing-americas-defense-supply-chains-and-ensuring-domestic-acquisition-of-critical-materials",
+      "officialURL": "https://www.whitehouse.gov/presidential-actions/2026/07/securing-americas-defense-supply-chains-and-ensuring-domestic-acquisition-of-critical-materials/",
+      "sourcePublishedAt": "2026-07-20T19:38:18.000Z",
+      "sourceModifiedAt": "2026-07-20T19:40:19.000Z",
+      "caseTags": ["high_relevance", "exact_time", "same_document_revision", "disabled_market"],
+      "analysis": {
+        "presentationTier": "signal",
+        "canonicalTitleJA": "米政府、防衛向け重要資材の国内・同盟国調達を強化",
+        "canonicalTitleEN": "Securing America's Defense Supply Chains and Ensuring Domestic Acquisition of Critical Materials",
+        "changeSummaryJA": "大統領令は、防衛装備に使う重要資材・部品を国内または同盟国から調達する方針を示した。2027年1月から一部の調達免除を制限し、国防サプライチェーンの可視化も求める。",
+        "whyItMattersJA": "防衛請負企業には、原材料まで遡る供給網の把握と代替調達先の確保が求められ得る。個別企業への影響と市場の値動きとの因果関係は未確定。",
+        "policyType": "executive_order",
+        "policyDomainCodes": ["defense-procurement", "industrial-policy"],
+        "primaryAgencyCode": "WH",
+        "affectedRegionCodes": ["US", "allied-countries"],
+        "affectedSectorCodes": ["defense", "critical-materials", "manufacturing"],
+        "affectedProductTerms": ["重要資材", "防衛部品", "原材料"],
+        "marketAnalysisMode": "disabled",
+        "marketRelevanceReasonJA": "防衛・素材企業との関連はあり得るが、市場データの表示権と個別銘柄マッピングは未承認。",
+        "noCompanyReasonJA": "命令本文は調達方針と供給網要件を定めるもので、個別銘柄の根拠付き承認は未完了。",
+        "noMarketDataReasonJA": "市場データの表示ライセンスが未承認のため、この環境では市場系列を表示しない。",
+        "editorialPriority": 100
+      }
+    },
+    {
+      "eventID": "ebbeeefe-457c-518d-8a61-3f2dd6d5ac71",
+      "documentNumber": "2026-14654",
+      "officialURL": "https://www.federalregister.gov/documents/2026/07/20/2026-14654/action-by-the-united-states-in-the-investigation-under-section-301-of-the-trade-act-of-1974-of",
+      "caseTags": ["high_relevance", "publication_day", "daily_market", "trade_tariffs"],
+      "analysis": {
+        "presentationTier": "signal",
+        "canonicalTitleJA": "米国、ブラジル産品に25%の301条関税を指示",
+        "canonicalTitleEN": "Action by the United States in the Investigation Under Section 301 of Brazil's Acts, Policies, and Practices",
+        "changeSummaryJA": "大統領覚書は、特定の除外品を除くブラジル産品に25%の追加関税を課すようUSTRに指示した。対象調査にはデジタル貿易、電子決済、知財、エタノール市場などが含まれる。",
+        "whyItMattersJA": "ブラジルからの輸入コストと、除外品目を含む調達判断に影響し得る。企業別の影響は品目表と輸入構成の確認が必要で、株価との因果関係は未確定。",
+        "policyType": "tariff_action",
+        "policyDomainCodes": ["trade-tariffs"],
+        "primaryAgencyCode": "EOP",
+        "affectedRegionCodes": ["US", "Brazil"],
+        "affectedSectorCodes": ["imports", "digital-payments", "agriculture"],
+        "affectedProductTerms": ["ブラジル産品", "電子決済", "エタノール"],
+        "marketAnalysisMode": "daily",
+        "marketRelevanceReasonJA": "掲載日精度のため、前営業日・掲載日・翌営業日・5営業日後の日足で確認する。",
+        "noCompanyReasonJA": "除外品目表と企業別輸入構成の照合が未完了のため、個別企業はまだ承認しない。",
+        "noMarketDataReasonJA": null,
+        "editorialPriority": 98
+      }
+    },
+    {
+      "eventID": "186a13f2-b3c7-5543-a6b7-e6d9fbb2f38e",
+      "documentNumber": "2026-14635",
+      "officialURL": "https://www.federalregister.gov/documents/2026/07/21/2026-14635/order-providing-exemptive-relief-to-facilitate-listing-of-cash-settled-futures-on-individual-equity",
+      "caseTags": ["publication_day", "daily_market", "company_mapping"],
+      "analysis": {
+        "presentationTier": "signal",
+        "canonicalTitleJA": "CFTC、個別株の現金決済先物上場に向けCMEへ適用除外",
+        "canonicalTitleEN": "Order Providing Exemptive Relief To Facilitate Listing of Cash-Settled Futures on Individual Equity Securities",
+        "changeSummaryJA": "CFTCは、CMEが個別株を原資産とする現金決済先物を上場する計画に関連し、security futuresの始値決済要件からの適用除外を認めた。適用日は2026年7月16日。",
+        "whyItMattersJA": "個別株先物の商品設計と上場実務を進める規制上の条件変更で、取引所・清算・証券デリバティブ市場に関係する。市場への影響は商品上場後の流動性などに左右される。",
+        "policyType": "order",
+        "policyDomainCodes": ["financial-regulation"],
+        "primaryAgencyCode": "CFTC",
+        "affectedRegionCodes": ["US"],
+        "affectedSectorCodes": ["exchanges", "derivatives", "clearing"],
+        "affectedProductTerms": ["個別株先物", "現金決済", "security futures"],
+        "marketAnalysisMode": "daily",
+        "marketRelevanceReasonJA": "掲載日精度であり、CMEと市場ベンチマークを日足で確認するのが適切。",
+        "noCompanyReasonJA": null,
+        "noMarketDataReasonJA": null,
+        "editorialPriority": 94
+      },
+      "companyRelations": [
+        {
+          "issuerName": "CME Group Inc.",
+          "ticker": "CME",
+          "exchange": "NASDAQ",
+          "relationType": "direct",
+          "evidenceReference": "FR Doc. 2026-14635, SUMMARY",
+          "evidenceSummaryJA": "公式要旨がChicago Mercantile Exchange Inc.の個別株現金決済先物上場計画を明示している。"
+        }
+      ]
+    },
+    {
+      "eventID": "5becc5a2-9120-5904-8890-ca1701c6d43e",
+      "documentNumber": "2026-14679",
+      "officialURL": "https://www.federalregister.gov/documents/2026/07/21/2026-14679/electronic-delivery-of-information-under-the-federal-securities-laws",
+      "caseTags": ["publication_day", "daily_market", "financial_regulation", "comment_deadline"],
+      "analysis": {
+        "presentationTier": "signal",
+        "canonicalTitleJA": "SEC、証券法上の電子交付ルールを提案",
+        "canonicalTitleEN": "Electronic Delivery of Information Under the Federal Securities Laws",
+        "changeSummaryJA": "SECはRegulation E-Deliveryを提案し、一定条件下で事前の明示的同意なしに法定資料を電子交付できる枠組みを示した。投資会社の株主報告や委任状・公開買付資料に関する既存規則の見直しも含む。",
+        "whyItMattersJA": "証券会社、運用会社、発行体の交付コストと利用者体験に関わる提案である。最終規則ではなく、意見期限は2026年9月21日。",
+        "policyType": "proposed_rule",
+        "policyDomainCodes": ["financial-regulation"],
+        "primaryAgencyCode": "SEC",
+        "affectedRegionCodes": ["US"],
+        "affectedSectorCodes": ["securities", "asset-management", "brokerage"],
+        "affectedProductTerms": ["電子交付", "株主報告", "委任状資料"],
+        "marketAnalysisMode": "daily",
+        "marketRelevanceReasonJA": "提案規則は掲載日精度であり、金融サービス業の反応は日足で確認する。",
+        "noCompanyReasonJA": "規則案は広い市場参加者を対象とし、個別発行体の直接対象を示していない。",
+        "noMarketDataReasonJA": null,
+        "editorialPriority": 91
+      }
+    },
+    {
+      "eventID": "f61f1e72-17c9-543f-a790-b4ef6ca2a338",
+      "documentNumber": "2026-14709",
+      "officialURL": "https://www.federalregister.gov/documents/2026/07/21/2026-14709/patient-protection-and-affordable-care-act-hhs-notice-of-benefit-and-payment-parameters-for-2027-and",
+      "caseTags": ["correction_document", "publication_day", "daily_market", "multiple_company_candidates"],
+      "analysis": {
+        "presentationTier": "signal",
+        "canonicalTitleJA": "HHS、2027年ACA支払パラメータ最終規則の誤記を訂正",
+        "canonicalTitleEN": "Patient Protection and Affordable Care Act, HHS Notice of Benefit and Payment Parameters for 2027; Correction",
+        "changeSummaryJA": "HHSは、2026年5月20日掲載の2027年ACA支払パラメータ最終規則について、誤植、技術的な起草誤り、記載漏れを訂正した。正しい発効日は2026年7月20日。",
+        "whyItMattersJA": "保険料・リスク調整・取引所運営などの実務で参照する最終規則の正確性に関わる。訂正は政策変更を断定するものではなく、個別保険会社への影響は追加確認が必要。",
+        "policyType": "correcting_amendment",
+        "policyDomainCodes": ["health-medicine", "financial-regulation"],
+        "primaryAgencyCode": "HHS",
+        "affectedRegionCodes": ["US"],
+        "affectedSectorCodes": ["health-insurance", "insurance-exchanges"],
+        "affectedProductTerms": ["ACA適格医療保険", "リスク調整", "利用料"],
+        "marketAnalysisMode": "daily",
+        "marketRelevanceReasonJA": "訂正文書は掲載日精度のため、保険セクターは日足で確認する。",
+        "noCompanyReasonJA": null,
+        "noMarketDataReasonJA": null,
+        "editorialPriority": 90
+      },
+      "companyRelations": [
+        {
+          "issuerName": "UnitedHealth Group Incorporated",
+          "ticker": "UNH",
+          "exchange": "NYSE",
+          "relationType": "policy_risk",
+          "evidenceReference": "FR Doc. 2026-14709 correcting FR Doc. 2026-10050",
+          "evidenceSummaryJA": "QHP発行体等に関する最終規則の訂正であることを根拠にした自動候補。本文で個社名は指定されていない。"
+        },
+        {
+          "issuerName": "Elevance Health, Inc.",
+          "ticker": "ELV",
+          "exchange": "NYSE",
+          "relationType": "policy_risk",
+          "evidenceReference": "FR Doc. 2026-14709 correcting FR Doc. 2026-10050",
+          "evidenceSummaryJA": "QHP発行体等に関する最終規則の訂正であることを根拠にした自動候補。本文で個社名は指定されていない。"
+        },
+        {
+          "issuerName": "Centene Corporation",
+          "ticker": "CNC",
+          "exchange": "NYSE",
+          "relationType": "policy_risk",
+          "evidenceReference": "FR Doc. 2026-14709 correcting FR Doc. 2026-10050",
+          "evidenceSummaryJA": "QHP発行体等に関する最終規則の訂正であることを根拠にした自動候補。本文で個社名は指定されていない。"
+        }
+      ]
+    },
+    {
+      "eventID": "040a4c88-3a37-5055-9250-6c08f8299734",
+      "documentNumber": "2026-14614",
+      "officialURL": "https://www.federalregister.gov/documents/2026/07/21/2026-14614/hardwood-and-decorative-plywood-from-the-socialist-republic-of-vietnam-final-affirmative",
+      "caseTags": ["publication_day", "daily_market", "trade_remedy"],
+      "analysis": {
+        "presentationTier": "signal",
+        "canonicalTitleJA": "米商務省、ベトナム産合板のダンピング最終認定",
+        "canonicalTitleEN": "Hardwood and Decorative Plywood from Vietnam: Final Affirmative Determination of Sales at Less Than Fair Value",
+        "changeSummaryJA": "米商務省は、ベトナム産の広葉樹・化粧合板が米国で公正価値を下回って販売されている、またはその可能性があると最終認定した。適用日は2026年7月21日。",
+        "whyItMattersJA": "対象合板の輸入条件と現金供託率に関わり、輸入業者、流通、建材調達へ影響し得る。企業別影響は対象範囲と輸入実績の照合が必要。",
+        "policyType": "trade_remedy_determination",
+        "policyDomainCodes": ["trade-tariffs", "industrial-policy"],
+        "primaryAgencyCode": "DOC",
+        "affectedRegionCodes": ["US", "Vietnam"],
+        "affectedSectorCodes": ["building-materials", "wood-products", "imports"],
+        "affectedProductTerms": ["広葉樹合板", "化粧合板"],
+        "marketAnalysisMode": "daily",
+        "marketRelevanceReasonJA": "掲載日精度の貿易救済決定であり、建材・輸入関連は日足で確認する。",
+        "noCompanyReasonJA": "公式文書の生産者・輸出者と米国上場証券の対応関係が未承認。",
+        "noMarketDataReasonJA": null,
+        "editorialPriority": 86
+      }
+    },
+    {
+      "eventID": "ce72c838-7cda-5b96-9aca-7439cf4ecaca",
+      "documentNumber": "2026-14659",
+      "officialURL": "https://www.federalregister.gov/documents/2026/07/21/2026-14659/request-for-information-on-domestic-reuse-and-repurposing-of-savannah-river-site-heavy-water",
+      "caseTags": ["publication_day", "unmapped_market", "energy"],
+      "analysis": {
+        "presentationTier": "monitor",
+        "canonicalTitleJA": "DOE、53万ガロンの重水再利用について情報募集",
+        "canonicalTitleEN": "Request for Information on Domestic Reuse and Repurposing of Savannah River Site Heavy Water Inventory",
+        "changeSummaryJA": "DOEはSavannah River Siteに保管する約53万ガロンの重水について、除染、再利用、現地処理設備などの協業案を募集した。回答期限は2026年9月21日。",
+        "whyItMattersJA": "同位体、医療、研究、産業用途の国内供給網に関わる可能性があるが、現時点ではRFIであり具体的な契約や採択ではない。",
+        "policyType": "request_for_information",
+        "policyDomainCodes": ["energy-nuclear", "industrial-policy"],
+        "primaryAgencyCode": "DOE",
+        "affectedRegionCodes": ["US"],
+        "affectedSectorCodes": ["nuclear", "isotopes", "medical-supply"],
+        "affectedProductTerms": ["重水", "同位体", "トリチウム除去"],
+        "marketAnalysisMode": "unmapped",
+        "marketRelevanceReasonJA": "産業用途との関連候補はあるが、協業先・契約・上場証券の根拠確認が未完了。",
+        "noCompanyReasonJA": "RFIは協業案を募集する段階で、採択企業や契約先を示していない。",
+        "noMarketDataReasonJA": null,
+        "editorialPriority": 62
+      }
+    },
+    {
+      "eventID": "3d11e7fa-074a-500a-9d6e-13a1885560ac",
+      "documentNumber": "2026-14674",
+      "officialURL": "https://www.federalregister.gov/documents/2026/07/21/2026-14674/sunshine-act-meeting-open-commission-meeting-wednesday-july-22-2026",
+      "caseTags": ["routine_meeting", "publication_day", "unmapped_market", "telecommunications"],
+      "analysis": {
+        "presentationTier": "monitor",
+        "canonicalTitleJA": "FCC、Cバンド・宇宙通信などを審議する公開会合を告知",
+        "canonicalTitleEN": "Sunshine Act Meeting; Open Commission Meeting Wednesday, July 22, 2026",
+        "changeSummaryJA": "FCCは2026年7月22日の公開会合を告知し、上部Cバンド160MHzの柔軟利用、宇宙・地球局免許、ブロードバンド表示、ロボコール対策などを審議項目に挙げた。",
+        "whyItMattersJA": "複数の重要議題を含むが、この文書自体は会合告知であり最終決定ではない。採決結果を別の公式文書で追跡する必要がある。",
+        "policyType": "meeting_notice",
+        "policyDomainCodes": ["telecommunications", "technology-ai-semiconductors"],
+        "primaryAgencyCode": "FCC",
+        "affectedRegionCodes": ["US"],
+        "affectedSectorCodes": ["wireless", "satellite", "broadband"],
+        "affectedProductTerms": ["上部Cバンド", "宇宙局免許", "ブロードバンド表示"],
+        "marketAnalysisMode": "unmapped",
+        "marketRelevanceReasonJA": "議題には市場関連候補があるが、会合前の告知であり決定内容と対象銘柄は未確定。",
+        "noCompanyReasonJA": "会合告知は複数案件を束ねており、決定前に個別企業へ結び付けない。",
+        "noMarketDataReasonJA": null,
+        "editorialPriority": 58
+      }
+    },
+    {
+      "eventID": "1e4b9e80-b248-5fbc-8554-54e5ce8a405c",
+      "documentNumber": "2026-14677",
+      "officialURL": "https://www.federalregister.gov/documents/2026/07/21/2026-14677/renewal-of-department-of-defense-federal-advisory-committees-board-of-visitors-national-defense",
+      "caseTags": ["routine_notice", "no_reasonable_company", "not_applicable_market"],
+      "analysis": {
+        "presentationTier": "archive",
+        "canonicalTitleJA": "国防大学の訪問委員会を連邦諮問委員会として更新",
+        "canonicalTitleEN": "Renewal of Department of Defense Federal Advisory Committees-Board of Visitors, National Defense University",
+        "changeSummaryJA": "国防総省は、National Defense Universityの訪問委員会を裁量的な連邦諮問委員会として更新すると告知した。",
+        "whyItMattersJA": "軍事教育の質と運営を助言する委員会の継続に関する行政上の通知で、具体的な調達、規制変更、企業措置ではない。",
+        "policyType": "advisory_committee_renewal",
+        "policyDomainCodes": ["defense-procurement", "education"],
+        "primaryAgencyCode": "DOD",
+        "affectedRegionCodes": ["US"],
+        "affectedSectorCodes": ["military-education"],
+        "affectedProductTerms": ["連邦諮問委員会", "軍事教育"],
+        "marketAnalysisMode": "not_applicable",
+        "marketRelevanceReasonJA": null,
+        "noCompanyReasonJA": "諮問委員会の更新であり、個別企業・証券を合理的に結び付ける根拠がない。",
+        "noMarketDataReasonJA": "定例的な委員会構成更新の通知であり、市場評価を行う合理性がない。",
+        "editorialPriority": 18
+      }
+    },
+    {
+      "eventID": "9cb65e97-dc25-43ff-8c51-2efb6cc44618",
+      "documentNumber": "FR Doc. 2023-17243",
+      "officialURL": "https://public-inspection.federalregister.gov/2023-17243.pdf",
+      "caseTags": ["original_and_correction", "publication_day", "daily_market", "export_controls"],
+      "analysis": {
+        "presentationTier": "signal",
+        "canonicalTitleJA": "BIS、中国・マカオ向け核不拡散輸出管理を拡大",
+        "canonicalTitleEN": "Expansion of Nuclear Nonproliferation Controls on the People's Republic of China and Macau",
+        "changeSummaryJA": "BISは中国とマカオ向けの核不拡散関連輸出管理を拡大した。原規則とは別の訂正文書（FR Doc. 2023-18047）が後日掲載され、両文書の関係を保持している。",
+        "whyItMattersJA": "対象品目を扱う輸出者には許可要件と取引審査の確認が必要となる。企業別影響は製品分類と輸出先の照合が必要で、市場との因果関係は未確定。",
+        "policyType": "final_rule_with_correction",
+        "policyDomainCodes": ["export-controls-sanctions"],
+        "primaryAgencyCode": "BIS",
+        "affectedRegionCodes": ["US", "China", "Macau"],
+        "affectedSectorCodes": ["exporters", "nuclear", "advanced-manufacturing"],
+        "affectedProductTerms": ["核不拡散対象品目", "輸出許可"],
+        "marketAnalysisMode": "daily",
+        "marketRelevanceReasonJA": "公式時刻ではなく掲載日精度であり、対象セクターは日足で確認する。",
+        "noCompanyReasonJA": "対象品目と上場企業の製品・輸出先を示す承認済み根拠が未整備。",
+        "noMarketDataReasonJA": null,
+        "editorialPriority": 92
+      }
+    }
+  ]
+}

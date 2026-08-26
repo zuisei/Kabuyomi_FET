@@ -1,0 +1,41 @@
+name = "md-admin-prod"
+main = "src/admin.ts"
+compatibility_date = "2026-07-21"
+workers_dev = true
+
+[vars]
+ENVIRONMENT = "production"
+OPENAI_TRANSLATION_MODEL = "gpt-5-nano-2025-08-07"
+TRANSLATION_REALTIME_CUTOFF = "2026-07-21T15:00:00.000Z"
+TRANSLATION_REALTIME_LIMIT = "5"
+TRANSLATION_DAILY_TOKEN_BUDGET = "1900000"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[[d1_databases]]
+binding = "CORE"
+database_name = "market-docket-core-prod"
+database_id = "1622c15a-5301-4edc-a749-ef078bba67b1"
+migrations_dir = "migrations/core"
+
+[[d1_databases]]
+binding = "OPS"
+database_name = "market-docket-ops-prod"
+database_id = "93bf5ee8-ff4e-446e-b2f7-93c3bcd85fd1"
+migrations_dir = "migrations/ops"
+
+[[r2_buckets]]
+binding = "RAW"
+bucket_name = "market-docket-raw-prod"
+
+[[r2_buckets]]
+binding = "DERIVED"
+bucket_name = "market-docket-derived-prod"
+
+[[r2_buckets]]
+binding = "TEMP"
+bucket_name = "market-docket-temp-prod"
+
+[observability]
+enabled = true

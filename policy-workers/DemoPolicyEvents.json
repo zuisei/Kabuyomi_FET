@@ -1,0 +1,700 @@
+{
+  "schemaVersion": 2,
+  "isSyntheticDataset": true,
+  "datasetLabelJA": "デモ環境・ローカルデータ",
+  "events": [
+    {
+      "id": "E6A78BA1-531A-4C10-9F2F-0B6FD116A001",
+      "isSynthetic": true,
+      "lastActivityAt": "2026-07-16T10:32:14-04:00",
+      "agency": {
+        "code": "BIS",
+        "displayNameJA": "米国商務省産業安全保障局",
+        "displayNameEN": "Bureau of Industry and Security"
+      },
+      "titleJA": "先端計算用半導体の輸出管理規則を改訂（デモ）",
+      "titleEN": "Advanced Computing Export Controls Updated (Demo)",
+      "summaryJA": "対象性能の定義、許可審査方針、発効日の記載を更新した架空のデモ事例です。",
+      "topics": [
+        "半導体",
+        "輸出管理"
+      ],
+      "tickers": [
+        "NVDA",
+        "AMD",
+        "TSM"
+      ],
+      "category": "semiconductorExportControls",
+      "status": "revised",
+      "timestampState": "officialExact",
+      "analysisAnchor": "officialPublication",
+      "publishedAt": "2026-07-16T10:02:14-04:00",
+      "detectedAt": "2026-07-16T10:03:01-04:00",
+      "revisedAt": "2026-07-16T10:12:44-04:00",
+      "sourceURL": null,
+      "documentInfo": {
+        "documentNumber": "BIS-DEMO-2026-0716-AC-01",
+        "publisherJA": "米国商務省産業安全保障局",
+        "publisherEN": "Bureau of Industry and Security",
+        "currentVersion": 2,
+        "contentHash": {
+          "algorithm": "sha256",
+          "value": "d554b3f1faa68c3b76c5dfcde8292c970c8186ab21f23700db936b9d1484db85"
+        }
+      },
+      "timelineItems": [
+        {
+          "id": "B4000001-0000-4000-8000-000000000001",
+          "kind": "officialPublication",
+          "occurredAt": "2026-07-16T10:02:14-04:00",
+          "titleJA": "公式文書を公開",
+          "detailJA": "BISが規則文書の初版を公開したデモイベントです。",
+          "sourceType": "official",
+          "verificationState": "humanVerified",
+          "documentVersion": 1
+        },
+        {
+          "id": "B4000001-0000-4000-8000-000000000002",
+          "kind": "systemDetection",
+          "occurredAt": "2026-07-16T10:03:01-04:00",
+          "titleJA": "システムが文書を検知",
+          "detailJA": "Market Docketが初版文書を取得した想定です。",
+          "sourceType": "system",
+          "verificationState": "systemObserved",
+          "documentVersion": 1
+        },
+        {
+          "id": "B4000001-0000-4000-8000-000000000003",
+          "kind": "mediaReport",
+          "occurredAt": "2026-07-16T10:07:18-04:00",
+          "titleJA": "最初の主要報道",
+          "detailJA": "主要報道機関が規則変更を速報した想定です。",
+          "sourceType": "secondary",
+          "verificationState": "humanVerified",
+          "documentVersion": 1
+        },
+        {
+          "id": "B4000001-0000-4000-8000-000000000004",
+          "kind": "documentRevision",
+          "occurredAt": "2026-07-16T10:12:44-04:00",
+          "titleJA": "公式文書を改訂",
+          "detailJA": "許可審査方針と発効日の記載を変更した想定です。",
+          "sourceType": "official",
+          "verificationState": "humanVerified",
+          "documentVersion": 2
+        },
+        {
+          "id": "B4000001-0000-4000-8000-000000000005",
+          "kind": "marketReaction",
+          "occurredAt": "2026-07-16T10:32:14-04:00",
+          "titleJA": "公開後30分の市場データを確定",
+          "detailJA": "NVDAはSOXX対比で1.3ポイント下落し、出来高は通常同時間帯比で最大2.4倍となった想定です。因果関係は未確定です。",
+          "sourceType": "market",
+          "verificationState": "calculated",
+          "documentVersion": 2
+        }
+      ],
+      "exposures": [
+        {
+          "id": "C5000001-0000-4000-8000-000000000001",
+          "ticker": "NVDA",
+          "companyName": "NVIDIA",
+          "relationship": "direct",
+          "evidenceJA": "対象性能区分に該当する製品群を販売しているというデモ根拠です。",
+          "verificationState": "humanVerified",
+          "references": [
+            {
+              "labelJA": "製品区分",
+              "valueJA": "Demo Advanced Compute Class A"
+            },
+            {
+              "labelJA": "企業資料",
+              "valueJA": "Demo Form 10-K / Export Controls節"
+            },
+            {
+              "labelJA": "政策条項",
+              "valueJA": "BIS-DEMO §742.6"
+            }
+          ]
+        },
+        {
+          "id": "C5000001-0000-4000-8000-000000000002",
+          "ticker": "AMD",
+          "companyName": "Advanced Micro Devices",
+          "relationship": "direct",
+          "evidenceJA": "対象性能区分に該当する可能性がある製品群を販売しているというデモ根拠です。",
+          "verificationState": "automaticUnverified",
+          "references": [
+            {
+              "labelJA": "製品区分",
+              "valueJA": "Demo Advanced Compute Class B"
+            },
+            {
+              "labelJA": "企業資料",
+              "valueJA": "Demo Product Catalog / Accelerators節"
+            }
+          ]
+        },
+        {
+          "id": "C5000001-0000-4000-8000-000000000003",
+          "ticker": "TSM",
+          "companyName": "TSMC",
+          "relationship": "indirect",
+          "evidenceJA": "関連製品の製造供給網に含まれる可能性があるというデモ根拠です。",
+          "verificationState": "automaticUnverified",
+          "references": [
+            {
+              "labelJA": "供給網",
+              "valueJA": "Demo Foundry Relationship Dataset"
+            }
+          ]
+        }
+      ],
+      "marketSummaries": [
+        {
+          "window": "thirtyMinutes",
+          "availableAt": "2026-07-16T10:32:14-04:00",
+          "ticker": "NVDA",
+          "benchmarkTicker": "SOXX",
+          "securityReturn": -0.018,
+          "benchmarkReturn": -0.005,
+          "abnormalReturn": -0.013,
+          "maxVolumeRatio": 2.4,
+          "abnormalReactionDetected": true
+        }
+      ],
+      "marketSeries": [
+        {
+          "timestamp": "2026-07-16T09:32:14-04:00",
+          "normalizedSecurityPrice": 100.0,
+          "normalizedBenchmarkPrice": 100.0,
+          "abnormalReturnPoints": 0.0,
+          "volumeRatio": 0.8
+        },
+        {
+          "timestamp": "2026-07-16T09:47:14-04:00",
+          "normalizedSecurityPrice": 100.08,
+          "normalizedBenchmarkPrice": 100.04,
+          "abnormalReturnPoints": 0.04,
+          "volumeRatio": 0.92
+        },
+        {
+          "timestamp": "2026-07-16T10:02:14-04:00",
+          "normalizedSecurityPrice": 100.05,
+          "normalizedBenchmarkPrice": 100.03,
+          "abnormalReturnPoints": 0.02,
+          "volumeRatio": 1.1
+        },
+        {
+          "timestamp": "2026-07-16T10:03:01-04:00",
+          "normalizedSecurityPrice": 99.98,
+          "normalizedBenchmarkPrice": 100.02,
+          "abnormalReturnPoints": -0.04,
+          "volumeRatio": 1.2
+        },
+        {
+          "timestamp": "2026-07-16T10:07:18-04:00",
+          "normalizedSecurityPrice": 99.74,
+          "normalizedBenchmarkPrice": 99.92,
+          "abnormalReturnPoints": -0.18,
+          "volumeRatio": 1.4
+        },
+        {
+          "timestamp": "2026-07-16T10:12:44-04:00",
+          "normalizedSecurityPrice": 99.4,
+          "normalizedBenchmarkPrice": 99.78,
+          "abnormalReturnPoints": -0.38,
+          "volumeRatio": 1.8
+        },
+        {
+          "timestamp": "2026-07-16T10:18:00-04:00",
+          "normalizedSecurityPrice": 99.1,
+          "normalizedBenchmarkPrice": 99.63,
+          "abnormalReturnPoints": -0.53,
+          "volumeRatio": 2.4
+        },
+        {
+          "timestamp": "2026-07-16T10:32:14-04:00",
+          "normalizedSecurityPrice": 98.2,
+          "normalizedBenchmarkPrice": 99.5,
+          "abnormalReturnPoints": -1.3,
+          "volumeRatio": 2.2
+        },
+        {
+          "timestamp": "2026-07-16T11:02:14-04:00",
+          "normalizedSecurityPrice": 98.35,
+          "normalizedBenchmarkPrice": 99.45,
+          "abnormalReturnPoints": -1.1,
+          "volumeRatio": 1.5
+        }
+      ],
+      "confounders": [
+        {
+          "id": "F7000001-0000-4000-8000-000000000001",
+          "titleJA": "同時間帯の米国経済指標発表（デモ）",
+          "occurredAt": "2026-07-16T10:00:00-04:00",
+          "relevance": "possible",
+          "detailJA": "市場全体へ影響した可能性があるため、政策との因果関係は確定できません。"
+        }
+      ],
+      "documentVersions": [
+        {
+          "version": 1,
+          "publishedAt": "2026-07-16T10:02:14-04:00",
+          "titleJA": "初版",
+          "bodyJA": "対象性能を超える製品について、許可審査は原則不許可とする。",
+          "bodyEN": "Applications for products above the defined performance threshold will be reviewed under a presumption of denial."
+        },
+        {
+          "version": 2,
+          "publishedAt": "2026-07-16T10:12:44-04:00",
+          "titleJA": "改訂版",
+          "bodyJA": "対象性能を超える製品について、許可申請を個別に審査する。発効日は公表日の30日後とする。",
+          "bodyEN": "Applications for products above the defined performance threshold will be reviewed on a case-by-case basis. The rule becomes effective 30 days after publication."
+        }
+      ],
+      "documents": [
+        {
+          "id": "D6A78BA1-531A-4C10-9F2F-0B6FD116A001",
+          "documentType": "final_rule",
+          "relationship": "primary",
+          "correctsDocumentID": null,
+          "documentNumber": "BIS-DEMO-2026-0716-AC-01",
+          "publisherJA": "米国商務省産業安全保障局",
+          "publisherEN": "Bureau of Industry and Security",
+          "titleJA": "先端計算用半導体の輸出管理規則を改訂（デモ）",
+          "titleEN": "Advanced Computing Export Controls Updated (Demo)",
+          "officialURL": "https://example.com/market-docket/demo/bis",
+          "publishedOn": "2026-07-16",
+          "effectiveOn": "2026-08-15",
+          "applicableOn": "2026-09-01",
+          "commentsCloseOn": "2026-07-30",
+          "sourceStatedAt": "Filed 7/16/2026 10:02:14 am EDT",
+          "sourceStatedTimezone": "America/New_York",
+          "firstObservedAt": "2026-07-16T10:03:01-04:00",
+          "ingestedAt": "2026-07-16T10:03:05-04:00",
+          "availableAt": "2026-07-16T10:02:14-04:00",
+          "availabilityBasis": "source_stated",
+          "timePrecision": "exact",
+          "currentRevision": 2,
+          "contentHash": {
+            "algorithm": "sha256",
+            "value": "d554b3f1faa68c3b76c5dfcde8292c970c8186ab21f23700db936b9d1484db85"
+          },
+          "bodyJA": "対象性能を超える製品について、許可申請を個別に審査する。発効日は公表日の30日後とする。",
+          "bodyEN": "Applications for products above the defined performance threshold will be reviewed on a case-by-case basis. The rule becomes effective 30 days after publication."
+        }
+      ],
+      "documentDiff": {
+        "deletedJA": [
+          "許可審査は原則不許可とする。"
+        ],
+        "addedJA": [
+          "許可申請を個別に審査する。",
+          "発効日は公表日の30日後とする。"
+        ],
+        "deletedEN": [
+          "presumption of denial"
+        ],
+        "addedEN": [
+          "case-by-case basis",
+          "effective 30 days after publication"
+        ]
+      },
+      "correctionNotes": [
+        {
+          "id": "A8000001-0000-4000-8000-000000000001",
+          "occurredAt": "2026-07-16T10:24:00-04:00",
+          "detailJA": "要点内の発効日表記を修正したデモ履歴です。"
+        }
+      ]
+    },
+    {
+      "id": "E6A78BA1-531A-4C10-9F2F-0B6FD116A002",
+      "isSynthetic": true,
+      "lastActivityAt": "2026-07-16T09:47:10-04:00",
+      "agency": {
+        "code": "WH",
+        "displayNameJA": "ホワイトハウス",
+        "displayNameEN": "The White House"
+      },
+      "titleJA": "半導体製造投資の実施指針を公表（デモ）",
+      "titleEN": "Semiconductor Manufacturing Investment Guidance Published (Demo)",
+      "summaryJA": "補助対象と審査手順を整理した架空のデモ事例です。",
+      "topics": [
+        "半導体",
+        "産業政策"
+      ],
+      "tickers": [
+        "INTC"
+      ],
+      "category": "semiconductorIndustrialPolicy",
+      "status": "published",
+      "timestampState": "officialExact",
+      "analysisAnchor": "officialPublication",
+      "publishedAt": "2026-07-16T09:46:00-04:00",
+      "detectedAt": "2026-07-16T09:47:10-04:00",
+      "revisedAt": null,
+      "sourceURL": null,
+      "documentInfo": {
+        "documentNumber": "WH-DEMO-2026-0716-SI-01",
+        "publisherJA": "ホワイトハウス",
+        "publisherEN": "The White House",
+        "currentVersion": 1,
+        "contentHash": {
+          "algorithm": "sha256",
+          "value": "12aa36ebe3161ba0933c71a16fbd4e876c70ff5dc375ed95ad315a34ef19d664"
+        }
+      },
+      "timelineItems": [
+        {
+          "id": "B4000002-0000-4000-8000-000000000001",
+          "kind": "officialPublication",
+          "occurredAt": "2026-07-16T09:46:00-04:00",
+          "titleJA": "実施指針を公開",
+          "detailJA": "ホワイトハウスがデモ指針を公開した想定です。",
+          "sourceType": "official",
+          "verificationState": "humanVerified",
+          "documentVersion": 1
+        },
+        {
+          "id": "B4000002-0000-4000-8000-000000000002",
+          "kind": "systemDetection",
+          "occurredAt": "2026-07-16T09:47:10-04:00",
+          "titleJA": "システムが文書を検知",
+          "detailJA": "ローカルデモで文書を取得した想定です。",
+          "sourceType": "system",
+          "verificationState": "systemObserved",
+          "documentVersion": 1
+        }
+      ],
+      "exposures": [
+        {
+          "id": "C5000002-0000-4000-8000-000000000001",
+          "ticker": "INTC",
+          "companyName": "Intel",
+          "relationship": "direct",
+          "evidenceJA": "補助対象分野に製造投資が含まれるというデモ根拠です。",
+          "verificationState": "automaticUnverified",
+          "references": [
+            {
+              "labelJA": "政策節",
+              "valueJA": "WH-DEMO Investment Eligibility"
+            }
+          ]
+        }
+      ],
+      "marketSummaries": [],
+      "marketSeries": [],
+      "confounders": [],
+      "documentVersions": [
+        {
+          "version": 1,
+          "publishedAt": "2026-07-16T09:46:00-04:00",
+          "titleJA": "初版",
+          "bodyJA": "補助対象と審査手順を定める。",
+          "bodyEN": "The guidance defines eligible investments and review procedures."
+        }
+      ],
+      "documentDiff": null,
+      "correctionNotes": []
+    },
+    {
+      "id": "E6A78BA1-531A-4C10-9F2F-0B6FD116A003",
+      "isSynthetic": true,
+      "lastActivityAt": "2026-07-16T08:42:10-04:00",
+      "agency": {
+        "code": "USTR",
+        "displayNameJA": "米国通商代表部",
+        "displayNameEN": "Office of the United States Trade Representative"
+      },
+      "titleJA": "特定半導体製品への追加関税案を公示（デモ）",
+      "titleEN": "Proposed Additional Tariffs on Selected Semiconductor Products (Demo)",
+      "summaryJA": "対象品目と意見募集期間を示した架空のデモ事例です。",
+      "topics": [
+        "半導体",
+        "関税"
+      ],
+      "tickers": [
+        "SOXX"
+      ],
+      "category": "tariffPolicy",
+      "status": "published",
+      "timestampState": "officialExact",
+      "analysisAnchor": "officialPublication",
+      "publishedAt": "2026-07-16T08:31:00-04:00",
+      "detectedAt": "2026-07-16T08:33:25-04:00",
+      "revisedAt": null,
+      "sourceURL": null,
+      "documentInfo": {
+        "documentNumber": "USTR-DEMO-2026-0716-TF-01",
+        "publisherJA": "米国通商代表部",
+        "publisherEN": "Office of the United States Trade Representative",
+        "currentVersion": 1,
+        "contentHash": {
+          "algorithm": "sha256",
+          "value": "75066157608bc5a3aa6a46b8c677f992a351f383ca8a74e113771420ae54b11e"
+        }
+      },
+      "timelineItems": [
+        {
+          "id": "B4000003-0000-4000-8000-000000000001",
+          "kind": "officialPublication",
+          "occurredAt": "2026-07-16T08:31:00-04:00",
+          "titleJA": "関税案を公示",
+          "detailJA": "USTRがデモ関税案を公示した想定です。",
+          "sourceType": "official",
+          "verificationState": "humanVerified",
+          "documentVersion": 1
+        },
+        {
+          "id": "B4000003-0000-4000-8000-000000000002",
+          "kind": "systemDetection",
+          "occurredAt": "2026-07-16T08:33:25-04:00",
+          "titleJA": "システムが公示を検知",
+          "detailJA": "ローカルデモで公示を取得した想定です。",
+          "sourceType": "system",
+          "verificationState": "systemObserved",
+          "documentVersion": 1
+        },
+        {
+          "id": "B4000003-0000-4000-8000-000000000003",
+          "kind": "mediaReport",
+          "occurredAt": "2026-07-16T08:42:10-04:00",
+          "titleJA": "最初の主要報道",
+          "detailJA": "主要報道機関が追加関税案を報じた想定です。",
+          "sourceType": "secondary",
+          "verificationState": "humanVerified",
+          "documentVersion": 1
+        }
+      ],
+      "exposures": [],
+      "marketSummaries": [],
+      "marketSeries": [],
+      "confounders": [],
+      "documentVersions": [
+        {
+          "version": 1,
+          "publishedAt": "2026-07-16T08:31:00-04:00",
+          "titleJA": "初版",
+          "bodyJA": "対象品目と意見募集期間を定める。",
+          "bodyEN": "The notice defines covered products and the comment period."
+        }
+      ],
+      "documents": [
+        {
+          "id": "D6A78BA1-531A-4C10-9F2F-0B6FD116A003",
+          "documentType": "proposed_rule",
+          "relationship": "primary",
+          "correctsDocumentID": null,
+          "documentNumber": "USTR-DEMO-2026-0716-01",
+          "publisherJA": "米国通商代表部",
+          "publisherEN": "Office of the United States Trade Representative",
+          "titleJA": "特定半導体製品への追加関税案を公示（デモ）",
+          "titleEN": "Proposed Additional Tariffs on Certain Semiconductor Products (Demo)",
+          "officialURL": "https://example.com/market-docket/demo/ustr",
+          "publishedOn": "2026-07-16",
+          "effectiveOn": null,
+          "applicableOn": null,
+          "commentsCloseOn": "2026-07-20",
+          "sourceStatedAt": "Filed 7/16/2026 8:31 am EDT",
+          "sourceStatedTimezone": "America/New_York",
+          "firstObservedAt": "2026-07-16T08:32:00-04:00",
+          "ingestedAt": "2026-07-16T08:32:05-04:00",
+          "availableAt": "2026-07-16T08:31:00-04:00",
+          "availabilityBasis": "source_stated",
+          "timePrecision": "exact",
+          "currentRevision": 1,
+          "contentHash": {
+            "algorithm": "sha256",
+            "value": "e1b7b1f179005cc7b7ddc52d2f6dcc6a97926ec2e9b28dcf4ee03cab7a152eac"
+          },
+          "bodyJA": "対象品目と意見募集期間を定める。",
+          "bodyEN": "The notice defines covered products and the comment period."
+        }
+      ],
+      "documentDiff": null,
+      "correctionNotes": []
+    },
+    {
+      "id": "E6A78BA1-531A-4C10-9F2F-0B6FD116A004",
+      "isSynthetic": true,
+      "lastActivityAt": "2026-07-16T08:25:00-04:00",
+      "agency": {
+        "code": "DOC",
+        "displayNameJA": "米国商務省",
+        "displayNameEN": "U.S. Department of Commerce"
+      },
+      "titleJA": "先端パッケージ補助金の採択内容を改訂（デモ）",
+      "titleEN": "Advanced Packaging Grant Notice Revised (Demo)",
+      "summaryJA": "公式公開時刻を確認できず、システム検知時刻を基準に整理した架空のデモ事例です。",
+      "topics": [
+        "半導体",
+        "補助金"
+      ],
+      "tickers": [
+        "AMAT"
+      ],
+      "category": "semiconductorGrantPolicy",
+      "status": "revised",
+      "timestampState": "systemDetectedOnly",
+      "analysisAnchor": "systemDetection",
+      "officialPublicationDate": "2026-07-16",
+      "publishedAt": null,
+      "detectedAt": "2026-07-16T07:55:00-04:00",
+      "revisedAt": "2026-07-16T08:20:00-04:00",
+      "sourceURL": null,
+      "documentInfo": {
+        "documentNumber": "DOC-DEMO-2026-0716-AP-01",
+        "publisherJA": "米国商務省",
+        "publisherEN": "U.S. Department of Commerce",
+        "currentVersion": 2,
+        "contentHash": {
+          "algorithm": "sha256",
+          "value": "1a8d6a2b44c824b8bcbf14e8dffa8e35cb9fddcfff83527a5e24ffba33d1177b"
+        }
+      },
+      "timelineItems": [
+        {
+          "id": "B4000004-0000-4000-8000-000000000001",
+          "kind": "systemDetection",
+          "occurredAt": "2026-07-16T07:55:00-04:00",
+          "titleJA": "システムが文書を検知",
+          "detailJA": "公式時刻を確認できないため、検知時刻を基準とするデモです。",
+          "sourceType": "system",
+          "verificationState": "systemObserved",
+          "documentVersion": 1
+        },
+        {
+          "id": "B4000004-0000-4000-8000-000000000002",
+          "kind": "documentRevision",
+          "occurredAt": "2026-07-16T08:20:00-04:00",
+          "titleJA": "文書の記載を改訂",
+          "detailJA": "採択金額の注記を修正した想定です。",
+          "sourceType": "official",
+          "verificationState": "humanVerified",
+          "documentVersion": 2
+        },
+        {
+          "id": "B4000004-0000-4000-8000-000000000003",
+          "kind": "marketReaction",
+          "occurredAt": "2026-07-16T08:25:00-04:00",
+          "titleJA": "市場データを確認",
+          "detailJA": "検知時刻基準で顕著な異常反応は確認されなかった想定です。",
+          "sourceType": "market",
+          "verificationState": "calculated",
+          "documentVersion": 2
+        }
+      ],
+      "exposures": [
+        {
+          "id": "C5000004-0000-4000-8000-000000000001",
+          "ticker": "AMAT",
+          "companyName": "Applied Materials",
+          "relationship": "indirect",
+          "evidenceJA": "先端パッケージ設備の供給企業として関連するというデモ根拠です。",
+          "verificationState": "automaticUnverified",
+          "references": [
+            {
+              "labelJA": "供給分野",
+              "valueJA": "Demo Advanced Packaging Equipment"
+            }
+          ]
+        }
+      ],
+      "marketSummaries": [
+        {
+          "window": "thirtyMinutesFromDetection",
+          "availableAt": "2026-07-16T08:25:00-04:00",
+          "ticker": "AMAT",
+          "benchmarkTicker": "SOXX",
+          "securityReturn": 0.002,
+          "benchmarkReturn": 0.001,
+          "abnormalReturn": 0.001,
+          "maxVolumeRatio": 1.1,
+          "abnormalReactionDetected": false
+        }
+      ],
+      "marketSeries": [
+        {
+          "timestamp": "2026-07-16T07:55:00-04:00",
+          "normalizedSecurityPrice": 100.0,
+          "normalizedBenchmarkPrice": 100.0,
+          "abnormalReturnPoints": 0.0,
+          "volumeRatio": 0.9
+        },
+        {
+          "timestamp": "2026-07-16T08:10:00-04:00",
+          "normalizedSecurityPrice": 100.1,
+          "normalizedBenchmarkPrice": 100.08,
+          "abnormalReturnPoints": 0.02,
+          "volumeRatio": 1.0
+        },
+        {
+          "timestamp": "2026-07-16T08:20:00-04:00",
+          "normalizedSecurityPrice": 100.15,
+          "normalizedBenchmarkPrice": 100.1,
+          "abnormalReturnPoints": 0.05,
+          "volumeRatio": 1.1
+        },
+        {
+          "timestamp": "2026-07-16T08:25:00-04:00",
+          "normalizedSecurityPrice": 100.2,
+          "normalizedBenchmarkPrice": 100.1,
+          "abnormalReturnPoints": 0.1,
+          "volumeRatio": 1.05
+        }
+      ],
+      "confounders": [],
+      "documentVersions": [
+        {
+          "version": 1,
+          "publishedAt": "2026-07-16T07:55:00-04:00",
+          "titleJA": "検知時の版",
+          "bodyJA": "採択金額を示す。",
+          "bodyEN": "The notice states the award amount."
+        },
+        {
+          "version": 2,
+          "publishedAt": "2026-07-16T08:20:00-04:00",
+          "titleJA": "改訂版",
+          "bodyJA": "採択金額と注記を示す。",
+          "bodyEN": "The revised notice states the award amount and an explanatory note."
+        }
+      ],
+      "documentDiff": {
+        "deletedJA": [],
+        "addedJA": [
+          "採択金額の注記を追加。"
+        ],
+        "deletedEN": [],
+        "addedEN": [
+          "Added an explanatory note to the award amount."
+        ]
+      },
+      "correctionNotes": []
+    }
+  ],
+  "watchCatalog": {
+    "topics": [
+      "半導体輸出管理",
+      "半導体産業政策",
+      "関税",
+      "補助金"
+    ],
+    "agencies": [
+      "BIS",
+      "White House",
+      "USTR",
+      "Commerce"
+    ],
+    "tickers": [
+      "NVDA",
+      "AMD",
+      "TSM",
+      "INTC",
+      "AMAT",
+      "SOXX"
+    ]
+  }
+}

@@ -1,0 +1,361 @@
+openapi: 3.1.0
+info:
+  title: Market Docket Public API
+  version: 0.5.0-preview
+  description: Policy-event API. Event data is read-only; the only public mutation starts one historical document's Japanese translation. Complete automated Signal analyses may be exposed in every environment and must remain clearly labelled as unverified.
+servers:
+  - url: https://md-api-preview.dznqjmctk7.workers.dev
+paths:
+  /v1/health:
+    get:
+      summary: Check public API availability without exposing Worker, dataset, adapter or provider identifiers
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/events:
+    get:
+      summary: List lightweight published policy-event summaries
+      description: User-specific unread state, evidence, hashes, document versions and company evidence are intentionally excluded.
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: "filter[tier]", in: query, schema: { type: string, enum: [signal, monitor, archive] } }
+        - { name: "filter[market_mode]", in: query, schema: { type: string, enum: [intraday, daily, unmapped, not_applicable, disabled] } }
+        - { name: "filter[region]", in: query, schema: { type: string } }
+        - { name: "filter[time_precision]", in: query, schema: { type: string, enum: [exact, minute, hour, day] } }
+        - { name: "filter[correction]", in: query, schema: { type: string, enum: ["true"] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        "200":
+          description: EventSummary collection
+          headers:
+            ETag: { schema: { type: string } }
+            X-MD-Data-Mode: { schema: { type: string, enum: [synthetic, live, mixed] } }
+            X-MD-Schema-Version: { schema: { type: integer, const: 6 } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventSummaryEnvelope" }
+  /v1/search:
+    get:
+      summary: Search all reachable Signal, Monitor and Archive records
+      description: Accepts the same query, filter and pagination parameters as /v1/events.
+      responses:
+        "200":
+          description: Search result collection
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventSummaryEnvelope" }
+  /v1/events/{event_id}:
+    get:
+      summary: Read a policy event
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/events/{event_id}/translation:
+    get:
+      summary: Read the Japanese translation state for a policy event
+      description: New records at or after the configured cutoff use the automatic lane. Older records remain available until a user explicitly requests that one record.
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      responses:
+        "200": { $ref: "#/components/responses/TranslationStatus" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+    post:
+      summary: Start one historical policy event's Japanese translation immediately
+      description: Idempotent for the current source-content hash and prompt version. The public Worker invokes the private translation Worker synchronously, while the 15-minute scheduler remains only as recovery. This route never submits a historical Batch job and never exposes the OpenAI credential to the app.
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200": { $ref: "#/components/responses/TranslationStatus" }
+        "202": { $ref: "#/components/responses/TranslationStatus" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /v1/events/{event_id}/replay:
+    get:
+      summary: Read the information snapshot available at an exact time
+      description: Later timeline entries, related documents, document revisions, market observations, evaluations, confounders and corrections are excluded.
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+        - name: as_of
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/events/{event_id}/evidence:
+    get:
+      summary: Read document, revision and related-entity evidence
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/events/{event_id}/market:
+    get:
+      summary: Read descriptive market series and evaluations
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/taxonomy:
+    get:
+      summary: List published agency, topic and ticker values
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+components:
+  parameters:
+    EventId:
+      name: event_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    Success:
+      description: Public API response
+      headers:
+        ETag: { schema: { type: string } }
+        X-MD-Data-Mode: { schema: { type: string, enum: [synthetic, live, mixed] } }
+        X-MD-Schema-Version: { schema: { type: integer, const: 6 } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+    TranslationStatus:
+      description: Current state of the automatic or user-requested Japanese translation
+      headers:
+        X-MD-Data-Mode: { schema: { type: string, enum: [live] } }
+        X-MD-Schema-Version: { schema: { type: integer, const: 6 } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/TranslationRequestStatusEnvelope" }
+    Error:
+      description: Structured API error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+  schemas:
+    Envelope:
+      type: object
+      required: [data_mode, data]
+      properties:
+        data_mode:
+          type: string
+          enum: [synthetic, live, mixed]
+          description: Prevents fixture data from being mistaken for reviewed live policy data.
+        data: {}
+    Agency:
+      type: object
+      additionalProperties: false
+      required: [code, displayNameJA, displayNameEN]
+      properties:
+        code: { type: string, description: "Official source agency code; Federal Register agencies are not restricted to a fixed enum.", example: SEC }
+        displayNameJA: { type: string }
+        displayNameEN: { type: string }
+    ContentHash:
+      type: object
+      additionalProperties: false
+      required: [algorithm, value]
+      properties:
+        algorithm: { type: string, const: sha256 }
+        value: { type: string, pattern: "^[0-9a-f]{64}$" }
+    EventSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - agency
+        - titleJA
+        - titleEN
+        - summaryJA
+        - topics
+        - tickers
+        - status
+        - lastActivityAt
+        - hasMarketData
+        - timelineItemCount
+        - updateCount
+        - relatedDocumentCount
+        - hasCorrectionDocument
+        - confounderCount
+        - analysis
+        - translation
+        - legalDates
+        - publicationGrouping
+      properties:
+        id: { type: string, format: uuid }
+        agency: { $ref: "#/components/schemas/Agency" }
+        titleJA: { type: string }
+        titleEN: { type: string }
+        summaryJA: { type: string }
+        topics: { type: array, items: { type: string } }
+        tickers: { type: array, items: { type: string } }
+        status: { type: string, enum: [published, revised, corrected] }
+        lastActivityAt: { type: string, format: date-time }
+        publishedAt: { type: [string, "null"], format: date-time }
+        revisedAt: { type: [string, "null"], format: date-time }
+        hasMarketData: { type: boolean }
+        marketEvaluationAvailableAt: { type: [string, "null"], format: date-time }
+        timelineItemCount: { type: integer, minimum: 0 }
+        updateCount: { type: integer, minimum: 0 }
+        relatedDocumentCount: { type: integer, minimum: 0 }
+        hasCorrectionDocument: { type: boolean }
+        confounderCount: { type: integer, minimum: 0 }
+        analysis: { $ref: "#/components/schemas/PolicyAnalysis" }
+        translation:
+          oneOf:
+            - { $ref: "#/components/schemas/PolicyTranslation" }
+            - { type: "null" }
+        legalDates:
+          type: array
+          items: { $ref: "#/components/schemas/PolicyLegalDateSummary" }
+        publicationGrouping:
+          oneOf:
+            - { $ref: "#/components/schemas/PublicationGrouping" }
+            - { type: "null" }
+    PolicyLegalDateSummary:
+      type: object
+      additionalProperties: false
+      required: [kind, date, documentID, documentNumber, officialURL]
+      properties:
+        kind: { type: string, enum: [comments_close, effective, applicable] }
+        date: { type: string, format: date }
+        documentID: { type: string, format: uuid }
+        documentNumber: { type: [string, "null"] }
+        officialURL: { type: string, format: uri }
+    PublicationGrouping:
+      type: object
+      additionalProperties: false
+      required: [documentNumber, docketIDs, regulationIDNumbers, cfrReferences]
+      properties:
+        documentNumber: { type: [string, "null"] }
+        docketIDs: { type: array, items: { type: string } }
+        regulationIDNumbers: { type: array, items: { type: string } }
+        cfrReferences: { type: array, items: { type: string } }
+    PolicyTranslation:
+      type: object
+      additionalProperties: false
+      required: [titleStatus, factualSummaryStatus, sourceLanguage, provider, model, promptVersion, translatedAt, sourceContentHash]
+      properties:
+        titleStatus: { type: string, enum: [machine_translated, editorial_reviewed, rejected] }
+        factualSummaryStatus: { type: string, enum: [machine_translated, editorial_reviewed, rejected] }
+        sourceLanguage: { type: string, example: en }
+        provider: { type: string, example: openai }
+        model: { type: string, example: gpt-5-nano-2025-08-07 }
+        promptVersion: { type: string }
+        translatedAt: { type: string, format: date-time }
+        sourceContentHash: { type: string, pattern: "^[0-9a-f]{64}$" }
+    PolicyAnalysis:
+      type: object
+      additionalProperties: false
+      required: [analysisStatus, presentationTier, policyDomainCodes, affectedRegionCodes, affectedSectorCodes, affectedProductTerms, marketAnalysisMode, analysisVersion, companyRelations]
+      properties:
+        analysisStatus: { type: string, enum: [unreviewed, automated_draft, editorial_reviewed, published, rejected], description: Automated drafts may be public and must be presented as unverified. Human review is not required for automatic Signal selection. }
+        presentationTier: { type: string, enum: [signal, monitor, archive] }
+        canonicalTitleJA: { type: [string, "null"] }
+        canonicalTitleEN: { type: [string, "null"] }
+        changeSummaryJA: { type: [string, "null"] }
+        whyItMattersJA: { type: [string, "null"] }
+        policyType: { type: [string, "null"] }
+        policyDomainCodes: { type: array, items: { type: string } }
+        primaryAgencyCode: { type: [string, "null"] }
+        affectedRegionCodes: { type: array, items: { type: string } }
+        affectedSectorCodes: { type: array, items: { type: string } }
+        affectedProductTerms: { type: array, items: { type: string } }
+        marketAnalysisMode: { type: string, enum: [intraday, daily, unmapped, not_applicable, disabled] }
+        marketRelevanceReasonJA: { type: [string, "null"] }
+        noCompanyReasonJA: { type: [string, "null"] }
+        noMarketDataReasonJA: { type: [string, "null"] }
+        analysisVersion: { type: integer, minimum: 0 }
+        reviewedAt: { type: [string, "null"], format: date-time }
+        publishedAt: { type: [string, "null"], format: date-time }
+        companyRelations:
+          type: array
+          items: { $ref: "#/components/schemas/PolicyCompanyRelation" }
+    PolicyCompanyRelation:
+      type: object
+      additionalProperties: false
+      required: [id, issuerID, issuerName, relationType, evidenceReference, evidenceSummaryJA, reviewStatus]
+      properties:
+        id: { type: string, format: uuid }
+        issuerID: { type: string, format: uuid }
+        issuerName: { type: string }
+        securityID: { type: [string, "null"], format: uuid }
+        ticker: { type: [string, "null"] }
+        relationType: { type: string, enum: [direct, indirect, supply_chain, competitor, customer, geographic_exposure, policy_beneficiary, policy_risk] }
+        evidenceDocumentID: { type: [string, "null"], format: uuid }
+        evidenceReference: { type: string }
+        evidenceSummaryJA: { type: string }
+        reviewStatus: { type: string, enum: [candidate, approved, rejected] }
+        reviewedAt: { type: [string, "null"], format: date-time }
+    PolicyDocument:
+      type: object
+      additionalProperties: false
+      required: [id, documentType, relationship, documentNumber, publisherJA, publisherEN, titleJA, titleEN, officialURL, firstObservedAt, ingestedAt, availableAt, availabilityBasis, timePrecision, currentRevision, contentHash, bodyJA, bodyEN]
+      properties:
+        id: { type: string, format: uuid }
+        documentType: { type: string, enum: [final_rule, correcting_amendment, notice, other] }
+        relationship: { type: string, enum: [primary, corrects, related] }
+        correctsDocumentID: { type: [string, "null"], format: uuid }
+        documentNumber: { type: string }
+        publisherJA: { type: string }
+        publisherEN: { type: string }
+        titleJA: { type: string }
+        titleEN: { type: string }
+        officialURL: { type: string, format: uri }
+        publishedOn: { type: [string, "null"], format: date }
+        effectiveOn: { type: [string, "null"], format: date }
+        applicableOn: { type: [string, "null"], format: date }
+        commentsCloseOn: { type: [string, "null"], format: date }
+        sourceStatedAt: { type: [string, "null"], description: Verbatim source-local text; not assumed to be ET. }
+        sourceStatedTimezone: { type: [string, "null"] }
+        firstObservedAt: { type: string, format: date-time }
+        ingestedAt: { type: string, format: date-time }
+        availableAt: { type: string, format: date-time }
+        availabilityBasis: { type: string, enum: [source_stated, first_observed, publication_date_only, manual_estimate] }
+        timePrecision: { type: string, enum: [exact, minute, hour, day] }
+        currentRevision: { type: integer, minimum: 1 }
+        contentHash: { $ref: "#/components/schemas/ContentHash" }
+        bodyJA: { type: string }
+        bodyEN: { type: string }
+    EventSummaryEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data_mode, data]
+      properties:
+        data_mode: { type: string, enum: [synthetic, live, mixed] }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/EventSummary" }
+    TranslationRequestStatusEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data_mode, data]
+      properties:
+        data_mode: { type: string, const: live }
+        data: { $ref: "#/components/schemas/TranslationRequestStatus" }
+    TranslationRequestStatus:
+      type: object
+      additionalProperties: false
+      required: [eventID, mode, state, requestedAt, updatedAt, retryAfterSeconds]
+      properties:
+        eventID: { type: string, format: uuid }
+        mode: { type: string, enum: [automatic, on_demand] }
+        state: { type: string, enum: [available, queued, processing, retry, failed, translated, batch_processing, unavailable] }
+        requestedAt: { type: [string, "null"], format: date-time }
+        updatedAt: { type: [string, "null"], format: date-time }
+        retryAfterSeconds: { type: [integer, "null"], minimum: 0 }
