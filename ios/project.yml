@@ -121,9 +121,8 @@ targets:
         Release:
           APP_ATTEST_ENVIRONMENT: production
           KABUYOMI_API_BASE_URL: https://kabuyomi-api.dznqjmctk7.workers.dev
-          # md-api の本番が立ったらここに URL を入れる。それまでは空のまま。
           MARKET_DOCKET_DEFAULT_ENVIRONMENT: productionAPI
-          MARKET_DOCKET_PRODUCTION_API_URL: ""
+          MARKET_DOCKET_PRODUCTION_API_URL: https://md-api-prod.dznqjmctk7.workers.dev
 
     postBuildScripts:
       - name: Generate Ad SDK dSYMs for Archive
