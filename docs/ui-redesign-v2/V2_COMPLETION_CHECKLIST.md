@@ -14,7 +14,7 @@
 - [x] B. iOS の既知不具合がすべて解消
 - [x] C. 口語ベンチ(human-phrasing-12 × production-tracked-15)が新 LKG として記録され、
       綺麗版との経路差分が説明可能
-- [ ] D. Worker の改善がすべて本番に反映され、本番 smoke PASS
+- [x] D. Worker の改善がすべて本番に反映され、本番 smoke PASS(2026-08-26 完了)
 - [x] E. 全テスト緑(Worker / iOS unit / iOS UI / sec-fetcher)、docs と memory が現状と一致
 
 ## A. 回答品質バックログ
@@ -49,7 +49,9 @@
 
 ## D. 本番反映
 
-- [ ] D1. Worker の未反映分(意図修正 ee11b11 以降、質問ガード、safe-harbor 判定、A 系)を
+- [x] D1. **完了(2026-08-26 09:35 JST)**。worker `a858999a`(旧 `25586dc6`)、候補 `f58eb70e`、
+      本番 smoke 29 PASS / 0 FAIL。**iOS は同時に出していない** — ASO(8/24 の改名)の
+      効果を切り分けるため、提出は 9 月上旬以降。旧記述: Worker の未反映分(意図修正 ee11b11 以降、質問ガード、safe-harbor 判定、A 系)を
       release gate の waiver 更新 → deploy → smoke:production:release PASS
       **本番デプロイはリリースオーナーの明示 GO があってから**(この制約は /goal より先に
       オーナーが置いたもの。waiver の `APPROVED_BY_RELEASE_OWNER` を私が書くのは承認の捏造)。
