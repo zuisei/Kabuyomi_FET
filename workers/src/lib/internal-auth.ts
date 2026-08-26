@@ -10,6 +10,17 @@ export function isAuthorizedEvalRequest(request: Request, env: Env): boolean {
   return isAuthorizedSharedSecretRequest(request, configured, "x-eval-token");
 }
 
+/**
+ * The subscription principal migration endpoint moves paid credits between
+ * principals, so it is at least as privileged as the other internal routes.
+ * It shipped with a bare !== against a differently-named header; this keeps the
+ * header name it is called with and makes the comparison timing-safe like the rest.
+ */
+export function isAuthorizedSubscriptionPrincipalMigrationRequest(request: Request, env: Env): boolean {
+  const configured = env.BACKFILL_SHARED_SECRET?.trim();
+  return isAuthorizedSharedSecretRequest(request, configured, "x-kabuyomi-internal-token");
+}
+
 export function isAuthorizedSecFetcherRequest(request: Request, env: Env): boolean {
   const configured = env.SEC_FETCHER_SHARED_SECRET?.trim();
   return isAuthorizedSharedSecretRequest(request, configured, "x-internal-token");

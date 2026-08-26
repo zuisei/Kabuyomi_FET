@@ -135,7 +135,8 @@ enum TestFixtures {
                 totalRemaining: 30,
                 resetsAt: "2026-05-01T00:00:00+09:00"
             ),
-            creditBillingEnabled: false
+            creditBillingEnabled: false,
+            chatCreditCost: nil
         )
     }
 

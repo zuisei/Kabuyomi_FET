@@ -1,3 +1,4 @@
+import { isBusinessOverviewQuestion } from "../../lib/chat/business-overview-question";
 import type { ChatPromptInput } from "./types";
 
 export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer: string, sourceIds: string[]): boolean {
@@ -7,10 +8,7 @@ export function shouldRecoverLowQualityChatAnswer(input: ChatPromptInput, answer
 export function classifyLowQualityChatAnswer(input: ChatPromptInput, answer: string, sourceIds: string[]): string | null {
   const normalizedQuestion = input.question.replace(/\s+/g, "").toLowerCase();
   const normalizedAnswer = answer.toLowerCase();
-  const asksBusinessOverview =
-    /(なんの企業|何の企業|なんの会社|何の会社|どんな企業|どんな会社|何してる|何をしてる|何をやってる|事業内容|主な事業|事業は)/.test(
-      normalizedQuestion
-    ) || /(whatdoes.*companydo|whatcompany|whatbusiness|businessmodel)/.test(normalizedQuestion);
+  const asksBusinessOverview = isBusinessOverviewQuestion(normalizedQuestion);
   const asksProfitCause =
     /(赤字|黒字|損失|欠損|純利益|利益|net income|net loss|profit|loss)/.test(normalizedQuestion) &&
     /(主因|要因|原因|理由|なぜ|背景|何が|driver|cause|why)/.test(normalizedQuestion);

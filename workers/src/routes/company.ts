@@ -1,3 +1,4 @@
+import { loadCompanyTimeline } from "../lib/company/timeline";
 import { loadCompanyUsecase, refreshCompanyUsecase, type CompanyUsecaseResult } from "../lib/company/usecase";
 import { badRequest, json, notFound } from "../lib/response";
 import type { RouteHandler } from "./types";
@@ -10,6 +11,12 @@ export const handleCompanyRoute: RouteHandler = async ({ request, url, env, conf
   const ticker = decodeURIComponent(url.pathname.split("/")[3] ?? "");
   if (!ticker) {
     return badRequest("Ticker is required");
+  }
+
+  // 年表はモデルを呼ばず XBRL だけで作れるので、クレジットを消費しない。
+  if (request.method === "GET" && url.pathname.endsWith("/timeline")) {
+    const timeline = await loadCompanyTimeline(ticker, env);
+    return timeline ? json(timeline) : notFound("Ticker not found");
   }
 
   if (request.method === "GET") {

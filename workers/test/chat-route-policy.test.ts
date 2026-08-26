@@ -140,16 +140,26 @@ describe("chat route policy helpers", () => {
     expect(shouldPreferDeterministicRevenueDrivers("売上高は増加しました。", true, "low_quality_answer")).toBe(true);
   });
 
-  it("uses ticker business overview when filing text cannot produce one", () => {
-    const result = buildDeterministicMetricAnswer(
-      makeFiling([source("S1", "Revenue was 100. Net income was 10.")], { ticker: "MSFT", companyName: "Microsoft" }),
-      "どんな会社ですか？"
-    );
+  /**
+   * This used to assert the opposite: a filing whose only text is "Revenue was
+   * 100. Net income was 10." produced 「クラウド、Microsoft 365 ...」 out of a
+   * ticker-keyed constant table, with this filing's source chunks attached as
+   * citations. Nothing about Microsoft 365 was read from the filing.
+   *
+   * The deterministic layer now declines. Declining is what lets the pipeline
+   * reach the model path, which is source-validated separately.
+   */
+  it("produces no business overview when the filing text cannot support one", () => {
+    const filing = makeFiling([source("S1", "Revenue was 100. Net income was 10.")], {
+      ticker: "MSFT",
+      companyName: "Microsoft"
+    });
 
-    expect(result?.strategy).toBe("business_overview");
-    expect(result?.response.answer).toContain("クラウド");
-    expect(result?.response.answer).toContain("Microsoft 365");
-    expect(result?.response.sources.length).toBeGreaterThan(0);
+    const result = buildDeterministicMetricAnswer(filing, "どんな会社ですか？");
+
+    expect(result?.strategy).not.toBe("business_overview");
+    expect(result?.response.answer ?? "").not.toContain("Microsoft 365");
+    expect(result?.response.answer ?? "").not.toContain("クラウド");
   });
 });
 

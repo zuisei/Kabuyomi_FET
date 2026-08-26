@@ -73,20 +73,24 @@ private struct LaunchPlaceholderView: View {
         ZStack {
             KabuyomiTheme.background.ignoresSafeArea()
 
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 ProgressView()
-                    .tint(KabuyomiTheme.accentDeep)
+                    .tint(KabuyomiTheme.accent)
 
                 Text("Kabuyomi")
-                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .font(.title3.weight(.bold))
                     .foregroundStyle(KabuyomiTheme.ink)
 
                 Text("決算の要点を読み込んでいます")
-                    .font(.system(.footnote, design: .rounded, weight: .medium))
+                    .font(.footnote)
                     .foregroundStyle(KabuyomiTheme.inkMuted)
             }
-            .padding(24)
-            .kabuyomiGlass(radius: 28, tint: Color.white.opacity(0.28), stroke: Color.white.opacity(0.62))
+            .padding(22)
+            .background(KabuyomiTheme.elevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(KabuyomiTheme.separator, lineWidth: KabuyomiTheme.hairlineWidth)
+            }
         }
     }
 }

@@ -25,3 +25,7 @@ claude api.txt
 *.key
 *.pem
 *api*.txt
+
+# 政策バックエンドのローカル状態と依存
+policy-workers/node_modules/
+policy-workers/.wrangler/

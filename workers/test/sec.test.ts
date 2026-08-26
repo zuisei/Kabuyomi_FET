@@ -491,7 +491,9 @@ describe("SEC filing selection", () => {
     expect(kvPut).not.toHaveBeenCalled();
   });
 
-  it("surfaces unsupported recent filing forms for search results", async () => {
+  /// SASOL は 20-F 提出者。以前は「対応外の形式」として 6-K を返していたが、
+  /// 2026-08-24 に外国企業へ対応したので **20-F を対応済みとして返す**のが正しい。
+  it("resolves a foreign issuer to its 20-F rather than to a stray 6-K", async () => {
     const cache = new Map<string, unknown>([
       [
         "tickers_snapshot",
@@ -542,7 +544,58 @@ describe("SEC filing selection", () => {
       }
     } as never);
 
-    expect(result.items.map((item) => [item.ticker, item.latestFormType])).toEqual([["SSL", "6-K"]]);
+    expect(result.items.map((item) => [item.ticker, item.latestFormType])).toEqual([["SSL", "20-F"]]);
+  });
+
+  /// 対応外の形式を出す経路自体は残っている。投信は 10-K/10-Q/20-F のどれも出さない。
+  it("still surfaces an unsupported recent form when nothing analyzable exists", async () => {
+    const cache = new Map<string, unknown>([
+      [
+        "tickers_snapshot",
+        {
+          updatedAt: "2026-04-15T00:00:00.000Z",
+          items: [{ ticker: "MUJ", companyName: "BLACKROCK MUNIYIELD NJ FUND", cik: "0000903914", exchange: "NYSE" }]
+        }
+      ]
+    ]);
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: "BLACKROCK MUNIYIELD NJ FUND",
+          filings: {
+            recent: {
+              form: ["NPORT-P", "N-CSRS"],
+              accessionNumber: ["0000000000-26-000010", "0000000000-26-000001"],
+              primaryDocument: ["muj-nport.htm", "muj-ncsrs.htm"],
+              filingDate: ["2026-04-01", "2026-02-20"],
+              reportDate: ["2026-04-01", "2025-12-31"]
+            }
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await searchTickers("muj", {
+      SEC_FETCHER_BASE_URL: "https://sec-fetcher.test",
+      KABUYOMI_CACHE: {
+        get: async (key: string) => cache.get(key),
+        put: vi.fn()
+      },
+      DB: {
+        prepare: vi.fn((sql: string) => ({
+          bind: vi.fn(() =>
+            sql.includes("SELECT")
+              ? { all: vi.fn().mockResolvedValue({ results: [] }) }
+              : { run: vi.fn().mockResolvedValue({ success: true }) }
+          )
+        }))
+      }
+    } as never);
+
+    expect(result.items.map((item) => [item.ticker, item.latestFormType])).toEqual([["MUJ", "NPORT-P"]]);
   });
 
   it("ranks separator-alias class ticker queries against the resolved ticker", () => {

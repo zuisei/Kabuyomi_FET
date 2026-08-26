@@ -17,6 +17,10 @@ const FilingPayloadSchema = z.object({
   accessionNumber: z.string().trim().min(1),
   primaryDocument: z.string().trim().min(1)
 });
+const FilingDocumentsPayloadSchema = z.object({
+  cik: z.string().trim().min(1),
+  accessionNumber: z.string().trim().min(1)
+});
 const MetricsPayloadSchema = z.object({
   cik: z.string().trim().min(1),
   tags: z.array(z.string()).optional().default([])
@@ -25,7 +29,9 @@ const FilingAssetsPayloadSchema = FilingPayloadSchema.extend({
   tags: z.array(z.string()).optional().default([])
 });
 const PreparedFilingPayloadSchema = FilingAssetsPayloadSchema.extend({
-  formType: z.enum(["10-K", "10-Q"])
+  // 20-F を落とすと、外国企業は取り込みの入口で 400 になる。
+  // MD&A の切り出しは prepared-filing 側が formType ごとに分岐している。
+  formType: z.enum(["10-K", "10-Q", "20-F"])
 });
 
 export const handleInternalSecFetcherRoute: RouteHandler = async ({ request, url, env }) => {
@@ -51,6 +57,11 @@ export const handleInternalSecFetcherRoute: RouteHandler = async ({ request, url
   if (url.pathname === "/internal/sec/submissions") {
     const payload = await parsePayload(request, SubmissionsPayloadSchema);
     return json(await service.fetchSubmissions(payload.cik, { includeHistory: payload.includeHistory === true }));
+  }
+
+  if (url.pathname === "/internal/sec/filing-documents") {
+    const payload = await parsePayload(request, FilingDocumentsPayloadSchema);
+    return json(await service.listFilingDocuments(payload));
   }
 
   if (url.pathname === "/internal/sec/filing") {

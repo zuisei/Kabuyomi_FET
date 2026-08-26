@@ -2,6 +2,8 @@ import type { ChatPromptInput, QuoteTranslationPromptInput, SummaryPromptInput }
 import type { MetricSnapshot, SourceChunkRecord, VerifiedFinancialFact } from "../../env";
 import { formatMetricValue, formatYoYDelta, metricLabel } from "../../lib/metrics";
 import { buildVerifiedFinancialFacts } from "../../lib/chat/verified-financial-facts";
+import { filingSegmentVocabulary } from "../../lib/chat/context-factual-pack";
+import type { ChatFactualPack } from "../../lib/chat/context-factual-pack";
 
 export function buildSummaryPrompt(input: SummaryPromptInput): string {
   return [
@@ -55,6 +57,18 @@ export function buildSummaryPrompt(input: SummaryPromptInput): string {
   ].join("\n");
 }
 
+/**
+ * NOT the production chat prompt.
+ *
+ * With OPENAI_PROMPT_ID set — which it is in both wrangler.toml and
+ * wrangler.test.toml — client.ts routes chat through invokeOpenAIDashboardPrompt
+ * and this string is never sent. The instructions that actually reach the model
+ * live in the OpenAI dashboard; a byte-exact copy of them is checked in at
+ * src/clients/llm/providers/openai/production-prompt/ (see the README there).
+ *
+ * This remains the fallback used when no prompt id is configured, so it is not
+ * dead code — but do not read it as "what production tells the model".
+ */
 export function buildChatPrompt(input: ChatPromptInput): string {
   const contextPack = input.contextPack ?? {
     questionIntent: input.questionIntent ?? "unknown",
@@ -127,7 +141,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     `Question intent: ${contextPack.questionIntent}`,
     `Content mode: ${contextPack.contentMode}`,
     "Answer format:",
-    answerFormatInstruction(contextPack.questionIntent),
+    answerFormatInstruction(contextPack.questionIntent, { question: input.question, ticker: input.filing.ticker }),
     retryInstruction(input),
     "",
     "Filing metadata:",
@@ -147,7 +161,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     JSON.stringify(buildPromptVerifiedFactPack(contextPack.verifiedFacts)),
     "",
     "Factual pack:",
-    JSON.stringify(contextPack.factualPack ?? null),
+    JSON.stringify(contextPack.factualPack ? promptSafeFactualPack(contextPack.factualPack) : null),
     "",
     "Sources:",
     JSON.stringify(contextPack.sourceChunks)
@@ -168,14 +182,14 @@ export function buildChatPromptTemplateVariables(input: ChatPromptInput): Record
     ? `${input.question}\n\n直近の会話文脈:\n${conversationContext}`
     : input.question;
   const hostedPromptFactualPack = {
-    ...(contextPack.factualPack ?? {}),
+    ...promptSafeFactualPack(contextPack.factualPack),
     verifiedFinancialFacts: buildPromptVerifiedFactPack(contextPack.verifiedFacts)
   };
   return {
     question: questionForPrompt,
     question_intent: contextPack.questionIntent,
     content_mode: contextPack.contentMode,
-    answer_format_instruction: answerFormatInstruction(contextPack.questionIntent),
+    answer_format_instruction: answerFormatInstruction(contextPack.questionIntent, { question: input.question, ticker: input.filing.ticker }),
     retry_instruction: retryInstruction(input) || "なし",
     filing_metadata_json: JSON.stringify({
       filingKey: input.filing.filingKey,
@@ -388,7 +402,22 @@ export function quoteTranslationResponseJsonSchema() {
   };
 }
 
-export function answerFormatInstruction(intent: NonNullable<ChatPromptInput["questionIntent"]>): string {
+/**
+ * 質問が会社固有の区分(AWS、iPhone、Google Cloud …)を名指ししているとき、
+ * 「主な売上区分 / 大きい区分 / …」のスロット形式は質問とずれる
+ * (「AWS の伸びは？」に「主な売上区分: AWS。大きい区分: AWS。」と返していた、
+ * 2026-08-22 実機レビュー)。名指しされた区分に絞った文章形式に切り替える。
+ */
+export function answerFormatInstruction(
+  intent: NonNullable<ChatPromptInput["questionIntent"]>,
+  focus: { question?: string; ticker?: string } = {}
+): string {
+  if (intent === "segment_analysis" && focus.question && focus.ticker) {
+    const lowered = focus.question.toLowerCase();
+    if (filingSegmentVocabulary(focus.ticker).some((pattern) => pattern.test(lowered))) {
+      return "質問で名指しされた区分(製品・サービス・セグメント)だけに絞り、2〜4文で答える。順に: その区分の当期の増減(数値があれば数値つき)、資料が挙げる理由、資料だけでは分からない点。他の区分の列挙や「主な売上区分」「大きい区分」の見出しは書かない。";
+    }
+  }
   switch (intent) {
     case "business_overview":
       return "Cover, in this order: 一言概要, 主な収益源, 直近filingで見える変化, 注意点。";
@@ -464,4 +493,41 @@ export function retryInstruction(input: ChatPromptInput): string {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * The single choke-point where a ChatFactualPack becomes model input.
+ *
+ * It is an allowlist, not a blocklist: a field added to `ChatFactualPack` does
+ * not reach the model until it is named here. That direction matters — the
+ * prompt tells the model to prefer the factual pack over the raw excerpts, so
+ * anything that lands in this object is treated as an established fact about
+ * the company. Diagnostics, provenance and counts describe the pack rather than
+ * the issuer and must stay out.
+ *
+ * Both serialisation points above go through this function; neither spreads the
+ * pack directly.
+ */
+function promptSafeFactualPack(factualPack: ChatFactualPack | undefined): Record<string, unknown> {
+  if (!factualPack) {
+    return {};
+  }
+  return {
+    kind: factualPack.kind,
+    companyName: factualPack.companyName,
+    ticker: factualPack.ticker,
+    formType: factualPack.formType,
+    periodOfReport: factualPack.periodOfReport,
+    // `!== undefined`, not truthiness: an optional field that is present but
+    // empty must serialise as present, the way spreading the pack did.
+    ...(factualPack.productsServices !== undefined ? { productsServices: factualPack.productsServices } : {}),
+    ...(factualPack.reportableSegments !== undefined ? { reportableSegments: factualPack.reportableSegments } : {}),
+    ...(factualPack.revenueCategories !== undefined ? { revenueCategories: factualPack.revenueCategories } : {}),
+    ...(factualPack.riskCategories !== undefined ? { riskCategories: factualPack.riskCategories } : {}),
+    ...(factualPack.largestRevenueCategory !== undefined
+      ? { largestRevenueCategory: factualPack.largestRevenueCategory }
+      : {}),
+    sourceIds: factualPack.sourceIds,
+    missingFields: factualPack.missingFields
+  };
 }

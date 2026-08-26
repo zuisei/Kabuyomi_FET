@@ -482,6 +482,8 @@ export function buildChatQualityPipelinePayload({
     languageGuardFallbackKind: answer.debug?.languageGuardFallbackKind ?? null,
     originalAnswerBeforeLanguageGuardLength: answer.debug?.originalAnswerBeforeLanguageGuardLength ?? null,
     originalAnswerBeforeLanguageGuardSample: answer.debug?.originalAnswerBeforeLanguageGuardSample ?? null,
+    cleanupReplacedAnswerSample: answer.debug?.cleanupReplacedAnswerSample ?? null,
+    cleanupFallbackUserReason: answer.debug?.cleanupFallbackUserReason ?? null,
     sourceRepairLabels: answer.debug?.sourceRepairLabels ?? [],
     totalPipelineMs: answer.debug?.totalPipelineMs ?? null,
     historicalLookupMs: answer.debug?.historicalLookupMs ?? null,

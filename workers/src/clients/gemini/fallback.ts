@@ -1,7 +1,6 @@
 import type { FilingCacheRecord, MetricSnapshot, SourceChunkRecord } from "../../env";
 import { formatMetricValue, formatYoYDelta, metricLabel } from "../../lib/metrics";
 import { analyzeQuestion, wantsNarrativeDepth, type QuestionProfile } from "./fallback-question";
-import { summarizeKnownCompanyBusiness } from "./fallback-known-business";
 import type { ChatPromptInput, GeminiChatAnswer } from "./types";
 
 export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
@@ -13,11 +12,6 @@ export function localChatFallback(input: ChatPromptInput): GeminiChatAnswer {
   const nonHardFallback = buildNonHardFallbackIfNeeded(input, profile, sourceChunks, metric, metricSourceId, narrative);
 
   if (profile.asksBusinessOverview) {
-    const knownBusiness = summarizeKnownCompanyBusiness(input.filing);
-    if (knownBusiness) {
-      return knownBusiness;
-    }
-
     if (narrative) {
       return {
         answer: summarizeBusinessNarrativeEvidence(narrative, input.filing.companyName),
@@ -571,9 +565,25 @@ function fallbackSourceIds(metricSourceId: string | undefined, sourceChunks: Sou
   return Array.from(new Set(ids)).slice(0, 2);
 }
 
-function isBankLike(filing: FilingCacheRecord): boolean {
-  const haystack = `${filing.ticker} ${filing.companyName} ${filing.mdaText.slice(0, 5000)}`.toLowerCase();
-  return /(jpm|bank|financial|deposits?|loans?|net interest income|credit quality|capital ratios?)/.test(haystack);
+export function isBankLike(filing: FilingCacheRecord): boolean {
+  // This gates the liquidity/funding fallback answer, which talks about deposits
+  // and credit quality. The previous version searched ticker + company name +
+  // the first 5,000 characters of MD&A for an unbounded
+  // /jpm|bank|financial|deposits?|loans?|.../ and so matched almost every filing:
+  // "consolidated financial statements" and "financial condition" are boilerplate
+  // in every 10-K and 10-Q, and "bank credit facilities" / "term loans" appear in
+  // ordinary industrial and consumer filings. Apple and Coca-Cola both came out
+  // bank-like, and their funding answers were steered to deposits.
+  //
+  // Split it: the identity terms have to actually name a bank, and the MD&A terms
+  // have to be ones only a bank's MD&A uses.
+  const identity = `${filing.ticker} ${filing.companyName}`.toLowerCase();
+  if (/\b(?:jpm|bac|wfc|gs|pnc|usb|schw|cof|tfc|jpmorgan|citigroup|bancorp|bank|banking|banc)\b/.test(identity)) {
+    return true;
+  }
+
+  const mdaText = filing.mdaText.slice(0, 5000).toLowerCase();
+  return /\b(?:net interest income|net interest margin|noninterest income|noninterest expense|provision for credit losses|allowance for (?:credit|loan) losses|net charge-offs?|tier 1 capital|common equity tier 1|deposit balances|total deposits|loan portfolio|credit quality)\b/.test(mdaText);
 }
 
 function buildMetricFallbackAnswer(
@@ -700,36 +710,24 @@ function buildRevenueDriverFallbackAnswer(
 }
 
 function sectorRevenueDriverChecklist(filing: FilingCacheRecord): string {
-  const ticker = filing.ticker.toUpperCase();
-  const company = filing.companyName.toLowerCase();
+  // Content-gated only. This used to carry five identity-gated branches above
+  // the text checks (ticker === "AAPL" etc.) that asserted company structure —
+  // "iPhone、Services、Mac" — from the ticker alone, whatever the filing said.
+  // Same family as the deleted constant-answer tables, in advice clothing. The
+  // haystack variants below say the same things when and only when the MD&A
+  // actually uses that sector's vocabulary, which is the only gate that keeps
+  // the "every statement has a source" claim honest here.
   const haystack = filing.mdaText.slice(0, 8000).toLowerCase();
-  const companyProfile = `${ticker} ${company}`;
 
-  if (ticker === "WMT" || /walmart|sam'?s club/.test(company)) {
-    return "小売では、既存店売上、traffic、ticket、eCommerce、membership/advertising、在庫とgross marginを分けて確認する必要があります。";
-  }
-
-  if (ticker === "CAT" || /caterpillar/.test(company)) {
-    return "工業株では、price realization、販売数量、dealer inventory、backlog、Construction/Resource/Energy & Transportation別の強弱を分けて確認する必要があります。";
-  }
-
-  if (ticker === "XOM" || /exxon/.test(company)) {
-    return "エネルギーでは、原油・天然ガス価格、upstreamの生産量、refining margin、chemical margin、為替や売却影響を分けて確認する必要があります。";
-  }
-
-  if (ticker === "AAPL" || /apple/.test(company)) {
-    return "Appleのような製品・サービス企業では、iPhone、Services、Mac、地域別売上、為替、製品mixを分けて確認する必要があります。";
-  }
-
-  if (isBankOrFinancialCompany(companyProfile)) {
+  if (/net interest income|noninterest income|provision for credit losses|total deposits|loan portfolio|net charge-offs?/.test(haystack)) {
     return "銀行では、net interest income、noninterest income、信用損失引当、預金・貸出残高、投資銀行やマーケット収益を分けて確認する必要があります。";
   }
 
-  if (ticker === "XOM" || /exxon|upstream|downstream|chemical|crude oil|natural gas|refining margin/.test(haystack)) {
+  if (/exxon|upstream|downstream|chemical|crude oil|natural gas|refining margin/.test(haystack)) {
     return "エネルギーでは、原油・天然ガス価格、upstreamの生産量、refining margin、chemical margin、為替や売却影響を分けて確認する必要があります。";
   }
 
-  if (ticker === "CAT" || /caterpillar|construction industries|resource industries|energy and transportation|backlog|dealer inventory/.test(haystack)) {
+  if (/caterpillar|construction industries|resource industries|energy and transportation|backlog|dealer inventory/.test(haystack)) {
     return "工業株では、price realization、販売数量、dealer inventory、backlog、Construction/Resource/Energy & Transportation別の強弱を分けて確認する必要があります。";
   }
 
@@ -741,7 +739,7 @@ function sectorRevenueDriverChecklist(filing: FilingCacheRecord): string {
     return "バイオ医薬では、製品別売上、提携収入、ロイヤリティ、承認済み製品の需要、研究開発や販売体制の変化を分けて確認する必要があります。";
   }
 
-  if (/rocket lab|space|launch|aerospace|satellite/.test(`${company} ${haystack}`)) {
+  if (/rocket lab|space|launch|aerospace|satellite/.test(haystack)) {
     return "宇宙・航空関連では、打ち上げサービス、宇宙システム、受注残、ミッション数、顧客需要を分けて確認する必要があります。";
   }
 
@@ -752,9 +750,6 @@ function sectorRevenueDriverChecklist(filing: FilingCacheRecord): string {
   return "次に見るべきなのは、事業別・地域別・製品別の売上説明、価格や数量、顧客需要のどれが増減に効いたかです。";
 }
 
-function isBankOrFinancialCompany(companyProfile: string): boolean {
-  return /\b(jpm|bac|c|wfc|gs|ms|pnc|usb|td|schw|blk|bank|bancorp|financial|capital markets|wealth management|asset management|brokerage)\b/i.test(companyProfile);
-}
 
 function buildClosestContextFallbackAnswer(
   metric: MetricSnapshot | undefined,
@@ -1101,7 +1096,13 @@ function summarizeBusinessNarrativeEvidence(narrative: SourceChunkRecord, compan
   };
 
   add("がん領域の精密医療", /precision oncology|oncology/i);
-  add("がん検査・診断", /cancer|tumor|screening|diagnostic/i);
+  // "screening" / "diagnostic" 単独は腫瘍学の語ではない(半導体・産業機械の提出資料でも
+  // 普通に使われる)のに、このラベルは「がん検査」を主張する。近接条件で腫瘍学の語を必須にする。
+  // final-answer-language.ts の AWS顧客利用量 と同じ近接イディオム。
+  add(
+    "がん検査・診断",
+    /\b(?:cancer|tumou?rs?)\b[\s\S]{0,200}\b(?:screening|diagnostics?)\b|\b(?:screening|diagnostics?)\b[\s\S]{0,200}\b(?:cancer|tumou?rs?)\b/i
+  );
   add("血液検査・分子診断", /blood[- ]based|liquid biopsy|molecular|genomic/i);
   add("製薬会社向けサービス", /biopharmaceutical|pharmaceutical|clinical trial/i);
   add("車両販売・関連サービス", /automotive|vehicle sales|deliveries and servicing/i);
@@ -1121,7 +1122,12 @@ function summarizeBusinessNarrativeEvidence(narrative: SourceChunkRecord, compan
     return `${subject}、提出資料から見ると、${labels.slice(0, 4).join("、")}を主な事業にする会社です。`;
   }
 
-  return `この会社は、提出資料の本文では「${truncateExcerpt(narrative.text, 120)}」という文脈で説明されています。`;
+  // 事業を表すラベルが1つも取れないとき、以前は本文の先頭120字を英語のまま
+  // 「…という文脈で説明されています」と引用していた。MA のように抽出された
+  // MD&A が業績記述だけの会社では「Net revenue increased 14%…」が出て、
+  // 何の説明にもならない(2026-08-22 実機レビュー)。英語の生引用はせず、
+  // 事業説明が本文に無いことをそのまま言う。
+  return "提出資料の本文(抜粋)には事業内容の説明が含まれていません。確認できるのは業績の数値と売上要因の記述で、何を売ってどう稼ぐ会社かは、10-K の事業の項(Item 1)を直接確認する必要があります。";
 }
 
 function buildMetricObservation(metric: MetricSnapshot): string {
@@ -1798,7 +1804,10 @@ function isLowSignalNarrative(chunk: SourceChunkRecord): boolean {
     return false;
   }
 
-  return /available information|available free of charge|forward-looking statements|private securities litigation reform act|investor relations website|corporate website|sec.?s website|securities and exchange commission|investor\.nvidia\.com|table of contents|following table sets forth|expressed as a percentage of revenue|should be read in conjunction|financial reporting standards?|new pronouncements|accounting policies/i.test(
+  // could differ materially / actual results / safe harbor / cautionary:
+  // 「forward-looking statements」の語を含まない safe-harbor 文が根拠チップに
+  // 「売上高」として出ていた(2026-08-22 実機レビュー)。
+  return /available information|available free of charge|forward-looking statements|could differ materially|actual results (?:and outcomes )?(?:could|may) differ|safe harbor|cautionary statements?|private securities litigation reform act|investor relations website|corporate website|sec.?s website|securities and exchange commission|investor\.nvidia\.com|table of contents|following table sets forth|expressed as a percentage of revenue|should be read in conjunction|financial reporting standards?|new pronouncements|accounting policies/i.test(
     normalized
   );
 }

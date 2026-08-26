@@ -102,8 +102,66 @@ final class APIClientTests: XCTestCase {
         XCTAssertFalse(item.isSupportedInV1)
         XCTAssertTrue(item.canAttemptInV1)
         XCTAssertTrue(item.requiresFilingVerification)
-        XCTAssertEqual(item.supportDisplayLabel, "10-K / 10-Q 未確認")
-        XCTAssertEqual(item.availabilityNote, "保存または表示時に 10-K / 10-Q を確認します。")
+        XCTAssertEqual(item.supportDisplayLabel, "対応書類 未確認")
+        XCTAssertEqual(item.availabilityNote, "保存または表示時に対応書類を確認します。")
+    }
+
+    /// 20-F は外国企業(ADR)の年次報告で、10-K に相当する。
+    /// TSM・ASML・SAP・トヨタ等は 10-K / 10-Q を 1 本も出さないので、
+    /// ここが未対応のままだと検索しても「未対応」としか出ない(2026-08-24 に対応)。
+    /// 計算指標は「答えだけ」を出してはいけない。ROE は提出書類のどこにも
+    /// 書かれていないので、式と材料が揃って初めて出せる数字になる(2026-08-25)。
+    func testDerivedMetricCarriesItsFormulaAndOperands() throws {
+        let json = """
+        {
+          "logicalName": "roe",
+          "label": "ROE（自己資本利益率）",
+          "value": 0.24509,
+          "unit": "ratio",
+          "formula": "純利益 ÷ 自己資本",
+          "definitionNote": "分母は期末の自己資本。年度の値のみ算出する。",
+          "periodEnd": "2024-12-31",
+          "operands": [
+            {"logicalName":"netIncome","label":"純利益","value":35301100000,"unit":"USD","periodEnd":"2024-12-31","tagUsed":"ProfitLoss"},
+            {"logicalName":"equity","label":"自己資本","value":144032000000,"unit":"USD","periodEnd":"2024-12-31","tagUsed":"Equity"}
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let metric = try JSONDecoder().decode(DerivedMetricPayload.self, from: json)
+
+        XCTAssertTrue(metric.isRatio)
+        XCTAssertEqual(metric.ratioText, "24.5%")
+        XCTAssertEqual(metric.formula, "純利益 ÷ 自己資本")
+        XCTAssertEqual(metric.operands.map(\.label), ["純利益", "自己資本"])
+    }
+
+    /// 金額の計算指標は比率ではない。%% を付けて出すと桁が意味を失う。
+    func testDerivedAmountIsNotRenderedAsARatio() throws {
+        let metric = try JSONDecoder().decode(
+            DerivedMetricPayload.self,
+            from: """
+            {"logicalName":"freeCashFlow","label":"フリーキャッシュフロー","value":25913100000,
+             "unit":"USD","formula":"営業キャッシュフロー − 設備投資",
+             "definitionNote":"設備投資は有形固定資産の取得による支出。","periodEnd":"2024-12-31","operands":[]}
+            """.data(using: .utf8)!
+        )
+        XCTAssertFalse(metric.isRatio)
+        XCTAssertNil(metric.ratioText)
+    }
+
+    func testSearchItemTreatsTwentyFAsSupported() {
+        let item = SearchItem(
+            ticker: "TSM",
+            companyName: "Taiwan Semiconductor Manufacturing Co Ltd",
+            cik: "0001046179",
+            exchange: "NYSE",
+            latestFormType: "20-F"
+        )
+
+        XCTAssertTrue(item.hasSupportedLatestFiling)
+        XCTAssertEqual(item.supportDisplayLabel, "最新 20-F")
+        XCTAssertEqual(item.availabilityBadgeTitle, "保存可")
     }
 
     func testSearchItemBlocksKnownUnsupportedFilingStatus() {

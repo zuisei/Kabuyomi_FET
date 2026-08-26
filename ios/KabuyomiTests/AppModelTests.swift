@@ -58,6 +58,51 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.consumePendingDraftQuestion(for: "MSFT"))
     }
 
+    /// 盤面の未読ドットの基準になる「会社ごとの最終閲覧時刻」。
+    /// UserDefaults を毎描画で読むと SwiftUI が変化を観測できないので、
+    /// 観測可能な状態と永続の両方が同時に更新されることを固定する。
+    func testMarkCompanyOpenedStoresTimestampInStateAndDefaults() {
+        let model = makeAppModel()
+        let openedAt = Date(timeIntervalSince1970: 1_776_000_000)
+
+        // 記録前は値そのものが無い = `homeBoardIsUnread` 側で既読扱いになる。
+        XCTAssertNil(model.lastOpenedAt["AAPL"])
+
+        model.markCompanyOpened(ticker: " aapl ", at: openedAt)
+
+        XCTAssertEqual(model.lastOpenedAt["AAPL"], openedAt)
+        XCTAssertEqual(
+            UserDefaults.standard.double(forKey: "\(AppModel.lastOpenedAtKeyPrefix)AAPL"),
+            openedAt.timeIntervalSince1970,
+            accuracy: 0.001
+        )
+        XCTAssertFalse(
+            homeBoardIsUnread(
+                filedAt: Date(timeIntervalSince1970: 1_770_000_000),
+                isPlaceholder: false,
+                lastOpenedAt: model.lastOpenedAt["AAPL"]
+            )
+        )
+    }
+
+    /// 保存済みの値はアプリ再起動をまたいで読み戻され、リセットで消える。
+    func testLastOpenedTimestampsSurviveRelaunchAndAreClearedByReset() {
+        let persistence = PersistenceController(inMemory: true)
+        let first = makeAppModel(persistence: persistence)
+        first.markCompanyOpened(ticker: "AAPL", at: Date(timeIntervalSince1970: 1_776_000_000))
+
+        let relaunched = makeAppModel(persistence: persistence)
+        XCTAssertEqual(
+            relaunched.lastOpenedAt["AAPL"],
+            Date(timeIntervalSince1970: 1_776_000_000)
+        )
+
+        relaunched.resetLocalData()
+
+        XCTAssertTrue(relaunched.lastOpenedAt.isEmpty)
+        XCTAssertNil(UserDefaults.standard.object(forKey: "\(AppModel.lastOpenedAtKeyPrefix)AAPL"))
+    }
+
     func testPaidCreditAccountSignOutClearsOnlyLocalSessionAndRefreshesInstallationUsage() async {
         let store = TestAccountCredentialStore(credential: AccountCredential(
             token: "opaque-account-session",
@@ -161,7 +206,19 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertNil(model.activeConversationTicker)
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
-        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+        // v2 IA 仕様 Phase 6「AAPL の自然さ監査」。
+        // 旧 `rootConversationTicker` はここで `?? "AAPL"` へ落ちていた。
+        // 復元をやめた以上、宛先として名指しされる会社は残らない
+        // (recents に残る AAPL は本人が開いた履歴で、質問の宛先ではない)。
+        XCTAssertNil(model.lastOpenedCompanyTicker)
+        XCTAssertNil(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            ),
+            "ユーザー操作なしにアスクバーの宛先が埋まってはいけない"
+        )
     }
 
     func testBootstrapClearsRestoredRecentOnlyNonStarterTickerWithoutWatchlistOrLocalData() async {
@@ -178,7 +235,19 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.lastViewedTicker)
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.lastViewedTickerKey))
-        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+        // v2 IA 仕様 Phase 6「AAPL の自然さ監査」。
+        // 旧 `rootConversationTicker` はここで `?? "AAPL"` へ落ち、
+        // ユーザーが一度も触っていないスターター企業を名指ししていた。
+        // 触っていない状態では、どこにも会社が現れないことを固定する。
+        XCTAssertNil(model.lastOpenedCompanyTicker)
+        XCTAssertNil(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            ),
+            "ユーザー操作なしにアスクバーの宛先が埋まってはいけない"
+        )
     }
 
     func testBootstrapClearsRestoredSavedOnlyTickerWithoutLocalData() async {
@@ -195,7 +264,17 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.lastViewedTicker)
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.lastViewedTickerKey))
-        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+        XCTAssertNil(model.lastOpenedCompanyTicker)
+        // 保存済みが1社ある人の宛先はその会社。スターター企業には落ちない
+        // (v2 IA 仕様 Phase 6「AAPL の自然さ監査」)。
+        XCTAssertEqual(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            )?.ticker,
+            "NVDA"
+        )
     }
 
     func testBootstrapClearsRestoredStarterTickerWithoutLocalData() async {
@@ -211,10 +290,22 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.lastViewedTicker)
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.lastViewedTickerKey))
-        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+        // v2 IA 仕様 Phase 6「AAPL の自然さ監査」。
+        // 旧 `rootConversationTicker` はここで `?? "AAPL"` へ落ち、
+        // ユーザーが一度も触っていないスターター企業を名指ししていた。
+        // 触っていない状態では、どこにも会社が現れないことを固定する。
+        XCTAssertNil(model.lastOpenedCompanyTicker)
+        XCTAssertNil(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            ),
+            "ユーザー操作なしにアスクバーの宛先が埋まってはいけない"
+        )
     }
 
-    func testRootConversationTickerIgnoresSavedOnlyTickerPlaceholderWithoutLocalData() async {
+    func testSavedOnlyTickerPlaceholderStaysTheAskDestinationWithoutLocalData() async {
         UserDefaults.standard.set(["NVDA"], forKey: AppModel.savedTickersKey)
         UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
 
@@ -224,7 +315,17 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(model.watchlist.map(\.ticker), ["NVDA"])
         XCTAssertEqual(model.watchlist.map(\.isPlaceholder), [true])
-        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+        // 資料がまだ落ちてきていない保存済み会社でも、宛先は本人が保存したその会社。
+        // 旧 `rootConversationTicker` はここでスターターの "AAPL" を返していた。
+        XCTAssertNil(model.lastOpenedCompanyTicker)
+        XCTAssertEqual(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            )?.ticker,
+            "NVDA"
+        )
     }
 
     func testLoadCompanyFailureClearsRestoredUnsavedStarterTickerSelection() async {
@@ -264,8 +365,60 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.lastViewedTicker)
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.activeConversationTickerKey))
         XCTAssertNil(UserDefaults.standard.string(forKey: AppModel.lastViewedTickerKey))
-        XCTAssertEqual(model.rootConversationTicker, "AAPL")
+        // v2 IA 仕様 Phase 6「AAPL の自然さ監査」。
+        // 旧 `rootConversationTicker` はここで `?? "AAPL"` へ落ち、
+        // ユーザーが一度も触っていないスターター企業を名指ししていた。
+        // 触っていない状態では、どこにも会社が現れないことを固定する。
+        XCTAssertNil(model.lastOpenedCompanyTicker)
+        XCTAssertNil(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            ),
+            "ユーザー操作なしにアスクバーの宛先が埋まってはいけない"
+        )
         XCTAssertNil(model.activeAlert)
+    }
+
+    // 初回訪問は payload が通信中のため recordCompanyVisit が途中で帰る。
+    // 修正前はそのセッション中、開いただけの会社が recents(盤面・ストリーム)に
+    // 一切現れなかった。読み込み完了時に予約済みの訪問が清算されることを固定する。
+    func testFirstVisitBeforePayloadLandsInRecentsOnceLoaded() async throws {
+        UserDefaults.standard.set(true, forKey: AppModel.hasCompletedInitialEntryKey)
+        let model = makeAppModel()
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch request.url?.path ?? "" {
+            case "/v1/company/MSFT":
+                return (response, try TestFixtures.companyPayloadData(ticker: "MSFT"))
+            default:
+                let data = try TestFixtures.jsonData([
+                    "plan": "free",
+                    "chatsUsed": 0,
+                    "chatLimit": 10,
+                    "stocksUsed": 0,
+                    "stockLimit": 3,
+                    "dateJST": "2026-04-18"
+                ])
+                return (response, data)
+            }
+        }
+
+        model.openConversation(for: "MSFT")
+        // payload はまだ無い — ここで訪問しても recents には入れない(入れたら嘘の行になる)
+        model.recordCompanyVisit(ticker: "MSFT")
+        XCTAssertFalse(model.recentCompanies.contains { $0.ticker == "MSFT" })
+
+        await model.loadCompany(ticker: "MSFT")
+
+        // 読み込み完了が予約を清算し、保存も再起動も要らずに recents へ載る
+        XCTAssertTrue(
+            model.recentCompanies.contains { $0.ticker == "MSFT" }
+                || model.watchlist.contains { $0.ticker == "MSFT" },
+            "visited company must appear on the board without saving or relaunching"
+        )
+        XCTAssertEqual(model.lastViewedTicker, "MSFT")
     }
 
     func testLoadCompanyRetryableStateDoesNotPresentAlert() async {
@@ -372,6 +525,109 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.watchlist.isEmpty)
         XCTAssertTrue(model.recentCompanies.isEmpty)
         XCTAssertTrue(model.showStarterCompanies)
+    }
+
+    // MARK: - Phase 6: 初回動線(v2 IA 仕様「Phase 6」節)
+
+    /// 「ようこそ」を出すかどうかは `shouldShowConversationEntry` ひとつが決める。
+    /// 並行フラグは作らない、という設計をここで固定する。
+    /// 真の初回 = 真 / 初回入口を抜けたら偽 / ローカルデータを消したらまた真。
+    func testWelcomeVisibilityFollowsTheInitialEntryFlagAcrossCompletionAndReset() {
+        let persistence = PersistenceController(inMemory: true)
+        let model = makeAppModel(persistence: persistence)
+
+        // 真の初回インストール。
+        XCTAssertTrue(model.shouldShowConversationEntry)
+
+        // 「あとで」でも「銘柄を選んではじめる」でも、閉じた時点でここを通る。
+        model.completeInitialEntry()
+
+        XCTAssertFalse(model.shouldShowConversationEntry)
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: AppModel.hasCompletedInitialEntryKey))
+
+        // 再起動しても出ない(判定は UserDefaults に載っている)。
+        let relaunched = makeAppModel(persistence: persistence)
+        XCTAssertFalse(relaunched.shouldShowConversationEntry)
+
+        // ローカルデータを消した人には、もう一度初回から始まる。
+        relaunched.resetLocalData()
+        XCTAssertTrue(relaunched.shouldShowConversationEntry)
+    }
+
+    /// スターターピッカーの「はじめる」。選んだ銘柄がワークスペースの
+    /// ブックマークと**同じ道**(`AppModel.saveTicker`)で `savedTickers` に載り、
+    /// 盤面が本人のものとして始まること。
+    /// 保存は会社を開かない(初回動線はストリームに着地する)。
+    func testStarterPickerSelectionLandsInSavedTickersThroughTheRealSavePath() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        let model = makeAppModel(persistence: persistence)
+        let aapl = TestFixtures.companyPayload(ticker: "AAPL", cik: "0000320193")
+        let msft = TestFixtures.companyPayload(ticker: "MSFT", cik: "0000789019")
+
+        MockAppModelURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+            switch request.url?.path {
+            case "/v1/watchlist/add":
+                let body = try XCTUnwrap(Self.requestBodyData(from: request))
+                let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+                let ticker = try XCTUnwrap(payload["ticker"])
+                let company = ticker == "AAPL" ? aapl : msft
+                let savedTickers = ticker == "AAPL" ? ["AAPL"] : ["AAPL", "MSFT"]
+                let baseData = try TestFixtures.watchlistAddResponseData(ticker: company.ticker, cik: company.cik)
+                var json = try XCTUnwrap(JSONSerialization.jsonObject(with: baseData) as? [String: Any])
+                var usage = try XCTUnwrap(json["usage"] as? [String: Any])
+                usage["stocksUsed"] = savedTickers.count
+                usage["savedTickers"] = savedTickers
+                json["usage"] = usage
+                return (response, try TestFixtures.jsonData(json))
+            default:
+                return (
+                    response,
+                    try TestFixtures.jsonData([
+                        "plan": "free",
+                        "chatsUsed": 0,
+                        "chatLimit": 10,
+                        "stocksUsed": 0,
+                        "stockLimit": 3,
+                        "dateJST": "2026-04-18",
+                        "savedTickers": []
+                    ])
+                )
+            }
+        }
+
+        XCTAssertTrue(model.shouldShowConversationEntry)
+
+        // ピッカーが押す順序そのもの(選んだ順・保存済みは落とす)。
+        let picks = redesignStarterPickerSaveOrder(
+            selection: ["AAPL", "MSFT"],
+            isAlreadySaved: { model.isTickerInWatchlist($0) }
+        )
+        XCTAssertEqual(picks, ["AAPL", "MSFT"])
+
+        for ticker in picks {
+            await model.saveTicker(ticker)
+        }
+
+        XCTAssertEqual(model.watchlist.map(\.ticker), ["AAPL", "MSFT"])
+        XCTAssertEqual(
+            UserDefaults.standard.stringArray(forKey: AppModel.savedTickersKey),
+            ["AAPL", "MSFT"]
+        )
+        // 盤面が埋まった以上、「ようこそ」も空状態も次からは出ない。
+        XCTAssertFalse(model.shouldShowConversationEntry)
+        // 保存はドキュメントへ飛ばさない。着地はストリーム。
+        XCTAssertNil(model.activeConversationTicker)
+        // アスクバーの宛先は本人が選んだ1社目。スターターへのフォールバックではない。
+        XCTAssertEqual(
+            streamAskContext(
+                lastOpenedTicker: model.lastOpenedCompanyTicker,
+                saved: model.watchlist,
+                recent: model.recentCompanyCards(limit: 8)
+            )?.ticker,
+            "AAPL"
+        )
     }
 
     func testResetLocalDataClearsAIConsentAndRequiresReconsentBeforeChat() async {
@@ -1116,7 +1372,8 @@ final class AppModelTests: XCTestCase {
                 totalRemaining: 150,
                 resetsAt: "2026-06-01T00:00:00+09:00"
             ),
-            creditBillingEnabled: true
+            creditBillingEnabled: true,
+            chatCreditCost: nil
         )
 
         let viewModel = AccountStatusDisplayModel(
@@ -1219,6 +1476,79 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(projectYML.contains("CURRENT_PROJECT_VERSION: 6"))
         XCTAssertTrue(pbxproj.contains("MARKETING_VERSION = 1.2;"))
         XCTAssertTrue(pbxproj.contains("CURRENT_PROJECT_VERSION = 6;"))
+    }
+
+    /// 本番 Worker の `APP_ATTEST_ALLOWED_BUNDLE_VERSIONS` に載っていないビルド番号を
+    /// App Store に出すと、新規インストールの attestation が
+    /// `attestation_bundle_version_not_allowed` で拒否され、
+    /// **ウェルカムクレジットも購入も無言で落ちる**(ユーザーにはエラーが出ない)。
+    ///
+    /// 同じ突き合わせは `workers/scripts/deploy-worker.mjs` にもあるが、あちらは
+    /// **Worker をデプロイするときにしか走らない**。iOS だけ提出する経路には
+    /// これまでゲートが無かったので、iOS 側のテストにも置く。
+    func testBundleVersionIsCoveredByProductionAppAttestAllowlist() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let projectYML = try String(contentsOf: repoRoot.appendingPathComponent("ios/project.yml"), encoding: .utf8)
+        let wrangler = try String(contentsOf: repoRoot.appendingPathComponent("workers/wrangler.toml"), encoding: .utf8)
+
+        guard let buildNumber = Self.firstCapture(
+            in: projectYML,
+            pattern: #"(?m)^\s*CURRENT_PROJECT_VERSION:\s*(\S+)"#
+        ) else {
+            return XCTFail("ios/project.yml から CURRENT_PROJECT_VERSION を読めなかった")
+        }
+        guard let allowlistRaw = Self.firstCapture(
+            in: wrangler,
+            pattern: #"(?m)^APP_ATTEST_ALLOWED_BUNDLE_VERSIONS\s*=\s*"([^"]*)""#
+        ) else {
+            return XCTFail("workers/wrangler.toml から APP_ATTEST_ALLOWED_BUNDLE_VERSIONS を読めなかった")
+        }
+
+        let allowlist = allowlistRaw
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        XCTAssertTrue(
+            allowlist.contains(buildNumber),
+            """
+            ビルド番号 \(buildNumber) が本番の App Attest 許可リスト [\(allowlist.joined(separator: ", "))] に入っていない。
+            この状態で提出すると新規インストールが無言で restricted_installation に落ちる。
+            workers/wrangler.toml の APP_ATTEST_ALLOWED_BUNDLE_VERSIONS に \(buildNumber) を追加し、
+            Worker をデプロイしてから提出すること。
+            """
+        )
+    }
+
+    /// Apple 由来の期限は Worker が `new Date(ms).toISOString()` で作るため必ず
+    /// 小数秒が付く(`2026-09-01T00:00:00.000Z`)。`.withFractionalSeconds` を
+    /// 持たない ISO8601DateFormatter はこれをパースできず、CreditView が
+    /// 生の ISO 文字列を「次回: 2026-09-01T00:00:00.000Z」と表示していた。
+    /// **課金中の購読者にだけ見える不具合**だったので回帰を固定する。
+    func testCreditViewParsesBothFractionalAndPlainISO8601() throws {
+        let withFraction = try XCTUnwrap(
+            CreditView.parseISO8601("2026-09-01T00:00:00.000Z"),
+            "Apple 由来の小数秒つき ISO をパースできていない"
+        )
+        let withoutFraction = try XCTUnwrap(
+            CreditView.parseISO8601("2026-09-01T00:00:00Z"),
+            "小数秒なしの ISO をパースできていない"
+        )
+        XCTAssertEqual(withFraction, withoutFraction)
+
+        // サーバ自前生成の期間(JST オフセット付き・小数秒なし)も従来どおり通ること。
+        XCTAssertNotNil(CreditView.parseISO8601("2026-09-01T00:00:00+09:00"))
+        XCTAssertNil(CreditView.parseISO8601("not-a-date"))
+    }
+
+    private static func firstCapture(in text: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let range = Range(match.range(at: 1), in: text) else { return nil }
+        return String(text[range]).trimmingCharacters(in: .whitespaces)
     }
 
     func testResetLocalDataClearsRecentStateAndKeepsDeviceIdentity() async throws {
@@ -3549,6 +3879,7 @@ final class AppModelTests: XCTestCase {
                 resetsAt: "2026-08-01T00:00:00+09:00"
             ),
             creditBillingEnabled: creditBillingEnabled,
+            chatCreditCost: nil,
             capabilities: UsageCapabilitiesPayload(
                 configVersion: "test",
                 configSource: "unit-test",
@@ -3556,6 +3887,8 @@ final class AppModelTests: XCTestCase {
                 webSupplementEnabled: false,
                 consumablePurchasesEnabled: consumablePurchasesEnabled,
                 accountRecoveryReady: consumablePurchasesEnabled,
+                premiumChatModelEnabled: nil,
+                premiumChatCreditCost: nil,
                 rewardedCredit: RewardedCreditCapabilityPayload(
                     enabled: false,
                     rewardedCreditEnabled: false,

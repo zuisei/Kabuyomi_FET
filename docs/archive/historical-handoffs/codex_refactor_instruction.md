@@ -1,6 +1,6 @@
 # Codex 実装指示書
 
-> Historical / stale document. Not current v1 release truth. See `docs/release/RELEASE_TRUTH.md`.
+> Historical / stale document. Not current v1 release truth. See `docs/archive/v1/RELEASE_TRUTH.md`.
 >
 > Status (2026-04-18): historical handoff. Parts of this brief describe work that has already landed and should not be treated as the current source of truth.
 > The local coordination docs (`docs/current_shipping_truth.md`, `CURRENT_SLICE.md`) are intentionally not tracked in Git. Use the current code and `docs/testflight_readiness_checklist.md` before following any instruction here literally.

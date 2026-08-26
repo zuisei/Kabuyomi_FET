@@ -1,0 +1,509 @@
+openapi: 3.1.0
+info:
+  title: Market Docket Admin API
+  version: 0.4.0-testflight
+  description: Private ingest, leased-job, editorial-analysis, review and publish API. Never bind these routes to the public Worker.
+servers:
+  - url: https://md-admin-testflight.dznqjmctk7.workers.dev
+    description: TestFlight administration environment
+security:
+  - bearerAuth: []
+paths:
+  /admin/status:
+    get:
+      summary: Inspect job, draft-review and published-read-model counts
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+  /admin/translations/status:
+    get:
+      summary: Inspect translation credentials, routing cutoff, token usage, jobs and Batch manifests
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+  /admin/translations/queue:
+    post:
+      summary: Route current source hashes into realtime or historical Batch lanes without calling OpenAI
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+  /admin/translations/realtime/run:
+    post:
+      summary: Translate only realtime and manually prioritized jobs within the daily token budget
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+  /admin/translations/batch/prepare:
+    post:
+      summary: Build a historical JSONL manifest and cost estimate without submitting it to OpenAI
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                maximumItems: { type: integer, minimum: 1, maximum: 500, default: 500 }
+      responses:
+        "201": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /admin/translations/batch/{manifest_id}/submit:
+    post:
+      summary: Submit one prepared historical Batch only after exact count-and-token confirmation
+      parameters:
+        - name: manifest_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation]
+              properties:
+                confirmation: { type: string, description: Must exactly match the phrase returned by Batch preparation. }
+      responses:
+        "202": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /admin/translations/batches/poll:
+    post:
+      summary: Poll only already-confirmed submitted Batches and import completed translations
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+  /admin/ingests:
+    post:
+      summary: Register an official source file and enqueue processing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IngestRequest" }
+      responses:
+        "201": { $ref: "#/components/responses/Success" }
+        "200": { description: Existing idempotent job }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /admin/jobs/claim:
+    post:
+      summary: Lease one eligible job to a Mac Processor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [processorID]
+              properties:
+                processorID: { type: string }
+                leaseSeconds: { type: integer, minimum: 30, maximum: 900, default: 300 }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "204": { description: No eligible job }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /admin/jobs/{job_id}/complete:
+    post:
+      summary: Store processed Raw/Derived objects and create a draft review
+      parameters: [{ $ref: "#/components/parameters/JobId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CompletionRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /admin/jobs/{job_id}/fail:
+    post:
+      summary: Release a leased job with bounded exponential retry
+      parameters: [{ $ref: "#/components/parameters/JobId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [processorID, error]
+              properties:
+                processorID: { type: string }
+                error: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /admin/events/{event_id}/latest-model:
+    get:
+      summary: Fetch the newest draft or published model for revision processing
+      parameters: [{ $ref: "#/components/parameters/EventId" }]
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /admin/events/{event_id}/analysis-drafts:
+    post:
+      summary: Create a new automated policy-analysis draft
+      description: This route cannot claim verification or publication. A complete Signal draft is publicly visible as automatically selected and unverified; an optional later editorial record is never implied.
+      parameters: [{ $ref: "#/components/parameters/EventId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PolicyAnalysisDraft" }
+      responses:
+        "201": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /admin/analyses/{analysis_id}:
+    put:
+      summary: Replace an unreviewed or automated analysis draft
+      parameters: [{ $ref: "#/components/parameters/AnalysisId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PolicyAnalysisDraft" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /admin/analyses/{analysis_id}/transition:
+    post:
+      summary: Record an optional editorial, publish or reject decision
+      description: Publication requires an editorial_reviewed state and all tier/market-mode gates.
+      parameters: [{ $ref: "#/components/parameters/AnalysisId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PolicyAnalysisTransition" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /admin/events/{event_id}/analysis-preview:
+    get:
+      summary: Preview the latest non-rejected editorial analysis and company relations
+      parameters: [{ $ref: "#/components/parameters/EventId" }]
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /admin/events/{event_id}/analysis-history:
+    get:
+      summary: Read the immutable editorial state-transition history
+      parameters: [{ $ref: "#/components/parameters/EventId" }]
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+  /admin/events/{event_id}/company-relations:
+    post:
+      summary: Add an evidence-backed company/security candidate without approving it
+      parameters: [{ $ref: "#/components/parameters/EventId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CompanyRelationCandidate" }
+      responses:
+        "201": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /admin/company-relations/{company_relation_id}/review:
+    post:
+      summary: Approve or reject a company/security relation candidate
+      parameters: [{ $ref: "#/components/parameters/CompanyRelationId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RelationshipReviewRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /admin/events/{event_id}/publish:
+    post:
+      summary: Approve the newest draft and atomically replace the public read model
+      parameters: [{ $ref: "#/components/parameters/EventId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reviewedBy]
+              properties:
+                reviewedBy: { type: string }
+                note: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /admin/events/{event_id}/enrich:
+    post:
+      summary: Record a human analyst review and promote a published event to analyst_enriched
+      parameters: [{ $ref: "#/components/parameters/EventId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnalystEnrichmentRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /admin/events/{event_id}/confounders:
+    post:
+      summary: Add a reviewed or candidate confounder with a separate knowledge-availability boundary
+      parameters: [{ $ref: "#/components/parameters/EventId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConfounderRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /admin/events/{event_id}/market-mappings:
+    post:
+      summary: Recalculate and approve an evidence-backed market mapping after analyst and confounder review
+      parameters: [{ $ref: "#/components/parameters/EventId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MarketMappingRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /admin/market-providers/{provider_id}/review:
+    post:
+      summary: Record a human display-rights decision for a market-data provider
+      parameters: [{ $ref: "#/components/parameters/ProviderId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MarketProviderReviewRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /admin/relationships/{relationship_id}/review:
+    post:
+      summary: Record a human decision for a document relationship candidate
+      parameters: [{ $ref: "#/components/parameters/RelationshipId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RelationshipReviewRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /admin/check/regulations-gov:
+    post:
+      summary: Check the credentialed Regulations.gov connector and persist source health
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  parameters:
+    JobId: { name: job_id, in: path, required: true, schema: { type: string, format: uuid } }
+    EventId: { name: event_id, in: path, required: true, schema: { type: string, format: uuid } }
+    AnalysisId: { name: analysis_id, in: path, required: true, schema: { type: string, format: uuid } }
+    CompanyRelationId: { name: company_relation_id, in: path, required: true, schema: { type: string, format: uuid } }
+    RelationshipId: { name: relationship_id, in: path, required: true, schema: { type: string, format: uuid } }
+    ProviderId: { name: provider_id, in: path, required: true, schema: { type: string } }
+  responses:
+    Success:
+      description: Admin operation succeeded
+      content: { application/json: { schema: { type: object } } }
+    Error:
+      description: Structured admin error
+      content: { application/json: { schema: { type: object } } }
+  schemas:
+    SHA256: { type: string, pattern: "^[0-9a-f]{64}$" }
+    IngestRequest:
+      type: object
+      required: [sourceCode, externalID, sourceURL, eventID, documentID, documentNumber, revisionNumber, documentType, relationship, titleJA, titleEN, publisherJA, publisherEN, publishedOn, availableAt, availabilityBasis, bodyText, displayBodyJA, displayBodyEN]
+      properties:
+        sourceCode: { type: string, enum: [BIS, WH, USTR, DOC, FR, GOVINFO] }
+        externalID: { type: string }
+        sourceURL: { type: string, format: uri, pattern: "^https://" }
+        eventID: { type: string, format: uuid }
+        documentID: { type: string, format: uuid }
+        documentNumber: { type: string }
+        revisionNumber: { type: integer, minimum: 1 }
+        documentType: { type: string, enum: [final_rule, correcting_amendment, notice, other] }
+        relationship: { type: string, enum: [primary, corrects, related] }
+        correctsDocumentID: { type: string, format: uuid }
+        titleJA: { type: string }
+        titleEN: { type: string }
+        publisherJA: { type: string }
+        publisherEN: { type: string }
+        publishedOn: { type: string, format: date }
+        effectiveOn: { type: string, format: date }
+        applicableOn: { type: string, format: date }
+        commentsCloseOn: { type: string, format: date }
+        sourceStatedAt: { type: string }
+        sourceStatedTimezone: { type: string }
+        availableAt: { type: string, format: date-time }
+        availabilityBasis: { type: string, enum: [source_stated, first_observed, publication_date_only, manual_estimate] }
+        timePrecision: { type: string, enum: [exact, minute, hour, day], default: exact, description: publication_date_only is always day }
+        bodyText: { type: string }
+        rawBodyBase64: { type: string, contentEncoding: base64 }
+        contentType: { type: string }
+        displayBodyJA: { type: string }
+        displayBodyEN: { type: string }
+        changeSummaryJA: { type: string }
+    PolicyAnalysisDraft:
+      type: object
+      required: [presentationTier, marketAnalysisMode]
+      properties:
+        analysisStatus: { type: string, enum: [unreviewed, automated_draft], description: Human-review states are rejected on draft routes. }
+        canonicalTitleJA: { type: [string, "null"] }
+        canonicalTitleEN: { type: [string, "null"] }
+        changeSummaryJA: { type: [string, "null"] }
+        whyItMattersJA: { type: [string, "null"] }
+        policyType: { type: [string, "null"] }
+        policyDomainCodes: { type: array, items: { type: string } }
+        primaryAgencyCode: { type: [string, "null"] }
+        affectedRegionCodes: { type: array, items: { type: string } }
+        affectedSectorCodes: { type: array, items: { type: string } }
+        affectedProductTerms: { type: array, items: { type: string } }
+        presentationTier: { type: string, enum: [signal, monitor, archive] }
+        marketAnalysisMode: { type: string, enum: [intraday, daily, unmapped, not_applicable, disabled] }
+        marketRelevanceReasonJA: { type: [string, "null"] }
+        noCompanyReasonJA: { type: [string, "null"] }
+        noMarketDataReasonJA: { type: [string, "null"] }
+        editorialPriority: { type: integer, minimum: -1000, maximum: 1000 }
+        generatedBy: { type: string }
+        note: { type: [string, "null"] }
+    PolicyAnalysisTransition:
+      type: object
+      required: [action, reviewedBy]
+      properties:
+        action: { type: string, enum: [review, publish, reject] }
+        reviewedBy: { type: string, minLength: 1 }
+        note: { type: string }
+    CompanyRelationCandidate:
+      type: object
+      required: [issuerName, relationType, evidenceDocumentID, evidenceReference, evidenceSummaryJA]
+      properties:
+        issuerName: { type: string, minLength: 1 }
+        ticker: { type: string }
+        exchange: { type: string }
+        relationType: { type: string, enum: [direct, indirect, supply_chain, competitor, customer, geographic_exposure, policy_beneficiary, policy_risk] }
+        evidenceDocumentID: { type: string, format: uuid }
+        evidenceReference: { type: string, minLength: 1 }
+        evidenceSummaryJA: { type: string, minLength: 1 }
+        generatedBy: { type: string }
+    CompletionRequest:
+      type: object
+      required: [processorID, rawSHA256, normalizedSHA256, normalizedText, eventReadModel]
+      properties:
+        processorID: { type: string }
+        rawSHA256: { $ref: "#/components/schemas/SHA256" }
+        normalizedSHA256: { $ref: "#/components/schemas/SHA256" }
+        diffSHA256: { $ref: "#/components/schemas/SHA256" }
+        normalizedText: { type: string }
+        diff: { type: object }
+        eventReadModel: { type: object }
+    AnalystEnrichmentRequest:
+      type: object
+      required: [summaryJA, domainSlug, importantClauseJA, clauseSourceURL, confounderReviewState, reviewedBy]
+      properties:
+        summaryJA: { type: string, minLength: 1 }
+        domainSlug: { type: string, minLength: 1 }
+        importantClauseJA: { type: string, minLength: 1 }
+        clauseSourceURL: { type: string, format: uri, pattern: "^https://" }
+        confounderReviewState: { type: string, enum: [verified_none, candidate, verified] }
+        reviewedBy: { type: string, minLength: 1 }
+        note: { type: string }
+    ConfounderRequest:
+      type: object
+      required: [titleJA, detailJA, relevance, kind, sourceURL, occurredAt, availableAt, reviewState, reviewedBy]
+      properties:
+        titleJA: { type: string, minLength: 1 }
+        detailJA: { type: string, minLength: 1 }
+        relevance: { type: string, minLength: 1 }
+        kind: { type: string, enum: [macro, issuer_filing, earnings, analyst, peer, market, geopolitical, other] }
+        sourceURL: { type: string, format: uri, pattern: "^https://" }
+        occurredAt: { type: string, format: date-time }
+        availableAt: { type: string, format: date-time }
+        reviewState: { type: string, enum: [candidate, verified] }
+        reviewedBy: { type: string, minLength: 1 }
+    RelationshipReviewRequest:
+      type: object
+      required: [decision, reviewedBy]
+      properties:
+        decision: { type: string, enum: [approved, rejected] }
+        reviewedBy: { type: string, minLength: 1 }
+        note: { type: string }
+    MarketProviderReviewRequest:
+      type: object
+      required: [decision, rightsNote, reviewedBy]
+      properties:
+        decision: { type: string, enum: [approved, rejected] }
+        rightsNote: { type: string, minLength: 1 }
+        reviewedBy: { type: string, minLength: 1 }
+    ReviewedNormalizedPoint:
+      type: object
+      required: [timestamp, normalizedSecurityPrice, normalizedBenchmarkPrice, volumeRatio]
+      properties:
+        timestamp: { type: string, format: date-time }
+        normalizedSecurityPrice: { type: number, exclusiveMinimum: 0 }
+        normalizedBenchmarkPrice: { type: number, exclusiveMinimum: 0 }
+        volumeRatio: { type: number, minimum: 0 }
+    MarketMappingRequest:
+      type: object
+      required: [ticker, exchange, companyName, relationship, confidence, evidenceDocumentID, evidenceClause, evidenceURL, benchmarkTicker, providerID, windowName, windowStart, windowEnd, timePrecision, evaluatedAt, availableAt, reviewedBy, points]
+      properties:
+        ticker: { type: string, minLength: 1 }
+        exchange: { type: string, minLength: 1 }
+        companyName: { type: string, minLength: 1 }
+        relationship: { type: string, enum: [direct, indirect, supplier, customer, competitor, sector_proxy, benchmark] }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        evidenceDocumentID: { type: string, format: uuid }
+        evidenceClause: { type: string, minLength: 1 }
+        evidenceURL: { type: string, format: uri, pattern: "^https://" }
+        benchmarkTicker: { type: string, minLength: 1 }
+        providerID: { type: string, minLength: 1 }
+        windowName: { type: string, enum: [fiveMinutes, thirtyMinutes, twoHours, sameDayClose, nextDayClose, fiveTradingDays, nextRegularSessionOpen, fiveMinutesAfterOpen, thirtyMinutesAfterOpen, twoHoursAfterOpen, previousCloseToOpen, previousCloseToClose, closeToNextClose, fiveTradingDayReturn, thirtyMinutesFromDetection] }
+        windowStart: { type: string, format: date-time }
+        windowEnd: { type: string, format: date-time }
+        timePrecision: { type: string, enum: [exact, minute, hour, day] }
+        evaluatedAt: { type: string, format: date-time }
+        availableAt: { type: string, format: date-time }
+        reviewedBy: { type: string, minLength: 1 }
+        points:
+          type: array
+          minItems: 2
+          items: { $ref: "#/components/schemas/ReviewedNormalizedPoint" }

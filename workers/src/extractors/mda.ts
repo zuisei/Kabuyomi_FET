@@ -1,3 +1,5 @@
+import type { FilingFormType } from "../env";
+
 const TOKEN_BUDGET = 15_000;
 const MIN_SECTION_CHARS = 2_400;
 
@@ -67,13 +69,13 @@ function normalizeFilingTextWithDiagnostics(
   };
 }
 
-export function extractMDASection(html: string, formType: "10-K" | "10-Q"): ExtractedMDA | null {
+export function extractMDASection(html: string, formType: FilingFormType): ExtractedMDA | null {
   return extractMDASectionWithDiagnostics(html, formType).result;
 }
 
 export function extractMDASectionWithDiagnostics(
   html: string,
-  formType: "10-K" | "10-Q"
+  formType: FilingFormType
 ): { result: ExtractedMDA | null; diagnostics: MDAExtractionDiagnostics } {
   const startedAt = nowMs();
   const { text: normalizedText, diagnostics: normalizationDiagnostics } = normalizeFilingTextWithDiagnostics(html);
@@ -174,7 +176,34 @@ function stripLeadingNoise(candidate: string, startPatterns: RegExp[]): string {
   return replacement ? candidate.slice(replacement.index).trim() : candidate;
 }
 
-function getPatterns(formType: "10-K" | "10-Q"): PatternPair {
+function getPatterns(formType: FilingFormType): PatternPair {
+  /// 20-F に MD&A という章は無い。相当するのは
+  /// **Item 5 "Operating and Financial Review and Prospects"** で、次章の
+  /// Item 6 (Directors, Senior Management and Employees) までが本文。
+  ///
+  /// 実物(TSMC 2025 年度 20-F、2026-04-16 提出)で確認した点が二つある:
+  /// - 見出しは様式名と違って **"Reviews"(複数形)** で書かれていた。様式どおりの
+  ///   単数形しか見ない正規表現は TSMC を丸ごと取りこぼす。`reviews?` で両方拾う。
+  /// - 目次と本文中の相互参照(「"Item 5 ... – Critical Accounting Policies" 参照」)が
+  ///   本文より先に何度も出る。相互参照は章題のあとに **ダッシュ + 小節名**が続くのが特徴で、
+  ///   本物の見出しは直後が本文になる。この差だけで見分けが付く。
+  ///   末尾の否定先読みが無いと、SAP では Item 4 のサステナビリティ記述を
+  ///   財務レビューとして 38,000 字抜いてしまう(実測)。**間違った章を自信満々に
+  ///   引用するのが一番まずい**ので、ここは緩めない。
+  if (formType === "20-F") {
+    return {
+      start: [
+        /item\s+5\b[\s.: -]*operating and financial reviews? and prospects(?!\s*[–—”"'-])/gi,
+        /operating and financial reviews? and prospects(?!\s*[–—”"'-])/gi
+      ],
+      end: [
+        /item\s+6\b[\s.: -]*directors,? senior management and employees/gi,
+        /item\s+6\b/gi,
+        /directors,? senior management and employees/gi
+      ]
+    };
+  }
+
   if (formType === "10-K") {
       return {
         start: [

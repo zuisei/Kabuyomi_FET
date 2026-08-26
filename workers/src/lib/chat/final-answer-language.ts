@@ -398,11 +398,16 @@ function inferDriverLabels(text: string): string[] {
   add("利用席数", /seats? (?:grew|growth|increased)|seat growth/);
   add("販売数量", /\bsales\s+volume|production volumes?|unit volumes?|数量/);
   add("価格実現", /price realization|pricing|price\/mix|price mix|価格/);
-  add("平均販売価格", /average selling prices?|asp\b/);
+  // 先頭に語境界が無いと "grasp" / "clasp" / "gasp" が asp に一致する。
+  add("平均販売価格", /average selling prices?|\basp\b/);
   add("出荷量", /bit shipments?|shipments?/);
-  add("製品ミックス", /favorable mix|product mix|mix/);
+  // 裸の mix は "mixture" / "mixed" にも一致するため語境界を付ける。
+  add("製品ミックス", /favorable mix|product mix|\bmix\b/);
   add("製造コスト削減", /manufacturing cost reductions?/);
-  add("DRAM・NAND需要", /dram|nand/);
+  // 語境界が無いと "dramatically" / "dramatic" が dram に部分一致し、
+  // **半導体メモリと無関係な企業の回答に「DRAM・NAND需要」が混入する**。
+  // 実測: KO(飲料)と LLY(製薬)の回答で発生していた。
+  add("DRAM・NAND需要", /\bdram\b|\bnand\b/);
   add("需要", /demand|需要/);
   add("エンドユーザー向け機械販売", /equipment to end users?|end users?|machine sales/);
   add("受注残", /backlog/);
@@ -427,7 +432,9 @@ function inferDriverLabels(text: string): string[] {
   add("検索広告", /google search|search advertising/);
   add("YouTube広告", /youtube ads/);
   add("為替影響", /foreign exchange|foreign currency/);
-  add("AWS顧客利用量", /aws[\s\S]{0,160}customer usage|customer usage/);
+  // 単独の "customer usage" を許すと、AWS と無関係な企業の回答に
+  // 「AWS顧客利用量」というラベルが付く。AWS の近傍にある場合だけ採る。
+  add("AWS顧客利用量", /\baws\b[\s\S]{0,160}customer usage/);
   add("中古車・整備・充電・保険サービス", /used vehicle sales|maintenance services|supercharging|automotive insurance/);
   add("Mounjaro・Zepbound需要", /mounjaro|zepbound/);
   add("実現価格低下による相殺", /lower realized prices/);
@@ -495,14 +502,18 @@ function inferMarginDriverLabels(text: string): string[] {
     }
   };
 
-  add("営業費用", /operating expense|operating cost|cost per available seat mile|casm|non-fuel unit cost|cost structure|expenses?/);
+  // \bcasm\b: 裸の casm は "sarcasm" に一致する。68c2b70 の dram/dramatically と同型で、
+  // 航空の単位コストのラベルが無関係な本文に付く。
+  add("営業費用", /operating expense|operating cost|cost per available seat mile|\bcasm\b|non-fuel unit cost|cost structure|expenses?/);
   add("燃料費", /fuel cost|aircraft fuel|jet fuel|fuel expense/);
   add("人件費", /salaries|wages|labor cost|compensation|related costs/);
   add("精製・第三者向け販売コスト", /refinery sales to third parties|refinery sales|third[- ]party sales/);
-  add("単位コスト", /unit cost|cost per available seat mile|casm|cost per unit/);
-  add("価格・単価", /pricing|price realization|premium products?|fare|average ticket|rate increase/);
-  add("製品・顧客ミックス", /mix|premium products?|corporate customers?|product mix|customer mix/);
-  add("販売数量・稼働率", /volume|capacity|available seat mile|asm|load factor|traffic/);
+  add("単位コスト", /unit cost|cost per available seat mile|\bcasm\b|cost per unit/);
+  // \bfares?\b: 裸の fare は "welfare" / "warfare" に一致する。
+  add("価格・単価", /pricing|price realization|premium products?|\bfares?\b|average ticket|rate increase/);
+  add("製品・顧客ミックス", /\bmix\b|premium products?|corporate customers?|product mix|customer mix/);
+  // \basms?\b: 裸の asm は "plasma" / "enthusiasm" に一致する。
+  add("販売数量・稼働率", /volume|capacity|available seat mile|\basms?\b|load factor|traffic/);
   add("粗利益率", /gross margin|gross profit/);
   add("信用損失・引当", /provision for credit losses|credit loss|allowance/);
   add("販管費・研究開発費", /sg&a|selling, general and administrative|research and development|r&d/);
@@ -514,7 +525,7 @@ function inferMarginDriverLabels(text: string): string[] {
 function inferMarginNextIndicators(text: string, marginLabels: string[]): string[] {
   const lower = text.toLowerCase();
   const indicators = [...marginLabels];
-  if (/operating expense|operating cost|casm|unit cost/.test(lower)) {
+  if (/operating expense|operating cost|\bcasm\b|unit cost/.test(lower)) {
     indicators.push("単位コスト");
   }
   if (/fuel/.test(lower)) {
@@ -523,10 +534,10 @@ function inferMarginNextIndicators(text: string, marginLabels: string[]): string
   if (/salaries|wages|labor|compensation/.test(lower)) {
     indicators.push("人件費");
   }
-  if (/pricing|price|premium products?|fare|rate/.test(lower)) {
+  if (/pricing|price|premium products?|\bfares?\b|rate/.test(lower)) {
     indicators.push("価格・単価");
   }
-  if (/mix|premium products?|corporate customers?/.test(lower)) {
+  if (/\bmix\b|premium products?|corporate customers?/.test(lower)) {
     indicators.push("製品・顧客ミックス");
   }
   return [...new Set(indicators)];

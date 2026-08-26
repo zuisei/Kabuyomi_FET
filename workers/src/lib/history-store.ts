@@ -1,4 +1,4 @@
-import type { Env, FilingCacheRecord, FilingReference, MetricSnapshot, SourceChunkRecord, TickerRecord } from "../env";
+import type { Env, FilingCacheRecord, FilingFormType, FilingReference, MetricSnapshot, SourceChunkRecord, TickerRecord } from "../env";
 import { fetchSubmissionsWithHistory, listSupportedFilings, lookupTicker, pickComparisonFiling, pickLatestSupportedFiling } from "../clients/sec";
 import { logEvent } from "./logging";
 import { formatMetricValue, metricLabel } from "./metrics";
@@ -87,7 +87,7 @@ export interface BackfillHistoryResult {
 interface HistoricalMetricRow {
   filingKey: string;
   ticker: string;
-  formType: "10-K" | "10-Q";
+  formType: FilingFormType;
   filedAt: string;
   periodOfReport: string;
   periodEnd: string;
@@ -115,7 +115,7 @@ interface HistoricalFilingMetadataRow {
 interface SegmentHighlightRow {
   filingKey: string;
   ticker: string;
-  formType: "10-K" | "10-Q";
+  formType: FilingFormType;
   filedAt: string;
   periodEnd: string;
   dimension: string;

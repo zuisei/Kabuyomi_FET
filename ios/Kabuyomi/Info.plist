@@ -2,8 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>KABUYOMI_API_BASE_URL</key>
-	<string>$(KABUYOMI_API_BASE_URL)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -26,8 +24,16 @@
 	<string>ca-app-pub-1248492954379402~7909080109</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>KABUYOMI_API_BASE_URL</key>
+	<string>$(KABUYOMI_API_BASE_URL)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.finance</string>
+	<key>MARKET_DOCKET_DEFAULT_ENVIRONMENT</key>
+	<string>$(MARKET_DOCKET_DEFAULT_ENVIRONMENT)</string>
+	<key>MARKET_DOCKET_PRODUCTION_API_URL</key>
+	<string>$(MARKET_DOCKET_PRODUCTION_API_URL)</string>
+	<key>MARKET_DOCKET_TESTFLIGHT_API_URL</key>
+	<string>$(MARKET_DOCKET_TESTFLIGHT_API_URL)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

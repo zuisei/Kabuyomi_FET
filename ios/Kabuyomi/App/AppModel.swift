@@ -329,6 +329,9 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     static let appLaunchCountKey = "kabuyomi.appLaunchCount"
     static let starterCompaniesAutoHiddenKey = "kabuyomi.starterCompaniesAutoHidden"
     static let starterCompaniesAutoHideLaunchThreshold = 5
+    /// 会社ごとの最終閲覧時刻。`kabuyomi.lastSeenFiling.<TICKER>` と同じ
+    /// 「接頭辞 + ticker」のフラットキーで、値は 1970 起点の秒(Double)。
+    static let lastOpenedAtKeyPrefix = "kabuyomi.lastOpenedAt."
     #if DEBUG
     static let devModeEnabledKey = "kabuyomi.detachedAccess.devModeEnabled"
     #endif
@@ -353,6 +356,10 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var companyLoadStates: [String: CompanyLoadStatePayload] = [:]
     var chatHistoryCache: [String: [LocalChatMessage]] = [:]
     var pendingChats: [String: PendingChatState] = [:]
+    /// 会社ごとの最終閲覧時刻。盤面の未読ドットの基準。
+    /// UserDefaults の読み書きを毎描画で行うと SwiftUI は変化を観測できないので、
+    /// 起動時に一度だけ読み出して観測可能な状態として保持し、書き込み時に両方を更新する。
+    private(set) var lastOpenedAt: [String: Date] = AppModel.loadPersistedLastOpenedAt()
     var lastViewedTicker = UserDefaults.standard.string(forKey: "kabuyomi.lastViewedTicker")
     var activeConversationTicker = UserDefaults.standard.string(forKey: "kabuyomi.activeConversationTicker")
 
@@ -386,7 +393,11 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     var billingAPIHealthReport: BillingAPIHealthReport?
     var billingAPIHealthCheckInFlight = false
     var activeAlert: AppAlertState?
+    /// レビュー依頼を出したい瞬間だけ true になる。実際に依頼を出すのは
+    /// SwiftUI の `requestReview` を持つ view 側(モデルは UI を呼ばない)。
+    var pendingReviewRequest = false
     private(set) var accountCredential: AccountCredential?
+    @ObservationIgnored private let reviewPromptGate = ReviewPromptGate()
     var aiConsentGranted = UserDefaults.standard.bool(forKey: "kabuyomi.aiConsentGranted")
     var showStarterCompanies = UserDefaults.standard.object(forKey: "kabuyomi.showStarterCompanies") as? Bool ?? true
     var hasCompletedInitialEntry = UserDefaults.standard.bool(forKey: "kabuyomi.hasCompletedInitialEntry")
@@ -416,6 +427,14 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     private var subscriptionStateObserver: NSObjectProtocol?
     private var savedTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.savedTickers") ?? [])
     private var recentTickers = AppModel.normalizedTickers(UserDefaults.standard.stringArray(forKey: "kabuyomi.recentTickers") ?? [])
+    /// 初回訪問時は payload が通信中で recordCompanyVisit が guard で帰るため、
+    /// 最近リスト(recentTickers / recentCompanies)への記帳が丸ごと落ちていた。
+    /// 症状: 開いただけの会社がそのセッション中は盤面にもストリームにも出ない
+    /// (保存すれば watchlist 経由で即出る、再起動すれば復元経路の再訪問で出る)。
+    /// 訪問だけ予約しておき、handleLoadedCompany が清算する。
+    /// 予約は最後の1件だけ持つ — 訪問中にユーザーが別の会社へ移った場合、
+    /// 古い方を最近の先頭に押し込むのは嘘になるため。
+    private var pendingVisitTicker: String?
     private var pendingConversationTicker = UserDefaults.standard.string(forKey: "kabuyomi.pendingConversationTicker")
     private var pendingConversationQuestion = UserDefaults.standard.string(forKey: "kabuyomi.pendingConversationQuestion")
     private var starterCompaniesAutoHidden = UserDefaults.standard.bool(forKey: "kabuyomi.starterCompaniesAutoHidden")
@@ -451,6 +470,51 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         }
     }
 
+    #if DEBUG
+    /// UI テスト専用の起動引数。**これが渡されたときだけ**、
+    /// ローカルの痕跡(UserDefaults 側)を初回インストール相当まで消す。
+    static let freshInstallUITestArgument = "-KabuyomiUITestFreshInstall"
+
+    /// 初回動線(v2 IA 仕様 Phase 6)は「本当の初回」でしか出ないので、
+    /// UI テストからは通常たどり着けない — `XCUIApplication` は
+    /// terminate/launch しかできず、アプリを消してくれない。
+    /// シミュレータを erase してからの1本目に賭けると、実行順しだいで
+    /// 通ったり通らなかったりするテストになる。
+    ///
+    /// 消すのは UserDefaults だけで十分。盤面もストリームも
+    /// `savedTickers` / `recentTickers` から導出されるので、
+    /// Core Data に会社が残っていても面には出てこない。
+    /// `PersistenceController` には触らない(消す範囲を最小に保つ)。
+    static func eraseLocalStateForFreshInstallUITestIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains(freshInstallUITestArgument) else { return }
+
+        let defaults = UserDefaults.standard
+        let keys = [
+            savedTickersKey,
+            recentTickersKey,
+            lastViewedTickerKey,
+            activeConversationTickerKey,
+            hasCompletedInitialEntryKey,
+            hasSeenEntryIntroKey,
+            pendingConversationTickerKey,
+            pendingConversationQuestionKey,
+            appLaunchCountKey,
+            starterCompaniesAutoHiddenKey,
+            showStarterCompaniesKey,
+            aiConsentKey,
+            ReviewPromptGate.successfulAnswerCountKey,
+            ReviewPromptGate.lastPromptedVersionKey
+        ]
+        for key in keys {
+            defaults.removeObject(forKey: key)
+        }
+        for key in defaults.dictionaryRepresentation().keys
+        where key.hasPrefix(lastOpenedAtKeyPrefix) || key.hasPrefix("kabuyomi.lastSeenFiling.") {
+            defaults.removeObject(forKey: key)
+        }
+    }
+    #endif
+
     static func live() -> AppModel {
         let deviceIdentity = DeviceIdentityStore.shared
         #if DEBUG
@@ -476,14 +540,15 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         StarterCompany.defaults
     }
 
-    var rootConversationTicker: String {
-        activeConversationTicker
-            ?? lastViewedTicker
-            ?? firstRestorableSavedTicker
-            ?? starterCompanies.first?.ticker
-            ?? "AAPL"
-    }
-
+    /// 初回動線の可視条件(v2 IA 仕様 Phase 6)。
+    /// 「ようこそ」を出すかどうかもこの1つの述語が決める。並行フラグは作らない。
+    /// 保存も最近も無く、開いた会社も無く、初回入口をまだ抜けていない = 真の初回。
+    /// `resetLocalData` が `hasCompletedInitialEntry` ごと消すので、
+    /// ローカルデータを消した人にはもう一度ここから始まる。
+    ///
+    /// かつてここには `rootConversationTicker`(最終的に `?? "AAPL"` へ落ちる)が
+    /// 並んでいたが、Phase 6 で削除した。view の消費者はゼロで、
+    /// 残っていると「ユーザーが触っていない会社」を名指しできる口が開いたままになる。
     var shouldShowConversationEntry: Bool {
         !hasCompletedInitialEntry
         && savedTickers.isEmpty
@@ -502,7 +567,13 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     var shouldShowBannerAds: Bool {
-        currentBillingTier.plan == BillingCatalog.free.plan
+        #if DEBUG
+        // Dev クォータは Worker 上 plan=pro を名乗るため、素通しにすると
+        // 開発機だけバナーが消えて広告の確認ができない(2026-08-24 オーナー
+        // 「広告表示はどこへ？」の正体)。DEBUG の dev モード中は free 扱いで出す。
+        if isDetachedDevAccessActive { return true }
+        #endif
+        return currentBillingTier.plan == BillingCatalog.free.plan
     }
 
     var currentPlanBadgeTitle: String {
@@ -559,18 +630,49 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     #endif
 
     var chatCreditCost: Int {
-        2
+        // 上位モデルで答える相手(有料プラン)は単価が上がる。値はサーバーが決め、
+        // 端末は表示と残高判定に使うだけ。旧 Worker 相手は従来の 2。
+        usage?.chatCreditCost ?? 2
     }
 
     var creditUsage: CreditUsagePayload? {
         usage?.credits
     }
 
-    var chatCreditStatusText: String {
-        guard let credits = usage?.credits else {
-            return "\(chatCreditCost)クレジット"
+    /// 残高の言い方。**人が数えたいのは質問の回数**で、クレジットはその単位でしかない。
+    /// 「2クレジット / 残り 0」では、あと何回聞けるのかが読み手の暗算になっていた
+    /// (2026-08-26 オーナー「クレジットの残りが全体的にわかりにくい」)。
+    ///
+    /// 3 つの状態を混ぜないこと。0回・不明・無制限は別のことを意味する。
+    enum ChatQuota: Equatable {
+        /// 1問あたり 0 クレジット。回数で数える相手ではない。
+        case unlimited
+        /// 残高をまだサーバーから受け取っていない。
+        case unknown
+        case questions(Int)
+    }
+
+    var chatQuota: ChatQuota {
+        // 単価 0 は「無料で聞ける相手」。ここで割ると 0 除算になる。
+        guard chatCreditCost > 0 else { return .unlimited }
+        guard let credits = usage?.credits else { return .unknown }
+        return .questions(max(0, credits.totalRemaining / chatCreditCost))
+    }
+
+    /// 残りを1行で言う。コンポーザにも設定にも同じ文を出す。
+    var chatQuotaText: String {
+        switch chatQuota {
+        case .unlimited:
+            return "回数の上限なし"
+        case .unknown:
+            return "残りを確認中"
+        case .questions(let count):
+            return "あと\(count)回質問できます"
         }
-        return "\(chatCreditCost)クレジット / 残り \(credits.totalRemaining)"
+    }
+
+    var chatCreditStatusText: String {
+        chatQuotaText
     }
 
     var hasChatCreditAvailable: Bool {
@@ -1675,7 +1777,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         } catch {
             guard stateGeneration == self.stateGeneration, generation == searchGeneration else { return }
             searchResults = []
-            searchErrorMessage = shouldIgnore(error) ? nil : presentableMessage(for: error)
+            searchErrorMessage = shouldIgnore(error) ? nil : presentableMessage(for: error, context: .search)
         }
 
         if stateGeneration == self.stateGeneration, generation == searchGeneration {
@@ -1752,6 +1854,16 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         }
 
         await fetchCompanyRemote(ticker: normalized, forceRefresh: forceRefresh)
+    }
+
+    /// 回答が成功した直後にだけ呼ぶ。失敗直後や起動直後に依頼すると
+    /// 低い評価を集めにいくことになるので、成功体験以外からは呼ばない。
+    private func noteSuccessfulAnswerForReviewPrompt() {
+        guard !AppModel.isRunningTests else { return }
+        guard reviewPromptGate.recordSuccessfulAnswer(
+            appVersion: ReviewPromptGate.currentAppVersion()
+        ) else { return }
+        pendingReviewRequest = true
     }
 
     func sendChat(question: String, ticker: String) async -> Bool {
@@ -1836,6 +1948,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
             storeUsage(response.usage, source: .chat)
             chatHistoryCache[normalized] = persistence.loadCompany(ticker: normalized, filingKey: company.filingKey)?.chatHistory ?? []
             clearRetryableChatOperation(ticker: normalized, operationId: operationId)
+            noteSuccessfulAnswerForReviewPrompt()
             await ensureMinimumPendingChatDuration(since: pendingStartedAt)
             return true
         } catch {
@@ -2036,8 +2149,17 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     }
 
     func recordCompanyVisit(ticker: String) {
-        guard let company = companyPayload(for: ticker) else { return }
+        // 未読ドットは「開いたかどうか」だけで消す。
+        // 資料の取得に失敗した会社でもワークスペースは開いているので、
+        // 記録を payload の有無より前に置き、ドットが取り残されないようにする。
+        markCompanyOpened(ticker: ticker)
 
+        guard let company = companyPayload(for: ticker) else {
+            pendingVisitTicker = normalizedTicker(ticker)
+            return
+        }
+
+        pendingVisitTicker = nil
         let normalized = normalizedTicker(ticker)
         completeInitialEntry()
         lastViewedTicker = normalized
@@ -2074,6 +2196,32 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
     func recentCompanyCards(limit: Int, includeSaved: Bool = false) -> [WatchlistCard] {
         let filteredTickers = includeSaved ? recentTickers : recentTickers.filter { !isTickerInWatchlist($0) }
         return Array(orderedCards(for: filteredTickers).prefix(limit))
+    }
+
+    /// 最後に開いた会社。アスクバーの会社チップの既定値に使う
+    /// (`streamAskContext`)。該当が無いときは nil のまま返し、
+    /// スターター企業へは落とさない — 本人が選んでいない会社を
+    /// 質問の宛先に据えないため(v2 IA 仕様 Phase 6「AAPL の自然さ監査」)。
+    var lastOpenedCompanyTicker: String? {
+        activeConversationTicker ?? lastViewedTicker
+    }
+
+    /// ストリームの回答カードの素。追っている会社(保存済み + 最近)の会話記録を
+    /// まとめて読み出す。並べ替えと組み立ては `researchArchiveGroups` / `streamItems`
+    /// (純ロジック)側の仕事で、ここは永続化に触れる部分だけを引き受ける。
+    ///
+    /// 上限は**最近開いた会社にだけ**かける。保存済みを切り詰めると、
+    /// 20社保存している人の過去の質問が黙って消える面が出る
+    /// (ストリームは Phase 3 の研究アーカイブを置き換えた面なので、
+    /// あちらが見せていた範囲を狭めない)。`savedTickers` 自体が25社で頭打ちなので、
+    /// 読み出す会社数は最悪でも25 + recentLimit に収まる。
+    func trackedConversationRecords(recentLimit: Int = 10) -> [LocalCompanyRecord] {
+        let recent = recentCompanyCards(limit: recentLimit, includeSaved: false)
+        var seen = Set<String>()
+        let tickers = (watchlist + recent)
+            .map { normalizedTicker($0.ticker) }
+            .filter { seen.insert($0).inserted }
+        return tickers.flatMap { conversationHistory(for: $0) }
     }
 
     func dismissAlert() {
@@ -2511,6 +2659,14 @@ credit残高に使う端末識別情報は維持されます。
             refreshedTickersThisSession.insert(normalizedCompanyTicker)
         }
         loadHomeFromPersistence()
+
+        // 訪問の予約(上の pendingVisitTicker 参照)は、その会社の payload が
+        // 揃ったこの時点で清算する。関係ない会社の読み込み(先読み・一括更新)では
+        // 発火しないよう、予約と一致する場合に限る。
+        if pendingVisitTicker == normalizedCompanyTicker || pendingVisitTicker == requestedTicker {
+            pendingVisitTicker = nil
+            recordCompanyVisit(ticker: normalizedCompanyTicker)
+        }
     }
 
     private func scheduleCompanyLoadRetry(ticker: String, state: CompanyLoadStatePayload) {
@@ -2759,7 +2915,18 @@ credit残高に使う端末識別情報は維持されます。
         return nsError.domain == NSURLErrorDomain && nsError.code == URLError.cancelled.rawValue
     }
 
-    private func presentableMessage(for error: Error) -> String {
+    /// エラー文の宛先。同じ 503 でも、会話の失敗と検索の失敗では言うことが違う。
+    enum PresentableMessageContext {
+        case general
+        /// 検索。**会話の文言を出さない** — 「チャット応答を生成できません」が
+        /// 銘柄検索の失敗として出ていた(2026-08-26 実機)。
+        case search
+    }
+
+    private func presentableMessage(
+        for error: Error,
+        context: PresentableMessageContext = .general
+    ) -> String {
         let nsError = error as NSError
         if let urlError = error as? URLError, urlError.code == .timedOut {
             return "通信に時間がかかりすぎています。少し待ってから、もう一度試してください。"
@@ -2844,7 +3011,7 @@ credit残高に使う端末識別情報は維持されます。
         }
 
         if rawMessage.contains("No supported filing found") {
-            return "この銘柄の最新開示は v1 の対応範囲外です。Kabuyomi v1 は 10-K / 10-Q のみ対応しており、20-F / 6-K はまだ未対応です。"
+            return "この銘柄の最新開示は対応範囲外です。\(SupportedFilingForms.listed) に対応しています(ETF・投資信託などは対象外です)。"
         }
 
         if rawMessage.contains("Ticker not found") {
@@ -2859,10 +3026,17 @@ credit残高に使う端末識別情報は維持されます。
             return "本文抽出に失敗しました。時間を置いて再試行するか、原文を直接確認してください。"
         }
 
+        // メンテナンスは「落ちている」ではなく「止めている」。理由を名指しする。
+        if rawMessage.contains("under maintenance") {
+            return "ただいまメンテナンス中です。しばらくしてから再度お試しください。"
+        }
+
         if rawMessage.contains("Chat response is temporarily unavailable")
             || rawMessage.contains("Internal server error")
             || rawMessage.contains("HTTP 503") {
-            return "チャット応答を現在生成できません。少し待ってから、もう一度お試しください。"
+            return context == .search
+                ? "サーバーが応答しませんでした。しばらくしてから再度お試しください。"
+                : "チャット応答を現在生成できません。少し待ってから、もう一度お試しください。"
         }
 
         if rawMessage.contains("Chat is temporarily disabled") {
@@ -2957,6 +3131,7 @@ credit残高に使う端末識別情報は維持されます。
                 accessMode: usage.accessMode,
                 credits: nil,
                 creditBillingEnabled: usage.creditBillingEnabled,
+                chatCreditCost: usage.chatCreditCost,
                 capabilities: usage.capabilities
             )
         }
@@ -2992,6 +3167,7 @@ credit残高に使う端末識別情報は維持されます。
             accessMode: usage.accessMode,
             credits: normalizedCredits,
             creditBillingEnabled: usage.creditBillingEnabled,
+            chatCreditCost: usage.chatCreditCost,
             capabilities: usage.capabilities
         )
     }
@@ -3023,6 +3199,7 @@ credit残高に使う端末識別情報は維持されます。
             accessMode: usage.accessMode,
             credits: usage.credits,
             creditBillingEnabled: usage.creditBillingEnabled,
+            chatCreditCost: usage.chatCreditCost,
             capabilities: usage.capabilities
         )
     }
@@ -3163,6 +3340,7 @@ credit残高に使う端末識別情報は維持されます。
             UserDefaults.standard.removeObject(forKey: Self.pendingConversationQuestionKey)
         }
         clearLastSeenFilingKey(for: normalized)
+        clearLastOpenedAt(for: normalized)
         try? persistence.removeStock(ticker: normalized)
         companyIsLoading = !loadingTickers.isEmpty
         chatIsSending = !pendingChats.isEmpty
@@ -3287,14 +3465,6 @@ credit残高に使う端末識別情報は維持されます。
         return trimmed?.isEmpty == false ? trimmed : nil
     }
 
-    private var firstRestorableSavedTicker: String? {
-        if let cachedWatchlistTicker = watchlist.first(where: { !$0.isPlaceholder })?.ticker {
-            return cachedWatchlistTicker
-        }
-
-        return savedTickers.first(where: hasLocallyAvailableConversation(ticker:))
-    }
-
     private func hasLocallyAvailableConversation(ticker: String) -> Bool {
         let normalized = normalizedTicker(ticker)
         guard !isLocalAccessRevoked(for: normalized) else { return false }
@@ -3311,6 +3481,40 @@ credit残高に使う端末識別情報は維持されます。
         "kabuyomi.lastSeenFiling.\(normalizedTicker(ticker))"
     }
 
+    private static func lastOpenedAtKey(for ticker: String) -> String {
+        "\(lastOpenedAtKeyPrefix)\(ticker)"
+    }
+
+    /// 保存済みの最終閲覧時刻をまとめて読み出す。
+    /// 値が無い会社はここに現れず、未読判定側で「既読」として扱われる
+    /// (`homeBoardIsUnread`。導入前から保存されている会社にドットを一斉に付けない)。
+    private static func loadPersistedLastOpenedAt() -> [String: Date] {
+        var result: [String: Date] = [:]
+        for (key, value) in UserDefaults.standard.dictionaryRepresentation()
+        where key.hasPrefix(lastOpenedAtKeyPrefix) {
+            let ticker = String(key.dropFirst(lastOpenedAtKeyPrefix.count))
+            guard !ticker.isEmpty,
+                  let seconds = (value as? NSNumber)?.doubleValue,
+                  seconds > 0 else { continue }
+            result[ticker] = Date(timeIntervalSince1970: seconds)
+        }
+        return result
+    }
+
+    /// 会社を開いたことを記録する。未読ドットはこの時刻を基準に消える。
+    func markCompanyOpened(ticker: String, at date: Date = Date()) {
+        let normalized = normalizedTicker(ticker)
+        guard !normalized.isEmpty else { return }
+        lastOpenedAt[normalized] = date
+        UserDefaults.standard.set(date.timeIntervalSince1970, forKey: Self.lastOpenedAtKey(for: normalized))
+    }
+
+    private func clearLastOpenedAt(for ticker: String) {
+        let normalized = normalizedTicker(ticker)
+        lastOpenedAt.removeValue(forKey: normalized)
+        UserDefaults.standard.removeObject(forKey: Self.lastOpenedAtKey(for: normalized))
+    }
+
     private func setLastSeenFilingKey(_ filingKey: String, for ticker: String) {
         UserDefaults.standard.set(filingKey, forKey: lastSeenFilingKeyKey(for: ticker))
     }
@@ -3318,10 +3522,11 @@ credit残高に使う端末識別情報は維持されます。
     private func clearCompanyNavigationState() {
         let defaults = UserDefaults.standard
         for key in defaults.dictionaryRepresentation().keys {
-            if key.hasPrefix("kabuyomi.lastSeenFiling.") {
+            if key.hasPrefix("kabuyomi.lastSeenFiling.") || key.hasPrefix(Self.lastOpenedAtKeyPrefix) {
                 defaults.removeObject(forKey: key)
             }
         }
+        lastOpenedAt = [:]
     }
 
     private func clearLastSeenFilingKey(for ticker: String) {
@@ -3470,7 +3675,13 @@ credit残高に使う端末識別情報は維持されます。
             && shouldRevokeLocalAccessWithoutWatchlist(for: normalized)
     }
 
-    private func completeInitialEntry() {
+    /// 初回入口を抜けたことを記録する。`shouldShowConversationEntry` が偽になり、
+    /// 次の起動から「ようこそ」は出ない。
+    ///
+    /// 会社を開いた・保存したときに内部から呼ばれるほか、Phase 6 では
+    /// 「ようこそ」を閉じた時点でも呼ぶ(「あとで」でスキップした人にも
+    /// 二度と出さない)。並行フラグを足さないための唯一の入口。
+    func completeInitialEntry() {
         guard !hasCompletedInitialEntry else { return }
         hasCompletedInitialEntry = true
         UserDefaults.standard.set(true, forKey: Self.hasCompletedInitialEntryKey)

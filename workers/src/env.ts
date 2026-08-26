@@ -13,6 +13,10 @@ export interface Env {
   LLM_PROVIDER?: "gemini-legacy" | "gemini" | "openai" | "disabled";
   OPENAI_API_KEY?: string;
   OPENAI_CHAT_MODEL?: string;
+  /** 有料プラン(free 以外)と dev_unlimited に使う上位チャットモデル。未設定なら全員 OPENAI_CHAT_MODEL。 */
+  OPENAI_CHAT_MODEL_PREMIUM?: string;
+  /** 上位モデル回答の1問あたりクレジット(既定5)。 */
+  PREMIUM_CHAT_CREDIT_COST?: string;
   OPENAI_PROMPT_ID?: string;
   OPENAI_PROMPT_VERSION?: string;
   OPENAI_TIMEOUT_MS?: string;
@@ -53,6 +57,8 @@ export interface Env {
   APP_ATTEST_ALLOWED_VALIDATION_CATEGORIES?: string;
   APP_ATTEST_ALLOWED_BUNDLE_VERSIONS?: string;
   APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS?: string;
+  /// 広告視聴でクレジットをもらえる 1 日あたりの回数。未設定なら既定 20。
+  REWARDED_AD_DAILY_CAP?: string;
   EMERGENCY_DISABLE_CHAT?: string;
   EMERGENCY_DISABLE_ADS?: string;
   EMERGENCY_DISABLE_REWARDS?: string;
@@ -86,12 +92,43 @@ export interface TickerRecord {
   latestFormType?: string;
 }
 
+/// 取り込み対象の提出書類。
+///
+/// 10-K / 10-Q は米国企業。**20-F は外国企業(ADR)の年次報告**で、10-K に相当する
+/// (2026-08-24 オーナー「TSM とかそのへんの企業に対応したい」)。TSM・ASML・SAP・
+/// トヨタ・BABA・Shell・NVO・ソニーはいずれも 10-K / 10-Q をまったく出さず 20-F だけを出す。
+///
+/// 20-F は**年 1 回**しか出ないので、四半期の数字は 6-K(業績プレスリリース)から
+/// 別途取る。6-K は XBRL を持たないため経路がまったく違い、この union には
+/// その扱いを実装する Stage 2 まで入れない
+/// (docs/quality/FOREIGN_ISSUER_SUPPORT_2026-08-24.md)。
+export type FilingFormType = "10-K" | "10-Q" | "20-F";
+
+/// 対応している書類の一覧。**判定を各所に直書きしない**ための1か所。
+///
+/// 20-F を足したとき `normalizeForm` は直したのに、保存経路の関所
+/// (`watchlist/usecase.ts`)が `!== "10-K" && !== "10-Q"` のままで、
+/// **検索は「最新 20-F」と出すのに追加すると「対応範囲外」と言う**状態だった
+/// (2026-08-26 実機)。書類を増やすときはここだけを見ればいいようにする。
+export const SUPPORTED_FILING_FORMS: readonly FilingFormType[] = ["10-K", "10-Q", "20-F"];
+
+export function isSupportedFilingForm(value: string | null | undefined): value is FilingFormType {
+  return typeof value === "string" && (SUPPORTED_FILING_FORMS as readonly string[]).includes(value);
+}
+
+/// その提出書類が扱う期間の長さ。20-F と 10-K は年次、10-Q は四半期。
+export type FilingPeriodKind = "annual" | "quarterly";
+
+export function filingPeriodKind(formType: FilingFormType): FilingPeriodKind {
+  return formType === "10-Q" ? "quarterly" : "annual";
+}
+
 export interface FilingReference {
   cik: string;
   ticker: string;
   companyName: string;
   exchange: string;
-  formType: "10-K" | "10-Q";
+  formType: FilingFormType;
   accessionNumber: string;
   primaryDocument: string;
   filedAt: string;
@@ -107,7 +144,12 @@ export interface MetricSnapshot {
     | "operatingCashFlow"
     | "cashAndCashEquivalents"
     | "currentDebt"
-    | "longTermDebt";
+    | "longTermDebt"
+    // 派生指標(ROE / ROA / FCF)の材料。それ自体も提出書類に載っている事実なので
+    // MetricSnapshot として扱う。計算結果は DerivedMetric に分けてある。
+    | "equity"
+    | "totalAssets"
+    | "capitalExpenditure";
   tagUsed: string;
   value: number;
   unit: string;
@@ -215,7 +257,7 @@ export interface FilingCacheRecord {
   ticker: string;
   companyName: string;
   cik: string;
-  formType: "10-K" | "10-Q";
+  formType: FilingFormType;
   filedAt: string;
   periodOfReport: string;
   primaryDocumentUrl: string;

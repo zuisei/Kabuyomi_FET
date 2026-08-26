@@ -1,6 +1,6 @@
 # Kabuyomi Worker Refactor Notes
 
-> Historical / stale document. Not current v1 release truth. See `docs/release/RELEASE_TRUTH.md`.
+> Historical / stale document. Not current v1 release truth. See `docs/archive/v1/RELEASE_TRUTH.md`.
 
 今の Worker を上から見ていった時の「今は触らない」「あとで整理したい」「本当に危ない」をまとめるメモ。
 

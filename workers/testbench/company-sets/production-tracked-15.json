@@ -1,0 +1,21 @@
+{
+  "version": "production-tracked-15-v1",
+  "description": "15 tickers drawn exclusively from DEFAULT_TRACKED_TICKERS (the production tracking set). Replaces prompt-v2-expanded-multisector, whose 15 tickers were identical to the deleted TICKER_BUSINESS_OVERVIEWS constant table — the bench was measuring the constants, keyed GOOGL while production tracks GOOG, and included KO/DAL which production never tracked. Composition pairs formerly-curated tickers with never-curated sector twins (JPM/BAC banks, GOOG/META platforms, NVDA/AVGO semis, AMZN/COST retail, MSFT/PLTR software) plus MA (live regression for the \\bcard\\b sector-gate fix), CVX (energy), JNJ (pharma), AAPL (tech hardware), CAT (the only industrial production tracks). LKG comparability resets at this set's first run: prior LKG measured the old set against the constant-answer layer and is not a valid baseline for either axis.",
+  "tickers": [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "GOOG",
+    "AMZN",
+    "JPM",
+    "CAT",
+    "META",
+    "AVGO",
+    "MA",
+    "BAC",
+    "CVX",
+    "JNJ",
+    "COST",
+    "PLTR"
+  ]
+}

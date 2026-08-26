@@ -17,10 +17,13 @@ import {
   type RequestExecutionReservationOptions,
   type QuotaIdentity
 } from "../lib/quota";
+import { AppError } from "../lib/errors";
 import { parseJsonBody } from "../lib/request";
+import { QUESTION_TOO_SHORT_MESSAGE, questionHasSubstance } from "../lib/chat/question-substance";
 import { hashForLog, logErrorEvent, suffixForLog } from "../lib/logging";
 import { json, notFound, serverError, unavailable } from "../lib/response";
 import type { Env } from "../env";
+import { chatCreditCostForIdentity, chatEnvForIdentity } from "../lib/chat/premium-model";
 import { isCreditBillingEnabledForIdentity, type RemoteConfig } from "../lib/remote-config";
 import type { RouteHandler } from "./types";
 
@@ -37,14 +40,20 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
     maxBytes: CHAT_PAYLOAD_MAX_BYTES,
     tooLargeMessage: "Chat payload is too large"
   });
+  // 予約(クレジット)より前。ここで止めれば何も消費されない。
+  if (!questionHasSubstance(payload.question)) {
+    throw new AppError(400, QUESTION_TOO_SHORT_MESSAGE);
+  }
   const identity = await readQuotaIdentity(request, env, { requireDeviceKey: true });
   const creditBillingEnabled = isCreditBillingEnabledForIdentity(config, identity);
-  const reservation = buildChatReservation(identity, payload.filingKey);
+  // 上位モデルで答える相手は単価も上がる(採算)。予約・hash・請求で同じ値を使う。
+  const chatCreditCost = chatCreditCostForIdentity(env, identity);
+  const reservation = buildChatReservation(identity, payload.filingKey, chatCreditCost);
   const requestHash = await buildChatRequestHash({
     filingKey: payload.filingKey,
     question: payload.question,
     conversationContext: payload.conversationContext,
-    creditCost: CHAT_CREDIT_COST
+    creditCost: chatCreditCost
   });
   const execution = await beginRequestExecution(identity, env, config, {
     operationId: payload.operationId,
@@ -97,12 +106,13 @@ export const handleChatRoute: RouteHandler = async ({ request, url, env, config,
       filing: requestedFiling,
       identity,
       operationId: payload.operationId,
-      env,
+      // 有料プランは上位モデル(OPENAI_CHAT_MODEL_PREMIUM)で回答する。
+      env: chatEnvForIdentity(env, identity),
       config,
       ctx
     });
     const chargeable = body.chargeable !== false;
-    const cachedCreditsCharged = chargeable && reservation.mode === "credits" ? CHAT_CREDIT_COST : 0;
+    const cachedCreditsCharged = chargeable && reservation.mode === "credits" ? chatCreditCost : 0;
     const stableResult: unknown = {
       kind: "chat",
       answer: body.answer,
@@ -236,14 +246,15 @@ function classifyChatExecutionFailure(error: unknown): {
 
 function buildChatReservation(
   identity: QuotaIdentity,
-  filingKey: string
+  filingKey: string,
+  creditsRequired: number
 ): RequestExecutionReservationOptions {
   if (identity.accessMode === "dev_unlimited") {
     return { mode: "unmetered" };
   }
   return {
     mode: "credits",
-    creditsRequired: CHAT_CREDIT_COST,
+    creditsRequired,
     reference: {
       type: "chat",
       id: filingKey

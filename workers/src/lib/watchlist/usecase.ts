@@ -1,4 +1,5 @@
 import { listTickersByCik, lookupTicker, resolveLatestSearchFormType } from "../../clients/sec";
+import { isSupportedFilingForm } from "../../env";
 import type { Env, TickerRecord } from "../../env";
 import { serializeCompanyResponse } from "../company-response";
 import { AppError } from "../errors";
@@ -143,7 +144,7 @@ export async function addWatchlistTickerUsecase({
 
 async function assertAsyncFilingSupported(tickerRecord: TickerRecord, env: Env): Promise<void> {
   const latestFormType = await resolveLatestSearchFormType(tickerRecord, env);
-  if (latestFormType !== "10-K" && latestFormType !== "10-Q") {
+  if (!isSupportedFilingForm(latestFormType)) {
     logEvent("watchlist_add_async_unsupported_filing", {
       ticker: tickerRecord.ticker,
       cik: tickerRecord.cik,

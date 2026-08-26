@@ -1,0 +1,26 @@
+{
+  "name": "market-docket-backend",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "dev:admin": "wrangler dev --config wrangler.admin.toml",
+    "deploy:admin": "wrangler deploy --config wrangler.admin.toml",
+    "processor": "node --experimental-strip-types scripts/mac-processor.ts",
+    "submit:bis": "node --experimental-strip-types scripts/submit-bis-vertical-slice.ts",
+    "smoke": "bash scripts/smoke.sh",
+    "audit:parity": "node --experimental-strip-types scripts/compare-environments.ts",
+    "release:gate": "bash scripts/release-gate.sh"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest",
+    "typescript": "latest",
+    "wrangler": "4.112.0"
+  }
+}

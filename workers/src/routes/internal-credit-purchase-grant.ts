@@ -28,7 +28,13 @@ export const handleInternalCreditPurchaseGrantRoute: RouteHandler = async ({ req
   const identity = payload.quotaSubject
     ? identityFromQuotaSubject(payload.quotaSubject)
     : await readQuotaIdentity(request, env, { requireDeviceKey: true });
-  const result = await grantPurchasedCredits(identity, env, config, payload);
+  // This route grants without contacting Apple at all, so it has no verification
+  // environment to report. Recording it as "production" would make an internal
+  // grant indistinguishable from a real App Store purchase in the ledger.
+  const result = await grantPurchasedCredits(identity, env, config, {
+    ...payload,
+    verificationEnvironment: "internal"
+  });
 
   return json({
     status: result.didMutate ? "granted" : "already_granted",

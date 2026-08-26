@@ -261,14 +261,6 @@ interface PrincipalMigrationTombstone extends PrincipalMigrationLock {
   migratedAt: string;
 }
 
-interface ChatRefundRecord {
-  operationId: string;
-  dateJST: string;
-  status: "applied" | "noop";
-  chatsUsedAfter: number;
-  createdAt: string;
-}
-
 interface RewardedAdDailyCapRecord {
   dateKey: string;
   count: number;
@@ -281,12 +273,16 @@ const CREDIT_STATE_KEY = "credit_state";
 const CREDIT_OPERATION_PREFIX = "credit_operation:";
 const MONTHLY_GRANT_PREFIX = "monthly_grant:";
 const PURCHASE_TRANSACTION_PREFIX = "purchase_transaction:";
-const CHAT_REFUND_PREFIX = "chat_refund:";
 const REWARDED_AD_DAILY_CAP_PREFIX = "rewarded_ad_daily_cap:";
 const REQUEST_EXECUTION_PREFIX = "request_execution:";
 const CREDIT_RESERVATION_PREFIX = "credit_reservation:";
 const CREDIT_RESERVATION_DUE_PREFIX = "credit_reservation_due:";
 const CREDIT_OPERATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const CREDIT_OPERATION_PRUNE_PAGE_SIZE = 500;
+// Bounds the work one mutation can do. 20 pages covers 10,000 operations, far
+// past the 30-day retention window for any real account, while keeping a single
+// request from scanning without limit.
+const CREDIT_OPERATION_PRUNE_MAX_PAGES = 20;
 const DAILY_KEY_PREFIX = "daily:";
 const LEGACY_DAILY_KEY_LIMIT = 30;
 const WELCOME_CREDIT_AMOUNT = 50;
@@ -598,44 +594,6 @@ export class UserQuotaDO {
         didMutate = true;
       }
 
-      let pendingChatRefund: ChatRefundRecord | undefined;
-      if (body.action === "refundChat") {
-        const operationId = body.operationId;
-        if (!operationId) {
-          return {
-            status: 400,
-            payload: { error: "Invalid quota payload", usage: currentUsage(), didMutate }
-          };
-        }
-
-        const existingRefund = await this.loadChatRefund(operationId);
-        if (existingRefund) {
-          await Promise.all([
-            this.state.storage.put(buildDailyKey(body.dateJST), dailyRecord),
-            this.state.storage.put(SAVED_TICKERS_KEY, savedTickerRecord),
-            this.state.storage.put(CREDIT_STATE_KEY, creditState),
-            monthlyGrant ? this.saveMonthlyGrant(monthlyGrant) : Promise.resolve()
-          ]);
-          return {
-            status: 200,
-            payload: { usage: currentUsage(), didMutate: false, monthlyGrant }
-          };
-        }
-
-        const now = new Date().toISOString();
-        if (dailyRecord.chatsUsed > 0) {
-          dailyRecord.chatsUsed -= 1;
-          didMutate = true;
-        }
-        pendingChatRefund = {
-          operationId,
-          dateJST: body.dateJST,
-          status: didMutate ? "applied" : "noop",
-          chatsUsedAfter: dailyRecord.chatsUsed,
-          createdAt: now
-        };
-      }
-
       if (body.action === "checkStock") {
         if (!alreadyTracked && savedTickerRecord.savedTickers.length >= savedTickerRecord.stockLimit) {
           return {
@@ -696,8 +654,7 @@ export class UserQuotaDO {
         this.state.storage.put(buildDailyKey(body.dateJST), dailyRecord),
         this.state.storage.put(SAVED_TICKERS_KEY, savedTickerRecord),
         this.state.storage.put(CREDIT_STATE_KEY, creditState),
-        monthlyGrant ? this.saveMonthlyGrant(monthlyGrant) : Promise.resolve(),
-        pendingChatRefund ? this.saveChatRefund(pendingChatRefund) : Promise.resolve()
+        monthlyGrant ? this.saveMonthlyGrant(monthlyGrant) : Promise.resolve()
       ]);
 
       return { status: 200, payload: { usage: currentUsage(), didMutate, monthlyGrant } };
@@ -2531,16 +2488,6 @@ export class UserQuotaDO {
     return operation;
   }
 
-  private async loadChatRefund(operationId: string): Promise<ChatRefundRecord | undefined> {
-    return (await this.state.storage.get<ChatRefundRecord>(buildChatRefundKey(operationId))) as
-      | ChatRefundRecord
-      | undefined;
-  }
-
-  private async saveChatRefund(refund: ChatRefundRecord): Promise<void> {
-    await this.state.storage.put(buildChatRefundKey(refund.operationId), refund);
-  }
-
   private async loadRewardedAdDailyCap(dateKey: string): Promise<RewardedAdDailyCapRecord> {
     return (
       ((await this.state.storage.get<RewardedAdDailyCapRecord>(buildRewardedAdDailyCapKey(dateKey))) as
@@ -2564,16 +2511,34 @@ export class UserQuotaDO {
       return;
     }
 
-    const entries = await this.state.storage.list<CreditOperationRecord>({
-      prefix: CREDIT_OPERATION_PREFIX,
-      limit: 500
-    });
-
-    for (const [key, operation] of entries) {
-      const createdAtMs = Date.parse(operation?.createdAt ?? "");
-      if (Number.isFinite(createdAtMs) && createdAtMs < cutoffMs) {
-        await this.state.storage.delete(key);
+    // The keys are operation ids, not timestamps, so one lexicographic page is
+    // the alphabetically first 500 records — not the oldest 500. Past a single
+    // page the tail was never examined and expired operations accumulated for
+    // good. Walk pages with startAfter, bounded, so every record is reachable.
+    let startAfter: string | undefined;
+    for (let page = 0; page < CREDIT_OPERATION_PRUNE_MAX_PAGES; page += 1) {
+      const entries = await this.state.storage.list<CreditOperationRecord>({
+        prefix: CREDIT_OPERATION_PREFIX,
+        limit: CREDIT_OPERATION_PRUNE_PAGE_SIZE,
+        ...(startAfter === undefined ? {} : { startAfter })
+      });
+      if (entries.size === 0) {
+        return;
       }
+
+      let lastKey: string | undefined;
+      for (const [key, operation] of entries) {
+        lastKey = key;
+        const createdAtMs = Date.parse(operation?.createdAt ?? "");
+        if (Number.isFinite(createdAtMs) && createdAtMs < cutoffMs) {
+          await this.state.storage.delete(key);
+        }
+      }
+
+      if (entries.size < CREDIT_OPERATION_PRUNE_PAGE_SIZE || lastKey === undefined) {
+        return;
+      }
+      startAfter = lastKey;
     }
   }
 
@@ -2912,10 +2877,6 @@ function buildPurchaseRefundOperationId(transactionId: string): string {
 
 function buildPurchaseRefundReversalOperationId(transactionId: string): string {
   return `purchase-refund-reversal:${transactionId}`;
-}
-
-function buildChatRefundKey(operationId: string): string {
-  return `${CHAT_REFUND_PREFIX}${operationId}`;
 }
 
 function buildRewardedAdDailyCapKey(dateKey: string): string {

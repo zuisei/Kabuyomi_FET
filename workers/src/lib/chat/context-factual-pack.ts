@@ -1,4 +1,4 @@
-import type { FilingCacheRecord, SourceChunkRecord } from "../../env";
+import type { FilingCacheRecord, FilingFormType, SourceChunkRecord } from "../../env";
 import { isAccountingEstimateRiskDistractor } from "./context-patterns";
 import {
   assessNarrativeQuality,
@@ -9,11 +9,27 @@ import {
 import { findMetricSourceChunk } from "./context-metrics";
 import type { QuestionIntent } from "./intent";
 
+/**
+ * Sent to the model as `factual_pack_json`.
+ *
+ * WARNING for anyone adding a field: both serialisation points in
+ * `clients/gemini/prompts.ts` build the payload from this object, so a field
+ * that describes the pack rather than the company — provenance, counts,
+ * diagnostics, anything an auditor would add to understand the pack — reaches
+ * the model as if it were a fact about the issuer. Add such a field to the
+ * allowlist in `promptSafeFactualPack` only if the model genuinely needs it.
+ *
+ * Every field here must be something extraction found in the filing. Nothing in
+ * this pack may be seeded from a per-ticker table: the prompt instructs the
+ * model to prefer the factual pack over the raw excerpts, so a label the filing
+ * does not contain is stated as fact no matter how well the model obeys "do not
+ * invent facts".
+ */
 export interface ChatFactualPack {
   kind: "business_overview" | "revenue_breakdown" | "risk_factors";
   companyName: string;
   ticker: string;
-  formType: "10-K" | "10-Q";
+  formType: FilingFormType;
   periodOfReport: string;
   productsServices?: string[];
   reportableSegments?: string[];
@@ -59,18 +75,14 @@ export function buildChatFactualPack(
 
 function buildBusinessOverviewFactualPack(filing: FilingCacheRecord): ChatFactualPack | undefined {
   const sourceText = filingSearchText(filing);
-  const productsServices = seedKnownTickerLabels(
-    filing.ticker,
-    "products_services",
-    collectOrderedLabels(sourceText, businessProductDefinitions(filing.ticker))
-  );
-  const reportableSegments = seedKnownTickerLabels(
-    filing.ticker,
-    "reportable_segments",
-    collectOrderedLabels(sourceText, reportableSegmentDefinitions(filing.ticker))
-  );
+  const productsServices = collectOrderedLabels(sourceText, businessProductDefinitions(filing.ticker));
+  const reportableSegments = collectOrderedLabels(sourceText, reportableSegmentDefinitions(filing.ticker));
   const revenueCategories = extractRevenueFacts(filing).filter((fact) => fact.kind !== "geography");
-  let sourceIds = selectFactualSourceIds(
+  // Only the chunks the labels were actually matched in. If that comes back
+  // empty the pack ships with no sourceIds and the caller has nothing to cite —
+  // which is the correct outcome, not something to paper over with a
+  // conveniently-shaped md_a chunk.
+  const sourceIds = selectFactualSourceIds(
     filing,
     [
       ...productsServices,
@@ -79,9 +91,6 @@ function buildBusinessOverviewFactualPack(filing: FilingCacheRecord): ChatFactua
     ],
     { questionIntent: "business_overview" }
   );
-  if (sourceIds.length === 0 && hasKnownBusinessLabels(filing.ticker) && (productsServices.length > 0 || reportableSegments.length > 0)) {
-    sourceIds = fallbackKnownBusinessSourceIds(filing);
-  }
 
   if (productsServices.length === 0 && reportableSegments.length === 0 && revenueCategories.length === 0) {
     return undefined;
@@ -113,7 +122,7 @@ function buildBusinessOverviewFactualPack(filing: FilingCacheRecord): ChatFactua
 }
 
 function buildRevenueBreakdownFactualPack(filing: FilingCacheRecord): ChatFactualPack | undefined {
-  const revenueCategories = seedKnownTickerRevenueFacts(filing, extractRevenueFacts(filing));
+  const revenueCategories = extractRevenueFacts(filing);
   const productOrSegment = revenueCategories.filter((fact) => fact.kind === "segment" || fact.kind === "product_service");
   const geography = revenueCategories.filter((fact) => fact.kind === "geography");
   const prioritized = [...productOrSegment, ...geography];
@@ -221,6 +230,19 @@ function collectOrderedLabels(
     }
   }
   return labels;
+}
+
+/**
+ * 提出会社固有のセグメント・製品語彙(AMZN なら AWS / North America /
+ * International …)。意図分類がこれを知らないと、「AWS growth?」のような
+ * 固有名詞だけの質問が unknown に落ち、文脈パックにそのセグメントの本文が
+ * 入らない → モデルは正直に「資料には分かりません」と答える
+ * (2026-08-22 実機レビュー)。factual pack と同じ表を使うので、表が育てば
+ * 分類も同時に育つ。
+ */
+export function filingSegmentVocabulary(ticker: string): RegExp[] {
+  return [...reportableSegmentDefinitions(ticker), ...businessProductDefinitions(ticker)]
+    .flatMap((definition) => definition.patterns);
 }
 
 function businessProductDefinitions(ticker: string): Array<{ label: string; patterns: RegExp[] }> {
@@ -478,105 +500,6 @@ function revenueFactDefinitions(ticker: string): Array<{ label: string; kind: Re
     { label: "segment revenue", kind: "segment", patterns: [/segment revenue|reportable segments?/i] },
     { label: "geography revenue", kind: "geography", patterns: [/geograph|region/i] }
   ];
-}
-
-function seedKnownTickerLabels(
-  ticker: string,
-  field: "products_services" | "reportable_segments",
-  labels: string[]
-): string[] {
-  const upperTicker = ticker.toUpperCase();
-  const seeds: Record<string, Record<typeof field, string[]>> = {
-    AAPL: {
-      products_services: ["iPhone", "Mac", "iPad", "Wearables, Home and Accessories", "Services"],
-      reportable_segments: []
-    },
-    MSFT: {
-      products_services: ["Office・Microsoft 365", "Azure・クラウド", "Windows", "LinkedIn", "Gaming"],
-      reportable_segments: ["Productivity and Business Processes", "Intelligent Cloud", "More Personal Computing"]
-    },
-    NVDA: {
-      products_services: ["Data Center", "Gaming", "Professional Visualization", "Automotive"],
-      reportable_segments: ["Compute & Networking", "Graphics"]
-    },
-    AMZN: {
-      products_services: ["Online stores", "Third-party seller services", "Advertising services", "Subscription services", "AWS"],
-      reportable_segments: ["North America", "International", "AWS"]
-    },
-    GOOGL: {
-      products_services: ["Google Search", "YouTube", "Google Cloud", "Google Network", "Other Bets"],
-      reportable_segments: ["Google Services", "Google Cloud", "Other Bets"]
-    },
-    GOOG: {
-      products_services: ["Google Search", "YouTube", "Google Cloud", "Google Network", "Other Bets"],
-      reportable_segments: ["Google Services", "Google Cloud", "Other Bets"]
-    },
-    PH: {
-      products_services: ["Motion and Control Technologies"],
-      reportable_segments: ["Aerospace Systems", "Diversified Industrial"]
-    },
-    CRWD: {
-      products_services: ["Falcon platform", "cybersecurity subscriptions", "cloud security and identity protection"],
-      reportable_segments: []
-    },
-    INTU: {
-      products_services: ["QuickBooks", "TurboTax", "Credit Karma", "ProTax"],
-      reportable_segments: ["Global Business Solutions", "Consumer", "Credit Karma", "ProTax"]
-    },
-    CEG: {
-      products_services: ["発電・電力販売", "原子力発電", "エネルギー供給"],
-      reportable_segments: []
-    }
-  };
-  return mergeLabels(labels, seeds[upperTicker]?.[field] ?? []);
-}
-
-function hasKnownBusinessLabels(ticker: string): boolean {
-  return ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "GOOG", "PH", "CRWD", "INTU", "CEG"].includes(ticker.toUpperCase());
-}
-
-function fallbackKnownBusinessSourceIds(filing: FilingCacheRecord): string[] {
-  const source = filing.sourceChunks.find((chunk) => chunk.sectionType === "md_a" && normalizeWhitespace(chunk.text).length > 0);
-  return source ? [source.sourceId] : [];
-}
-
-function seedKnownTickerRevenueFacts(filing: FilingCacheRecord, facts: RevenueFact[]): RevenueFact[] {
-  const upperTicker = filing.ticker.toUpperCase();
-  if (!["AAPL", "MSFT", "AMZN", "GOOGL", "GOOG", "NVDA"].includes(upperTicker)) {
-    return facts;
-  }
-
-  const definitions = revenueFactDefinitions(filing.ticker).filter(
-    (definition) => definition.kind === "segment" || definition.kind === "product_service"
-  );
-  const existing = new Set(facts.map((fact) => `${fact.kind}:${fact.label}`));
-  const seeded: RevenueFact[] = [];
-
-  for (const definition of definitions) {
-    const key = `${definition.kind}:${definition.label}`;
-    if (existing.has(key)) {
-      continue;
-    }
-    seeded.push({
-      label: definition.label,
-      sourceId: selectFactualSourceIds(filing, [definition.label], {
-        questionIntent: "revenue_breakdown"
-      })[0],
-      kind: definition.kind
-    });
-  }
-
-  return dedupeRevenueFacts([...facts, ...seeded]);
-}
-
-function mergeLabels(labels: string[], seeds: string[]): string[] {
-  const result = [...labels];
-  for (const seed of seeds) {
-    if (!result.includes(seed)) {
-      result.push(seed);
-    }
-  }
-  return result;
 }
 
 function riskDefinitions(ticker: string): Array<{ label: string; patterns: RegExp[] }> {

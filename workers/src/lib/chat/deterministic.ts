@@ -1,5 +1,6 @@
 import type { FilingCacheRecord, SourceChunkRecord } from "../../env";
 import { formatMetricValue } from "../metrics";
+import { isBusinessOverviewQuestion } from "./business-overview-question";
 import { buildChatFactualPack } from "./context-factual-pack";
 import {
   buildMetricObservationSentence,
@@ -45,7 +46,9 @@ export function buildDeterministicMetricAnswer(
     /(セクター|sector|セグメント|segment|事業|business|部門|内訳|構成|柱|源泉|カテゴリ)/.test(normalizedQuestion);
   const asksSegmentOrRegionPerformance =
     /(セグメント|segment|地域|region|事業|business|部門|製品|product|カテゴリ|category)/.test(normalizedQuestion) &&
-    /(伸び|弱|強|増|減|成長|鈍化|grew|growth|weak|declin|increase|decrease)/.test(normalizedQuestion);
+    // 調子/好調/ダメ: 口語ベンチ Q08「どこの事業が調子いいの？逆にダメなとこは？」が
+    // 綺麗版「どのセグメントや地域が伸びた？」と同じ抽出回答に届かなかった(2026-08-22 LKG)。
+    /(伸び|弱|強|増|減|成長|鈍化|調子|好調|不調|ダメ|だめ|grew|growth|weak|declin|increase|decrease)/.test(normalizedQuestion);
   const asksRevenueDrivers =
     /(売上|増収|成長|growth|revenue)/.test(normalizedQuestion) &&
     /(支え|押し上げ|牽引|ドライバ|主因|要因|原因|理由|どの変化|何が)/.test(normalizedQuestion);
@@ -276,22 +279,11 @@ function findRevenueMovementWithoutDriverSource(sourceChunks: SourceChunkRecord[
   }) ?? null;
 }
 
-function isBusinessOverviewQuestion(normalizedQuestion: string): boolean {
-  return (
-    /(何屋|なに屋|なんの企業|何の企業|なんの会社|何の会社|どんな企業|どんな会社|何してる|何をしてる|何をやってる|何で儲け|なんで儲け|何で稼|なんで稼|事業内容|主な事業|事業は)/.test(
-      normalizedQuestion
-    ) || /(whatdoes.*companydo|whatcompany|whatbusiness|businessmodel)/.test(normalizedQuestion)
-  );
-}
-
 function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {
-  // The release benchmark uses a curated company set. Prefer its stable, reviewed
-  // overview instead of appending partially extracted English category labels
-  // (for example, a lone "International," fragment).
-  const knownTickerOverview = buildTickerBusinessOverviewAnswer(filing);
-  if (knownTickerOverview) {
-    return knownTickerOverview;
-  }
+  // Every branch below must end in either an extraction-derived answer carrying
+  // the sources the labels actually came from, or null so the caller continues
+  // to the model path. Returning a constant sentence with filing source chips
+  // attached is the one thing this function may not do.
   const factualPack = buildChatFactualPack(filing, "business_overview");
   if (factualPack && ((factualPack.productsServices?.length ?? 0) > 0 || (factualPack.reportableSegments?.length ?? 0) > 0)) {
     const sources = factualPack.sourceIds.flatMap((sourceId) => {
@@ -303,36 +295,33 @@ function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePay
         ...(factualPack.productsServices ?? []),
         ...(factualPack.reportableSegments ?? [])
       ].map((label) => label.replace(/[、,\s]+$/u, "").trim()).filter((label) => label && !isGenericBusinessLineLabel(label)))).slice(0, 6);
-      if (businessLines.length === 0) {
-        return buildTickerBusinessOverviewAnswer(filing);
+      // No usable label survived filtering: the pack had nothing to say about
+      // this company, so hand the question to the next extractor below rather
+      // than composing a sentence with an empty subject.
+      if (businessLines.length > 0) {
+        const revenueCategories = factualPack.revenueCategories
+          ?.map((fact) => fact.label.replace(/[、,\s]+$/u, "").trim())
+          .filter((label) => label && !businessLines.includes(label) && !isGenericRevenueCategoryLabel(label))
+          .slice(0, 3) ?? [];
+        const revenueSentence =
+          revenueCategories.length > 0
+            ? `売上区分としては、${revenueCategories.join("、")}も確認できます。`
+            : "売上区分の細かい金額内訳は、この抜粋だけでは限定的です。";
+        const answer = `${filing.companyName}は、${businessLines.join("、")}を主な事業・製品群として持つ会社です。${revenueSentence}`;
+        // A trailing comma means a label was cut mid-phrase during extraction.
+        // We cannot stand behind that sentence, and there is nothing honest to
+        // put in its place, so the model path takes the question.
+        if (/[、,]\s*$/u.test(answer)) {
+          return null;
+        }
+        return { answer, sources: dedupeChatSources(sources) };
       }
-      if (businessLines.length < 2) {
-        const tickerOverview = buildTickerBusinessOverviewAnswer(filing);
-        if (tickerOverview) return tickerOverview;
-      }
-      const revenueCategories = factualPack.revenueCategories
-        ?.map((fact) => fact.label.replace(/[、,\s]+$/u, "").trim())
-        .filter((label) => label && !businessLines.includes(label) && !isGenericRevenueCategoryLabel(label))
-        .slice(0, 3) ?? [];
-      const revenueSentence =
-        revenueCategories.length > 0
-          ? `売上区分としては、${revenueCategories.join("、")}も確認できます。`
-          : "売上区分の細かい金額内訳は、この抜粋だけでは限定的です。";
-      const answer = `${filing.companyName}は、${businessLines.join("、")}を主な事業・製品群として持つ会社です。${revenueSentence}`;
-      if (/[、,]\s*$/u.test(answer)) {
-        return buildTickerBusinessOverviewAnswer(filing);
-      }
-      return { answer, sources: dedupeChatSources(sources) };
     }
   }
 
   const overview = summarizeBusinessOverview(filing.sourceChunks);
   if (!overview) {
-    return buildTickerBusinessOverviewAnswer(filing);
-  }
-  if (overview.labels.length < 2) {
-    const tickerOverview = buildTickerBusinessOverviewAnswer(filing);
-    if (tickerOverview) return tickerOverview;
+    return null;
   }
 
   const sources = overview.sourceIds.flatMap((sourceId) => {
@@ -340,9 +329,10 @@ function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePay
     return source ? [buildSecFilingSource(source)] : [];
   });
 
+  // Labels without the chunks they were read out of would be an answer with no
+  // citable source. Nothing to serve.
   if (sources.length === 0) {
-    const tickerOverview = buildTickerBusinessOverviewAnswer(filing);
-    return tickerOverview;
+    return null;
   }
 
   return {
@@ -350,63 +340,6 @@ function buildBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePay
     sources: dedupeChatSources(sources)
   };
 }
-
-function buildTickerBusinessOverviewAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {
-  const overview = TICKER_BUSINESS_OVERVIEWS[filing.ticker.toUpperCase()];
-  if (!overview) {
-    return null;
-  }
-  const sources = fallbackOverviewSources(filing);
-  if (sources.length === 0) {
-    return null;
-  }
-  return {
-    answer: `${filing.companyName}は、${overview}で収益を得ている会社です。`,
-    sources
-  };
-}
-
-function fallbackOverviewSources(filing: FilingCacheRecord): ChatEvidenceSource[] {
-  const preferred = filing.sourceChunks.filter((chunk) => chunk.sectionType !== "xbrl_metric").slice(0, 3);
-  const sourceChunks = preferred.length > 0 ? preferred : filing.sourceChunks.slice(0, 3);
-  return dedupeChatSources(sourceChunks.map(buildSecFilingSource));
-}
-
-const TICKER_BUSINESS_OVERVIEWS: Record<string, string> = {
-  AAPL: "iPhone、Mac、iPad、ウェアラブル機器、サービス",
-  JPM: "純利息収入、投資銀行・市場業務、カード・決済、資産運用",
-  XOM: "上流の石油・天然ガス、下流の燃料、化学製品",
-  CAT: "建設機械、資源産業向け機械、エネルギー・輸送機器と関連サービス",
-  WMT: "米国小売、海外小売、Sam's Clubなどの商品販売と会員サービス",
-  NVDA: "データセンター向けGPU・アクセラレータ、ゲーミング、車載、プロ向け可視化",
-  MU: "DRAM、NAND、ストレージなどのメモリ製品",
-  MSFT: "クラウド、Office・Microsoft 365、Windows、LinkedIn、ゲーム",
-  GOOGL: "検索広告、YouTube広告、Google Cloud、サブスクリプション・端末",
-  AMZN: "オンライン小売、第三者販売サービス、広告、サブスクリプション、AWS",
-  TSLA: "車両販売・関連サービス、サービス・その他、エネルギー生成・蓄電",
-  LLY: "糖尿病・肥満症、がん、免疫などの医薬品",
-  V: "決済ネットワーク、取引処理、サービス収入、付加価値サービス",
-  KO: "飲料原液・完成品、ブランド飲料、地域ボトラー向け販売",
-  DAL: "旅客航空、プレミアム座席、ロイヤルティ、貨物・整備関連サービス"
-};
-
-const TICKER_REVENUE_BREAKDOWNS: Record<string, string[]> = {
-  AAPL: ["iPhone", "Mac", "iPad", "ウェアラブル機器", "サービス"],
-  JPM: ["純利息収入", "投資銀行・市場業務", "カード・決済", "資産運用"],
-  XOM: ["上流の石油・天然ガス", "燃料", "化学製品", "特殊製品"],
-  CAT: ["建設機械", "資源産業向け機械", "エネルギー・輸送機器", "関連サービス"],
-  WMT: ["米国小売", "海外小売", "Sam's Club", "会員サービス"],
-  NVDA: ["データセンター", "ゲーミング", "車載", "プロ向け可視化"],
-  MU: ["DRAM", "NAND", "ストレージ"],
-  MSFT: ["クラウド", "Office・Microsoft 365", "Windows", "LinkedIn", "ゲーム"],
-  GOOGL: ["検索広告", "YouTube広告", "Google Cloud", "サブスクリプション・端末"],
-  AMZN: ["オンライン小売", "第三者販売サービス", "広告", "サブスクリプション", "AWS"],
-  TSLA: ["自動車販売・リース", "サービス・その他", "エネルギー生成・蓄電"],
-  LLY: ["糖尿病・肥満症薬", "がん領域", "免疫領域", "その他医薬品"],
-  V: ["サービス収入", "データ処理収入", "国際取引収入", "付加価値サービス"],
-  KO: ["濃縮原液", "完成品飲料", "炭酸飲料", "水・スポーツ飲料・コーヒー・茶"],
-  DAL: ["旅客収入", "プレミアム座席", "ロイヤルティ", "貨物・整備関連サービス"]
-};
 
 function isGenericRevenueCategoryLabel(label: string): boolean {
   return /^(product revenue|service revenue|segment revenue|geography revenue|transaction revenue|other revenues?|取引収益|その他収益)$/i.test(label.trim());
@@ -448,7 +381,7 @@ function buildRevenueBreakdownAnswer(filing: FilingCacheRecord): ChatResponsePay
 
   const breakdown = summarizeRevenueBreakdown(filing.sourceChunks);
   if (!breakdown) {
-    return buildKnownRevenueBreakdownAnswer(filing);
+    return null;
   }
 
   const sources = breakdown.sourceIds.flatMap((sourceId) => {
@@ -466,12 +399,12 @@ function buildRevenueSnapshotAnswer(filing: FilingCacheRecord): ChatResponsePayl
   const revenue = filing.metrics.find((metric) => metric.logicalName === "revenue");
   const revenueSourceId = findMetricSourceId(filing, "revenue");
   if (!revenue || !revenueSourceId) {
-    return buildKnownRevenueBreakdownAnswer(filing);
+    return null;
   }
 
   const revenueSource = filing.sourceChunks.find((chunk) => chunk.sourceId === revenueSourceId);
   if (!revenueSource) {
-    return buildKnownRevenueBreakdownAnswer(filing);
+    return null;
   }
 
   const sources: ChatEvidenceSource[] = [buildSecFilingSource(revenueSource)];
@@ -486,13 +419,10 @@ function buildRevenueSnapshotAnswer(filing: FilingCacheRecord): ChatResponsePayl
       }
     }
     answerParts.push(`売上の柱は、${usableBreakdownLabels.join("、")}です。`);
-  } else {
-    const knownBreakdown = TICKER_REVENUE_BREAKDOWNS[filing.ticker.toUpperCase()];
-    if (knownBreakdown) {
-      answerParts.push(`売上構造を見る軸は、${knownBreakdown.slice(0, 5).join("、")}です。`);
-      sources.push(...fallbackOverviewSources(filing));
-    }
   }
+  // When no breakdown was extracted the answer simply omits the 売上構造 sentence.
+  // The metric observation and the driver sentence below still carry their own
+  // sources.
 
   const drivers = summarizeRevenueDrivers(filing.sourceChunks);
   if (drivers) {
@@ -596,6 +526,12 @@ function summarizeSegmentPerformance(filing: FilingCacheRecord): {
     { label: "資源産業", pattern: /\bResource Industries\b/i },
     { label: "エネルギー・輸送", pattern: /\bEnergy\s*&\s*Transportation\b/i }
   ];
+  // NOT a constant-answer table. Nothing here is ever emitted on its own: every
+  // label below must first have been matched against a real MD&A sentence by the
+  // `signals` patterns above, and this allowlist then narrows those matches to
+  // the ones that mean something for this issuer. It only ever removes claims —
+  // it cannot add one. Contrast the tables deleted from this file, which
+  // asserted company facts the filing was never consulted for.
   const issuerSignalLabels: Record<string, string[]> = {
     AAPL: ["日本", "欧州", "アジア太平洋", "米州"],
     JPM: ["純利息収入", "非利息収入"],
@@ -664,33 +600,27 @@ function nearestSegmentDirection(
   return positiveDistance < negativeDistance ? "strong" : "weak";
 }
 
-function buildKnownRevenueBreakdownAnswer(filing: FilingCacheRecord): ChatResponsePayload | null {
-  const knownBreakdown = TICKER_REVENUE_BREAKDOWNS[filing.ticker.toUpperCase()];
-  if (!knownBreakdown) {
-    return null;
-  }
-  const sources = fallbackOverviewSources(filing);
-  if (sources.length === 0) {
-    return null;
-  }
-  return {
-    answer: `売上構造を見る軸は、${knownBreakdown.slice(0, 5).join("、")}です。`,
-    sources
-  };
-}
-
 function summarizeBusinessOverview(sourceChunks: SourceChunkRecord[]): {
   labels: string[];
   sourceIds: string[];
   context: string;
 } | null {
+  // 事業内容を名乗るには区分名が2つ以上要る。「その他収益」のような会計上の
+  // 汎用区分1つで「〜を主な事業にする会社」と断定していた(META、2026-08-22
+  // 実機レビュー)。足りなければ null を返し、MD&A 文脈を持つモデル経路に任せる —
+  // CAT / BAC はその経路で実セグメントまで答えている。
   const revenueBreakdown = summarizeRevenueBreakdown(sourceChunks);
   if (revenueBreakdown) {
-    return {
-      labels: revenueBreakdown.labels,
-      sourceIds: revenueBreakdown.sourceIds,
-      context: "提出資料では、売上区分としてこれらの事業が確認できます。"
-    };
+    const usableLabels = revenueBreakdown.labels.filter(
+      (label) => !isGenericRevenueCategoryLabel(label) && !isGenericBusinessLineLabel(label)
+    );
+    if (usableLabels.length >= 2) {
+      return {
+        labels: usableLabels,
+        sourceIds: revenueBreakdown.sourceIds,
+        context: "提出資料では、売上区分としてこれらの事業が確認できます。"
+      };
+    }
   }
 
   const businessDefinitions: Array<{ label: string; priority: number; patterns: RegExp[] }> = [
@@ -778,7 +708,10 @@ function summarizeBusinessOverview(sourceChunks: SourceChunkRecord[]): {
   }
 
   const matches = Array.from(found.values()).sort((left, right) => left.priority - right.priority).slice(0, 4);
-  if (matches.length === 0) {
+  // キーワード1語(payments / cloud)の一致だけで事業を断定しない。JPM が
+  // 「決済・取引サービス」、Broadcom が「クラウドサービス」の会社にされていた。
+  // 2つ以上揃わなければ辞退してモデル経路へ。
+  if (matches.length < 2) {
     return null;
   }
 
@@ -1998,7 +1931,10 @@ function translateDriverList(raw: string): string {
     .replace(/\bproducts?\b/gi, "製品")
     .replace(/\bvolume\b/gi, "数量")
     .replace(/\bpricing\b/gi, "価格改定")
-    .replace(/\btransactions?\b/gi, "取引件数")
+    // 直前に固有名詞(大文字始まり)が来る場合は訳さない。"the Pioneer transaction" は
+    // M&A の案件であって決済の件数ではないのに「the Pioneer 取引件数」になっていた。
+    // "processed transactions" / "Transactions increased" は従来どおり訳される。
+    .replace(/(?<!\b[A-Z][A-Za-z&.\-]+\s)\b[Tt]ransactions?\b/g, "取引件数")
     .replace(/\bdelivery\b/gi, "配送")
     .replace(/\band\b/gi, "と")
     .replace(/\s+/g, " ")

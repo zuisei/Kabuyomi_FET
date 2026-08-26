@@ -82,6 +82,11 @@ interface AppAttestVerificationResult {
   assertionCounter?: number;
   publicKeySpki?: Uint8Array;
   environment?: "development" | "production";
+  /// 失敗の種別。以前はここが落ちていたため「鍵が違う」「証明書チェーンが壊れている」
+  /// 「bundle version が許可外」「カウンタ巻き戻り」がすべて同じ 403 に潰れ、
+  /// ログを読む以外に切り分ける手段が無かった。公開メッセージには載せず、
+  /// AppError の内部詳細としてのみ運ぶ。
+  failureClass?: string;
 }
 
 const INSTALLATION_CREDENTIAL_TTL_MS = 90 * 24 * 60 * 60 * 1_000;
@@ -507,7 +512,11 @@ export async function completeAppAttestation(env: Env, credential: InstallationC
   });
   if (!verification.verified) {
     await markChallengeResult(env.DB, challenge.challenge_id, "rejected");
-    throw new AppError(403, "App Attest verification failed");
+    throw new AppError(
+      403,
+      "App Attest verification failed",
+      `attestation rejected: ${verification.failureClass ?? "unknown"}`
+    );
   }
   const attestedAt = new Date().toISOString();
   const tokenReference = `itok_${base64Url(crypto.getRandomValues(new Uint8Array(18)))}`;
@@ -580,7 +589,11 @@ export async function verifyAppAttestAssertionForRequest(request: Request, env: 
   }, publicKeySpki);
   if (!verification.verified) {
     await markChallengeResult(env.DB, challenge.challenge_id, "rejected");
-    throw new AppError(403, "App Attest assertion failed");
+    throw new AppError(
+      403,
+      "App Attest assertion failed",
+      `assertion rejected: ${verification.failureClass ?? "unknown"}`
+    );
   }
   const assertionCounter = verification.assertionCounter;
   if (!Number.isSafeInteger(assertionCounter) || (assertionCounter ?? 0) <= 0) {
@@ -650,11 +663,9 @@ async function verifyWithConfiguredService(
         assertionCounter: await verifyBuiltInAssertion(env, { ...input, publicKeySpki })
       };
     } catch (error) {
-      logWarnEvent("app_attest_verification_rejected", {
-        kind: input.kind,
-        failureClass: builtInVerificationFailureClass(error)
-      });
-      return { verified: false };
+      const failureClass = builtInVerificationFailureClass(error);
+      logWarnEvent("app_attest_verification_rejected", { kind: input.kind, failureClass });
+      return { verified: false, failureClass };
     }
   }
   const url = env.APP_ATTEST_VERIFIER_URL?.trim();

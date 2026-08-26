@@ -1,4 +1,5 @@
 import type { Env, UsageState } from "../env";
+import type { VerifiedAppleEnvironment } from "./apple-signed-data";
 import {
   resolveCreditPackCredits,
   resolveMonthlyCreditLimit,
@@ -50,8 +51,20 @@ interface UsageEnvelope {
   dailyRewardsRemaining?: number;
 }
 
+/**
+ * How a credit purchase grant was authorised.
+ * - "production" / "sandbox": which Apple endpoint verified the transaction.
+ *   APPLE_APP_STORE_SERVER_ENVIRONMENT is "auto" in production, so both are
+ *   reachable there.
+ * - "internal": /v1/internal/credits/purchase-grant, which grants without any
+ *   Apple verification. Recording it as "production" would invent an audit fact.
+ */
+export type CreditGrantEnvironment = VerifiedAppleEnvironment | "internal";
+
 interface PurchaseTransactionRow {
   user_id: string;
+  /** null on rows written before 0019: unknown environment, not "production". */
+  verification_environment: CreditGrantEnvironment | null;
   product_id: string;
   transaction_id: string;
   original_transaction_id: string | null;
@@ -79,7 +92,6 @@ export interface QuotaMutationResult {
 
 interface QuotaMutationOptions {
   relatedTickers?: readonly string[];
-  operationId?: string;
 }
 
 export interface CreditReference {
@@ -457,15 +469,6 @@ export async function consumeChatQuota(
   return (await mutateUsage(identity, env, config, "consumeChat")).usage;
 }
 
-export async function refundChatQuota(
-  identity: QuotaIdentity,
-  env: Env,
-  config: RemoteConfig,
-  options: { operationId: string }
-): Promise<UsageState> {
-  return (await mutateUsage(identity, env, config, "refundChat", undefined, options)).usage;
-}
-
 export async function ensureMonthlyCreditGrant(
   identity: QuotaIdentity,
   env: Env,
@@ -536,6 +539,7 @@ export async function grantPurchasedCredits(
     transactionId: string;
     originalTransactionId?: string;
     purchasedAt?: string;
+    verificationEnvironment: CreditGrantEnvironment;
   }
 ): Promise<PurchaseCreditGrantResult> {
   assertPurchasedCreditGrantsEnabled(config);
@@ -549,7 +553,8 @@ export async function grantPurchasedCredits(
     transactionId: options.transactionId,
     originalTransactionId: options.originalTransactionId,
     creditsGranted,
-    purchasedAt: options.purchasedAt
+    purchasedAt: options.purchasedAt,
+    verificationEnvironment: options.verificationEnvironment
   });
 
   if (transaction.user_id !== identity.quotaSubject) {
@@ -560,6 +565,27 @@ export async function grantPurchasedCredits(
   }
   if (transaction.status !== "pending" && transaction.status !== "granted") {
     throw new AppError(409, "Purchase transaction is in an unsupported state");
+  }
+
+  // APPLE_APP_STORE_SERVER_ENVIRONMENT is "auto" in production, so a transaction
+  // Apple's production endpoint does not know is retried against sandbox and
+  // still verifies. TestFlight Release builds talk to the production API while
+  // StoreKit hands them sandbox transactions, so this is reachable without any
+  // tampering. Recorded and logged here; whether such a grant should be blocked
+  // is still an open product decision.
+  const environmentLog = {
+    quotaSubjectHash: hashForLog(identity.quotaSubject),
+    transactionIdSuffix: suffixForLog(options.transactionId),
+    productId: options.productId,
+    verificationEnvironment: options.verificationEnvironment,
+    recordedEnvironment: transaction.verification_environment,
+    transactionStatus: transaction.status,
+    creditsGranted
+  };
+  if (options.verificationEnvironment === "production") {
+    logEvent("credit_purchase_grant_environment", environmentLog);
+  } else {
+    logWarnEvent("credit_purchase_grant_non_production_environment", environmentLog);
   }
 
   if (transaction.status === "granted") {
@@ -934,7 +960,6 @@ async function mutateUsage(
     | "checkChat"
     | "checkStock"
     | "consumeChat"
-    | "refundChat"
     | "consumeStock"
     | "refundStock"
     | "removeTicker"
@@ -963,8 +988,7 @@ async function mutateUsage(
       monthlyCreditLimit: limits.monthlyCreditLimit,
       monthlyCreditPeriodStart: limits.monthlyCreditPeriodStart,
       monthlyCreditPeriodEnd: limits.monthlyCreditPeriodEnd,
-      monthlyGrantOperationId: limits.monthlyGrantOperationId,
-      operationId: options.operationId
+      monthlyGrantOperationId: limits.monthlyGrantOperationId
     })
   });
 
@@ -1375,6 +1399,7 @@ async function ensurePurchaseTransactionRow(
     originalTransactionId?: string;
     creditsGranted: number;
     purchasedAt?: string;
+    verificationEnvironment: CreditGrantEnvironment;
   }
 ): Promise<PurchaseTransactionRow> {
   const now = new Date().toISOString();
@@ -1387,10 +1412,11 @@ async function ensurePurchaseTransactionRow(
       original_transaction_id,
       credits_granted,
       status,
+      verification_environment,
       purchased_at,
       created_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       crypto.randomUUID(),
@@ -1400,6 +1426,7 @@ async function ensurePurchaseTransactionRow(
       options.originalTransactionId ?? null,
       options.creditsGranted,
       "pending",
+      options.verificationEnvironment,
       options.purchasedAt ?? null,
       now,
       now
@@ -1425,6 +1452,7 @@ async function loadPurchaseTransactionRow(
       original_transaction_id,
       credits_granted,
       status,
+      verification_environment,
       debt_offset_applied,
       refunded_at,
       refund_reversed_at,
@@ -1450,13 +1478,30 @@ async function markPurchaseTransactionGranted(
   transactionId: string,
   debtOffsetApplied: number
 ): Promise<void> {
-  await env.DB.prepare(
+  const result = await env.DB.prepare(
     `UPDATE purchase_transactions
     SET status = ?, debt_offset_applied = ?, updated_at = ?
     WHERE transaction_id = ? AND status = 'pending'`
   )
     .bind("granted", debtOffsetApplied, new Date().toISOString(), transactionId)
     .run();
+
+  const changes = Number(result.meta?.changes);
+  if (!Number.isFinite(changes) || changes >= 1) {
+    return;
+  }
+
+  // The other mark* helpers treat "no row updated" as divergence outright. Here
+  // it is not necessarily divergence: granting the same transaction twice is
+  // idempotent in the Durable Object, and the loser of that race finds the row
+  // already 'granted'. So re-read before deciding — but do not let a genuinely
+  // missing or mismatched projection pass silently, which is what this did
+  // before. The caller enqueues a repair and logs on throw.
+  const row = await loadPurchaseTransactionRow(env, transactionId);
+  if (row?.status === "granted" && row.debt_offset_applied === debtOffsetApplied) {
+    return;
+  }
+  throw new AppError(409, "Purchase transaction projection did not record the grant");
 }
 
 async function markPurchaseTransactionRefunded(

@@ -1,8 +1,19 @@
-import type { Env } from "../env";
+import type { Env, FilingFormType } from "../env";
 import { extractMDASectionWithDiagnostics, normalizeFilingText } from "../extractors/mda";
 import type { CompanyFactsResponse, ConceptResponse } from "../clients/sec";
 
 const MAX_RESPONSE_CACHE_ENTRIES = 512;
+/// **件数だけでは isolate のメモリを守れない。**
+/// `responseCache` はモジュールスコープなので isolate が生きている限り残り、
+/// XBRL の `companyfacts` は1社あたり実測 3.6 MB(パース後の JS オブジェクトは
+/// その2〜6倍を占める)。追跡銘柄30社を1回の cron で回すと、
+/// 件数上限 512 には遠く届かないままテキスト換算で 100 MB を超えうる。
+/// Workers の isolate 上限は 128 MB なので、バイト数側にも蓋をする。
+///
+/// 12 MB は「同一URLの再取得を抑える」という本来の効果を残しつつ、
+/// 別CIKの巨大応答が積み上がるのを防げる水準。cron は銘柄ごとに別URLを
+/// 引くためキャッシュ再利用が効かず、ここを削っても取得回数はほぼ増えない。
+const MAX_RESPONSE_CACHE_BYTES = 12 * 1024 * 1024;
 const CACHE_TTL = {
   tickerSnapshot: 24 * 60 * 60 * 1000,
   submissions: 30 * 60 * 1000,
@@ -13,6 +24,8 @@ const CACHE_TTL = {
 const SUBMISSIONS_LOOKBACK_YEARS = 4;
 const MIN_RECENT_10K_FILINGS = 3;
 const MIN_RECENT_10Q_FILINGS = 4;
+/// 20-F は年 1 回。4 年遡って 3 本あれば履歴としては十分。
+const MIN_RECENT_20F_FILINGS = 3;
 const DEFAULT_RETRY_COUNT = 2;
 const DEFAULT_INITIAL_BACKOFF_MS = 400;
 const DEFAULT_REQUEST_TIMEOUT_MS = 12_000;
@@ -22,6 +35,11 @@ interface SecFetcherConfig {
   retryCount: number;
   initialBackoffMs: number;
   requestTimeoutMs: number;
+  /// SEC を実際に叩く直前に必ず呼ばれる。**再試行のたびにも呼ばれる**ので、
+  /// レート予算は「フェッチャ呼び出し数」ではなく「実 HTTP リクエスト数」で消費される。
+  /// これが無いと 1トークンで最大 retryCount+1 回 SEC を叩けてしまい、
+  /// SEC の fair-access(10 req/s 超過でIPブロック)を静かに超える。
+  beforeAttempt?: () => Promise<void>;
 }
 
 interface SubmissionRecent {
@@ -44,12 +62,18 @@ interface CacheEntry {
   value?: unknown;
   expiresAt: number;
   pending?: Promise<unknown>;
+  /// ロード時に実測した応答テキスト長(UTF-16 コード単位)。厳密なバイト数では
+  /// ないが、退避の判断には十分な近似。`pending` のみのエントリは 0。
+  sizeBytes?: number;
 }
 
 const responseCache = new Map<string, CacheEntry>();
 
-export function createCloudflareSecFetcherService(env: Env) {
-  const config = readSecFetcherConfig(env);
+export function createCloudflareSecFetcherService(
+  env: Env,
+  options: { beforeAttempt?: () => Promise<void> } = {}
+) {
+  const config = { ...readSecFetcherConfig(env), beforeAttempt: options.beforeAttempt };
 
   async function secJson(url: string, options: { allowNotFound?: boolean; cacheTtlMs?: number } = {}) {
     return withCache(responseCache, url, options.cacheTtlMs ?? 0, async () => {
@@ -66,14 +90,17 @@ export function createCloudflareSecFetcherService(env: Env) {
       );
 
       if (options.allowNotFound === true && response.status === 404) {
-        return null;
+        return { value: null, sizeBytes: 0 };
       }
 
       if (!response.ok) {
         throw new Error(`SEC request failed (${response.status}) for ${url}`);
       }
 
-      return response.json();
+      // 本文はどのみち全量バッファされるので、ここで長さを測っておく。
+      // `response.json()` を直接使うと保持量を知る手立てが無くなる。
+      const text = await response.text();
+      return { value: JSON.parse(text) as unknown, sizeBytes: text.length };
     });
   }
 
@@ -95,7 +122,8 @@ export function createCloudflareSecFetcherService(env: Env) {
         throw new Error(`SEC request failed (${response.status}) for ${url}`);
       }
 
-      return response.text();
+      const text = await response.text();
+      return { value: text, sizeBytes: text.length };
     }) as Promise<string>;
   }
 
@@ -112,6 +140,21 @@ export function createCloudflareSecFetcherService(env: Env) {
       });
 
       return options.includeHistory === true ? expandSubmissionHistory(root, secJson) : root;
+    },
+
+    /// 提出物に含まれる添付の名前だけを返す。
+    /// 6-K は本体が表紙で、中身が添付に入っているため、名前が分からないと本文に辿り着けない。
+    async listFilingDocuments({ cik, accessionNumber }: { cik: string; accessionNumber: string }): Promise<{ documents: string[] }> {
+      const accessionNoDash = accessionNumber.replace(/-/g, "");
+      const index = await secJson(
+        `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${accessionNoDash}/index.json`,
+        { allowNotFound: true, cacheTtlMs: CACHE_TTL.filing }
+      ) as { directory?: { item?: Array<{ name?: unknown }> } } | null;
+      const items = index?.directory?.item ?? [];
+      const documents = items
+        .map((item) => (typeof item?.name === "string" ? item.name : ""))
+        .filter((name) => name.length > 0);
+      return { documents };
     },
 
     async fetchFiling({
@@ -152,7 +195,7 @@ export function createCloudflareSecFetcherService(env: Env) {
       cik: string;
       accessionNumber: string;
       primaryDocument: string;
-      formType: "10-K" | "10-Q";
+      formType: FilingFormType;
       tags: string[];
     }): Promise<{
       primaryDocumentUrl: string;
@@ -256,14 +299,20 @@ function readSecFetcherConfig(env: Env): SecFetcherConfig {
   };
 }
 
+/// 指標が載りうるタクソノミ。米国企業は us-gaap、外国企業(20-F)は ifrs-full。
+/// トヨタとソニーのように両方で出す会社があるので、**us-gaap を先に見て挙動を変えない**。
+const METRIC_TAXONOMIES = ["us-gaap", "ifrs-full"] as const;
+
 function extractRequestedConceptsFromCompanyFacts(companyFacts: CompanyFactsResponse | null, tags: string[]) {
-  const usGaap = companyFacts?.facts?.["us-gaap"];
   const concepts: Record<string, ConceptResponse> = {};
   const missingTags: string[] = [];
 
   for (const tag of tags) {
-    if (usGaap && Object.prototype.hasOwnProperty.call(usGaap, tag)) {
-      concepts[tag] = usGaap[tag]!;
+    const found = METRIC_TAXONOMIES
+      .map((taxonomy) => companyFacts?.facts?.[taxonomy])
+      .find((facts) => facts && Object.prototype.hasOwnProperty.call(facts, tag));
+    if (found) {
+      concepts[tag] = found[tag]!;
       continue;
     }
 
@@ -282,14 +331,19 @@ async function fetchConceptFallbacks(
     return { concepts: {}, fulfilledCount: 0, failedCount: 0 };
   }
 
+  // タグ名だけではどちらのタクソノミのものか決まらない(ProfitLoss は両方に存在する)。
+  // us-gaap を先に引き、404 なら ifrs-full を引く。両方無ければ null。
   const settled = await Promise.allSettled(
-    tags.map(async (tag): Promise<[string, ConceptResponse | null]> => [
-      tag,
-      await secJson(`https://data.sec.gov/api/xbrl/companyconcept/CIK${normalizedCik}/us-gaap/${tag}.json`, {
-        allowNotFound: true,
-        cacheTtlMs: CACHE_TTL.concept
-      }) as ConceptResponse | null
-    ])
+    tags.map(async (tag): Promise<[string, ConceptResponse | null]> => {
+      for (const taxonomy of METRIC_TAXONOMIES) {
+        const concept = await secJson(
+          `https://data.sec.gov/api/xbrl/companyconcept/CIK${normalizedCik}/${taxonomy}/${tag}.json`,
+          { allowNotFound: true, cacheTtlMs: CACHE_TTL.concept }
+        ) as ConceptResponse | null;
+        if (concept) return [tag, concept];
+      }
+      return [tag, null];
+    })
   );
   const concepts: Record<string, ConceptResponse | null> = {};
   let fulfilledCount = 0;
@@ -381,6 +435,7 @@ async function fetchWithRetry(url: string, init: RequestInit, config: SecFetcher
 
   for (let attempt = 0; attempt <= config.retryCount; attempt += 1) {
     try {
+      await config.beforeAttempt?.();
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
       try {
@@ -409,7 +464,12 @@ async function fetchWithRetry(url: string, init: RequestInit, config: SecFetcher
   throw lastError ?? new Error(`Request failed for ${url}`);
 }
 
-async function withCache<T>(cache: Map<string, CacheEntry>, key: string, ttlMs: number, loader: () => Promise<T>): Promise<T> {
+async function withCache<T>(
+  cache: Map<string, CacheEntry>,
+  key: string,
+  ttlMs: number,
+  loader: () => Promise<{ value: T; sizeBytes: number }>
+): Promise<T> {
   const cached = cache.get(key);
   if (cached) {
     if (cached.value !== undefined && cached.expiresAt > Date.now()) {
@@ -423,11 +483,12 @@ async function withCache<T>(cache: Map<string, CacheEntry>, key: string, ttlMs: 
 
   const pending = (async () => {
     try {
-      const value = await loader();
+      const { value, sizeBytes } = await loader();
       if (ttlMs > 0) {
         setCacheEntry(cache, key, {
           value,
-          expiresAt: Date.now() + ttlMs
+          expiresAt: Date.now() + ttlMs,
+          sizeBytes
         });
       } else {
         cache.delete(key);
@@ -480,17 +541,25 @@ function setCacheEntry(cache: Map<string, CacheEntry>, key: string, entry: Cache
 }
 
 function pruneCache(cache: Map<string, CacheEntry>): void {
-  if (cache.size <= MAX_RESPONSE_CACHE_ENTRIES) {
+  let totalBytes = 0;
+  for (const entry of cache.values()) {
+    totalBytes += entry.sizeBytes ?? 0;
+  }
+  if (cache.size <= MAX_RESPONSE_CACHE_ENTRIES && totalBytes <= MAX_RESPONSE_CACHE_BYTES) {
     return;
   }
 
+  // Map は挿入順を保つ。`setCacheEntry` が毎回 delete してから set し直すので
+  // 先頭ほど古い = 先に退避してよい。
   for (const [key, entry] of cache) {
-    if (cache.size <= MAX_RESPONSE_CACHE_ENTRIES) {
+    if (cache.size <= MAX_RESPONSE_CACHE_ENTRIES && totalBytes <= MAX_RESPONSE_CACHE_BYTES) {
       return;
     }
+    // 進行中の取得は落とさない(同一URLの相乗りを壊すため)。
     if (entry.pending) {
       continue;
     }
+    totalBytes -= entry.sizeBytes ?? 0;
     cache.delete(key);
   }
 }
@@ -506,13 +575,28 @@ function normalizeSubmissionRecent(payload: unknown): SubmissionRecent | null {
       ? candidate.filings.recent as SubmissionRecent
       : payload as SubmissionRecent;
 
-  return Array.isArray(recent.form) &&
-    Array.isArray(recent.accessionNumber) &&
-    Array.isArray(recent.primaryDocument) &&
-    Array.isArray(recent.filingDate) &&
-    Array.isArray(recent.reportDate)
-    ? recent
-    : null;
+  const columns = [
+    recent.form,
+    recent.accessionNumber,
+    recent.primaryDocument,
+    recent.filingDate,
+    recent.reportDate
+  ];
+  if (!columns.every((column) => Array.isArray(column))) {
+    return null;
+  }
+
+  // SEC の submissions.json は列指向で、5つの配列が同じ添字で1件の資料を表す。
+  // 長さが揃っていない応答(部分応答・切り詰め)をそのまま通すと、
+  // `toSubmissionEntries` が `form.length` を基準に回して他を `?? ""` で埋めるため、
+  // **種別と実体がずれた資料**(form[i] と accessionNumber[i] が別物)を
+  // 掴みうる。列が食い違う応答は資料一覧として信用できないので弾く。
+  const expectedLength = columns[0]!.length;
+  if (!columns.every((column) => column.length === expectedLength)) {
+    return null;
+  }
+
+  return recent;
 }
 
 function toSubmissionEntries(recent: SubmissionRecent): SubmissionEntry[] {
@@ -577,9 +661,16 @@ function hasEnoughSupportedHistory(recent: SubmissionRecent): boolean {
   return hasEnoughSupportedHistoryEntries(toSubmissionEntries(recent));
 }
 
+/// これ以上ページを辿らなくてよいか、という**打ち切り条件**であって、
+/// 銘柄を扱えるかどうかの門ではない(門は `normalizeForm`)。
+///
+/// 外国企業は 10-K も 10-Q も 1 本も出さないので、米国企業の条件だけを見ていると
+/// **永久に満たされず、履歴ファイルを全部取りに行ってしまう**。正しさではなく
+/// 通信量の問題だが、20-F だけを出す会社には 20-F の本数で打ち切る。
 function hasEnoughSupportedHistoryEntries(entries: SubmissionEntry[]): boolean {
   let tenKCount = 0;
   let tenQCount = 0;
+  let twentyFCount = 0;
 
   for (const entry of entries) {
     if (!entry.filingDate || entry.filingDate < isoDateYearsAgo(SUBMISSIONS_LOOKBACK_YEARS)) {
@@ -593,10 +684,20 @@ function hasEnoughSupportedHistoryEntries(entries: SubmissionEntry[]): boolean {
 
     if (entry.form.startsWith("10-Q")) {
       tenQCount += 1;
+      continue;
+    }
+
+    // "20-F/A"(訂正版)は取り込み対象ではないが、履歴が十分あることの証拠にはなる。
+    if (entry.form.startsWith("20-F")) {
+      twentyFCount += 1;
     }
   }
 
-  return tenKCount >= MIN_RECENT_10K_FILINGS && tenQCount >= MIN_RECENT_10Q_FILINGS;
+  if (tenKCount >= MIN_RECENT_10K_FILINGS && tenQCount >= MIN_RECENT_10Q_FILINGS) {
+    return true;
+  }
+
+  return twentyFCount >= MIN_RECENT_20F_FILINGS;
 }
 
 function isoDateYearsAgo(years: number): string {

@@ -1,6 +1,6 @@
 # Kabuyomi 会話主役 UI 仕様書 v1
 
-> Historical / stale document. Not current v1 release truth. See `docs/release/RELEASE_TRUTH.md`.
+> Historical / stale document. Not current v1 release truth. See `docs/archive/v1/RELEASE_TRUTH.md`.
 
 ## 目的
 Kabuyomi の主役を `Summary を読む体験` から `決算書に質問する体験` へ移す。

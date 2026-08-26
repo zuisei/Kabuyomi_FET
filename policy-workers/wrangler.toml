@@ -1,0 +1,50 @@
+name = "md-api-preview"
+main = "src/index.ts"
+compatibility_date = "2026-07-19"
+workers_dev = true
+
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[[ratelimits]]
+name = "TRANSLATION_REQUEST_RATE_LIMITER"
+namespace_id = "43010"
+
+  [ratelimits.simple]
+  limit = 5
+  period = 60
+
+[vars]
+ENVIRONMENT = "preview"
+TRANSLATION_REALTIME_CUTOFF = "2026-07-21T15:00:00.000Z"
+
+[[services]]
+binding = "TRANSLATION_ADMIN"
+service = "md-admin-preview"
+
+[[d1_databases]]
+binding = "CORE"
+database_name = "market-docket-core-preview"
+database_id = "d2ea87cc-99be-40f6-8533-04e7399de5cf"
+migrations_dir = "migrations/core"
+
+[[d1_databases]]
+binding = "OPS"
+database_name = "market-docket-ops-preview"
+database_id = "09ff11ce-34f7-4ac8-a713-06f0c09f836c"
+migrations_dir = "migrations/ops"
+
+[[r2_buckets]]
+binding = "RAW"
+bucket_name = "market-docket-raw-preview"
+
+[[r2_buckets]]
+binding = "DERIVED"
+bucket_name = "market-docket-derived-preview"
+
+[[r2_buckets]]
+binding = "TEMP"
+bucket_name = "market-docket-temp-preview"
+
+[observability]
+enabled = true

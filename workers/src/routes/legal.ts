@@ -15,7 +15,7 @@ const legalPages: LegalPage[] = [
   {
     path: "/legal/privacy",
     title: "Kabuyomi プライバシーポリシー",
-    updatedAt: "2026-05-05",
+    updatedAt: "2026-07-11",
     sections: [
       {
         title: "1. 収集する情報",
@@ -67,7 +67,7 @@ const legalPages: LegalPage[] = [
   {
     path: "/legal/terms",
     title: "Kabuyomi 利用条件",
-    updatedAt: "2026-05-05",
+    updatedAt: "2026-07-11",
     sections: [
       {
         title: "1. サービスの性質",
@@ -113,7 +113,7 @@ const legalPages: LegalPage[] = [
   {
     path: "/legal/tokushoho",
     title: "Kabuyomi 特定商取引法に基づく表記",
-    updatedAt: "2026-05-05",
+    updatedAt: "2026-07-11",
     sections: [
       {
         title: "API-hosted fallback copy",
@@ -173,7 +173,7 @@ const legalPages: LegalPage[] = [
   {
     path: "/legal/support",
     title: "Kabuyomi サポート",
-    updatedAt: "2026-04-26",
+    updatedAt: "2026-07-11",
     sections: [
       {
         title: "問い合わせ先",

@@ -1,0 +1,26 @@
+Question:
+{{question}}
+
+Question intent:
+{{question_intent}}
+
+Content mode:
+{{content_mode}}
+
+Answer format:
+{{answer_format_instruction}}
+
+Retry instruction:
+{{retry_instruction}}
+
+Filing metadata:
+{{filing_metadata_json}}
+
+Factual metrics pack:
+{{factual_metrics_pack_json}}
+
+Factual pack:
+{{factual_pack_json}}
+
+Sources:
+{{sources_json}}

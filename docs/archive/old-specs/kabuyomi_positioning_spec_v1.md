@@ -1,6 +1,6 @@
 # Kabuyomi ポジショニング改善仕様書 v1
 
-> Historical / stale document. Not current v1 release truth. See `docs/release/RELEASE_TRUTH.md`.
+> Historical / stale document. Not current v1 release truth. See `docs/archive/v1/RELEASE_TRUTH.md`.
 
 ## 目的
 Kabuyomi の現状の弱さは、機能不足ではなく「最初の約束が弱い」ことにある。

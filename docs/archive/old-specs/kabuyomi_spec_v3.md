@@ -1,6 +1,6 @@
 # Kabuyomi - 完全仕様書 v3
 
-> Historical / stale document. Not current v1 release truth. See `docs/release/RELEASE_TRUTH.md`.
+> Historical / stale document. Not current v1 release truth. See `docs/archive/v1/RELEASE_TRUTH.md`.
 
 ## アプリ概要
 米国株の SEC 提出書類を日本語で読み、企業ごとに出典付きで質問できる iOS アプリ。

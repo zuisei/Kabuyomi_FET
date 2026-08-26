@@ -562,4 +562,264 @@ final class ConversationPromptTests: XCTestCase {
 
         XCTAssertNil(resolvedSourceURL(for: source, in: company))
     }
+
+    // MARK: - v2 根拠チップの識別性
+
+    private func mdChunk(id: String, title: String, text: String, order: Int) -> SourceChunkPayload {
+        SourceChunkPayload(
+            sourceId: id,
+            sectionType: "md_a",
+            sectionTitle: title,
+            sourceLabel: "Item 7",
+            text: text,
+            startOffset: 0,
+            endOffset: text.count,
+            tagName: nil,
+            sortOrder: order
+        )
+    }
+
+    func testSourceSectionBadgeSeparatesFilingSectionKinds() {
+        XCTAssertEqual(sourceSectionBadge(sectionType: "xbrl_metric"), "XBRL")
+        XCTAssertEqual(sourceSectionBadge(sectionType: "historical_metric"), "履歴")
+        XCTAssertEqual(sourceSectionBadge(sectionType: "historical_segment"), "セグメント")
+        XCTAssertEqual(sourceSectionBadge(sectionType: "web_search"), "WEB")
+        XCTAssertEqual(
+            sourceSectionBadge(sectionType: "md_a", sectionTitle: "Item 1A. Risk Factors"),
+            "リスク"
+        )
+        XCTAssertEqual(
+            sourceSectionBadge(sectionType: "md_a", sectionTitle: "Management's Discussion and Analysis"),
+            "MD&A"
+        )
+        XCTAssertEqual(sourceSectionBadge(sectionType: "md_a", sectionTitle: "Gross margin"), "本文")
+    }
+
+    /// 監査で「利益率」が3つ並んで見分けられなかった状態の回帰テスト。
+    func testSourceChipDescriptorsDistinguishChunksThatShareOneLabel() {
+        let company = TestFixtures.companyPayload()
+        let chunks = [
+            mdChunk(id: "m1", title: "Gross margin", text: "Gross margin increased to 46.6% in the second quarter.", order: 0),
+            mdChunk(id: "m2", title: "Margin outlook", text: "Margin outlook was pressured by higher research spending.", order: 1),
+            mdChunk(id: "m3", title: "Profitability", text: "Profitability improved on a favorable product mix.", order: 2)
+        ]
+
+        let descriptors = sourceChipDescriptors(for: chunks, in: company)
+
+        XCTAssertEqual(descriptors.map(\.label), ["利益率", "利益率", "利益率"])
+        XCTAssertEqual(Set(descriptors.compactMap(\.fragment)).count, 3)
+        XCTAssertTrue(descriptors.allSatisfy { $0.ordinal == nil })
+        XCTAssertTrue(descriptors.allSatisfy { $0.source?.sourceIdSnapshot != nil })
+    }
+
+    func testSourceChipDescriptorsNumberRowsThatStayIdenticalAfterBadgeAndFragment() {
+        let company = TestFixtures.companyPayload()
+        let chunks = [
+            mdChunk(id: "m1", title: "Gross margin", text: "   ", order: 0),
+            mdChunk(id: "m2", title: "Margin outlook", text: "", order: 1)
+        ]
+
+        let descriptors = sourceChipDescriptors(for: chunks, in: company)
+
+        XCTAssertEqual(descriptors.map(\.label), ["利益率", "利益率"])
+        XCTAssertEqual(descriptors.map(\.fragment), [nil, nil])
+        XCTAssertEqual(descriptors.map(\.ordinal), [1, 2])
+    }
+
+    func testSourceChipDescriptorsDropRepeatsOfTheSameChunk() {
+        let company = TestFixtures.companyPayload()
+        let chunk = mdChunk(id: "m1", title: "Gross margin", text: "Gross margin increased.", order: 0)
+
+        XCTAssertEqual(sourceChipDescriptors(for: [chunk, chunk], in: company).count, 1)
+    }
+
+    func testDisplayableMessageSourcesKeepDistinctEvidenceThatSharesOneLabel() {
+        let company = TestFixtures.companyPayload()
+        let sources = ["a", "b"].map { id in
+            LocalMessageSourceRef(
+                id: UUID(),
+                sourceIdSnapshot: id,
+                sourceKind: .secFiling,
+                sourceLabelSnapshot: "Gross margin",
+                excerpt: "Margin note \(id).",
+                sourceUrl: nil
+            )
+        }
+
+        XCTAssertEqual(displayableMessageSources(sources, in: company).count, 2)
+        XCTAssertEqual(displayableMessageSources(sources + [sources[0]], in: company).count, 2)
+    }
+
+    // MARK: - v2 発見・履歴の密度
+
+    /// ミッション文は初回だけ立て、保存や履歴がある人には控えめに落とす。
+    func testMissionProminenceRecedesOnceTheUserHasHistory() {
+        XCTAssertEqual(
+            redesignMissionProminence(hasRecentCompanies: false, hasSavedCompanies: false),
+            .prominent
+        )
+        XCTAssertEqual(
+            redesignMissionProminence(hasRecentCompanies: true, hasSavedCompanies: false),
+            .receded
+        )
+        XCTAssertEqual(
+            redesignMissionProminence(hasRecentCompanies: false, hasSavedCompanies: true),
+            .receded
+        )
+        XCTAssertEqual(
+            redesignMissionProminence(hasRecentCompanies: true, hasSavedCompanies: true),
+            .receded
+        )
+    }
+
+    func testHistoryTrailingTextPacksAnswerCountAndLatestActivityIntoOneLine() {
+        let activity = Date(timeIntervalSince1970: 1_777_000_000)
+        XCTAssertEqual(
+            redesignHistoryTrailingText(answerCount: 0, latestActivity: nil, formatted: { _ in "x" }),
+            "回答なし"
+        )
+        XCTAssertEqual(
+            redesignHistoryTrailingText(answerCount: 3, latestActivity: nil, formatted: { _ in "x" }),
+            "回答 3件"
+        )
+        XCTAssertEqual(
+            redesignHistoryTrailingText(answerCount: 3, latestActivity: activity, formatted: { _ in "5/2 14:03" }),
+            "回答 3件 ・ 5/2 14:03"
+        )
+        XCTAssertEqual(
+            redesignHistoryTrailingText(answerCount: 0, latestActivity: activity, formatted: { _ in "5/2 14:03" }),
+            "回答なし ・ 5/2 14:03"
+        )
+    }
+
+    // MARK: - v2 XBRL 抜粋の数値整形
+
+    private func xbrlChunk(id: String, title: String, tag: String, text: String, order: Int) -> SourceChunkPayload {
+        SourceChunkPayload(
+            sourceId: id,
+            sectionType: "xbrl_metric",
+            sectionTitle: title,
+            sourceLabel: "XBRL \(title) (\(tag))",
+            text: text,
+            startOffset: 0,
+            endOffset: text.count,
+            tagName: tag,
+            sortOrder: order
+        )
+    }
+
+    /// Worker が生の桁のまま出す抜粋(`workers/src/lib/filings/ingest.ts`)を、
+    /// 主要数値グリッドと同じ体裁へ落とす。
+    func testXBRLExcerptFormattingScalesRawUsdValues() {
+        XCTAssertEqual(
+            formattedXBRLExcerptText("営業CF: 82627000000 USD"),
+            "営業CF: 826.3億ドル"
+        )
+        XCTAssertEqual(
+            formattedXBRLExcerptText("売上高: 1200000000000 USD"),
+            "売上高: 1.2兆ドル"
+        )
+        XCTAssertEqual(
+            formattedXBRLExcerptText("営業利益: -410000000 USD"),
+            "営業利益: -4.1億ドル"
+        )
+    }
+
+    /// `比較値:` は単位を持たないので、同じ抜粋の先頭で見つけた単位を引き継ぐ。
+    /// 比率と日付の断片は数値に見えても書き換えない。
+    func testXBRLExcerptFormattingInheritsUnitAndLeavesNonMeasurementsAlone() {
+        XCTAssertEqual(
+            formattedXBRLExcerptText("営業CF: 82627000000 USD / 比較値: 71000000000 / YoY: 16.4%"),
+            "営業CF: 826.3億ドル / 比較値: 710億ドル / YoY: 16.4%"
+        )
+    }
+
+    /// 期末の併記は落とさない。
+    func testXBRLExcerptFormattingKeepsThePeriodEndSuffix() {
+        XCTAssertEqual(
+            formattedXBRLExcerptText("営業CF（比較期）: 71000000000 USD / period end: 2025-03-29"),
+            "営業CF（比較期）: 710億ドル / period end: 2025-03-29"
+        )
+        XCTAssertEqual(
+            formattedXBRLExcerptText("純利益: 23640000000 USD (2026-03-28)"),
+            "純利益: 236.4億ドル (2026-03-28)"
+        )
+    }
+
+    /// 1株あたりの値は桁が読めるので換算しない。単位無しの素の数値も触らない。
+    func testXBRLExcerptFormattingLeavesPerShareAndUnitlessValuesAlone() {
+        XCTAssertEqual(
+            formattedXBRLExcerptText("EPS（Basic）: 1.53 USD/shares"),
+            "EPS（Basic）: 1.53 USD/shares"
+        )
+        XCTAssertEqual(formattedXBRLExcerptText("123456000000"), "123456000000")
+        XCTAssertEqual(formattedXBRLExcerptText("EPS（Basic）: 1.53 USD/shares / 比較値: 1.40"), "EPS（Basic）: 1.53 USD/shares / 比較値: 1.40")
+    }
+
+    /// Worker 側で既に整形済みの履歴抜粋を二重に整形しない。
+    func testXBRLExcerptFormattingDoesNotTouchAlreadyFormattedText() {
+        let alreadyFormatted = "営業CF: 826.3億ドル (2026-03-28)"
+        XCTAssertEqual(formattedXBRLExcerptText(alreadyFormatted), alreadyFormatted)
+    }
+
+    /// 本文(MD&A)の散文は XBRL ではないので整形経路に入らない。
+    func testSourceChipFragmentsFormatXBRLValuesButLeaveNarrativeUntouched() {
+        let company = TestFixtures.companyPayload()
+        let chunks = [
+            xbrlChunk(
+                id: "x1",
+                title: "営業CF",
+                tag: "NetCashProvidedByUsedInOperatingActivities",
+                text: "営業CF: 82627000000 USD / 比較値: 71000000000 / YoY: 16.4%",
+                order: 0
+            ),
+            mdChunk(
+                id: "m1",
+                title: "Liquidity",
+                text: "Note: 2024 was a record year for operating cash flow.",
+                order: 1
+            )
+        ]
+
+        let descriptors = sourceChipDescriptors(for: chunks, in: company)
+
+        XCTAssertEqual(descriptors.count, 2)
+        let xbrlFragment = descriptors[0].fragment ?? ""
+        XCTAssertEqual(descriptors[0].badge, "XBRL")
+        XCTAssertTrue(xbrlFragment.contains("826.3億ドル"), "got \(xbrlFragment)")
+        XCTAssertFalse(xbrlFragment.contains("82627000000"), "got \(xbrlFragment)")
+        XCTAssertEqual(descriptors[1].fragment, "Note: 2024 was a record year for operating cash flow.")
+    }
+
+    // MARK: - v2 購入・付与の状態色
+
+    func testCreditSyncDisplayMapsRawBillingStatusesToStateTones() {
+        XCTAssertEqual(creditSyncDisplay(status: "not_started"), CreditSyncDisplay(title: "未同期", tone: .neutral))
+        XCTAssertEqual(
+            creditSyncDisplay(status: "route_missing HTTP 404 /v1/ios/subscriptions/sync"),
+            CreditSyncDisplay(title: "同期エラー", tone: .failed)
+        )
+        XCTAssertEqual(creditSyncDisplay(status: "sync_failed"), CreditSyncDisplay(title: "同期エラー", tone: .failed))
+        XCTAssertEqual(creditSyncDisplay(status: "syncing"), CreditSyncDisplay(title: "同期中", tone: .pending))
+        XCTAssertEqual(creditSyncDisplay(status: "granting"), CreditSyncDisplay(title: "同期中", tone: .pending))
+        XCTAssertEqual(creditSyncDisplay(status: "succeeded"), CreditSyncDisplay(title: "同期済み", tone: .granted))
+        XCTAssertEqual(creditSyncDisplay(status: "recovered"), CreditSyncDisplay(title: "同期済み", tone: .granted))
+    }
+
+    func testRewardedAdCreditToneKeepsUnresolvedGrantsInTheCautionState() {
+        XCTAssertEqual(rewardedAdCreditTone(.idle), .neutral)
+        XCTAssertEqual(rewardedAdCreditTone(.presenting), .neutral)
+        XCTAssertEqual(rewardedAdCreditTone(.loading), .pending)
+        XCTAssertEqual(rewardedAdCreditTone(.pendingGrant), .pending)
+        XCTAssertEqual(rewardedAdCreditTone(.dailyCapReached), .pending)
+    }
+
+    func testHeaderCollapseUsesHysteresisSoItDoesNotFlapAtTheThreshold() {
+        XCTAssertFalse(redesignHeaderCollapsed(current: false, offset: 0))
+        XCTAssertFalse(redesignHeaderCollapsed(current: false, offset: 20))
+        XCTAssertTrue(redesignHeaderCollapsed(current: false, offset: 40))
+        // 一度畳んだら、戻す閾値まで下がるまで開かない。
+        XCTAssertTrue(redesignHeaderCollapsed(current: true, offset: 20))
+        XCTAssertFalse(redesignHeaderCollapsed(current: true, offset: 4))
+    }
 }

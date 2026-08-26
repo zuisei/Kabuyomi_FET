@@ -34,7 +34,7 @@ const env = {
   ...process.env,
   KABUYOMI_TESTBENCH_BASE_URL: process.env.KABUYOMI_TESTBENCH_BASE_URL?.trim() || defaultBaseURL,
   KABUYOMI_TESTBENCH_COMPANY_SET:
-    process.env.KABUYOMI_TESTBENCH_COMPANY_SET?.trim() || "testbench/company-sets/prompt-v2-expanded-multisector.json",
+    process.env.KABUYOMI_TESTBENCH_COMPANY_SET?.trim() || "testbench/company-sets/production-tracked-15.json",
   KABUYOMI_TESTBENCH_QUESTIONS: process.env.KABUYOMI_TESTBENCH_QUESTIONS?.trim() || "testbench/questions/prompt-v2-smoke-10.jsonl",
   KABUYOMI_TESTBENCH_RUN_ID: runId,
   KABUYOMI_QUALITY_GATE_REQUIRED_TEMPLATES:

@@ -381,7 +381,15 @@ describe("Gemini local chat fallback", () => {
     expect(response.sourceIds).toContain("S3");
   });
 
-  it("keeps known CRWD business fallback from drifting into generic data-center wording", async () => {
+  /**
+   * The regression guarded here is unchanged: a CRWD business-overview question
+   * must not come back described in Nvidia-like data-center wording.
+   *
+   * What changed is the answer it settles on. summarizeKnownCompanyBusiness used
+   * to return a stored CRWD paragraph; the fallback now summarises the narrative
+   * chunk it cites, so the wording is whatever that chunk supports.
+   */
+  it("keeps the CRWD business fallback on the cited narrative instead of generic data-center wording", async () => {
     const response = await generateChatAnswer({} as never, {
       question: "何の会社？",
       filing: {
@@ -416,10 +424,11 @@ describe("Gemini local chat fallback", () => {
       }
     });
 
-    expect(response.answer).toContain("Falcon platform");
-    expect(response.answer).toContain("サイバーセキュリティ");
+    expect(response.answer).toContain("クラウドサービス");
+    expect(response.answer).toContain("サブスク・サービス");
     expect(response.answer).not.toContain("アクセラレーテッドコンピューティング");
     expect(response.answer).not.toContain("データセンター向けコンピューティング");
+    expect(response.sourceIds).toContain("S3");
   });
 
   it("explains CRWD subscription revenue drivers instead of giving navigational fallback text", async () => {
@@ -475,15 +484,32 @@ describe("Gemini local chat fallback", () => {
     expect(response.sourceIds).toEqual(expect.arrayContaining(["S2", "S9"]));
   });
 
-  it("uses known CEG business context instead of mapping AI acronym glossary text to Nvidia-like business", async () => {
+  /**
+   * The regression: the chunk's "AI Artificial Intelligence" glossary entry used
+   * to be read as a business signal and answered in Nvidia-like wording. That
+   * assertion is unchanged.
+   *
+   * The old answer came from summarizeKnownCompanyBusiness, a stored CEG
+   * paragraph. Without it the fallback quotes the chunk it cites. That quote is
+   * a weak answer for this fixture — it lands on the acronym list rather than on
+   * the generation sentence that follows — but it is the filing's own words with
+   * the filing's own source attached, which the stored paragraph was not.
+   */
+  it("does not read the AI acronym glossary as a Nvidia-like business", async () => {
     const response = await generateChatAnswer({} as never, {
       question: "何の会社？",
       filing: makeConstellationAcronymGlossaryFiling()
     });
 
-    expect(response.answer).toContain("発電・電力販売");
-    expect(response.answer).toContain("エネルギー会社");
     expect(response.answer).not.toContain("アクセラレーテッドコンピューティング");
+    expect(response.answer).not.toContain("データセンター");
+    // The no-label case used to quote the first 120 English characters of the
+    // chunk; it now states plainly that the excerpt carries no business
+    // description (2026-08-22). The test's point — the AI glossary must not be
+    // read as an accelerated-computing business — is unchanged.
+    expect(response.answer).toContain("事業内容の説明が含まれていません");
+    expect(response.answer).not.toMatch(/[A-Za-z]{4,}.*[A-Za-z]{4,}.*[A-Za-z]{4,}/);
+    expect(response.sourceIds).toEqual(["CTX2"]);
   });
 
   it("uses CEG risk-factor context instead of returning no-source fallback", async () => {
@@ -843,29 +869,64 @@ describe("Gemini local chat fallback", () => {
     expect(result?.response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["JPM1", "JPM2"]));
   });
 
-  it("answers core business and revenue templates with ticker-specific fallback context", () => {
+  /**
+   * Was "answers core business and revenue templates with ticker-specific
+   * fallback context". The ticker-specific context was TICKER_BUSINESS_OVERVIEWS
+   * and TICKER_REVENUE_BREAKDOWNS: on this fixture, whose only narrative chunk
+   * says "Management discusses cloud demand, productivity software, LinkedIn and
+   * gaming, but this excerpt does not contain a full revenue table", the answers
+   * named Microsoft 365 / LinkedIn / Windows and, for AMZN, AWS and 第三者販売
+   * サービス — with this filing's chunks attached as sources.
+   *
+   * The segment/directional halves of this test are untouched: they were always
+   * driven by the chunk text.
+   */
+  it("answers core business and revenue templates from the cited text, not from the ticker", () => {
     const filing = makeKnownTickerRevenueAxisFiling();
 
     const business = buildDeterministicMetricAnswer(filing, "この会社は何で儲けている？");
     expect(business?.strategy).toBe("business_overview");
-    expect(business?.response.answer).toContain("クラウド");
-    expect(business?.response.answer).toContain("Microsoft 365");
+    // Same question, typed the way users type it. This used to miss the
+    // business-overview gate entirely and fall through to the model path.
+    const colloquial = buildDeterministicMetricAnswer(filing, "この会社ってなにで稼いでんの？");
+    expect(colloquial?.strategy).toBe("business_overview");
+    expect(colloquial?.response.answer).toBe(business?.response.answer);
+    // 稼 alone must not reach this builder: cash generation is a different answer.
+    expect(buildDeterministicMetricAnswer(filing, "ちゃんとキャッシュ稼げてる？")?.strategy).not.toBe(
+      "business_overview"
+    );
+    // The cited chunk says "cloud demand". It does not say Microsoft 365, Azure
+    // or Windows, and neither does the answer.
+    expect(business?.response.answer).toContain("クラウドサービス");
+    expect(business?.response.answer).not.toContain("Microsoft 365");
+    expect(business?.response.answer).not.toContain("Windows");
+    expect(business?.response.sources.map((source: { sourceId: string }) => source.sourceId)).toEqual(["S1"]);
 
+    // Same filing text, different ticker. The answer must be the same, because
+    // it is derived from the text and not from the ticker. Under
+    // TICKER_BUSINESS_OVERVIEWS this returned 「オンライン小売、第三者販売サービス、
+    // 広告、サブスクリプション、AWSで収益を得ている会社です」 for a filing that
+    // mentions none of those.
     const amazonBusiness = buildDeterministicMetricAnswer(
       { ...filing, ticker: "AMZN", companyName: "AMAZON COM INC" },
       "この会社は何で儲けている？"
     );
     expect(amazonBusiness?.response.answer).toBe(
-      "AMAZON COM INCは、オンライン小売、第三者販売サービス、広告、サブスクリプション、AWSで収益を得ている会社です。"
+      business?.response.answer.replace("MICROSOFT CORP", "AMAZON COM INC")
     );
+    expect(amazonBusiness?.response.answer).not.toContain("AWS");
+    expect(amazonBusiness?.response.answer).not.toContain("オンライン小売");
     expect(amazonBusiness?.response.answer).not.toContain("International");
 
     const snapshot = buildDeterministicMetricAnswer(filing, "直近決算の売上はどうだった？");
     expect(snapshot?.strategy).toBe("revenue_breakdown");
     expect(snapshot?.response.answer).toContain("売上高は");
-    expect(snapshot?.response.answer).toContain("売上構造を見る軸");
-    expect(snapshot?.response.answer).toContain("LinkedIn");
+    // No breakdown was extracted, so the answer stops at the metric it can cite
+    // rather than appending 「売上構造を見る軸は、…」 from a ticker table.
+    expect(snapshot?.response.answer).not.toContain("売上構造を見る軸");
+    expect(snapshot?.response.answer).not.toContain("LinkedIn");
     expect(snapshot?.response.answer).not.toContain("売上高の増減は確認できますが");
+    expect(snapshot?.response.sources.map((source: { sourceId: string }) => source.sourceId)).toEqual(["S9"]);
 
     const segment = buildDeterministicMetricAnswer(filing, "どのセグメントや地域が伸びた？弱かった部分は？");
     expect(segment?.strategy).toBe("revenue_breakdown");
@@ -921,7 +982,11 @@ describe("Gemini local chat fallback", () => {
 
     expect(result?.strategy).toBe("revenue_breakdown");
     expect(result?.response.answer).toContain("売上高は");
-    expect(result?.response.answer).toContain("売上構造を見る軸");
+    // The English driver fragment is skipped, as before. What used to fill the
+    // gap was 「売上構造を見る軸は、オンライン小売、第三者販売サービス、…」 from
+    // TICKER_REVENUE_BREAKDOWNS["AMZN"], none of which this filing states.
+    expect(result?.response.answer).not.toContain("売上構造を見る軸");
+    expect(result?.response.answer).not.toContain("第三者販売サービス");
     expect(result?.response.answer).not.toContain("several factors");
     expect(result?.response.answer).not.toContain("payment processing");
     expect(result?.response.answer).not.toContain("fulfillment");
@@ -3899,7 +3964,7 @@ function makeKnownTickerRevenueAxisFiling() {
         sectionType: "md_a",
         sectionTitle: "Management discussion",
         sourceLabel: "10-Q Management discussion",
-        text: "Management discusses cloud demand, productivity software, LinkedIn and gaming, but this excerpt does not contain a full revenue table.",
+        text: "Management discusses cloud demand, advertising revenue, productivity software, LinkedIn and gaming, but this excerpt does not contain a full revenue table.",
         startOffset: 0,
         endOffset: 0,
         sortOrder: 1

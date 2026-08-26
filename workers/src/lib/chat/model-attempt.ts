@@ -49,7 +49,7 @@ export async function buildValidatedModelAnswer({
   modelResponse: GeminiChatAnswer;
   sourceValidation: ChatSourceValidationResult;
 }> {
-  let contextPack = timings.timeSync("contextBuildMs", () => buildChatContextPack(filing, questionIntent));
+  let contextPack = timings.timeSync("contextBuildMs", () => buildChatContextPack(filing, questionIntent, { question }));
   logChatContextSelection(filing, contextPack);
   const initialGate = evaluateSourceGate({
     ticker: filing.ticker,

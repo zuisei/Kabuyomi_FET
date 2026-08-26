@@ -4,7 +4,8 @@ import { EntitlementDO } from "../src/durable/entitlement";
 import { UserQuotaDO } from "../src/durable/user-quota";
 import { setAppleSignedDataVerifierFactoryForTests } from "../src/lib/apple-signed-data";
 import { DEFAULT_REMOTE_CONFIG } from "../src/lib/remote-config";
-import worker, { resolveAppAttestAssertionPolicy } from "../src/index";
+import worker, { enforceAppAttestAssertionPolicy, resolveAppAttestAssertionPolicy } from "../src/index";
+import { AppError } from "../src/lib/errors";
 
 function completeRemoteConfigEnvelope(overrides: Record<string, unknown> = {}) {
   const config: Record<string, unknown> = {
@@ -1695,7 +1696,9 @@ describe("worker routing", () => {
     });
   });
 
-  it("bypasses App Attest only for unavailable core clients while keeping pending, verified, and reward paths strict", () => {
+  /// core パスで App Attest がユーザーを締め出さないこと。
+  /// 元の形は「一度証明に成功した端末だけが以後 403 で人質になる」という逆転を持っていた。
+  it("never blocks a core path on App Attest, and keeps the reward path strict", () => {
     for (const [method, path] of [
       ["POST", "/v1/chat"],
       ["POST", "/v1/translate-quote"],
@@ -1704,13 +1707,49 @@ describe("worker routing", () => {
       ["POST", "/v1/company/AAPL/refresh"]
     ] as const) {
       expect(resolveAppAttestAssertionPolicy(method, path, "unavailable")).toBe("none");
-      expect(resolveAppAttestAssertionPolicy(method, path, "pending")).toBe("required");
-      expect(resolveAppAttestAssertionPolicy(method, path, "verified")).toBe("required");
+      expect(resolveAppAttestAssertionPolicy(method, path, "pending")).toBe("advisory");
+      expect(resolveAppAttestAssertionPolicy(method, path, "verified")).toBe("advisory");
     }
+    // クレジットが増える唯一の経路。ここだけは偽装を通さない。
     for (const status of ["unavailable", "pending", "verified"] as const) {
       expect(resolveAppAttestAssertionPolicy("POST", "/v1/admob/reward-intents", status)).toBe("required");
     }
     expect(resolveAppAttestAssertionPolicy("GET", "/v1/company/AAPL", "unavailable")).toBe("none");
+  });
+
+  it("lets an advisory App Attest failure through, and still records it", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const context = {
+      path: "/v1/chat",
+      method: "POST",
+      attestationStatus: "verified",
+      principalHash: "inst...abcd"
+    };
+    const failing = vi.fn().mockRejectedValue(new AppError(403, "App Attest assertion failed"));
+
+    await expect(enforceAppAttestAssertionPolicy("advisory", failing, context)).resolves.toBeUndefined();
+    expect(failing).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("\"event\":\"app_attest_assertion_ignored\"")
+    );
+    // 握り潰した理由が読めること。read できない握り潰しは監査で指摘された形そのもの。
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("\"failureClass\":\"status_403\""));
+    warnSpy.mockRestore();
+  });
+
+  it("still refuses a required App Attest failure and skips verification entirely when the policy is none", async () => {
+    const context = {
+      path: "/v1/admob/reward-intents",
+      method: "POST",
+      attestationStatus: "verified",
+      principalHash: "inst...abcd"
+    };
+    const failing = vi.fn().mockRejectedValue(new AppError(403, "App Attest assertion failed"));
+    await expect(enforceAppAttestAssertionPolicy("required", failing, context)).rejects.toThrow("App Attest assertion failed");
+
+    const unused = vi.fn().mockResolvedValue(undefined);
+    await enforceAppAttestAssertionPolicy("none", unused, context);
+    expect(unused).not.toHaveBeenCalled();
   });
 
   it("allows secret-backed automation through installation and App Attest gates only on the test Worker", async () => {

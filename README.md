@@ -170,7 +170,7 @@ It also validates the current chat metadata contract: `responsePath` must be pre
 - Machine-readable gate state lives at `docs/release/RELEASE_GATE_STATE.json`.
 - Remote-config review/refresh lifecycle lives at `docs/release/REMOTE_CONFIG_LIFECYCLE_RUNBOOK.md`.
 - App Review notes live at `docs/release/APP_STORE_SUBMISSION_NOTES.md`.
-- `docs/release/RELEASE_TRUTH.md` and `docs/release/TESTFLIGHT_READINESS_CHECKLIST.md` are historical snapshots, not current authority.
+- `docs/archive/v1/RELEASE_TRUTH.md` and `docs/archive/v1/TESTFLIGHT_READINESS_CHECKLIST.md` are historical snapshots, not current authority.
 - Older specs and handoffs under `docs/archive/` are reference-only. Some still describe Home/Tab roots, subscription-era monetization, old beta quota language, or broader product plans.
 - Screenshot notes are consolidated at `artifacts/README.md` instead of keeping README files inside dated capture folders.
 

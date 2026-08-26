@@ -24,7 +24,31 @@ const CURRENCY_CLAIM_PATTERN = /(?<open>\()?[ \t]*(?<sign>[+\-−△▲])?[ \t]*
 const PERCENTAGE_CLAIM_PATTERN = /(?<open>\()?[ \t]*(?<sign>[+\-−△▲])?[ \t]*(?<number>\d+(?:\.\d+)?)[ \t]*%(?<direction>[ \t]*(?:増|減|上昇|下落|低下|改善|悪化|increase|increased|decrease|decreased|up|down))?[ \t]*(?<close>\))?/giu;
 const BARE_TYPED_CLAIM_PATTERN = /(?<open>\()?[ \t]*(?<sign>[+\-−△▲])?[ \t]*(?<number>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)[ \t]*(?<scale>trillion|billion|million|兆|億|十億|百万)?[ \t]*(?<suffix>shares?|株|倍|x)?[ \t]*(?<close>\))?/giu;
 
-export function extractMaterialNumericClaims(text: string): MaterialNumericClaim[] {
+/// 全角の数字・記号を半角へ倒す。**1文字を1文字に置き換えるので長さが変わらない。**
+/// これが重要で、返す `start`/`end` は呼び出し元が持つ元テキストにそのまま使える
+/// (`numeric-alignment` は元の answer に対して `slice` で修理値を差し込む)。
+///
+/// 正規化しないと、日本語の回答でごく自然に現れる全角 `％` や全角数字が
+/// どのパターンにも一致せず、**クレームが0件 = 検証を素通り**する。
+/// 全角カンマ/ピリオドは逆に数値を分断し(`1，111.8億ドル` → `1` と `111.8億ドル`)、
+/// 正しい値を誤ってブロックする。どちらもここで閉じる。
+/// **数値そのものを構成する文字だけ**を対象にする。全角括弧 `（）` と全角空白は
+/// 意図的に含めない。日本語では `長期債務（非流動）` のようにごく普通の
+/// 補足として使われ、半角 `()` に倒すと負数の括弧表記と誤認される。
+const FULL_WIDTH_NUMERIC_MAP: Record<string, string> = {
+  "０": "0", "１": "1", "２": "2", "３": "3", "４": "4",
+  "５": "5", "６": "6", "７": "7", "８": "8", "９": "9",
+  "％": "%", "，": ",", "．": ".", "＋": "+", "－": "-", "＄": "$"
+};
+
+const FULL_WIDTH_NUMERIC_PATTERN = /[０-９％，．＋－＄]/gu;
+
+export function normalizeNumericWidth(text: string): string {
+  return text.replace(FULL_WIDTH_NUMERIC_PATTERN, (character) => FULL_WIDTH_NUMERIC_MAP[character] ?? character);
+}
+
+export function extractMaterialNumericClaims(rawText: string): MaterialNumericClaim[] {
+  const text = normalizeNumericWidth(rawText);
   const explicitClaims = [
     ...extractCurrencyClaims(text),
     ...extractPercentageClaims(text)

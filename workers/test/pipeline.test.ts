@@ -408,7 +408,12 @@ describe("buildChatResponse", () => {
     expect(response.answer).not.toContain("segment revenue");
   });
 
-  it("keeps known PH and CRWD company overviews away from generic tech labels", async () => {
+  /**
+   * PH is unchanged: Aerospace Systems and Diversified Industrial are in that
+   * filing's text and the extractor matches them there. CRWD changed — see the
+   * comment on its assertions.
+   */
+  it("keeps PH and CRWD company overviews away from generic tech labels", async () => {
     const parker = await buildChatResponse(
       makeParkerOverviewFiling(),
       "何の会社？",
@@ -428,10 +433,17 @@ describe("buildChatResponse", () => {
     expect(parker.answer).not.toContain("本文では「");
 
     expect(crowdstrike.responsePath).toBe("deterministic");
-    expect(crowdstrike.answer).toContain("Falcon platform");
-    expect(crowdstrike.answer).toContain("cybersecurity subscriptions");
+    // Falcon platform and cybersecurity subscriptions are in this filing's text
+    // and in the extractor's CRWD patterns, but every md_a chunk here fails the
+    // factual-pack source-quality gate, so the pack has nothing to cite and the
+    // narrative summariser answers instead. That answer is less specific and
+    // still comes from the chunk it cites. It used to be rescued by
+    // fallbackKnownBusinessSourceIds, which attached the very chunk the quality
+    // gate had just rejected.
+    expect(crowdstrike.answer).toContain("クラウドサービス");
     expect(crowdstrike.answer).not.toContain("AI向けアクセラレーテッドコンピューティング");
     expect(crowdstrike.answer).not.toContain("データセンター向けコンピューティング");
+    expect(crowdstrike.sources.length).toBeGreaterThan(0);
   });
 
   it("uses deterministic filing context for business-overview prompts before provider work", async () => {
@@ -527,15 +539,21 @@ describe("buildChatResponse", () => {
       { webSupplementEnabled: false }
     );
 
-    expect(response.answer).toContain("Apple Inc.は");
-    expect(response.answer).toContain("iPhone");
-    expect(response.answer).toContain("サービス");
-    expect(response.answer).not.toContain("Services");
+    // The fixture's only narrative chunk is a seasonality paragraph: it names no
+    // product at all. The answer used to open with 「iPhone、Mac、iPad、ウェアラブル
+    // 機器、サービスで収益を得ている会社です」 out of TICKER_BUSINESS_OVERVIEWS, and
+    // after that table went, with 「製品・サービス販売を主な事業にする会社です」 —
+    // a seasonality sentence ("new product and service introductions") inflated
+    // into the company's main business. A single keyword is not a business
+    // description (2026-08-22): with one label the deterministic layer declines,
+    // and a filing that does not describe the business gets an honest
+    // insufficiency rather than an invented one.
+    expect(response.answer).not.toContain("iPhone");
+    expect(response.answer).not.toContain("ウェアラブル");
+    expect(response.answer).not.toContain("を主な事業にする会社です");
     expect(response.answer).not.toContain("historically experienced higher net sales");
-    expect(response.sources.map((source) => source.sourceId)).toEqual(["S8"]);
-    expect(response.responsePath).toBe("deterministic");
+    expect(response.answer).toMatch(/確認できません|分かりません/);
     expect(response.debug?.sourceIdsValid).toBe(true);
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("uses revenue buckets for broad what-company prompts when business buckets are available", async () => {

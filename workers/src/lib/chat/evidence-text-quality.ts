@@ -27,7 +27,7 @@ export function isBoilerplateOrRiskOnly(
   const hasPeriodDriverEvidence =
     /(net sales|revenue increased|decreased|primarily due|driven by|attributable to|gross margin|operating margin|segment operating|unit case volume|cloud revenue|revenue per user|seats grew|demand for our products|growth in)/i.test(normalized);
   return (
-    /(forward-looking statements|available information|investor relations website|trademark|table of contents|risk factors|risks related to|we urge you to carefully review|supervision and regulation)/i.test(normalized) &&
+    /(forward-looking statements|could differ materially|actual results (?:and outcomes )?(?:could|may) differ|safe harbor|cautionary statements?|available information|investor relations website|trademark|table of contents|risk factors|risks related to|we urge you to carefully review|supervision and regulation)/i.test(normalized) &&
     !hasPeriodDriverEvidence
   );
 }

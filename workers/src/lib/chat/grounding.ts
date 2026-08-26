@@ -166,6 +166,9 @@ export interface ChatResponseDebug {
   languageGuardFallbackKind?: import("../../clients/gemini/types").ChatFallbackKind | null;
   originalAnswerBeforeLanguageGuardLength?: number | null;
   originalAnswerBeforeLanguageGuardSample?: string | null;
+  /** cleanup が回答を差し替えたとき、差し替え前のモデル回答(冒頭)。理由の特定用。 */
+  cleanupReplacedAnswerSample?: string | null;
+  cleanupFallbackUserReason?: string | null;
   sourceRepairLabels?: string[];
   semanticQualityLabels?: string[];
   numericAlignmentChecked?: boolean;

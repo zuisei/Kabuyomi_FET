@@ -1,4 +1,6 @@
 import { classifyHistoricalComparisonMode } from "../history-question";
+import { filingSegmentVocabulary } from "./context-factual-pack";
+import { isBusinessOverviewQuestion } from "./business-overview-question";
 
 export type QuestionIntent =
   | "business_overview"
@@ -15,7 +17,10 @@ export type QuestionIntent =
   | "investment_view"
   | "unknown";
 
-export function classifyQuestionIntent(question: string): QuestionIntent {
+export function classifyQuestionIntent(
+  question: string,
+  options: { ticker?: string } = {}
+): QuestionIntent {
   const normalized = question.replace(/\s+/g, "").toLowerCase();
 
   if (classifyHistoricalComparisonMode(question)) {
@@ -38,11 +43,10 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
     return "investment_view";
   }
 
-  if (
-    /(何で儲け|なんで儲け|何で稼|なんで稼|収益源|なんの企業|何の企業|なんの会社|何の会社|どんな企業|どんな会社|何してる|何をしてる|何をやってる|事業内容|主な事業|事業は|主な製品|主要製品|製品と顧客|顧客|customers?|businessmodel|whatdoes.*companydo|whatcompany|whatbusiness)/.test(
-      normalized
-    )
-  ) {
+  // The shared vocabulary lives in business-overview-question.ts. The extra
+  // alternation is this classifier's own breadth: only the context pack treats a
+  // product/customer question as a business overview.
+  if (isBusinessOverviewQuestion(normalized) || /(主な製品|主要製品|製品と顧客|顧客|customers?)/.test(normalized)) {
     return "business_overview";
   }
 
@@ -70,7 +74,8 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
     return "mda_summary";
   }
 
-  if (/(資金繰り|負債|債務|借入|返済|満期|流動性|信用枠|debt|liquidity|maturity|borrowings?|creditfacility)/.test(normalized)) {
+  // 借金: 口語ベンチ(human-phrasing-12 Q10「借金やばくない？」)が unknown に落ちていた。
+  if (/(資金繰り|負債|債務|借入|借金|返済|満期|流動性|信用枠|debt|liquidity|maturity|borrowings?|creditfacility)/.test(normalized)) {
     return "liquidity_debt";
   }
 
@@ -78,7 +83,9 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
     return "cash_flow";
   }
 
-  if (/(リスク|懸念|逆風|不確実|不透明|risk|uncertain|uncertainty|macro|関税|tariff)/.test(normalized)) {
+  // やばい/危ない: 口語ベンチ Q11「この決算でやばいとこある？」。流動性・CF の段が先に
+  // 取るので、「借金やばい」は liquidity のまま。
+  if (/(リスク|懸念|逆風|不確実|不透明|やばい|ヤバい|やばく|危ない|危険|risk|uncertain|uncertainty|macro|関税|tariff)/.test(normalized)) {
     return "risk_factors";
   }
 
@@ -86,8 +93,21 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
     return "margin_profitability";
   }
 
-  if (/(セグメント|segment|部門|地域|geography|地域別|製品別|productmix|構成|内訳)/.test(normalized)) {
+  // どこの事業が調子いい: 口語ベンチ Q08。「事業」単体は business overview と衝突するので
+  // 「どこの/どの事業」「事業が/の調子」の形だけ拾う。
+  if (/(セグメント|segment|部門|地域|geography|地域別|製品別|productmix|構成|内訳|どこの事業|どの事業|事業が調子|事業の調子|事業が好調|事業が不調)/.test(normalized)) {
     return "segment_analysis";
+  }
+
+  // 会社固有のセグメント・製品名(AWS、iPhone、Google Cloud …)を名指しした質問は、
+  // 一般語の段で拾えなくてもセグメント分析として扱う。利益率など上の段が先に
+  // 取るので、「AWS margin」は margin のまま。空白を潰した normalized ではなく
+  // 元の質問に対して語境界付きで照合する。
+  if (options.ticker) {
+    const original = question.toLowerCase();
+    if (filingSegmentVocabulary(options.ticker).some((pattern) => pattern.test(original))) {
+      return "segment_analysis";
+    }
   }
 
   if (

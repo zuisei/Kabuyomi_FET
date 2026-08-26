@@ -1,4 +1,5 @@
 import type { Env, FilingReference } from "../env";
+import { SUPPORTED_FILING_FORMS, isSupportedFilingForm } from "../env";
 import { AppError } from "../lib/errors";
 import { logErrorEvent } from "../lib/logging";
 import { createCloudflareSecFetcherService } from "../lib/sec-fetcher-service";
@@ -73,6 +74,14 @@ export async function fetchFilingHtmlFromFetcher(filing: FilingReference, env: E
     accessionNumber: filing.accessionNumber,
     primaryDocument: filing.primaryDocument
   });
+}
+
+export async function listFilingDocumentsFromFetcher(
+  cik: string,
+  accessionNumber: string,
+  env: Env
+): Promise<{ documents: string[] }> {
+  return fetcherRequest(env, "/internal/sec/filing-documents", { cik, accessionNumber });
 }
 
 export async function fetchMetricsFromFetcher(
@@ -258,8 +267,16 @@ async function fetchFromCloudflareInternalSecFetcher(
   payload: Record<string, unknown>
 ): Promise<unknown> {
   try {
-    await waitForSecRateLimit(env, path);
-    const service = createCloudflareSecFetcherService(env);
+    // 課金は「実際に SEC を叩く直前」の1点だけに寄せる。1 HTTP リクエスト = 1トークン。
+    //
+    // 以前は経路の入口で 1〜2トークンをまとめて払っていたが、
+    // (a) `fetchWithRetry` の再試行が1トークンも払わずに SEC を叩けてしまい、
+    // (b) 逆にキャッシュヒットで SEC を叩かない場合でも払っていた。
+    // どちらも実リクエスト数とずれる。入口の課金は残さない
+    // (残すと1リクエストに2トークン払うことになり、予算が実質半分になる)。
+    const service = createCloudflareSecFetcherService(env, {
+      beforeAttempt: () => waitForSecRateLimit(env, path, 1)
+    });
 
     if (path === "/internal/sec/tickers-snapshot") {
       return service.fetchTickerSnapshot();
@@ -296,10 +313,19 @@ async function fetchFromCloudflareInternalSecFetcher(
     }
 
     if (path === "/internal/sec/prepared-filing") {
-      const formType = payload.formType === "10-K" || payload.formType === "10-Q" ? payload.formType : null;
-      if (!formType) {
-        throw new AppError(400, "Invalid SEC fetcher payload", "prepared filing formType must be 10-K or 10-Q");
+      // **`isSupportedFilingForm` を使う。** ここを 10-K / 10-Q の直書きにしていたため、
+      // 20-F は 400 で弾かれ、本文の用意まで届いていなかった。
+      // `sec-fetcher/src/prepared-filing.mjs` は Item 5 を読む実装を**既に持っている**のに、
+      // 手前の振り分けだけが古いままだった(2026-08-26)。
+      const rawFormType = typeof payload.formType === "string" ? payload.formType : null;
+      if (!isSupportedFilingForm(rawFormType)) {
+        throw new AppError(
+          400,
+          "Invalid SEC fetcher payload",
+          `prepared filing formType must be one of ${SUPPORTED_FILING_FORMS.join(", ")}`
+        );
       }
+      const formType = rawFormType;
 
       return service.fetchPreparedFiling({
         cik: String(payload.cik ?? ""),
@@ -330,7 +356,7 @@ async function fetchFromCloudflareInternalSecFetcher(
   }
 }
 
-async function waitForSecRateLimit(env: Env, path: string): Promise<void> {
+async function waitForSecRateLimit(env: Env, path: string, overrideTokens?: number): Promise<void> {
   if (!env.SEC_RATE_LIMITER) {
     logErrorEvent("sec_rate_limiter_missing", {
       path,
@@ -343,7 +369,8 @@ async function waitForSecRateLimit(env: Env, path: string): Promise<void> {
     return;
   }
 
-  const tokens = path === "/internal/sec/filing-assets" || path === "/internal/sec/prepared-filing" ? 2 : 1;
+  const tokens = overrideTokens ??
+    (path === "/internal/sec/filing-assets" || path === "/internal/sec/prepared-filing" ? 2 : 1);
   const response = await env.SEC_RATE_LIMITER.getByName(SEC_RATE_LIMITER_NAME).fetch(
     `https://do/sec-rate-limit?tokens=${tokens}`
   );

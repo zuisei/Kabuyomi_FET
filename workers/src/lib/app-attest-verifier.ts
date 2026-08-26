@@ -4,6 +4,7 @@ import { ECDSASigValue } from "@peculiar/asn1-ecc";
 import { X509Certificate, X509ChainBuilder } from "@peculiar/x509";
 import { decode, decodeMultiple } from "cbor-x";
 import type { Env } from "../env";
+import { logEvent, logWarnEvent } from "./logging";
 
 // Pinned from Apple's certificate authority service. Keep the trust anchor in
 // source so DNS or a remote certificate fetch cannot change verifier trust.
@@ -101,7 +102,7 @@ export async function verifyBuiltInAttestation(env: Env, input: {
   const rawPoint = new Uint8Array(await crypto.subtle.exportKey("raw", cryptoKey));
   if (!equal(await sha256(rawPoint), parsed.credentialId)) throw new Error("attestation_public_key_mismatch");
 
-  verifyAppExtensions(parsed.extensions, env);
+  verifyAppExtensions(parsed.extensions, env, "attestation");
   return { publicKeySpki: spki, environment };
 }
 
@@ -125,7 +126,7 @@ export async function verifyBuiltInAssertion(env: Env, input: {
   const extensions = hasExtensions
     ? decode(authData.slice(37)) as ParsedAttestationAuthData["extensions"]
     : null;
-  verifyAppExtensions(extensions, env);
+  verifyAppExtensions(extensions, env, "assertion");
 
   const publicKey = await crypto.subtle.importKey(
     "spki", ownedBuffer(input.publicKeySpki), { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]
@@ -139,11 +140,31 @@ export async function verifyBuiltInAssertion(env: Env, input: {
   return new DataView(authData.buffer, authData.byteOffset, authData.byteLength).getUint32(33, false);
 }
 
-function verifyAppExtensions(extensions: ParsedAttestationAuthData["extensions"], env: Env): void {
+function verifyAppExtensions(
+  extensions: ParsedAttestationAuthData["extensions"],
+  env: Env,
+  stage: "attestation" | "assertion"
+): void {
   if (!extensions) {
-    if (env.APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS?.trim().toLowerCase() === "true") return;
+    if (env.APP_ATTEST_ALLOW_MISSING_APP_EXTENSIONS?.trim().toLowerCase() === "true") {
+      // Production runs this allowance, and the early return used to be silent —
+      // so nobody could tell how many real installs send attestations without
+      // extensions, which is exactly what has to be known before the allowance
+      // can be turned off. Note that returning here skips BOTH the validation
+      // category and the bundle version check.
+      logWarnEvent("app_attest_extensions_missing_allowed", {
+        stage,
+        allowedBundleVersions: env.APP_ATTEST_ALLOWED_BUNDLE_VERSIONS ?? null,
+        allowedValidationCategories: env.APP_ATTEST_ALLOWED_VALIDATION_CATEGORIES ?? "2,3,4"
+      });
+      return;
+    }
     throw new Error("attestation_extensions_missing");
   }
+
+  // Logged so the two paths can be compared: if extensions are effectively
+  // always present, the allowance above can be removed safely.
+  logEvent("app_attest_extensions_present", { stage });
   const value = (key: string): unknown => extensions instanceof Map ? extensions.get(key) : extensions[key];
   const category = decodeValidationCategory(value("apple_validation_category_01"));
   if (!Number.isSafeInteger(category) || !csv(env.APP_ATTEST_ALLOWED_VALIDATION_CATEGORIES ?? "2,3,4").includes(String(category))) {

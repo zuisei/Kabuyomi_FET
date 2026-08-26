@@ -1,4 +1,4 @@
-import type { FilingCacheRecord, MetricSnapshot, SourceChunkRecord } from "../../env";
+import type { FilingCacheRecord, FilingFormType, MetricSnapshot, SourceChunkRecord } from "../../env";
 import type { ChatContextPack } from "../../lib/chat/context-pack";
 import type { QuestionIntent } from "../../lib/chat/intent";
 
@@ -6,7 +6,7 @@ export interface SummaryPromptInput {
   filingKey: string;
   ticker: string;
   companyName: string;
-  formType: "10-K" | "10-Q";
+  formType: FilingFormType;
   filedAt: string;
   periodOfReport: string;
   metrics: MetricSnapshot[];

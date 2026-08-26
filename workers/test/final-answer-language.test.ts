@@ -424,7 +424,15 @@ describe("Japanese-only final answer guard", () => {
     expect(response.debug?.sourceRepairLabels ?? []).not.toContain("q04_durability_wording_softened");
   });
 
-  it("repairs WMT Q04 post-gate underanswers from source-backed retail durability evidence", async () => {
+  /**
+   * Previously the repair for this fixture came from buildWmtDurabilitySynthesis,
+   * a constant paragraph naming 既存店売上 / EC / 会員利用 / 燃料価格 that fired on
+   * any Walmart-like filing and then claimed a `source_backed` label. The
+   * generic synthesis now handles it: every driver it names is a label read out
+   * of the evidence text, so the assertions below check the labels against the
+   * evidence rather than against a stored paragraph.
+   */
+  it("repairs WMT Q04 post-gate underanswers from labels found in the retail durability evidence", async () => {
     const filing = makeFiling({ ticker: "WMT", companyName: "Walmart Inc." });
     const response = await finalizeChatResponse({
       filing,
@@ -465,17 +473,22 @@ describe("Japanese-only final answer guard", () => {
       includeWebSupplement: false
     });
 
-    expect(response.answer).toContain("提出資料だけでは継続性は断定できません");
-    expect(response.answer).toContain("既存店売上");
-    expect(response.answer).toContain("EC");
-    expect(response.answer).toContain("会員利用");
-    expect(response.answer).toContain("継続性を見る材料");
+    expect(response.answer).toContain("継続性は断定できません");
+    // transactions / average ticket, grocery, unit volumes — all present in the
+    // evidence driver text above.
+    expect(response.answer).toContain("取引件数・客単価");
+    expect(response.answer).toContain("食品・一般商品");
+    expect(response.answer).toContain("販売数量");
+    // The evidence says nothing about fuel. The deleted constant paragraph
+    // asserted it anyway, for every Walmart-like filing.
+    expect(response.answer).not.toContain("燃料価格");
     expect(response.answer).not.toContain("継続的に高まり");
     expect(response.answer).not.toContain("持続的に伸びる");
     expect(response.responsePath).toBe("openai");
     expect(response.debug?.fallbackReason).toBeNull();
     expect(response.debug?.fallbackCategory).toBe("none");
-    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q04_retail_durability_source_backed_repair"]));
+    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q04_generic_durability_source_backed_repair"]));
+    expect(response.debug?.sourceRepairLabels ?? []).not.toContain("q04_retail_durability_source_backed_repair");
     expect(response.debug?.sourceIdsValid).toBe(true);
     expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
   });
@@ -536,7 +549,13 @@ describe("Japanese-only final answer guard", () => {
     expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
   });
 
-  it("repairs GOOGL Q04 from platform durability evidence without rejecting valid comma-grouped amounts", async () => {
+  /**
+   * The comma-grouped-amount half of this test is unchanged: 1,099億ドル must not
+   * trip the malformed-currency guard. The repair half changed — the platform
+   * synthesis it used to assert was a constant paragraph gated on an Alphabet
+   * name match, so the answer is now built from evidence labels instead.
+   */
+  it("repairs GOOGL Q04 from evidence labels without rejecting valid comma-grouped amounts", async () => {
     const baseFiling = makeFiling({ ticker: "GOOGL", companyName: "Alphabet Inc." });
     const sourceTexts = [
       "YouTube ads revenues increased, driven by direct response and brand advertising. Advertising results can vary with advertiser competition, device mix, and seasonal fluctuations.",
@@ -604,19 +623,32 @@ describe("Japanese-only final answer guard", () => {
       includeWebSupplement: false
     });
 
-    expect(response.responsePath).toBe("openai");
-    expect(response.answer).toContain("有料サブスクリプションの増加は継続性を見る材料");
-    expect(response.answer).toContain("広告主の競争");
-    expect(response.answer).toContain("為替影響も四半期ごとに変動");
-    expect(response.answer).toContain("Google Cloud");
+    expect(response.answer).toContain("継続性は断定できません");
+    // Read out of the evidence: "advertiser competition", "brand advertising".
+    expect(response.answer).toContain("広告需要");
+    // buildGoogleDurabilitySynthesis used to close every Alphabet-like answer
+    // with 「次回は、Googleサービス、Google Cloud、YouTube広告、有料サブスクリプション
+    // の成長率を…」 regardless of which of those the evidence mentioned.
+    expect(response.answer).not.toContain("Googleサービス");
+    // Was "openai". With no platform synthesis to repair the model answer with,
+    // the deterministic answer is served instead — a routing change worth
+    // pinning rather than leaving unasserted.
+    expect(response.responsePath).toBe("deterministic");
     expect(response.debug?.fallbackCategory).toBe("none");
     expect(response.debug?.guardLabels ?? []).not.toContain("malformed_currency_detected");
-    expect(response.debug?.sourceRepairLabels).toContain("q04_platform_durability_source_backed_repair");
-    expect(response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["CTX1", "CTX2", "CTX3"]));
+    expect(response.debug?.sourceRepairLabels ?? []).not.toContain("q04_platform_durability_source_backed_repair");
+    expect(response.sources.map((source) => source.sourceId)).toEqual(expect.arrayContaining(["CTX1", "CTX2"]));
     expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
   });
 
-  it("repairs JPM Q04 post-gate underanswers from source-backed NII and NIR evidence", async () => {
+  /**
+   * The repair still has to be substantive and still has to name the NII/NIR
+   * drivers — that part of the protection is unchanged. What changed is where
+   * the words come from: buildJpmDurabilitySynthesis supplied two stored
+   * paragraphs of banking commentary to any JPMorgan-like filing, so the
+   * assertions now pin driver labels inferred from the evidence text.
+   */
+  it("repairs JPM Q04 post-gate underanswers from labels found in the NII and NIR evidence", async () => {
     const filing = makeFiling({ ticker: "JPM", companyName: "JPMorgan Chase & Co." });
     const response = await finalizeChatResponse({
       filing,
@@ -670,17 +702,23 @@ describe("Japanese-only final answer guard", () => {
       includeWebSupplement: false
     });
 
-    expect(response.answer).toContain("提出資料だけでは継続性は断定できません");
+    expect(response.answer).toContain("継続性は断定できません");
+    // Both read out of the evidence drivers above ("Net interest income",
+    // "Noninterest revenue", "investment banking", "Markets").
     expect(response.answer).toContain("純利息収入");
-    expect(response.answer).toContain("非金利収入");
-    expect(response.answer).toContain("金利環境次第");
-    expect(response.answer).toContain("市場関連収益や一時利益は変動しやすい");
+    expect(response.answer).toContain("非利息収入・投資銀行・市場業務");
+    // buildJpmDurabilitySynthesis wrote these clauses itself. They are plausible
+    // banking commentary, but the filing was never consulted for them and the
+    // repair label claimed they were source-backed.
+    expect(response.answer).not.toContain("継続性は金利環境次第");
+    expect(response.answer).not.toContain("市場関連収益や一時利益は変動しやすい");
+    expect(response.answer).not.toContain("カード事業のリボ残高");
     expect(response.answer).not.toContain("今後も伸びる");
     expect(response.answer).not.toContain("買うべき");
     expect(response.responsePath).toBe("openai");
     expect(response.debug?.fallbackReason).toBeNull();
     expect(response.debug?.fallbackCategory).toBe("none");
-    expect(response.debug?.sourceRepairLabels).toEqual(expect.arrayContaining(["q04_bank_durability_source_backed_repair"]));
+    expect(response.debug?.sourceRepairLabels ?? []).not.toContain("q04_bank_durability_source_backed_repair");
     expect(response.debug?.sourceIdsValid).toBe(true);
     expect(checkFinalAnswerJapaneseOnly(response.answer).ok).toBe(true);
   });
@@ -4956,12 +4994,24 @@ describe("Japanese-only final answer guard", () => {
       includeWebSupplement: false
     });
 
-    expect(response.answer).toContain("売上構造を見る軸");
+    // What this test guards is that the malformed amount never reaches the user.
+    // It used to be replaced by 「売上構造を見る軸は、…」 out of
+    // TICKER_REVENUE_BREAKDOWNS — a constant AAPL breakdown with this filing's
+    // chunks attached as sources. With no constant to fall back on, the answer
+    // is the honest insufficiency statement instead.
     expect(response.answer).not.toContain("143,7.6億ドル");
     expect(response.answer).not.toContain("143.7.6億ドル");
-    expect(response.responsePath).toBe("deterministic");
-    expect(response.debug?.fallbackCategory).toBe("none");
-    expect(response.debug?.fallbackUserReason).toBe("none");
+    expect(response.answer).toContain("未確認の数値は表示しません");
+    expect(response.answer).not.toContain("売上構造を見る軸");
+    // Was "deterministic": the deterministic layer had a constant AAPL breakdown
+    // to serve in place of the blocked answer. It has nothing to serve now, so
+    // the guarded insufficiency answer is the fallback path's.
+    expect(response.responsePath).toBe("fallback");
+    // Was "none", because the constant breakdown stood in for the blocked answer
+    // and the response came out looking clean. The guard did fire, and the debug
+    // metadata now says so.
+    expect(response.debug?.fallbackCategory).toBe("answer_quality_guard");
+    expect(response.debug?.fallbackUserReason).toBe("numeric_alignment_failed");
   });
 
   it("removes minor English and Chinese-looking leakage from final answers", async () => {
@@ -5200,7 +5250,10 @@ function withTypedMetrics(filing: FilingCacheRecord, metrics: MetricSnapshot[]):
     operatingCashFlow: "営業CF",
     cashAndCashEquivalents: "現金及び現金同等物",
     currentDebt: "1年内返済予定の長期債務",
-    longTermDebt: "長期債務（非流動）"
+    longTermDebt: "長期債務（非流動）",
+    equity: "自己資本",
+    totalAssets: "総資産",
+    capitalExpenditure: "設備投資"
   };
   const metricSources: SourceChunkRecord[] = metrics.map((metric, index) => ({
     sourceId: `MX${index + 1}`,

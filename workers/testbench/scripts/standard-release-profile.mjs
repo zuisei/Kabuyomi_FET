@@ -8,7 +8,7 @@ export const STANDARD_RELEASE_PROFILE = Object.freeze({
     "AAPL", "JPM", "XOM", "CAT", "WMT", "NVDA", "MU", "MSFT", "GOOGL", "AMZN", "TSLA", "LLY", "V", "KO", "DAL"
   ]),
   questionsPath: "testbench/questions/prompt-v2-smoke-10.jsonl",
-  companySetPath: "testbench/company-sets/prompt-v2-expanded-multisector.json"
+  companySetPath: "testbench/company-sets/production-tracked-15.json"
 });
 
 export function applyStandardReleaseProfile(thresholds) {

@@ -6,7 +6,7 @@ import { SecRateLimiterDO } from "./durable/sec-rate-limiter";
 import { UserQuotaDO } from "./durable/user-quota";
 import { refreshTrackedFilings } from "./lib/daily-refresh";
 import { AppError, isAppError } from "./lib/errors";
-import { logErrorEvent, logEvent } from "./lib/logging";
+import { hashForLog, logErrorEvent, logEvent, logWarnEvent } from "./lib/logging";
 import { loadRemoteConfig } from "./lib/remote-config";
 import { json, notFound, serverError, unavailable } from "./lib/response";
 import { handleAdMobRewardRoutes } from "./routes/admob-rewards";
@@ -203,25 +203,68 @@ async function enforceInstallationIdentity(
     if (authorizeLegacyClientCompatibilityRequest(request, url, env, config)) return;
     throw new AppError(401, "Installation credential is required");
   }
-  if (resolveAppAttestAssertionPolicy(
-    request.method,
-    url.pathname,
-    credential.attestationStatus
-  ) === "required") {
-    await verifyAppAttestAssertionForRequest(request, env, credential);
+  await enforceAppAttestAssertionPolicy(
+    resolveAppAttestAssertionPolicy(request.method, url.pathname, credential.attestationStatus),
+    () => verifyAppAttestAssertionForRequest(request, env, credential),
+    {
+      path: url.pathname,
+      method: request.method.toUpperCase(),
+      attestationStatus: credential.attestationStatus,
+      principalHash: hashForLog(credential.principal)
+    }
+  );
+}
+
+/// "advisory" は「検証はする、落ちても通す」。失敗を握り潰す代わりに必ず 1 行残す
+/// (握り潰しが見えないまま権限が落ちる、というのが 2026-08-21 監査の指摘そのものだった)。
+export async function enforceAppAttestAssertionPolicy(
+  policy: "none" | "advisory" | "required",
+  verify: () => Promise<void>,
+  context: { path: string; method: string; attestationStatus: string; principalHash: string | null }
+): Promise<void> {
+  if (policy === "none") return;
+  if (policy === "required") {
+    await verify();
+    return;
+  }
+  try {
+    await verify();
+  } catch (error) {
+    logWarnEvent("app_attest_assertion_ignored", {
+      ...context,
+      failureClass: error instanceof AppError
+        ? `status_${error.status}`
+        : error instanceof Error ? error.name : typeof error
+    });
   }
 }
 
+/// App Attest でユーザーを締め出さない。締め出すのは「タダのクレジット」だけ。
+///
+/// 2026-08-24 のオーナー指摘「App Attest は無視できる形にするべきでは」。実際、元の形には
+/// **証明に成功した端末ほど壊れやすい**という逆転があった: `unavailable`(一度も証明して
+/// いない端末)は core パスの assertion を免除される一方、一度 `verified` になった端末は
+/// 以後 /v1/chat が assertion 必須になり、Apple 側の不調・extensions 検査・counter 競合の
+/// どれか一つで 403 に落ちる。本番の verified は 4 件、つまり真面目に証明した人だけが
+/// 人質になっていた。
+///
+/// なので core パスは "advisory" に落とす — 検証は走らせてログにも残すが、失敗しても
+/// リクエストは通す。守るべき対象がそこには無い: チャットはクレジットを消費する側で、
+/// クレジット自体は購入か付与でしか増えない。
+///
+/// "required" のまま残すのは `/v1/admob/reward-intents` だけ。ここは広告視聴で
+/// **クレジットが増える**唯一の経路で、偽装が直接タダ働きの原価になる。
+/// ようこそクレジットも同様に verified 限定のまま(accessMode 経由)。
 export function resolveAppAttestAssertionPolicy(
   method: string,
   pathname: string,
   attestationStatus: "pending" | "verified" | "unavailable"
-): "none" | "required" {
+): "none" | "advisory" | "required" {
   if (APP_ATTEST_STRICT_ASSERTION_PATHS.has(pathname)) return "required";
   const corePath = APP_ATTEST_CORE_ASSERTION_PATHS.has(pathname) ||
     (method.toUpperCase() === "POST" && /^\/v1\/company\/[^/]+\/refresh$/u.test(pathname));
   if (!corePath) return "none";
-  return attestationStatus === "unavailable" ? "none" : "required";
+  return attestationStatus === "unavailable" ? "none" : "advisory";
 }
 
 function truthy(value: string | undefined): boolean {

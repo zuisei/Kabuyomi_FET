@@ -1,5 +1,6 @@
 import { PrincipalMigrationAdminRequestSchema } from "../lib/contracts";
 import { deriveStableSubscriptionPrincipal } from "../lib/subscription-principal";
+import { isAuthorizedSubscriptionPrincipalMigrationRequest } from "../lib/internal-auth";
 import { AppError } from "../lib/errors";
 import { parseJsonBody } from "../lib/request";
 import { json } from "../lib/response";
@@ -10,8 +11,7 @@ export const handleInternalSubscriptionPrincipalMigrationRoute: RouteHandler = a
   if (!(request.method === "POST" && url.pathname === "/internal/subscription-principal-migration")) {
     return null;
   }
-  const expected = env.BACKFILL_SHARED_SECRET?.trim();
-  if (!expected || request.headers.get("x-kabuyomi-internal-token") !== expected) {
+  if (!isAuthorizedSubscriptionPrincipalMigrationRequest(request, env)) {
     throw new AppError(403, "Forbidden");
   }
   const body = await parseJsonBody(request, PrincipalMigrationAdminRequestSchema, {

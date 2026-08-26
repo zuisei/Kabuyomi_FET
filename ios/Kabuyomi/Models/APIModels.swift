@@ -1,5 +1,23 @@
 import Foundation
 
+/// 対応している提出書類。**呼び名を画面の文面に直書きしない**ための1か所。
+/// 20-F を足したとき、対応判定は直したのに文面は「10-K / 10-Q」のまま
+/// 6画面に残っていた(2026-08-26)。増やすときはここだけを触る。
+enum SupportedFilingForms {
+    /// 判定にも表示にも使う正の一覧。
+    static let all = ["10-K", "10-Q", "20-F"]
+
+    /// 文章に埋める並び。「10-K / 10-Q / 20-F」
+    static let listed = all.joined(separator: " / ")
+
+    /// 会社行など横幅の無い場所で使う総称。書類名を並べると会社名が潰れる。
+    static let collectiveNoun = "決算資料"
+
+    static func supports(_ formType: String) -> Bool {
+        all.contains(formType)
+    }
+}
+
 struct SearchResponse: Decodable {
     let items: [SearchItem]
     let snapshotUpdatedAt: String?
@@ -25,7 +43,10 @@ struct SearchItem: Decodable, Identifiable, Hashable {
             return .unknown
         }
 
-        if latestFormType == "10-K" || latestFormType == "10-Q" {
+        // 20-F は外国企業(ADR)の年次報告で、10-K に相当する。
+        // TSM・ASML・SAP・トヨタ等は 10-K / 10-Q を 1 本も出さないので、
+        // これを対応済みに数えないと検索しても「未対応」としか出ない。
+        if SupportedFilingForms.supports(latestFormType) {
             return .supported(formType: latestFormType)
         }
 
@@ -64,7 +85,7 @@ struct SearchItem: Decodable, Identifiable, Hashable {
         case .unsupported(let formType):
             return "\(formType) 対象"
         case .unknown:
-            return "10-K / 10-Q 未確認"
+            return "対応書類 未確認"
         }
     }
 
@@ -84,9 +105,9 @@ struct SearchItem: Decodable, Identifiable, Hashable {
         case .supported:
             return "v1 でそのまま保存して会話できます。"
         case .unsupported(let formType):
-            return "最新 \(formType) は v1 の対象外です。10-K / 10-Q のみ対応しています。"
+            return "最新 \(formType) は対象外です。\(SupportedFilingForms.listed) に対応しています。"
         case .unknown:
-            return "保存または表示時に 10-K / 10-Q を確認します。"
+            return "保存または表示時に対応書類を確認します。"
         }
     }
 
@@ -95,9 +116,9 @@ struct SearchItem: Decodable, Identifiable, Hashable {
         case .supported:
             return ""
         case .unsupported(let formType):
-            return "この銘柄の最新開示は \(formType) で、Kabuyomi v1 の対象外です。10-K / 10-Q のみ対応しています。"
+            return "この銘柄の最新開示は \(formType) で、対象外です。\(SupportedFilingForms.listed) に対応しています。"
         case .unknown:
-            return "この銘柄は 10-K / 10-Q をまだ確認できませんでした。時間を置いてもう一度お試しください。"
+            return "この銘柄は対応書類をまだ確認できませんでした。時間を置いてもう一度お試しください。"
         }
     }
 }
@@ -114,6 +135,8 @@ struct CompanyPayload: Codable, Hashable {
     let companyWebsiteUrl: String?
     let summary: SummaryPayload
     let metrics: [MetricPayload]
+    /// 旧 Worker には無いフィールドなので既定 nil の var にする。
+    var derivedMetrics: [DerivedMetricPayload]? = nil
     let historicalOverview: HistoricalOverviewPayload?
     let sourceChunks: [SourceChunkPayload]
     let lastUpdatedAt: String
@@ -253,6 +276,45 @@ struct MetricPayload: Codable, Identifiable, Hashable {
     let periodEnd: String
     let comparisonValue: Double?
     let yoyPercent: Double?
+
+    var id: String { logicalName }
+}
+
+/// 計算で求めた指標。**提出書類には書かれていない値**なので、
+/// 答えだけでなく式と材料を一緒に持つ(2026-08-25)。
+/// 画面はこれを開いて見せる責任がある。数字だけ出すと、
+/// 「すべての記述に出典がある」という建て付けをこの指標だけが破ることになる。
+struct DerivedMetricPayload: Codable, Identifiable, Hashable {
+    let logicalName: String
+    let label: String
+    let value: Double
+    /// `ratio` なら比率(0.245 = 24.5%)。金額なら通貨コード。
+    let unit: String
+    /// 「純利益 ÷ 自己資本」。数字は入っていない。
+    let formula: String
+    /// 「分母は期末の自己資本」。定義を書かない指標は比べようがない。
+    let definitionNote: String
+    let periodEnd: String
+    let operands: [DerivedMetricOperandPayload]
+
+    var id: String { logicalName }
+
+    var isRatio: Bool { unit == "ratio" }
+
+    /// 比率は %、金額は呼び出し側の既存の整形に任せる。
+    var ratioText: String? {
+        guard isRatio else { return nil }
+        return String(format: "%.1f%%", value * 100)
+    }
+}
+
+struct DerivedMetricOperandPayload: Codable, Identifiable, Hashable {
+    let logicalName: String
+    let label: String
+    let value: Double
+    let unit: String
+    let periodEnd: String
+    let tagUsed: String
 
     var id: String { logicalName }
 }
@@ -399,6 +461,9 @@ struct UsagePayload: Decodable, Hashable {
     let accessMode: String?
     let credits: CreditUsagePayload?
     let creditBillingEnabled: Bool?
+    /// この端末が1問に払うクレジット(旧 Worker には無い)。capabilities と同じく
+    /// 既定 nil の var — 既存のフィクスチャ・コピー箇所を全部書き換えないため。
+    var chatCreditCost: Int? = nil
     var capabilities: UsageCapabilitiesPayload? = nil
 
     var detachedAccessMode: DetachedAccessMode? {
@@ -439,6 +504,11 @@ struct UsageCapabilitiesPayload: Decodable, Hashable {
     let webSupplementEnabled: Bool
     let consumablePurchasesEnabled: Bool
     let accountRecoveryReady: Bool
+    /// 有料プランが上位AIモデルで回答するか(Worker の OPENAI_CHAT_MODEL_PREMIUM 設定時のみ)。
+    /// 旧 Worker には無いフィールドなので optional。
+    let premiumChatModelEnabled: Bool?
+    /// 上位モデル回答の1問あたりクレジット(premium 有効時のみ)。
+    let premiumChatCreditCost: Int?
     let rewardedCredit: RewardedCreditCapabilityPayload
 }
 
@@ -716,6 +786,60 @@ struct StarterCompany: Identifiable, Hashable {
         StarterCompany(ticker: "AMZN", companyName: "Amazon.com, Inc."),
         StarterCompany(ticker: "TSLA", companyName: "Tesla, Inc.")
     ]
+}
+
+/// スターターカタログの1分類。
+struct StarterCatalogSection: Identifiable, Hashable {
+    let title: String
+    let companies: [StarterCompany]
+
+    var id: String { title }
+}
+
+/// 初回ピッカーに並べる会社の全部(v2 IA 仕様 Phase 6.5「スターターの拡充と分類」)。
+///
+/// `StarterCompany.defaults` は**5社のまま増やさない**。空状態の候補一覧や
+/// `AppModel.starterCompanies` があの5社を指しており、増やすと初めて開いた面が
+/// 一覧で埋まる。拡張分はこちらに持ち、ピッカーだけが見る。
+///
+/// 銘柄は本番の追跡リスト(workers/src/lib/tracked-tickers.ts の
+/// `DEFAULT_TRACKED_TICKERS`)からだけ選ぶ。Worker が filing をキャッシュ済みの
+/// 会社しか置かないので、選んだ直後に中身のある盤面が出る。
+/// 追跡外の会社を混ぜると、初回に選んだ会社だけが空のまま残る。
+/// 部分集合であることは `FirstRunSupportTests` が固定している。
+///
+/// 表記は正式名称を手で持つ。SEC の提出者名は全大文字が多く
+/// (BROADCOM INC.、JPMORGAN CHASE & CO.)、そのまま出すと盤面で叫ぶ。
+/// ここの表記は `homeBoardCompanyName` にも供給される。
+enum StarterCatalog {
+    static let sections: [StarterCatalogSection] = [
+        // 先頭は既存の5社。列挙し直さず `defaults` から作る
+        // (2か所に書くと、片方だけ動く日が来る)。
+        StarterCatalogSection(title: "定番", companies: StarterCompany.defaults),
+        StarterCatalogSection(title: "半導体・AI", companies: [
+            StarterCompany(ticker: "AVGO", companyName: "Broadcom Inc."),
+            StarterCompany(ticker: "AMD", companyName: "Advanced Micro Devices, Inc."),
+            StarterCompany(ticker: "MU", companyName: "Micron Technology, Inc.")
+        ]),
+        StarterCatalogSection(title: "金融・決済", companies: [
+            StarterCompany(ticker: "JPM", companyName: "JPMorgan Chase & Co."),
+            StarterCompany(ticker: "V", companyName: "Visa Inc."),
+            StarterCompany(ticker: "MA", companyName: "Mastercard Incorporated")
+        ]),
+        StarterCatalogSection(title: "生活・消費", companies: [
+            StarterCompany(ticker: "WMT", companyName: "Walmart Inc."),
+            StarterCompany(ticker: "COST", companyName: "Costco Wholesale Corporation"),
+            StarterCompany(ticker: "PG", companyName: "The Procter & Gamble Company")
+        ])
+    ]
+
+    /// 分類をほどいた全社。表記オーバーライドと重複判定はこちらを見る。
+    static let companies: [StarterCompany] = sections.flatMap(\.companies)
+
+    /// 正式表記の引き当て。ticker の大小は問わない。
+    static func company(for ticker: String) -> StarterCompany? {
+        companies.first { $0.ticker.caseInsensitiveCompare(ticker) == .orderedSame }
+    }
 }
 
 struct LocalCompanyRecord {

@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 
 const DEFAULT_PRODUCTION_BASE_URL = "https://kabuyomi-api.dznqjmctk7.workers.dev";
 const PRODUCTION_HOSTNAME = "kabuyomi-api.dznqjmctk7.workers.dev";
-const REVIEWED_CONFIG_VERSION = "production-capabilities-restored-20260713-v1";
+// Pinned to the version the release owner last reviewed. The 2026-08-21 config
+// refresh (expiry extension, legacy bridge sunset) shipped without updating
+// this pin, so the smoke failed on version identity while asserting a stale
+// review. Update this line whenever remote-config:refresh-reviewed runs.
+const REVIEWED_CONFIG_VERSION = "production-config-refresh-20260824-v1";
 const SMOKE_UUID_NAMESPACE = "713f632d-4c5c-5d90-9e9c-11d8fc7f6750";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const CHECK_ONLY = process.argv.includes("--check-only");
@@ -58,53 +62,92 @@ async function main() {
   checks.publicSearch = "PASS";
 
   const legacyHeaders = { "x-device-key": identifiers.legacyDeviceKey };
-  const legacyUsage = await runStep("fresh legacy compatibility usage", async () => {
-    const response = await requestJson("/v1/usage", { headers: legacyHeaders });
-    expectStatus(response, 200, "legacy_usage_status");
-    assertZeroCreditUsage(response.body, "legacy_usage");
-    assertProductionCapabilities(response.body, "legacy_usage");
-    return response.body;
-  });
-  checks.legacyCompatibilityUsage = "PASS";
+  // The legacy client compatibility bridge is a bounded window (30-day max)
+  // controlled by remote config. Production disabled it and its expiry passed
+  // (config refresh 2026-08-21: enabled=false, expiresAt=2026-08-11), so this
+  // smoke must assert whichever contract is actually configured: when the
+  // bridge is open, legacy keys read but never grant; when it is closed,
+  // legacy keys are rejected consistently on every legacy route and nothing
+  // mutates. Probing /v1/usage decides which contract applies — asserting the
+  // open-bridge behavior against a closed bridge is how this smoke failed the
+  // 2026-08-22 deploy for a condition that predated it.
+  const legacyProbe = await requestJson("/v1/usage", { headers: legacyHeaders });
+  const legacyBridgeOpen = legacyProbe.status === 200;
 
-  const legacyCompany = await runStep("legacy compatibility company read", async () => {
-    const response = await requestJson(`/v1/company/${encodeURIComponent(ticker)}`, {
-      headers: legacyHeaders
+  let legacyUsage = null;
+  let legacyCompany = null;
+  let installationCompany = null;
+  if (legacyBridgeOpen) {
+    legacyUsage = await runStep("fresh legacy compatibility usage", async () => {
+      expectStatus(legacyProbe, 200, "legacy_usage_status");
+      assertZeroCreditUsage(legacyProbe.body, "legacy_usage");
+      assertProductionCapabilities(legacyProbe.body, "legacy_usage");
+      return legacyProbe.body;
     });
-    expectStatus(response, 200, "legacy_company_status");
-    assertCompany(response.body, "legacy_company");
-    return response.body;
-  });
-  checks.legacyCompatibilityCompany = "PASS";
+    checks.legacyCompatibilityUsage = "PASS";
 
-  await runStep("legacy chat rejected before model execution", async () => {
-    const response = await requestJson("/v1/chat", {
-      method: "POST",
-      headers: { ...legacyHeaders, "content-type": "application/json" },
-      body: JSON.stringify({
-        filingKey: legacyCompany.filingKey,
-        question: chatQuestion,
-        operationId: identifiers.legacyChatOperationId
-      })
+    legacyCompany = await runStep("legacy compatibility company read", async () => {
+      const response = await requestJson(`/v1/company/${encodeURIComponent(ticker)}`, {
+        headers: legacyHeaders
+      });
+      expectStatus(response, 200, "legacy_company_status");
+      assertCompany(response.body, "legacy_company");
+      return response.body;
     });
-    expectInsufficientCredits(response, 2, "legacy_chat");
-  });
-  checks.legacyChatNoModelExecution = "PASS";
+    checks.legacyCompatibilityCompany = "PASS";
+  } else {
+    await runStep("closed legacy bridge rejects every legacy route consistently", async () => {
+      expectStatus(legacyProbe, 401, "legacy_sunset_usage_status");
+      const companyResponse = await requestJson(`/v1/company/${encodeURIComponent(ticker)}`, {
+        headers: legacyHeaders
+      });
+      expectStatus(companyResponse, 401, "legacy_sunset_company_status");
+      const chatResponse = await requestJson("/v1/chat", {
+        method: "POST",
+        headers: { ...legacyHeaders, "content-type": "application/json" },
+        body: JSON.stringify({
+          filingKey: "v9:legacy-sunset-probe",
+          question: chatQuestion,
+          operationId: identifiers.legacyChatOperationId
+        })
+      });
+      expectStatus(chatResponse, 401, "legacy_sunset_chat_status");
+    });
+    checks.legacyBridgeSunsetRejection = "PASS";
+  }
 
-  await runStep("legacy quote rejected before model execution", async () => {
-    const response = await requestJson("/v1/translate-quote", {
-      method: "POST",
-      headers: { ...legacyHeaders, "content-type": "application/json" },
-      body: JSON.stringify({
-        text: quoteText,
-        sourceLanguage: "en",
-        targetLanguage: "ja",
-        operationId: identifiers.legacyQuoteOperationId
-      })
+  if (legacyBridgeOpen) {
+    await runStep("legacy chat rejected before model execution", async () => {
+      const response = await requestJson("/v1/chat", {
+        method: "POST",
+        headers: { ...legacyHeaders, "content-type": "application/json" },
+        body: JSON.stringify({
+          filingKey: legacyCompany.filingKey,
+          question: chatQuestion,
+          operationId: uuidV5(
+            `production-release-smoke-v1:legacy-chat-operation:${legacyCompany.filingKey}`
+          )
+        })
+      });
+      expectInsufficientCredits(response, 2, "legacy_chat");
     });
-    expectInsufficientCredits(response, 1, "legacy_quote");
-  });
-  checks.legacyQuoteNoModelExecution = "PASS";
+    checks.legacyChatNoModelExecution = "PASS";
+
+    await runStep("legacy quote rejected before model execution", async () => {
+      const response = await requestJson("/v1/translate-quote", {
+        method: "POST",
+        headers: { ...legacyHeaders, "content-type": "application/json" },
+        body: JSON.stringify({
+          text: quoteText,
+          sourceLanguage: "en",
+          targetLanguage: "ja",
+          operationId: identifiers.legacyQuoteOperationId
+        })
+      });
+      expectInsufficientCredits(response, 1, "legacy_quote");
+    });
+    checks.legacyQuoteNoModelExecution = "PASS";
+  }
 
   const credential = await runStep("unavailable installation bootstrap without welcome", async () => {
     const response = await requestJson("/v1/identity/bootstrap", {
@@ -150,7 +193,10 @@ async function main() {
     });
     expectStatus(response, 200, "installation_company_status");
     assertCompany(response.body, "installation_company");
-    assert(response.body.filingKey === legacyCompany.filingKey, "installation_company_filing_mismatch");
+    if (legacyCompany) {
+      assert(response.body.filingKey === legacyCompany.filingKey, "installation_company_filing_mismatch");
+    }
+    installationCompany = response.body;
   });
   checks.authenticatedCompany = "PASS";
 
@@ -159,9 +205,16 @@ async function main() {
       method: "POST",
       headers: { ...installationHeaders, "content-type": "application/json" },
       body: JSON.stringify({
-        filingKey: legacyCompany.filingKey,
+        filingKey: (legacyCompany ?? installationCompany).filingKey,
         question: chatQuestion,
-        operationId: identifiers.installationChatOperationId
+        // Scoped to the filing: the global deterministic id was consumed by the
+        // 2026-07-13 run with that generation's filingKey, so once the filing
+        // rotated every later run hit 409 operation_id_payload_mismatch — the
+        // replay guard working as designed against a smoke that assumed the
+        // payload never changes. Same filing still replays byte-exactly.
+        operationId: uuidV5(
+          `production-release-smoke-v1:installation-chat-operation:${(legacyCompany ?? installationCompany).filingKey}`
+        )
       })
     });
     expectInsufficientCredits(response, 2, "installation_chat");
@@ -253,14 +306,22 @@ async function main() {
   });
   checks.invalidAppleNotificationNoGrant = "PASS";
 
-  const finalLegacyUsage = await runStep("final legacy balance remains zero", async () => {
-    const response = await requestJson("/v1/usage", { headers: legacyHeaders });
-    expectStatus(response, 200, "final_legacy_usage_status");
-    assertZeroCreditUsage(response.body, "final_legacy_usage");
-    return response.body;
-  });
-  assertCreditBalancesStable(legacyUsage, finalLegacyUsage, "legacy_credit_balance_changed");
-  checks.finalLegacyBalanceZero = "PASS";
+  if (legacyBridgeOpen) {
+    const finalLegacyUsage = await runStep("final legacy balance remains zero", async () => {
+      const response = await requestJson("/v1/usage", { headers: legacyHeaders });
+      expectStatus(response, 200, "final_legacy_usage_status");
+      assertZeroCreditUsage(response.body, "final_legacy_usage");
+      return response.body;
+    });
+    assertCreditBalancesStable(legacyUsage, finalLegacyUsage, "legacy_credit_balance_changed");
+    checks.finalLegacyBalanceZero = "PASS";
+  } else {
+    await runStep("closed legacy bridge still rejects at the end of the run", async () => {
+      const response = await requestJson("/v1/usage", { headers: legacyHeaders });
+      expectStatus(response, 401, "final_legacy_sunset_status");
+    });
+    checks.finalLegacyBridgeStillClosed = "PASS";
+  }
 
   const finalInstallationUsage = await runStep("final installation balance remains zero", async () => {
     const response = await requestJson("/v1/usage", { headers: installationHeaders });

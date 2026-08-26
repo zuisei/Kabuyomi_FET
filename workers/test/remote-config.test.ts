@@ -263,7 +263,7 @@ describe("remote config", () => {
     expect(config.chatEnabled).toBe(false);
   });
 
-  it("rejects a stale envelope on the deployed test Worker", async () => {
+  it("keeps serving a stale envelope on the deployed test Worker instead of self-disabling", async () => {
     vi.useFakeTimers({ now: new Date("2026-07-11T02:00:00.000Z") });
     const config = await loadRemoteConfig({
       KABUYOMI_ENV: "test",
@@ -272,6 +272,22 @@ describe("remote config", () => {
         get: async () => completeEnvelope({}, {
           updatedAt: "2026-07-11T00:00:00.000Z",
           maxStaleAgeSeconds: 60
+        })
+      }
+    } as never);
+
+    expect(config.configSource).toBe("kv");
+  });
+
+  /// 未来日付だけは従来どおり拒む(時計狂い・改竄の兆候で、放置とは意味が違う)。
+  it("still refuses an envelope dated in the future", async () => {
+    vi.useFakeTimers({ now: new Date("2026-07-11T00:00:00.000Z") });
+    const config = await loadRemoteConfig({
+      KABUYOMI_ENV: "production",
+      KABUYOMI_CACHE: {
+        get: async () => completeEnvelope({}, {
+          updatedAt: "2026-07-12T00:00:00.000Z",
+          maxStaleAgeSeconds: REMOTE_CONFIG_MAX_STALE_AGE_SECONDS
         })
       }
     } as never);
@@ -319,14 +335,16 @@ describe("remote config", () => {
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("\"event\":\"remote_config_refresh_critical\""));
   });
 
-  it("fails closed and logs expiry after the 45-day hard stop", async () => {
+  /// 45 日の期限は「督促」であって「停止」ではない(2026-08-24 のオーナー判断)。
+  /// 見直しを忘れた日にアプリが落ちるのが元の挙動で、それが 2026-10-05 の自爆タイマーだった。
+  it("keeps serving past the 45-day review window and warns instead of going into maintenance", async () => {
     vi.useFakeTimers({ now: new Date("2026-08-26T00:00:00.000Z") });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const config = await loadRemoteConfig({
       KABUYOMI_ENV: "production",
       KABUYOMI_CACHE: {
         get: async () => completeEnvelope({}, {
-          version: "expired-2026-07-11",
+          version: "overdue-2026-07-11",
           updatedAt: "2026-07-11T00:00:00.000Z",
           maxStaleAgeSeconds: REMOTE_CONFIG_MAX_STALE_AGE_SECONDS
         })
@@ -334,11 +352,14 @@ describe("remote config", () => {
     } as never);
 
     expect(config).toMatchObject({
-      configSource: "safe_fail_closed",
-      maintenanceMode: true,
-      chatEnabled: false
+      configSource: "kv",
+      configVersion: "overdue-2026-07-11",
+      maintenanceMode: false,
+      chatEnabled: true
     });
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("\"event\":\"remote_config_expired\""));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("\"event\":\"remote_config_review_overdue_still_served\"")
+    );
   });
 
   it("preserves the human-reviewed authored timestamp when storing the D1 LKG", async () => {
@@ -449,10 +470,32 @@ describe("remote config", () => {
     expect(config.chatEnabled).toBe(false);
   });
 
-  it("rejects stale LKG and lets emergency disables override enabled KV", async () => {
-    vi.useFakeTimers({ now: new Date("2026-07-11T02:00:00.000Z") });
+  /// KV が消えた上に LKG も古い、という一番痛い状況でも止めない。
+  /// 「古い設定で動き続ける」ほうが「課金ユーザー全員が使えない」より軽い、という判断。
+  it("serves a complete LKG even long past its review window", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-30T00:00:00.000Z") });
     const stale = {
-      version: "stale",
+      version: "stale-but-complete",
+      updated_at: "2026-07-11T00:00:00.000Z",
+      max_stale_age_seconds: 60,
+      config_json: JSON.stringify(completeConfig({}))
+    };
+    const config = await loadRemoteConfig({
+      KABUYOMI_ENV: "production",
+      KABUYOMI_CACHE: { get: async () => null },
+      DB: { prepare: () => ({ first: async () => stale }) }
+    } as never);
+
+    expect(config.configSource).toBe("d1_lkg");
+    expect(config.chatEnabled).toBe(true);
+    expect(config.maintenanceMode).toBe(false);
+  });
+
+  it("rejects an incomplete LKG and lets emergency disables override enabled KV", async () => {
+    vi.useFakeTimers({ now: new Date("2026-07-11T02:00:00.000Z") });
+    // 古さではなく「本番で必須のフィールドが欠けている」ことで落ちる LKG。
+    const incomplete = {
+      version: "incomplete",
       updated_at: "2026-07-11T00:00:00.000Z",
       max_stale_age_seconds: 60,
       config_json: JSON.stringify({ maintenanceMode: false, chatEnabled: true })
@@ -460,7 +503,7 @@ describe("remote config", () => {
     const failed = await loadRemoteConfig({
       KABUYOMI_ENV: "production",
       KABUYOMI_CACHE: { get: async () => null },
-      DB: { prepare: () => ({ first: async () => stale }) }
+      DB: { prepare: () => ({ first: async () => incomplete }) }
     } as never);
     expect(failed.configSource).toBe("safe_fail_closed");
 

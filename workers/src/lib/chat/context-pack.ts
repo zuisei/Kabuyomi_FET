@@ -1,4 +1,6 @@
 import type { FilingCacheRecord, MetricSnapshot, SourceChunkRecord, VerifiedFinancialFact } from "../../env";
+import { isBoilerplateOrRiskOnly } from "./evidence-text-quality";
+import { filingSegmentVocabulary } from "./context-factual-pack";
 import { buildChatFactualPack, type ChatFactualPack } from "./context-factual-pack";
 import { findMetricSourceChunks, selectIntentMetrics } from "./context-metrics";
 import {
@@ -63,6 +65,13 @@ export interface ChatContextSelectionDiagnostics {
 export interface BuildChatContextPackOptions {
   mode?: ChatContextPackMode;
   retryReason?: string;
+  /**
+   * 質問文。会社固有の区分(AWS、iPhone …)を名指ししているとき、その語を含む
+   * チャンクを先頭に確保するために使う。Apple の reportable segment は地域なので、
+   * segment_analysis の順位付けだけでは iPhone の製品別記述が入らず、モデルが
+   * 「製品別内訳は示されていない」と答えていた(2026-08-22 実機レビュー)。
+   */
+  question?: string;
 }
 
 interface RankedSource {
@@ -104,6 +113,18 @@ export function buildChatContextPack(
 
   addFactualPackSourceIds(filing.sourceChunks, factualPack, add);
 
+  // 名指しされた区分の本文を最優先で確保する。順位付けの前に入れるので、
+  // 予算の端で落ちない。最大3チャンク(同じ語が出る表・注記を全部入れない)。
+  const focusPatterns = options.question
+    ? filingSegmentVocabulary(filing.ticker).filter((pattern) => pattern.test(options.question!.toLowerCase()))
+    : [];
+  if (focusPatterns.length > 0) {
+    strategyParts.push("segment_focus");
+    // 索引済みチャンクには製品別の段落が無いことがある(AAPL は地域別段落にしか
+    // iPhone が出ない)。MD&A 全文から名指し語の周辺を窓で切る。
+    for (const chunk of buildSegmentFocusChunks(filing, focusPatterns, profile)) add(chunk);
+  }
+
   if (shouldLeadWithMetrics(questionIntent)) {
     addMetricSources(filing.sourceChunks, metrics, add);
     addRankedSources(rankedIntentSources, add, profile.maxSources);
@@ -121,6 +142,25 @@ export function buildChatContextPack(
     addMetricSources(filing.sourceChunks, metrics, add);
   } else {
     addRankedSources(rankedIntentSources, add, profile.maxSources);
+    // business_overview はプロファイルに supplementalSources: 5 を持ちながら、
+    // 窓切り出しが driver 系の分岐にしか無く一度も使われていなかった。索引済み
+    // チャンクが利益率・売上要因の抜粋しか持たない会社(MA)では、事業説明が
+    // 文脈に入らず source gate で落ち、モデルが呼ばれもしなかった
+    // (2026-08-22 実機レビュー)。Overview の自己紹介文を優先パターンで窓に取る。
+    if (questionIntent === "business_overview") {
+      const supplementals = buildSupplementalContextChunks(filing, questionIntent, selected, profile, diagnostics);
+      // 診断: 窓が何本できたか・MD&A 本文が何字あるか(strategy 文字列に載せる)。
+      strategyParts.push(`overview_windows=${supplementals.length}`, `mda_chars=${filing.mdaText?.length ?? 0}`);
+      for (const supplemental of supplementals) add(supplemental);
+      // MD&A の冒頭は会社の自己紹介であることが多い(「Mastercard is a technology
+      // company in the global payments industry…」)。短い MD&A では通常の窓が
+      // 選択済み抜粋と重なって全滅するので、冒頭だけは重複判定を免除して入れる。
+      const head = buildOverviewHeadWindow(filing, profile);
+      if (head && !selected.has(head.sourceId)) {
+        strategyParts.push("overview_head");
+        add(head);
+      }
+    }
     addMetricSources(filing.sourceChunks, metrics, add);
   }
 
@@ -558,6 +598,83 @@ function metricSourceScore(source: SourceChunkRecord, questionIntent: QuestionIn
   }
 }
 
+const SEGMENT_FOCUS_SOURCE_PREFIX = `${SUPPLEMENTAL_SOURCE_PREFIX}F`;
+const OVERVIEW_HEAD_SOURCE_ID = `${SUPPLEMENTAL_SOURCE_PREFIX}H1`;
+
+function buildOverviewHeadWindow(filing: FilingCacheRecord, profile: ContextProfile): SourceChunkRecord | null {
+  const text = normalizeWhitespace(filing.mdaText);
+  if (text.length < 200) return null;
+  // MD&A はしばしば forward-looking statements の注記で始まる。定型段落を
+  // 600 字ずつ読み飛ばし、最初の非定型窓(会社の自己紹介が来る位置)を取る。
+  let head: string | null = null;
+  for (let offset = 0; offset < Math.min(text.length, 6_000); offset += 600) {
+    const candidate = clipToSourceExcerpt(text.slice(offset, offset + 1_800), Math.max(profile.sourceExcerptChars, 1_200));
+    if (candidate.length < 200) break;
+    if (!isBoilerplateOrRiskOnly(candidate, "", "md_a")) {
+      head = candidate;
+      break;
+    }
+  }
+  if (!head) return null;
+  return {
+    sourceId: OVERVIEW_HEAD_SOURCE_ID,
+    sectionType: "md_a",
+    sectionTitle: "Business overview (MD&A opening)",
+    sourceLabel: `${filing.formType} Business overview (MD&A opening), filed ${filing.filedAt}`,
+    text: head,
+    startOffset: 0,
+    endOffset: head.length,
+    sortOrder: 800
+  };
+}
+
+/// 質問が名指しした区分(AWS、iPhone …)の周辺を MD&A 全文から切り出す。
+/// 当期の増減を述べる窓(increased / decreased / % を含む)を優先し、
+/// safe-harbor 等の定型段落は除く。最大3窓。ID は CTX の系譜(CTXF1…)なので、
+/// 既存の「補足ソース」扱いがそのまま効く。
+function buildSegmentFocusChunks(
+  filing: FilingCacheRecord,
+  focusPatterns: RegExp[],
+  profile: ContextProfile
+): SourceChunkRecord[] {
+  const text = normalizeWhitespace(filing.mdaText);
+  if (!text) return [];
+  const windowChars = Math.max(600, Math.min(profile.supplementalWindowChars, 1_400));
+  const candidates: Array<{ start: number; text: string; resultLike: boolean }> = [];
+  for (const pattern of focusPatterns) {
+    const global = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+    for (const match of [...text.matchAll(global)].slice(0, 40)) {
+      const index = match.index ?? 0;
+      const start = Math.max(0, index - Math.floor(windowChars / 3));
+      const window = text.slice(start, start + windowChars);
+      if (isBoilerplateOrRiskOnly(window, "", "md_a")) continue;
+      candidates.push({
+        start,
+        text: window,
+        resultLike: /(increased|decreased|grew|declined|\d+(?:\.\d+)?\s*%)/i.test(window)
+      });
+    }
+  }
+  candidates.sort((left, right) => Number(right.resultLike) - Number(left.resultLike) || left.start - right.start);
+  const result: SourceChunkRecord[] = [];
+  for (const candidate of candidates) {
+    if (result.some((chunk) => Math.abs((chunk.startOffset ?? 0) - candidate.start) < windowChars / 2)) continue;
+    const clipped = clipToSourceExcerpt(candidate.text, profile.sourceExcerptChars);
+    result.push({
+      sourceId: `${SEGMENT_FOCUS_SOURCE_PREFIX}${result.length + 1}`,
+      sectionType: "md_a",
+      sectionTitle: "Segment focus",
+      sourceLabel: `${filing.formType} Segment focus, filed ${filing.filedAt}`,
+      text: clipped,
+      startOffset: candidate.start,
+      endOffset: candidate.start + clipped.length,
+      sortOrder: 900 + result.length
+    });
+    if (result.length >= 3) break;
+  }
+  return result;
+}
+
 function buildSupplementalContextChunks(
   filing: FilingCacheRecord,
   questionIntent: QuestionIntent,
@@ -572,7 +689,10 @@ function buildSupplementalContextChunks(
 
   const pattern = supplementalPattern(questionIntent);
   const windows = buildIntentTextWindows(text, pattern, questionIntent, profile.supplementalWindowChars, diagnostics);
-  const dedupSources = shouldLeadWithDriverNarrative(questionIntent)
+  // 索引済みチャンクは同じ MD&A の抜粋なので、2,500 字の窓は必ずどれかの先頭 160 字を
+  // 含む。filing.sourceChunks 全体と重複判定すると窓が全滅する — business_overview の
+  // 窓が一度も出なかった理由(2026-08-22)。選択済みソースとだけ比較する。
+  const dedupSources = shouldLeadWithDriverNarrative(questionIntent) || questionIntent === "business_overview"
     ? [...selected.values()]
     : [...selected.values(), ...filing.sourceChunks];
   const existingTexts = dedupSources
@@ -672,6 +792,15 @@ function buildIntentTextWindows(
 }
 
 function supplementalPriorityPattern(questionIntent: QuestionIntent): RegExp | null {
+  if (questionIntent === "business_overview") {
+    // 「何の会社か」に答える文は MD&A の Overview にある自己紹介文
+    // ("Mastercard is a technology company in the global payments industry…")。
+    // 汎用パターン(products / services / customers)は本文のどこにでも当たるので、
+    // その前にこの形の文を優先して窓に取る。無いと MA のように利益率・売上要因の
+    // 抜粋だけが文脈になり、モデルが事業を語れず low-quality 判定で落ちる
+    // (2026-08-22 実機レビュー)。
+    return /\b(?:is|are) (?:a|an|the) (?:leading |global |diversified |technology |multinational |premier |world's )?(?:company|provider|corporation|bank|holding company|financial services|technology company)|we are (?:a|an|the) |our mission|we operate (?:in|through|as)|we generate (?:revenue|net sales|income)|we earn (?:revenue|fees|income)|our (?:principal|primary|core) (?:business|products|services|activities)|our business consists|we (?:design|develop|manufacture|market|sell|provide|offer) /gi;
+  }
   if (questionIntent !== "yoy_change" && questionIntent !== "mda_summary") {
     return null;
   }
@@ -928,7 +1057,9 @@ function revenueDriverWindowQualityScore(text: string): number {
   if (/(?:cash provided by operating activities|operating cash flows?|capital expenditures?|technology and infrastructure costs?|fulfillment costs?|operating expenses?|net income|earnings driver analysis).{0,220}(?:driven by|primarily due to|reflecting)/.test(haystack) && !hasRevenueCausalLink) {
     score -= 180;
   }
-  if (/risk factors?|forward-looking statements?|available information|properties|website/.test(haystack) && !/driven by|primarily due to|reflected|reflecting|total net revenue|net sales|sales and revenues/.test(haystack)) {
+  // could differ materially / safe harbor / cautionary: 「forward-looking statements」の語を
+  // 含まない safe-harbor 段落が文脈パックの先頭に選ばれていた(2026-08-22 実機レビュー)。
+  if (/risk factors?|forward-looking statements?|could differ materially|safe harbor|cautionary statements?|available information|properties|website/.test(haystack) && !/driven by|primarily due to|reflected|reflecting|total net revenue|net sales|sales and revenues/.test(haystack)) {
     score -= 80;
   }
   if (isBroadEnergyContextWithoutPeriodResult(haystack)) {

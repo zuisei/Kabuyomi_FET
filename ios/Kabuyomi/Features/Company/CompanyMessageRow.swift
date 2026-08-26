@@ -4,9 +4,17 @@ import SwiftUI
 func displayableMessageSources(_ sources: [LocalMessageSourceRef], in company: CompanyPayload) -> [LocalMessageSourceRef] {
     var seen = Set<String>()
 
+    // 以前はラベルで畳んでいたが、`investorFacingSourceLabel` は別の抜粋を
+    // 同じ総称(「利益率」等)へ落とすため、本当に違う根拠まで消えていた。
+    // 同一の根拠(sourceId)だけを畳み、識別はチップ側のバッジと抜粋断片で行う。
     return sources.filter { source in
-        let label = investorFacingSourceLabel(for: source, in: company)
-        let key = "\(source.sourceKind.rawValue):\(label)"
+        let identity = source.sourceIdSnapshot?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key: String
+        if let identity, !identity.isEmpty {
+            key = "\(source.sourceKind.rawValue):id:\(identity)"
+        } else {
+            key = "\(source.sourceKind.rawValue):label:\(investorFacingSourceLabel(for: source, in: company))"
+        }
         return seen.insert(key).inserted
     }
 }

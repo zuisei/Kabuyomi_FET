@@ -31,6 +31,12 @@ GEMINI_TIMEOUT_MS = "12000"
 GEMINI_CHAT_TIMEOUT_MS = "7000"
 LLM_PROVIDER = "openai"
 OPENAI_CHAT_MODEL = "gpt-5-nano"
+# 有料プラン/dev の上位モデル(2026-08-24 オーナー承認で本番も有効化)。
+# 無料枠は 250k tok/日で、これは全モデル共有 — premium 回答おおよそ 55 問/日に相当する。
+# 超えたぶんは従量課金になる。無料プランは gpt-5-nano のままなので、この枠を食うのは
+# 課金ユーザーだけで、そのぶん 1 問 5 クレジット(標準は 2)を払っている。
+# 止めたくなったらこの 1 行を消して deploy すれば全員 OPENAI_CHAT_MODEL に戻る。
+OPENAI_CHAT_MODEL_PREMIUM = "gpt-5.4"
 OPENAI_PROMPT_ID = "pmpt_69f5f2f592b8819490c30cf43c4f0f770f3a1fc228661050"
 OPENAI_PROMPT_VERSION = "2"
 OPENAI_TIMEOUT_MS = "20000"

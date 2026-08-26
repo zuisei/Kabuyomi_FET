@@ -250,37 +250,45 @@ enum ConversationLibraryRecentEmptyCopy {
     static let message = "銘柄を開くと、ここから前回の会話へ戻れます。"
 }
 
+/// 提案質問のチップ。無地のテキストボタンで、頭に飾りのアイコンは持たない
+/// (v2 IA 仕様 Phase 6「AI 臭の除去」= sparkles 全廃。置き換えのアイコンも置かない)。
+/// 末尾の ↖ は「押すと入力欄に入る(送信ではない)」の合図で、
+/// Phase 4 の「プレフィルは送信にならない」規約を目で見せている部分。
+/// ただし入力欄がチップのすぐ下に見えている面では、押した先が目の前にあるので
+/// 記号で言い直す必要がない。そこだけ `showsPrefillGlyph: false` で落とす
+/// (規約自体は VoiceOver ラベル「質問を入力: 〜」が引き続き持つ)。
 struct ConversationPromptChip: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let text: String
-    let systemImage: String
+    var showsPrefillGlyph: Bool = true
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(KabuyomiTheme.accentDeep)
-                    .frame(width: 18, height: 24)
-
                 Text(text)
-                    .font(.caption.weight(.semibold))
+                    .font(.footnote.weight(.medium))
                     .foregroundStyle(KabuyomiTheme.ink)
                     .multilineTextAlignment(.leading)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
 
                 Spacer(minLength: 0)
 
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(KabuyomiTheme.inkSoft)
+                if showsPrefillGlyph {
+                    Image(systemName: "arrow.up.left")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(KabuyomiTheme.accent)
+                }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-            .background(KabuyomiTheme.fill(for: .secondary), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(KabuyomiTheme.inputWell, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(KabuyomiTheme.separator, lineWidth: KabuyomiTheme.hairlineWidth)
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("質問を入力: \(text)")

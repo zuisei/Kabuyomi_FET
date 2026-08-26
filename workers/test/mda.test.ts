@@ -92,6 +92,35 @@ const tenQWithHeavyInlineAssets = `
   </html>
 `;
 
+/// 20-F の本文は「Item 5. Operating and Financial Review and Prospects」で始まり
+/// 「Item 6. Directors, Senior Management and Employees」で終わる。
+/// TSMC は様式名と違って "Reviews"(複数形)で書く。
+const twentyF = `
+  <html><body>
+    <div>ITEM 4A. UNRESOLVED STAFF COMMENTS None</div>
+    <h2>ITEM 5. OPERATING AND FINANCIAL REVIEWS AND PROSPECTS</h2>
+    <p>The following discussion covers the fiscal years ended December 31, 2025 and 2024.</p>
+    <p>${"Net revenue grew on strong demand for leading-edge process technologies. ".repeat(120)}</p>
+    <h2>ITEM 6. DIRECTORS, SENIOR MANAGEMENT AND EMPLOYEES</h2>
+    <p>Members of the board are elected by the shareholders.</p>
+  </body></html>
+`;
+
+/// 相互参照(「"Item 5 ... – 小節名" を参照」)を章の入口と取り違えないこと。
+/// これを許すと SAP では Item 4 のサステナビリティ記述を財務レビューとして
+/// 38,000 字抜いてしまう(2026-08-24 に実物で確認)。
+const twentyFWithCrossReferenceBeforeTheSection = `
+  <html><body>
+    <div>
+      For our sustainability approach see “Item 5. Operating and Financial Review and Prospects – Expected Developments.”
+      ${"Our data protection and cloud compliance program covers every regional data centre. ".repeat(120)}
+    </div>
+    <h2>ITEM 5. OPERATING AND FINANCIAL REVIEW AND PROSPECTS</h2>
+    <p>${"Cloud revenue grew while license revenue continued its planned decline. ".repeat(120)}</p>
+    <h2>ITEM 6. DIRECTORS, SENIOR MANAGEMENT AND EMPLOYEES</h2>
+  </body></html>
+`;
+
 describe("extractMDASection", () => {
   it("extracts the 10-K MD&A and skips short TOC matches", () => {
     const result = extractMDASection(tenK, "10-K");
@@ -144,5 +173,33 @@ describe("extractMDASection", () => {
     expect(result?.text).toContain("Subscription growth improved and churn remained stable");
     expect(result?.text).not.toContain("window.__INLINE_DATA__");
     expect(result?.text).not.toContain(".toc{display:none;}");
+  });
+
+  it("reads the 20-F review section, including the plural heading TSMC actually files", () => {
+    const extracted = extractMDASection(twentyF, "20-F");
+    expect(extracted).not.toBeNull();
+    expect(extracted?.text).toContain("OPERATING AND FINANCIAL REVIEWS AND PROSPECTS");
+    expect(extracted?.text).toContain("leading-edge process technologies");
+    // 次章に入り込まない
+    expect(extracted?.text).not.toContain("Members of the board are elected");
+  });
+
+  it("does not mistake a 20-F cross-reference for the start of the section", () => {
+    const extracted = extractMDASection(twentyFWithCrossReferenceBeforeTheSection, "20-F");
+    expect(extracted).not.toBeNull();
+    expect(extracted?.text).toContain("Cloud revenue grew");
+    // 相互参照から始めると、その手前の別章の記述を財務レビューとして引用してしまう
+    expect(extracted?.text).not.toContain("data protection and cloud compliance");
+  });
+
+  it("returns nothing for a 20-F that indexes its own annual report instead of carrying Item headings", () => {
+    // ASML と Shell はこの形。抜けない方が、別の章を財務レビューと偽るより良い。
+    const crossReferenceIndexOnly = `
+      <html><body>
+        <div>Item 5. Operating and Financial Review and Prospects A. Operating results 23-30, 36-41 B. Liquidity 38-41</div>
+        <div>Financial performance – Performance KPIs ${"Revenue for the year increased on higher system sales. ".repeat(120)}</div>
+      </body></html>
+    `;
+    expect(extractMDASection(crossReferenceIndexOnly, "20-F")).toBeNull();
   });
 });

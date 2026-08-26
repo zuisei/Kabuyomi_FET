@@ -39,7 +39,11 @@ function usage() {
     "  node scripts/remote-config-lifecycle.mjs inspect <envelope.json> [--now <ISO-8601>]",
     "  node scripts/remote-config-lifecycle.mjs refresh-reviewed <input.json> <output.json> --approved-config-sha256 <sha256> --version <new-version> [--reviewed-at <ISO-8601>] [--max-stale-age-seconds <seconds>]",
     "",
-    "inspect never mutates the envelope. refresh-reviewed changes only reviewed metadata and requires an explicit human-approved config hash."
+    "inspect never mutates the envelope. refresh-reviewed changes only reviewed metadata and requires an explicit human-approved config hash.",
+    "",
+    "Note: since 2026-08-24 an overdue config no longer disables the Worker (see src/lib/remote-config.ts).",
+    "The non-zero exit codes here are the reminder — they turn the daily lifecycle-monitor workflow red.",
+    "Nothing user-facing breaks while they are red."
   ].join("\n");
 }
 

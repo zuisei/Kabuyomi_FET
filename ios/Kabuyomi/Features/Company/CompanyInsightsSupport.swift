@@ -25,14 +25,15 @@ enum InvestorOverviewTone {
         }
     }
 
+    /// 相場の向きなので状態色ではなく gain / loss を使う。
     var tint: Color {
         switch self {
         case .positive:
-            return KabuyomiTheme.positive
+            return KabuyomiTheme.gain
         case .mixed:
-            return KabuyomiTheme.accentDeep
+            return KabuyomiTheme.accent
         case .negative:
-            return KabuyomiTheme.negative
+            return KabuyomiTheme.loss
         }
     }
 
@@ -159,6 +160,21 @@ func formattedMetricValue(_ value: Double, logicalName: String, unit: String = "
     return formattedCurrencyLikeMetric(value, unit: unit)
 }
 
+/// 計算指標の金額(FCF など)。既存の通貨整形にそのまま乗せる。
+/// 別の整形を作ると、同じ画面で桁の出方が指標ごとに変わる。
+func formattedDerivedAmount(_ value: Double, unit: String) -> String {
+    formattedCurrencyLikeMetric(value, unit: unit)
+}
+
+/// 計算の材料。単位が `USD/shares` のような1株あたりの値なら小数、
+/// それ以外は金額として整形する。
+func formattedDerivedOperandValue(_ operand: DerivedMetricOperandPayload) -> String {
+    if operand.unit.contains("/") {
+        return operand.value.formatted(.number.precision(.fractionLength(2)))
+    }
+    return formattedCurrencyLikeMetric(operand.value, unit: operand.unit)
+}
+
 func formattedYoY(_ yoyPercent: Double) -> String {
     "\(yoyPercent.formatted(.number.precision(.fractionLength(1))))%"
 }
@@ -173,12 +189,14 @@ enum MetricDeltaTone: Equatable {
     case negative
     case neutral
 
+    /// 増減は相場慣習の gain / loss で塗る(日本式は上げ=赤 / 下げ=青)。
+    /// 色だけで読ませないため、表示側は必ず矢印か符号を併記すること。
     var tint: Color {
         switch self {
         case .positive:
-            return KabuyomiTheme.positive
+            return KabuyomiTheme.gain
         case .negative:
-            return KabuyomiTheme.negative
+            return KabuyomiTheme.loss
         case .neutral:
             return KabuyomiTheme.inkMuted
         }
@@ -405,7 +423,10 @@ private func containsJapaneseText(_ value: String) -> Bool {
     value.range(of: #"[ぁ-んァ-ン一-龥]"#, options: .regularExpression) != nil
 }
 
-private func formattedCurrencyLikeMetric(_ value: Double, unit: String) -> String {
+/// 金額を「826.3億ドル」の体裁へ落とす、アプリ内で唯一の桁変換。
+/// 主要数値グリッドと根拠チップが同じ関数を通ることで、
+/// 同じ数字が画面ごとに違う顔で出ないようにする。
+func formattedCurrencyLikeMetric(_ value: Double, unit: String) -> String {
     guard unit.uppercased() == "USD" else {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

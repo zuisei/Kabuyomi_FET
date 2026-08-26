@@ -1,6 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
 import { prepareFilingText } from "./prepared-filing.mjs";
 
+// NOTE: このサービスは本番/test のどちらの経路でも使われていない。
+// `wrangler.toml` / `wrangler.test.toml` はいずれも
+// `SEC_FETCHER_BASE_URL = "cloudflare-internal"` で、実際に動くのは
+// Worker 内の `workers/src/lib/sec-fetcher-service.ts` の方。
+// ここを直しても本番は変わらないので、両実装を触るときは必ず対にすること。
 const DEFAULT_USER_AGENT = "Kabuyomi admin@kabuyomi.app";
 const MAX_RESPONSE_CACHE_ENTRIES = 512;
 const CACHE_TTL = {
@@ -13,6 +18,8 @@ const CACHE_TTL = {
 const SUBMISSIONS_LOOKBACK_YEARS = 4;
 const MIN_RECENT_10K_FILINGS = 3;
 const MIN_RECENT_10Q_FILINGS = 4;
+// 20-F は年 1 回。4 年で 3 本あれば履歴として十分。
+const MIN_RECENT_20F_FILINGS = 3;
 
 export function readConfig(env = process.env) {
   return {
@@ -169,14 +176,20 @@ export function createSecService(config = readConfig()) {
   };
 }
 
+// 米国企業は us-gaap、外国企業(20-F)は ifrs-full。両方で出す会社(トヨタ・ソニー)が
+// あるので us-gaap を先に見る。Worker 側 `sec-fetcher-service.ts` と対。
+const METRIC_TAXONOMIES = ["us-gaap", "ifrs-full"];
+
 function extractRequestedConceptsFromCompanyFacts(companyFacts, tags) {
-  const usGaap = companyFacts?.facts?.["us-gaap"];
   const concepts = {};
   const missingTags = [];
 
   for (const tag of tags) {
-    if (usGaap && Object.prototype.hasOwnProperty.call(usGaap, tag)) {
-      concepts[tag] = usGaap[tag];
+    const found = METRIC_TAXONOMIES
+      .map((taxonomy) => companyFacts?.facts?.[taxonomy])
+      .find((facts) => facts && Object.prototype.hasOwnProperty.call(facts, tag));
+    if (found) {
+      concepts[tag] = found[tag];
       continue;
     }
 
@@ -424,13 +437,26 @@ function normalizeSubmissionRecent(payload) {
       ? payload.filings.recent
       : payload;
 
-  return Array.isArray(recent.form) &&
-    Array.isArray(recent.accessionNumber) &&
-    Array.isArray(recent.primaryDocument) &&
-    Array.isArray(recent.filingDate) &&
-    Array.isArray(recent.reportDate)
-    ? recent
-    : null;
+  const columns = [
+    recent.form,
+    recent.accessionNumber,
+    recent.primaryDocument,
+    recent.filingDate,
+    recent.reportDate
+  ];
+  if (!columns.every((column) => Array.isArray(column))) {
+    return null;
+  }
+
+  // 5つの配列は同じ添字で1件の資料を表す。長さが揃わない応答を通すと
+  // 種別と実体がずれた資料を掴みうるので弾く。
+  // (Worker 内の複製 workers/src/lib/sec-fetcher-service.ts と同じ判定)
+  const expectedLength = columns[0].length;
+  if (!columns.every((column) => column.length === expectedLength)) {
+    return null;
+  }
+
+  return recent;
 }
 
 function toSubmissionEntries(recent) {
@@ -498,6 +524,7 @@ function hasEnoughSupportedHistory(recent) {
 function hasEnoughSupportedHistoryEntries(entries) {
   let tenKCount = 0;
   let tenQCount = 0;
+  let twentyFCount = 0;
 
   for (const entry of entries) {
     if (!entry.filingDate || entry.filingDate < isoDateYearsAgo(SUBMISSIONS_LOOKBACK_YEARS)) {
@@ -511,10 +538,19 @@ function hasEnoughSupportedHistoryEntries(entries) {
 
     if (entry.form.startsWith("10-Q")) {
       tenQCount += 1;
+      continue;
+    }
+
+    if (entry.form.startsWith("20-F")) {
+      twentyFCount += 1;
     }
   }
 
-  return tenKCount >= MIN_RECENT_10K_FILINGS && tenQCount >= MIN_RECENT_10Q_FILINGS;
+  if (tenKCount >= MIN_RECENT_10K_FILINGS && tenQCount >= MIN_RECENT_10Q_FILINGS) {
+    return true;
+  }
+
+  return twentyFCount >= MIN_RECENT_20F_FILINGS;
 }
 
 function isoDateYearsAgo(years) {
