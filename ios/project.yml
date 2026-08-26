@@ -95,6 +95,13 @@ targets:
           NSAllowsArbitraryLoads: false
         ITSAppUsesNonExemptEncryption: false
         KABUYOMI_API_BASE_URL: $(KABUYOMI_API_BASE_URL)
+        # 政策タブの向き先。Kabuyomi 本体と同じ形にする。
+        # **Release は空のまま。** md-api の本番はまだデプロイされていないので、
+        # 埋めない限り政策タブは「設定が無い」と言って止まる。
+        # TestFlight 環境を本番ビルドから叩かせない(2026-08-26)。
+        MARKET_DOCKET_DEFAULT_ENVIRONMENT: $(MARKET_DOCKET_DEFAULT_ENVIRONMENT)
+        MARKET_DOCKET_TESTFLIGHT_API_URL: $(MARKET_DOCKET_TESTFLIGHT_API_URL)
+        MARKET_DOCKET_PRODUCTION_API_URL: $(MARKET_DOCKET_PRODUCTION_API_URL)
         LSApplicationCategoryType: public.app-category.finance
         GADApplicationIdentifier: ca-app-pub-1248492954379402~7909080109
         SKAdNetworkItems:
@@ -109,9 +116,15 @@ targets:
         Debug:
           APP_ATTEST_ENVIRONMENT: development
           KABUYOMI_API_BASE_URL: https://kabuyomi-api-test.dznqjmctk7.workers.dev
+          MARKET_DOCKET_DEFAULT_ENVIRONMENT: testflightAPI
+          MARKET_DOCKET_TESTFLIGHT_API_URL: https://md-api-testflight.dznqjmctk7.workers.dev
         Release:
           APP_ATTEST_ENVIRONMENT: production
           KABUYOMI_API_BASE_URL: https://kabuyomi-api.dznqjmctk7.workers.dev
+          # md-api の本番が立ったらここに URL を入れる。それまでは空のまま。
+          MARKET_DOCKET_DEFAULT_ENVIRONMENT: productionAPI
+          MARKET_DOCKET_PRODUCTION_API_URL: ""
+
     postBuildScripts:
       - name: Generate Ad SDK dSYMs for Archive
         basedOnDependencyAnalysis: false

@@ -105,21 +105,13 @@ struct RedesignRootView: View {
             .tabItem { Label("ホーム", systemImage: "square.grid.2x2") }
             .tag(RedesignTab.home)
 
-            NavigationStack(path: $summaryPath) {
-                RedesignConversationsView(
-                    openConversation: { ticker in
-                        // 会話タブは会話画面へ直行。戻れば資料が下にいる。
-                        appModel.openConversation(for: ticker)
-                        setPath([.company(ticker), .chat(ticker)], on: .summary)
-                    },
-                    present: { sheet = $0 }
-                )
-                .navigationDestination(for: RedesignRoute.self) { route in
-                    destination(for: route, on: .summary)
-                }
-            }
-            .tabItem { Label("会話", systemImage: "bubble.left.and.bubble.right") }
-            .tag(RedesignTab.summary)
+            // 2枚目は政策。会話の一覧はここに置いていたが、会社の会話は
+            // 会社の画面から辿れるので、タブ1枚を占める理由が無かった
+            // (2026-08-26 オーナー「このタブの存在意義微妙だよな」)。
+            // 中身は `Policy/` に移した MarketDocket の実装。
+            PolicyTabView()
+                .tabItem { Label("政策", systemImage: "building.columns") }
+                .tag(RedesignTab.summary)
         }
         .tint(KabuyomiTheme.accent)
         // 左端の戻りジェスチャは根から資料詳細まで同じように効く。
