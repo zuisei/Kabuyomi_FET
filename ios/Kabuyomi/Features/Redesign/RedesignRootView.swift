@@ -2982,16 +2982,30 @@ private func formattedFilingDate(_ raw: String) -> String {
 
 /// 会社の会話画面。メッセージが上に積み、入力欄が下に固定される普通のチャットの形。
 /// 資料パネル(ワークスペース)には埋め込まない — 資料は読む場所、ここは話す場所。
+/// 空の会話画面だけ、内容をスクロール領域の下端へ寄せる。
+/// `containerRelativeFrame` は高さを**固定**するので、内容がビューポートより
+/// 高くなり得る場面(会話が入った後・特大文字)では掛けない。掛けると溢れた分が切れる。
+private struct RedesignEmptyChatAnchor: ViewModifier {
+    let isActive: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isActive {
+            content.containerRelativeFrame(.vertical, alignment: .bottom)
+        } else {
+            content
+        }
+    }
+}
+
 private struct RedesignChatScreen: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let ticker: String
     let openCredits: (CreditInitialSheet?) -> Void
     let openSource: (LocalMessageSourceRef) -> Void
 
     @State private var question = ""
-    /// コンポーザを開いているか。`RedesignComposer` 側の @State に持たせると
-    /// safeAreaInset の再生成で毎回初期値に戻り、開いた直後に畳まれてしまう。
-    @State private var composerExpanded = false
     @State private var deferredConsentQuestion: String?
     @FocusState private var composerFocused: Bool
 
@@ -3024,6 +3038,15 @@ private struct RedesignChatScreen: View {
             }
         }
         return result
+    }
+
+    /// 会話がまだ無い状態。ここでだけ提案チップを下端へ寄せる。
+    /// 大きい文字サイズではチップだけで画面が埋まるため寄せない
+    /// (`containerRelativeFrame` は高さを固定するので、寄せると溢れた分が切れる)。
+    private var anchorsEmptyStateToComposer: Bool {
+        messages.isEmpty
+            && pendingChat == nil
+            && !dynamicTypeSize.isAccessibilitySize
     }
 
     private var navigationTitleText: String {
@@ -3070,6 +3093,9 @@ private struct RedesignChatScreen: View {
                         .padding(.horizontal, 18)
                         .frame(maxWidth: 760)
                         .frame(maxWidth: .infinity)
+                        // まだ会話が無いときは、中身を下端 = 入力欄のすぐ上へ寄せる。
+                        // 上に寄せると提案チップと入力欄の間に画面の半分が空く。
+                        .modifier(RedesignEmptyChatAnchor(isActive: anchorsEmptyStateToComposer))
                     }
                     .background(KabuyomiTheme.paper)
                     .scrollDismissesKeyboard(.interactively)
@@ -3104,7 +3130,6 @@ private struct RedesignChatScreen: View {
             if company != nil {
                 RedesignComposer(
                     question: $question,
-                    isExpandedByUser: $composerExpanded,
                     isFocused: $composerFocused,
                     creditText: appModel.chatCreditStatusText,
                     disabledReason: composerDisabledReason,
@@ -3137,16 +3162,11 @@ private struct RedesignChatScreen: View {
     }
 
     /// まだ何も聞いていないとき。提案チップは入力欄に載せるだけ(自動送信禁止は7月ルール)。
+    /// 文字での案内は置かない — 入力欄が下に見えていれば、この画面で何をするかは自明。
     private func emptyState(company: CompanyPayload) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("この資料について気になることを聞いてください")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(KabuyomiTheme.ink)
-            RedesignQuestionStarters(company: company) { prompt in
-                question = prompt
-                composerExpanded = true
-                composerFocused = true
-            }
+        RedesignQuestionStarters(company: company) { prompt in
+            question = prompt
+            composerFocused = true
         }
     }
 
@@ -3655,44 +3675,29 @@ private struct RedesignQuestionStarters: View {
     }
 
     var body: some View {
+        // 見出しは付けない。この画面の見出しはナビタイトルと資料の1行だけで足りる
+        // (2026-08-26: 同じ「この資料について質問」が5段重なっていた)。
         VStack(alignment: .leading, spacing: 8) {
-            RedesignSectionHeader(
-                title: "この資料を深掘りする",
-                subtitle: "質問は対象資料と会話の文脈に基づいて回答されます。"
-            )
             ForEach(prompts, id: \.self) { prompt in
-                ConversationPromptChip(text: prompt) {
+                // 入力欄がすぐ下に見えているので ↖ で言い直さない。
+                ConversationPromptChip(text: prompt, showsPrefillGlyph: false) {
                     select(prompt)
                 }
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .padding(.vertical, 4)
     }
 }
 
 private struct RedesignComposer: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var question: String
-    @Binding var isExpandedByUser: Bool
     var isFocused: FocusState<Bool>.Binding
     let creditText: String
     let disabledReason: String?
     let isSending: Bool
     let send: () -> Void
     let openCredits: () -> Void
-
-    /// 読んでいる間まで入力欄とクレジット表示を出し続けると、
-    /// 本文の上に常時110pt の板が乗り、しかも「クレジットが必要です」を
-    /// ずっと突きつけることになる。触れるまでは1行の入り口に畳む。
-    /// 折りたたみ中は TextField 自体が階層に無いため、FocusState を立てても
-    /// 束ねる先が無く SwiftUI に戻される。開くかどうかは別の状態で持つ。
-    private var isExpanded: Bool {
-        isExpandedByUser
-            || isFocused.wrappedValue
-            || isSending
-            || !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
 
     /// 送信可能な状態。塗り分けと disabled はここ1か所から決める。
     /// ホームの質問バーと**同じ基準**にする。コメントでは「2つのコンポーザが
@@ -3707,64 +3712,26 @@ private struct RedesignComposer: View {
         streamDraftHint(draft: question, disabledReason: disabledReason)
     }
 
+    /// 入力欄は畳まない。この画面は質問するためだけにあるので、
+    /// 「質問する」と書いた板を押させてから欄を出すのは一手多い
+    /// (2026-08-26: 同じ文言が画面に4回並んでいた原因のひとつ)。
     var body: some View {
-        Group {
-            if isExpanded {
-                expandedComposer
-                    .task(id: isExpandedByUser) {
-                        // 欄が現れてからでないとフォーカスを渡せない。
-                        if isExpandedByUser { isFocused.wrappedValue = true }
-                    }
-                    // 一度開いたら畳み直さない。フォーカスが外れるたびに閉じると、
-                    // キーボードを下げただけで入力欄が消えて書きかけを見失う。
-            } else {
-                collapsedEntry
-            }
-        }
-
-        .padding(.horizontal, 12)
-        .padding(.top, 7)
-        .padding(.bottom, 5)
-        // 半透明だと本文が板の裏に透けて、読む面と聞く面の境目が消える。
-        .background(KabuyomiTheme.paper)
-        .overlay(alignment: .top) { KabuyomiHairline(color: KabuyomiTheme.separatorStrong) }
-    }
-
-    private var collapsedEntry: some View {
-        Button {
-            isExpandedByUser = true
-        } label: {
-            HStack(spacing: 10) {
-                Text("この資料について質問する")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(KabuyomiTheme.accent)
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.up")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(KabuyomiTheme.inkMuted)
-            }
+        composerBody
             .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .background(KabuyomiTheme.inputWell, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(KabuyomiTheme.separator, lineWidth: KabuyomiTheme.hairlineWidth)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("redesign.composer.expand")
-        .accessibilityLabel("この資料について質問する")
+            .padding(.top, 7)
+            .padding(.bottom, 5)
+            // 半透明だと本文が板の裏に透けて、読む面と聞く面の境目が消える。
+            .background(KabuyomiTheme.paper)
+            .overlay(alignment: .top) { KabuyomiHairline(color: KabuyomiTheme.separatorStrong) }
     }
 
-    private var expandedComposer: some View {
+    private var composerBody: some View {
         VStack(spacing: 7) {
             HStack(spacing: 8) {
                 if disabledReason == "残高不足" {
-                    Label(
-                        dynamicTypeSize.isAccessibilitySize ? "残高不足" : "質問にはクレジットが必要です",
-                        systemImage: "exclamationmark.circle.fill"
-                    )
+                    // 同じ状態を「残高不足」と「質問にはクレジットが必要です」の
+                    // 2通りで言っていた。文字サイズで言い方を変えない(2026-08-26)。
+                    Label("クレジットが足りません", systemImage: "exclamationmark.circle.fill")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(KabuyomiTheme.caution)
                 } else {
@@ -3828,7 +3795,9 @@ private struct RedesignComposer: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(disabledReason != nil || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                // 塗りと押せるかを同じ条件から出す。以前は「H」1文字でボタンが
+                // 沈んで見えるのに押せて、押しても何も起きなかった。
+                .disabled(!canSend)
                 .accessibilityLabel("質問を送信")
                 .accessibilityIdentifier("redesign.composer.send")
             }

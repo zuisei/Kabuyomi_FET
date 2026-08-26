@@ -28,7 +28,8 @@ final class ShellParityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["redesign.company.more"].exists)
         // 資料パネルに会話は埋め込まない。あるのは会話画面への入口だけ。
         XCTAssertTrue(app.buttons["redesign.company.chat"].exists)
-        XCTAssertFalse(app.buttons["redesign.composer.expand"].exists)
+        // 質問の道は会話画面の1本だけ。資料の面に入力欄は無い。
+        XCTAssertFalse(app.textFields["redesign.composer.field"].exists)
         XCTAssertFalse(app.tabBars.firstMatch.exists)
         XCTAssertFalse(app.staticTexts["このアプリの署名を確認できません"].exists)
         capture("Research workspace")
@@ -36,7 +37,8 @@ final class ShellParityUITests: XCTestCase {
         // 会話画面はチャットの形: メッセージ面+下に固定のコンポーザ。
         app.buttons["redesign.company.chat"].tap()
         XCTAssertTrue(element("redesign.chat").waitForExistence(timeout: 8))
-        XCTAssertTrue(app.buttons["redesign.composer.expand"].waitForExistence(timeout: 8))
+        // 入力欄は最初から出ている。開くための一手は挟まない(2026-08-26)。
+        XCTAssertTrue(app.textFields["redesign.composer.field"].waitForExistence(timeout: 8))
         capture("Chat")
 
         edgeSwipeBack()

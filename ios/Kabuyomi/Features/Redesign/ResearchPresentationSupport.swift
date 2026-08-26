@@ -252,12 +252,16 @@ enum ConversationLibraryRecentEmptyCopy {
 
 /// 提案質問のチップ。無地のテキストボタンで、頭に飾りのアイコンは持たない
 /// (v2 IA 仕様 Phase 6「AI 臭の除去」= sparkles 全廃。置き換えのアイコンも置かない)。
-/// 末尾の ↖ だけは残す — これは装飾ではなく「押すと入力欄に入る(送信ではない)」
-/// の合図で、Phase 4 の「プレフィルは送信にならない」規約を目で見せている部分。
+/// 末尾の ↖ は「押すと入力欄に入る(送信ではない)」の合図で、
+/// Phase 4 の「プレフィルは送信にならない」規約を目で見せている部分。
+/// ただし入力欄がチップのすぐ下に見えている面では、押した先が目の前にあるので
+/// 記号で言い直す必要がない。そこだけ `showsPrefillGlyph: false` で落とす
+/// (規約自体は VoiceOver ラベル「質問を入力: 〜」が引き続き持つ)。
 struct ConversationPromptChip: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let text: String
+    var showsPrefillGlyph: Bool = true
     let action: () -> Void
 
     var body: some View {
@@ -271,9 +275,11 @@ struct ConversationPromptChip: View {
 
                 Spacer(minLength: 0)
 
-                Image(systemName: "arrow.up.left")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(KabuyomiTheme.accent)
+                if showsPrefillGlyph {
+                    Image(systemName: "arrow.up.left")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(KabuyomiTheme.accent)
+                }
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
