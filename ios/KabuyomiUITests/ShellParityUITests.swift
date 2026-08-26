@@ -1,7 +1,7 @@
 import XCTest
 
 /// v2 IA の骨格(2026-08-24 改訂)。
-/// 根はタブ2枚(ホーム = 盤面 / 会話 = 会社ごとの会話履歴)。
+/// 根はタブ2枚(ホーム = 盤面 / 政策 = 公式文書の一覧)。
 /// 質問は会社ワークスペースのコンポーザだけ — ホームに質問バーは無い
 /// (2026-08-24 オーナー再監査「ホームにこれがある理由がわからん」で撤去)。
 /// 会社ドキュメント・資料・引用はどちらのタブからも push、
@@ -125,7 +125,7 @@ final class ShellParityUITests: XCTestCase {
         // シートを閉じても根の盤面とタブはそのまま残る。
         app.buttons["redesign.settings.close"].tap()
         XCTAssertTrue(element("redesign.home").waitForExistence(timeout: 8))
-        XCTAssertTrue(app.tabBars.buttons["会話"].exists)
+        XCTAssertTrue(app.tabBars.buttons["政策"].exists)
     }
 
     /// 根はタブ2枚。ホームの根は盤面で、質問バーはどこにも無い。
@@ -138,7 +138,7 @@ final class ShellParityUITests: XCTestCase {
         // タブは2枚だけ(設定は3枚目のタブにしない)。
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 8))
         XCTAssertTrue(app.tabBars.buttons["ホーム"].exists)
-        XCTAssertTrue(app.tabBars.buttons["会話"].exists)
+        XCTAssertTrue(app.tabBars.buttons["政策"].exists)
         XCTAssertEqual(app.tabBars.firstMatch.buttons.count, 2)
 
         // 質問バー(旧アスクバー)は根に無い。
@@ -191,8 +191,8 @@ final class ShellParityUITests: XCTestCase {
         reachHomeRoot()
         XCTAssertTrue(element("redesign.home").waitForExistence(timeout: 8))
 
-        selectTab("会話")
-        XCTAssertTrue(element("redesign.conversations").waitForExistence(timeout: 8))
+        selectTab("政策")
+        XCTAssertTrue(element("policy.tab").waitForExistence(timeout: 15))
         XCTAssertFalse(element("redesign.home").exists)
 
         selectTab("ホーム")
@@ -221,21 +221,22 @@ final class ShellParityUITests: XCTestCase {
         XCTAssertTrue(element("redesign.home").waitForExistence(timeout: 8))
     }
 
-    /// 会話タブ。会話が無いうちは案内、会話を持つ会社は1行に畳まれる。
-    func testConversationsTabListsCompaniesWithHistory() throws {
+    /// 2枚目のタブは政策。会話の一覧はここに置いていたが、会社の会話は
+    /// 会社の画面から辿れるのでタブ1枚を占める理由が無かった(2026-08-26)。
+    ///
+    /// **質問の道は今も会話画面の1本だけ。** 政策タブに質問の入口は無い。
+    func testPolicyTabIsTheSecondDestination() throws {
         launch()
         seedBoardWithAAPL()
 
-        selectTab("会話")
-        XCTAssertTrue(element("redesign.conversations").waitForExistence(timeout: 8))
-        // この端末はまだ質問していないので空状態の案内が出る。
-        // (会話がある端末では行が出る — その場合この前段は落ちて状況の変化を知らせる。)
-        XCTAssertTrue(app.buttons["redesign.conversations.empty.find"].waitForExistence(timeout: 8))
+        selectTab("政策")
+        XCTAssertTrue(element("policy.tab").waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["redesign.askbar.send"].exists)
-        capture("Conversations empty")
+        XCTAssertFalse(app.textFields["redesign.composer.field"].exists)
+        capture("Policy tab")
 
-        app.buttons["redesign.conversations.empty.find"].tap()
-        XCTAssertTrue(element("redesign.picker").waitForExistence(timeout: 8))
+        selectTab("ホーム")
+        XCTAssertTrue(element("redesign.home").waitForExistence(timeout: 8))
     }
 
     func testProductionDeviceAuthenticationStatusIsReachable() throws {
