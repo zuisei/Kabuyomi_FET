@@ -4506,11 +4506,7 @@ private struct RedesignSettingsView: View {
                 .listRowBackground(KabuyomiTheme.paper)
                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 .accessibilityIdentifier("redesign.settings.starters")
-            } header: {
-                RedesignListSectionHeader(title: "アプリ")
-            }
 
-            Section {
                 NavigationLink(value: RedesignSettingsRoute.details) {
                     SettingsDestinationRow(
                         title: "端末情報とサポート",
@@ -4554,8 +4550,6 @@ private struct RedesignSettingsView: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 }
 
-            } header: {
-                RedesignListSectionHeader(title: "データとサポート")
             }
 
             // 消す操作は他の行と同じ列に並べない。節ごと切り離して最後に置く
