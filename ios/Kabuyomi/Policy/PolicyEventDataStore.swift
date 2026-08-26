@@ -19,25 +19,50 @@ final class EventDataStore: ObservableObject {
         self.repository = repository ?? EventRepositoryFactory.make(environment: environment)
     }
 
+    /// 続きを取るための位置。`nil` は「まだ読んでいない」か「読み切った」。
+    private(set) var nextCursor: String?
+    var hasMoreSummaries: Bool { nextCursor != nil }
+
+    /// **開いたときは1ページだけ。**
+    ///
+    /// 以前はここで最後のページまで回していた。サーバーはどのページを求められても
+    /// 全件を読んで JSON に起こしてから 100 件を切り出すので、1往復 1.4 秒が
+    /// ページ数だけ積み上がる — 2,447 件で 25 往復・約35秒、全件パース6万回。
+    /// 開いた直後に見えるのは最新の1日ぶんだけで、その全部が1ページ目に入る。
+    /// 残りは要るときに `loadMoreSummaries()` で取る(2026-08-26)。
     func loadSummaries() async {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         let syncStartedAt = Date()
         do {
-            var cursor: String?
-            var accumulated: [PolicyEventSummary] = []
-            repeat {
-                let page = try await repository.loadSummaryPage(cursor: cursor, updatedSince: nil)
-                accumulated.append(contentsOf: page.value)
-                summaries = deduplicated(accumulated)
-                loadedSummaryCount = summaries.count
-                totalSummaryCount = page.total
-                dataMode = page.dataMode
-                origin = page.origin
-                cursor = page.nextCursor
-            } while cursor != nil
+            let page = try await repository.loadSummaryPage(cursor: nil, updatedSince: nil)
+            summaries = deduplicated(page.value)
+            loadedSummaryCount = summaries.count
+            totalSummaryCount = page.total
+            dataMode = page.dataMode
+            origin = page.origin
+            nextCursor = page.nextCursor
             lastSuccessfulSyncAt = syncStartedAt
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// 続きを1ページ。末尾が見えたときと、1日ぶんより広い絞り込みに切り替えたときに呼ぶ。
+    func loadMoreSummaries() async {
+        guard !isLoading, let cursor = nextCursor else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let page = try await repository.loadSummaryPage(cursor: cursor, updatedSince: nil)
+            summaries = deduplicated(summaries + page.value)
+            loadedSummaryCount = summaries.count
+            totalSummaryCount = max(page.total, summaries.count)
+            dataMode = page.dataMode
+            origin = page.origin
+            nextCursor = page.nextCursor
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription

@@ -38,7 +38,9 @@ struct PolicyTabView: View {
             events: eventStore.summaries,
             loadError: eventStore.errorMessage != nil,
             isLoading: eventStore.isLoading,
-            refresh: { await eventStore.loadSummaries() }
+            hasMore: eventStore.hasMoreSummaries,
+            refresh: { await eventStore.loadSummaries() },
+            loadMore: { await eventStore.loadMoreSummaries() }
         )
         .environmentObject(eventStore)
         .environmentObject(PolicyStorage.savedStore)

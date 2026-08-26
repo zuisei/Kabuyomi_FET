@@ -4,7 +4,11 @@ struct TimelineView: View {
     let events: [PolicyEventSummary]
     let loadError: Bool
     let isLoading: Bool
+    /// まだ取っていないページが残っているか。
+    var hasMore: Bool = false
     let refresh: () async -> Void
+    /// 続きを1ページ取る。末尾が見えたときと、1日ぶんより広い絞り込みに移ったときに呼ぶ。
+    var loadMore: () async -> Void = {}
     @EnvironmentObject private var store: SavedEventStore
     @EnvironmentObject private var eventStore: EventDataStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -19,11 +23,20 @@ struct TimelineView: View {
     @State private var advancedFilters: TimelineAdvancedFilters
     @State private var didResolveInitialFilter = false
 
-    init(events: [PolicyEventSummary], loadError: Bool, isLoading: Bool, refresh: @escaping () async -> Void) {
+    init(
+        events: [PolicyEventSummary],
+        loadError: Bool,
+        isLoading: Bool,
+        hasMore: Bool = false,
+        refresh: @escaping () async -> Void,
+        loadMore: @escaping () async -> Void = {}
+    ) {
         self.events = events
         self.loadError = loadError
         self.isLoading = isLoading
+        self.hasMore = hasMore
         self.refresh = refresh
+        self.loadMore = loadMore
         let mode = ProcessInfo.processInfo.arguments.value(after: "-screenshotMode")
         _filter = State(initialValue:
             ["timelineMonitor", "timelineBundles"].contains(mode) ? .monitor
@@ -47,6 +60,10 @@ struct TimelineView: View {
     private var latestActivityAt: Date? {
         events.map(\.lastActivityAt).max()
     }
+
+    /// 「新着」は最新1日ぶんで、1ページ目に収まっている。それ以外へ移ると
+    /// 手元にあるぶんだけでは足りないので、続きを取りにいく。
+    private var filterNeedsEverything: Bool { filter != .recent }
 
     private var filtered: [PolicyEventSummary] {
         events.filter { event in
@@ -183,6 +200,22 @@ struct TimelineView: View {
                                     .accessibilityIdentifier("publicationBatch.row")
                                 }
                             }
+
+                            // 末尾が見えたら続きを1ページ。開いた直後に25往復して
+                            // 35秒かける代わりに、要る分だけ足していく(2026-08-26)。
+                            if hasMore {
+                                HStack(spacing: 8) {
+                                    ProgressView().controlSize(.small)
+                                    Text("続きを読み込み中")
+                                        .font(.caption)
+                                        .foregroundStyle(KabuyomiTheme.inkMuted)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.vertical, 12)
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(KabuyomiTheme.canvas)
+                                .task { await loadMore() }
+                            }
                         }
                     }
                     .listStyle(.plain)
@@ -191,6 +224,11 @@ struct TimelineView: View {
                     .scrollContentBackground(.hidden)
                     .background(KabuyomiTheme.canvas)
                     .refreshable { await refresh() }
+                    // 絞り込みを広げた瞬間にも続きを取る。末尾まで送らないと
+                    // 出てこない、という形にはしない。
+                    .task(id: filterNeedsEverything) {
+                        if filterNeedsEverything && hasMore { await loadMore() }
+                    }
                     .accessibilityIdentifier("timeline.main")
                 }
             }
