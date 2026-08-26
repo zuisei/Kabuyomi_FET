@@ -118,7 +118,7 @@ struct TimelineAdvancedFilterSheet: View {
 
     private var actionBar: some View {
         VStack(spacing: 0) {
-            Divider()
+            KabuyomiHairline(color: KabuyomiTheme.separatorStrong)
             HStack(spacing: 12) {
                 Button { draft = TimelineAdvancedFilters() } label: {
                     Text("すべて解除").frame(maxWidth: .infinity)

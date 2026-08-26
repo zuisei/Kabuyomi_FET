@@ -1777,7 +1777,7 @@ AI 利用前に、質問内容と対象の決算資料の抜粋を外部 AI モ�
         } catch {
             guard stateGeneration == self.stateGeneration, generation == searchGeneration else { return }
             searchResults = []
-            searchErrorMessage = shouldIgnore(error) ? nil : presentableMessage(for: error)
+            searchErrorMessage = shouldIgnore(error) ? nil : presentableMessage(for: error, context: .search)
         }
 
         if stateGeneration == self.stateGeneration, generation == searchGeneration {
@@ -2915,7 +2915,18 @@ credit残高に使う端末識別情報は維持されます。
         return nsError.domain == NSURLErrorDomain && nsError.code == URLError.cancelled.rawValue
     }
 
-    private func presentableMessage(for error: Error) -> String {
+    /// エラー文の宛先。同じ 503 でも、会話の失敗と検索の失敗では言うことが違う。
+    enum PresentableMessageContext {
+        case general
+        /// 検索。**会話の文言を出さない** — 「チャット応答を生成できません」が
+        /// 銘柄検索の失敗として出ていた(2026-08-26 実機)。
+        case search
+    }
+
+    private func presentableMessage(
+        for error: Error,
+        context: PresentableMessageContext = .general
+    ) -> String {
         let nsError = error as NSError
         if let urlError = error as? URLError, urlError.code == .timedOut {
             return "通信に時間がかかりすぎています。少し待ってから、もう一度試してください。"
@@ -3015,10 +3026,17 @@ credit残高に使う端末識別情報は維持されます。
             return "本文抽出に失敗しました。時間を置いて再試行するか、原文を直接確認してください。"
         }
 
+        // メンテナンスは「落ちている」ではなく「止めている」。理由を名指しする。
+        if rawMessage.contains("under maintenance") {
+            return "ただいまメンテナンス中です。しばらくしてから再度お試しください。"
+        }
+
         if rawMessage.contains("Chat response is temporarily unavailable")
             || rawMessage.contains("Internal server error")
             || rawMessage.contains("HTTP 503") {
-            return "チャット応答を現在生成できません。少し待ってから、もう一度お試しください。"
+            return context == .search
+                ? "サーバーが応答しませんでした。しばらくしてから再度お試しください。"
+                : "チャット応答を現在生成できません。少し待ってから、もう一度お試しください。"
         }
 
         if rawMessage.contains("Chat is temporarily disabled") {

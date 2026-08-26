@@ -535,11 +535,11 @@ private struct TimelineRowBoundaryBackground: View {
             KabuyomiTheme.paper
             VStack(spacing: 0) {
                 Rectangle()
-                    .fill(KabuyomiTheme.separator)
+                    .fill(KabuyomiTheme.separatorStrong)
                     .frame(height: KabuyomiTheme.hairlineWidth)
                 KabuyomiTheme.canvas
                 Rectangle()
-                    .fill(KabuyomiTheme.separator)
+                    .fill(KabuyomiTheme.separatorStrong)
                     .frame(height: KabuyomiTheme.hairlineWidth)
             }
             .frame(height: 8)

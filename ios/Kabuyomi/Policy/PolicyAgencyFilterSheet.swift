@@ -234,7 +234,7 @@ struct AgencyFilterSheet: View {
 
     private var actionBar: some View {
         VStack(spacing: 0) {
-            Divider()
+            KabuyomiHairline(color: KabuyomiTheme.separatorStrong)
             HStack(spacing: 12) {
                 Button { draftSelection.removeAll() } label: {
                     Text("すべて解除").frame(maxWidth: .infinity)

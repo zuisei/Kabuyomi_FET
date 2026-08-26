@@ -50,7 +50,7 @@ struct OnDeviceMarketChart: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Divider()
+            KabuyomiHairline(color: KabuyomiTheme.separatorStrong)
             HStack {
                 Text("この時点の市場")
                     .font(.headline)

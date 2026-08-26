@@ -31,12 +31,22 @@ struct PolicyOverviewContent: View {
                         request: requestTranslation
                     )
                 }
+                // 節の切れ目は罫で引く。以前は間隔だけで分けていて、
+                // ところどころ標準色の細い線が中途半端に混ざっていた
+                // (2026-08-26 オーナー「境界線が薄くて醜い」)。
+                // 引くなら全部の節に、`separatorStrong` ではっきり引く。
                 editorialBrief
+                sectionRule
                 affectedTargets
+                sectionRule
                 legalDates
+                sectionRule
                 market
+                sectionRule
                 DocumentRelationshipStrip(documents: event.relatedDocuments)
+                sectionRule
                 evidenceLinks
+                sectionRule
                 timePrecision
                 DisclosureGroup("補足情報", isExpanded: $detailsExpanded) {
                     VStack(alignment: .leading, spacing: 16) {
@@ -73,6 +83,12 @@ struct PolicyOverviewContent: View {
             }
             briefStatuses
         }
+    }
+
+    /// 節と節のあいだの罫。
+    private var sectionRule: some View {
+        KabuyomiHairline(color: KabuyomiTheme.separatorStrong)
+            .padding(.vertical, -4)
     }
 
     @ViewBuilder private var briefMetadata: some View {

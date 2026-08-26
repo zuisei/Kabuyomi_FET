@@ -335,7 +335,7 @@ struct MarketDataStatusFooter: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Divider()
+            KabuyomiHairline(color: KabuyomiTheme.separatorStrong)
             MarketDataStateMessage(title: title, detail: detail, systemImage: systemImage)
         }
         .padding(.top, 2)

@@ -166,7 +166,7 @@ struct PolicyReplayContent: View {
 
     @ViewBuilder private var futureIndex: some View {
         if !futureItems.isEmpty {
-            Divider()
+            KabuyomiHairline(color: KabuyomiTheme.separatorStrong)
             DisclosureGroup(isExpanded: $showFuture) {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(futureItems) { item in
@@ -411,7 +411,7 @@ private struct DayPrecisionChronologyView: View {
             }
 
             if !futureDocuments.isEmpty {
-                Divider()
+                KabuyomiHairline(color: KabuyomiTheme.separatorStrong)
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(futureDocuments) { document in
@@ -542,7 +542,7 @@ private struct ReplayMomentControl: View {
             }
             .accessibilityIdentifier("replay.currentTime")
 
-            Divider()
+            KabuyomiHairline(color: KabuyomiTheme.separatorStrong)
 
             ReplayStageTrack(
                 items: items,
@@ -732,7 +732,7 @@ private struct ReplaySnapshotPanel<Content: View>: View {
             }
             .font(.caption.weight(.semibold))
 
-            Divider()
+            KabuyomiHairline(color: KabuyomiTheme.separatorStrong)
             content()
         }
         .padding(16)
@@ -797,7 +797,7 @@ private struct ReplayDocumentRow: View {
                 }
             }
             if showsDivider {
-                Divider()
+                KabuyomiHairline(color: KabuyomiTheme.separatorStrong)
                     .padding(.leading, 35)
             }
         }
@@ -811,7 +811,7 @@ private struct ReplayMarketStatus: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Divider()
+            KabuyomiHairline(color: KabuyomiTheme.separatorStrong)
             Text("この時点の市場")
                 .font(.headline)
             HStack(alignment: .top, spacing: 12) {
@@ -841,7 +841,7 @@ private struct ReplayDailyMarketSummary: View {
     var body: some View {
         if let summary {
             VStack(alignment: .leading, spacing: 10) {
-                Divider()
+                KabuyomiHairline(color: KabuyomiTheme.separatorStrong)
                 HStack {
                     Text("この時点の市場")
                         .font(.headline)
