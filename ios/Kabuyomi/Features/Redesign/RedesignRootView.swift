@@ -3735,7 +3735,9 @@ private struct RedesignComposer: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(KabuyomiTheme.caution)
                 } else {
-                    Text(isSending ? "回答を作成中" : (disabledReason ?? draftHint ?? creditText))
+                    // 送信中は `disabledReason` が「回答を作成中です」を返すので、
+                    // ここで isSending を見ると同じことを別の言い方で二重に持つ。
+                    Text(disabledReason ?? draftHint ?? creditText)
                         .font(.caption2.weight(.medium))
                         .monospacedDigit()
                         .foregroundStyle(disabledReason == nil ? KabuyomiTheme.inkMuted : KabuyomiTheme.caution)
