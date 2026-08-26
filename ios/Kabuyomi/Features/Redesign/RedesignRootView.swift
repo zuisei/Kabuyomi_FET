@@ -1404,10 +1404,10 @@ private struct RedesignConversationsView: View {
             if rows.isEmpty {
                 emptySection
             } else {
+                // 見出しは付けない。ナビタイトルが「会話」と言っているので、
+                // 節の見出しに同じ語を置くと2回言うことになる(2026-08-26)。
                 Section {
                     ForEach(rows) { row in conversationRow(row) }
-                } header: {
-                    RedesignListSectionHeader(title: "会話", trailing: "\(rows.count)社")
                 }
             }
         }
@@ -1464,15 +1464,14 @@ private struct RedesignConversationsView: View {
                     .fixedSize()
                 }
                 if !row.latestQuestion.isEmpty {
+                    // 角丸+inputWell で囲むと入力欄に見える。ここは履歴で、
+                    // この行に打ち込むことはできない(2026-08-26)。地の文で出す。
                     Text(row.latestQuestion)
                         .font(.footnote)
-                        .foregroundStyle(KabuyomiTheme.ink)
-                        .lineLimit(2)
+                        .foregroundStyle(KabuyomiTheme.inkSoft)
+                        .lineLimit(1)
                         .multilineTextAlignment(.leading)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(KabuyomiTheme.inputWell, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
             }
             .padding(.vertical, 9)
