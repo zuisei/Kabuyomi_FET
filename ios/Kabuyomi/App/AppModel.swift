@@ -2971,7 +2971,7 @@ credit残高に使う端末識別情報は維持されます。
         }
 
         if rawMessage.contains("No supported filing found") {
-            return "この銘柄の最新開示は対応範囲外です。10-K / 10-Q / 20-F に対応しています(ETF・投資信託などは対象外です)。"
+            return "この銘柄の最新開示は対応範囲外です。\(SupportedFilingForms.listed) に対応しています(ETF・投資信託などは対象外です)。"
         }
 
         if rawMessage.contains("Ticker not found") {

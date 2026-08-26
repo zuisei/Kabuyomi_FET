@@ -439,7 +439,7 @@ struct RedesignDiscoveryMission: View {
                 .font(titleFont)
                 .foregroundStyle(KabuyomiTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("10-K / 10-Qを日本語で読み、根拠を確認しながら質問できます。投資助言や売買推奨は行いません。")
+            Text("\(SupportedFilingForms.listed) を日本語で読み、根拠を確認しながら質問できます。投資助言や売買推奨は行いません。")
                 .font(bodyFont)
                 .foregroundStyle(KabuyomiTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
@@ -717,7 +717,7 @@ private struct RedesignStreamView: View {
                     RedesignCompanyRow(
                         ticker: company.ticker,
                         companyName: company.companyName,
-                        detail: "10-K / 10-Qを確認",
+                        detail: "\(SupportedFilingForms.collectiveNoun)を確認",
                         isSaved: false
                     ) {
                         appModel.openConversation(for: company.ticker)
@@ -1689,7 +1689,7 @@ private struct RedesignHomeView: View {
                     RedesignCompanyRow(
                         ticker: company.ticker,
                         companyName: company.companyName,
-                        detail: "10-K / 10-Qを確認",
+                        detail: "\(SupportedFilingForms.collectiveNoun)を確認",
                         isSaved: false,
                         identifierPrefix: "redesign.summary"
                     ) {
@@ -1868,7 +1868,7 @@ private struct RedesignCompanyPickerSheet: View {
                     RedesignStarterChoiceRow(
                         ticker: company.ticker,
                         companyName: company.companyName,
-                        detail: "10-K / 10-Qを確認",
+                        detail: "\(SupportedFilingForms.collectiveNoun)を確認",
                         isSelected: selection.contains(company.ticker),
                         toggle: { toggle(company.ticker, searchItem: nil) }
                     )
@@ -1895,7 +1895,7 @@ private struct RedesignCompanyPickerSheet: View {
                     RedesignStarterChoiceRow(
                         ticker: ticker,
                         companyName: selectedSearchItems[ticker]?.companyName ?? ticker,
-                        detail: "10-K / 10-Qを確認",
+                        detail: "\(SupportedFilingForms.collectiveNoun)を確認",
                         isSelected: true,
                         toggle: { toggle(ticker, searchItem: selectedSearchItems[ticker]) }
                     )
@@ -2029,7 +2029,7 @@ private struct RedesignCompanyPickerSheet: View {
                     RedesignCompanyRow(
                         ticker: company.ticker,
                         companyName: company.companyName,
-                        detail: "10-K / 10-Qを確認",
+                        detail: "\(SupportedFilingForms.collectiveNoun)を確認",
                         isSaved: false
                     ) {
                         openCompany(company.ticker)

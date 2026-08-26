@@ -1,5 +1,23 @@
 import Foundation
 
+/// 対応している提出書類。**呼び名を画面の文面に直書きしない**ための1か所。
+/// 20-F を足したとき、対応判定は直したのに文面は「10-K / 10-Q」のまま
+/// 6画面に残っていた(2026-08-26)。増やすときはここだけを触る。
+enum SupportedFilingForms {
+    /// 判定にも表示にも使う正の一覧。
+    static let all = ["10-K", "10-Q", "20-F"]
+
+    /// 文章に埋める並び。「10-K / 10-Q / 20-F」
+    static let listed = all.joined(separator: " / ")
+
+    /// 会社行など横幅の無い場所で使う総称。書類名を並べると会社名が潰れる。
+    static let collectiveNoun = "決算資料"
+
+    static func supports(_ formType: String) -> Bool {
+        all.contains(formType)
+    }
+}
+
 struct SearchResponse: Decodable {
     let items: [SearchItem]
     let snapshotUpdatedAt: String?
@@ -28,7 +46,7 @@ struct SearchItem: Decodable, Identifiable, Hashable {
         // 20-F は外国企業(ADR)の年次報告で、10-K に相当する。
         // TSM・ASML・SAP・トヨタ等は 10-K / 10-Q を 1 本も出さないので、
         // これを対応済みに数えないと検索しても「未対応」としか出ない。
-        if latestFormType == "10-K" || latestFormType == "10-Q" || latestFormType == "20-F" {
+        if SupportedFilingForms.supports(latestFormType) {
             return .supported(formType: latestFormType)
         }
 
@@ -87,7 +105,7 @@ struct SearchItem: Decodable, Identifiable, Hashable {
         case .supported:
             return "v1 でそのまま保存して会話できます。"
         case .unsupported(let formType):
-            return "最新 \(formType) は対象外です。10-K / 10-Q / 20-F に対応しています。"
+            return "最新 \(formType) は対象外です。\(SupportedFilingForms.listed) に対応しています。"
         case .unknown:
             return "保存または表示時に対応書類を確認します。"
         }
@@ -98,7 +116,7 @@ struct SearchItem: Decodable, Identifiable, Hashable {
         case .supported:
             return ""
         case .unsupported(let formType):
-            return "この銘柄の最新開示は \(formType) で、対象外です。10-K / 10-Q / 20-F に対応しています。"
+            return "この銘柄の最新開示は \(formType) で、対象外です。\(SupportedFilingForms.listed) に対応しています。"
         case .unknown:
             return "この銘柄は対応書類をまだ確認できませんでした。時間を置いてもう一度お試しください。"
         }
