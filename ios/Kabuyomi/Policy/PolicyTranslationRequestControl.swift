@@ -12,7 +12,7 @@ struct TranslationRequestControl: View {
             if let errorMessage {
                 Label(errorMessage, systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(KabuyomiTheme.negative)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("translation.error")
             }
@@ -30,7 +30,7 @@ struct TranslationRequestControl: View {
             case .available:
                 Text("この過去資料だけを日本語へ翻訳します。結果は「自動翻訳・未確認」として原文と分けて保存します。")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("translation.status")
                 requestButton(title: "日本語に翻訳", systemImage: "character.book.closed")
@@ -47,7 +47,7 @@ struct TranslationRequestControl: View {
                         .accessibilityIdentifier("translation.status")
                     Text("通常は数秒で反映されます。画面を閉じても処理は継続します。")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
             case .processing:
                 ProgressView("日本語へ翻訳しています…")
@@ -55,7 +55,7 @@ struct TranslationRequestControl: View {
                     .accessibilityIdentifier("translation.status")
                 Text("画面を閉じても処理は継続します。")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             case .retry:
                 statusLabel(
                     title: "翻訳を一時待機しています",
@@ -101,7 +101,7 @@ struct TranslationRequestControl: View {
                 .font(.subheadline.weight(.semibold))
             Text(detail)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityIdentifier("translation.status")

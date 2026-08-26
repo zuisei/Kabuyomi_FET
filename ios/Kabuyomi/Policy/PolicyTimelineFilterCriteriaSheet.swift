@@ -11,10 +11,10 @@ struct TimelineFilterCriteriaSheet: View {
                 Section {
                     Text("最初に表示する「新着」は、直近24時間に公開または更新された公式資料です。")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                     Text("「注目」は公式資料と自動分析の必要項目を基準に自動選定し、閲覧数や株価の上昇・下落は選定に使いません。")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
                 Section("注目の自動選定条件") {
@@ -24,7 +24,7 @@ struct TimelineFilterCriteriaSheet: View {
                     Label("政策分野または対象地域が設定済み", systemImage: "scope")
                     Text("自動生成した分析は「未検証」と明記します。因果関係や投資判断は示しません。")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
                 Section("表示の基準") {
@@ -35,22 +35,22 @@ struct TimelineFilterCriteriaSheet: View {
                         } label: {
                             HStack(alignment: .top, spacing: 12) {
                                 Image(systemName: filter.systemImage)
-                                    .foregroundStyle(filter == selectedFilter ? Color.accentColor : Color.secondary)
+                                    .foregroundStyle(filter == selectedFilter ? KabuyomiTheme.accent : KabuyomiTheme.inkMuted)
                                     .frame(width: 24, height: 24)
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(filter.rawValue)
                                         .font(.headline)
-                                        .foregroundStyle(.primary)
+                                        .foregroundStyle(KabuyomiTheme.ink)
                                     Text(filter.explanationJA)
                                         .font(.subheadline)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(KabuyomiTheme.inkMuted)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
                                 Spacer(minLength: 8)
                                 if filter == selectedFilter {
                                     Image(systemName: "checkmark")
                                         .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(Color.accentColor)
+                                        .foregroundStyle(KabuyomiTheme.accent)
                                 }
                             }
                             .padding(.vertical, 4)
@@ -66,7 +66,7 @@ struct TimelineFilterCriteriaSheet: View {
                     LabeledContent("ウォッチ", value: "自分で登録した追跡条件")
                     Text("ウォッチは、機関・政策分野・企業などのいずれかに一致する資料を自分用にまとめる機能です。")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
             }
             .navigationTitle("表示の基準")

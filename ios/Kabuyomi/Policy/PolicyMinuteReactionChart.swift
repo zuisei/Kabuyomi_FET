@@ -99,24 +99,24 @@ struct MinuteReactionChart: View {
             } else {
                 Text(resolution == .minute ? "30分後評価はまだ未確定" : "評価値はまだ未確定")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             }
             Picker("チャート指標", selection: $mode) { ForEach(MarketChartMode.allCases) { Text(modeLabel($0)).tag($0) } }.pickerStyle(.segmented)
             Text(chartDescription)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
             if let p = cursorPoint { Text("\(AppFormatters.displayTime(p.timestamp, preference: store.timezone))  \(securityTicker) \(p.normalizedSecurityPrice, specifier: "%.2f")  \(benchmarkTicker) \(p.normalizedBenchmarkPrice, specifier: "%.2f")  対比 \(p.abnormalReturnPoints, specifier: "%+.2f")pt  出来高 \(p.volumeRatio, specifier: "%.1f")x").font(.caption.monospacedDigit()).accessibilityIdentifier("marketChart.cursorValue") }
             chart.frame(height: mode == .volume ? 170 : 220)
-            HStack(spacing: 10) { legend("公式公開", AppColors.official); legend("最初の報道", AppColors.report); legend(event.status == .corrected ? "訂正文書" : "文書改訂", AppColors.revision); legend("選択時点", .primary) }.font(.caption2).foregroundStyle(.secondary)
-            Text(sessionLabel).font(.caption).foregroundStyle(.secondary)
-            Text(provenanceLabel).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 10) { legend("公式公開", AppColors.official); legend("最初の報道", AppColors.report); legend(event.status == .corrected ? "訂正文書" : "文書改訂", AppColors.revision); legend("選択時点", .primary) }.font(.caption2).foregroundStyle(KabuyomiTheme.inkMuted)
+            Text(sessionLabel).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
+            Text(provenanceLabel).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
             if let volumeBaselineLabel {
                 Text(volumeBaselineLabel)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             }
-            Text("交絡要因: \(confounderLabel)").font(.caption).foregroundStyle(.secondary)
-            Text(summary == nil ? "選択時点までの市場データを記述しています。政策との因果関係は未確定です。" : "公式公開後の市場データを記述しています。政策との因果関係は未確定です。").font(.caption).foregroundStyle(.secondary)
+            Text("交絡要因: \(confounderLabel)").font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
+            Text(summary == nil ? "選択時点までの市場データを記述しています。政策との因果関係は未確定です。" : "公式公開後の市場データを記述しています。政策との因果関係は未確定です。").font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
         }
         .accessibilityIdentifier("marketChart.minute")
     }
@@ -128,7 +128,7 @@ struct MinuteReactionChart: View {
         case .relative:
             Chart { RuleMark(y: .value("0基準", 0)).foregroundStyle(.secondary.opacity(0.5)); ForEach(filteredPoints) { p in AreaMark(x: .value("時刻", p.timestamp), y: .value("pt", p.abnormalReturnPoints)).foregroundStyle(AppColors.market.opacity(0.12)); LineMark(x: .value("時刻", p.timestamp), y: .value("pt", p.abnormalReturnPoints)).foregroundStyle(AppColors.market) }; markers; cursorMarker }.chartXSelection(value: $cursorDate).chartXScale(domain: xDomain).chartYScale(domain: relativeDomain).chartXAxis { timeAxis }
         case .volume:
-            Chart { RuleMark(y: .value("通常比", 1.0)).foregroundStyle(.secondary).lineStyle(StrokeStyle(dash: [4, 3])); ForEach(filteredPoints) { p in BarMark(x: .value("時刻", p.timestamp), y: .value("倍", p.volumeRatio)).foregroundStyle(AppColors.market.opacity(0.7)) }; markers; cursorMarker }.chartXSelection(value: $cursorDate).chartXScale(domain: xDomain).chartYScale(domain: volumeDomain).chartXAxis { timeAxis }
+            Chart { RuleMark(y: .value("通常比", 1.0)).foregroundStyle(KabuyomiTheme.inkMuted).lineStyle(StrokeStyle(dash: [4, 3])); ForEach(filteredPoints) { p in BarMark(x: .value("時刻", p.timestamp), y: .value("倍", p.volumeRatio)).foregroundStyle(AppColors.market.opacity(0.7)) }; markers; cursorMarker }.chartXSelection(value: $cursorDate).chartXScale(domain: xDomain).chartYScale(domain: volumeDomain).chartXAxis { timeAxis }
         }
     }
 
@@ -146,7 +146,7 @@ struct MinuteReactionChart: View {
         if let selectedDate { RuleMark(x: .value("選択時点", selectedDate)).foregroundStyle(Color(uiColor: .label)).lineStyle(StrokeStyle(lineWidth: 2)) }
     }
     @ChartContentBuilder private var cursorMarker: some ChartContent {
-        if let cursorPoint { RuleMark(x: .value("カーソル", cursorPoint.timestamp)).foregroundStyle(.secondary).lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 2])) }
+        if let cursorPoint { RuleMark(x: .value("カーソル", cursorPoint.timestamp)).foregroundStyle(KabuyomiTheme.inkMuted).lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 2])) }
     }
     private func visible(_ date: Date) -> Bool { cutoff.map { date <= $0 } ?? true }
     private func legend(_ text: String, _ color: Color) -> some View { HStack(spacing: 3) { Rectangle().fill(color).frame(width: 10, height: 2); Text(text) } }

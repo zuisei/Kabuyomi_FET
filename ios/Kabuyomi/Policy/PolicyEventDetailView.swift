@@ -52,6 +52,7 @@ struct EventDetailView: View {
             case .evidence: EventEvidenceView(event: event)
             }
         }
+        .background(KabuyomiTheme.canvas)
         .navigationTitle(event.displayAgencyCode).navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
@@ -80,19 +81,19 @@ struct EventHeader: View {
             HStack {
                 if event.isSynthetic {
                     if eventStore.environment == .syntheticLocal { DemoBadge() }
-                    else { Label("プレビュー環境・デモデータ", systemImage: "testtube.2").font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
+                    else { Label("プレビュー環境・デモデータ", systemImage: "testtube.2").font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted) }
                 }
                 else {
                     Label(event.coverageState?.labelJA ?? "確認済み公開データ", systemImage: event.coverageState?.systemImage ?? "checkmark.seal")
-                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        .font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted)
                 }
                 Spacer()
-                Text(event.agency.displayNameJA).font(.caption).foregroundStyle(.secondary)
+                Text(event.agency.displayNameJA).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
             }
             Text(event.displayTitleJA).font(.title2.bold()).fixedSize(horizontal: false, vertical: true)
             if let translation = event.titleTranslationLabelJA {
                 Label(translation, systemImage: "globe")
-                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    .font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted)
             }
             if let primary = event.relatedDocuments.first(where: { $0.relationship == .primary }), primary.timePrecision == .day {
                 Label("\(primary.publishedOn ?? "日付不明") 掲載日", systemImage: "calendar")

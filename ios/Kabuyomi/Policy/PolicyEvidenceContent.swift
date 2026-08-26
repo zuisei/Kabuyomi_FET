@@ -59,12 +59,12 @@ struct PolicyEvidenceContent: View {
                             .foregroundStyle(selectedDocument?.id == document.id ? (document.documentType == .correctingAmendment ? AppColors.revision : AppColors.official) : .secondary)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(document.typeLabel).font(.subheadline.weight(.semibold))
-                            Text(document.documentNumber).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            Text(document.documentNumber).font(.caption.monospaced()).foregroundStyle(KabuyomiTheme.inkMuted)
                             Text((document.publishedOn.map { "\($0) 掲載・" } ?? "") + (document.relationship == .corrects ? "原規則を訂正" : "主文書"))
-                                .font(.caption2).foregroundStyle(.secondary)
+                                .font(.caption2).foregroundStyle(KabuyomiTheme.inkMuted)
                         }
                         Spacer()
-                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(KabuyomiTheme.inkMuted.opacity(0.6))
                     }
                     .contentShape(Rectangle())
                     .frame(minHeight: 44)
@@ -79,13 +79,13 @@ struct PolicyEvidenceContent: View {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(document.typeLabel).font(.title3.bold())
-                    Text("改訂 \(document.currentRevision)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Text("改訂 \(document.currentRevision)").font(.caption.monospacedDigit()).foregroundStyle(KabuyomiTheme.inkMuted)
                 }
             } else {
                 HStack {
                     Text(document.typeLabel).font(.title3.bold())
                     Spacer()
-                    Text("改訂 \(document.currentRevision)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Text("改訂 \(document.currentRevision)").font(.caption.monospacedDigit()).foregroundStyle(KabuyomiTheme.inkMuted)
                 }
             }
             Text(PolicyEvidenceDisplay.title(event: event, document: document, showsOriginal: language == .original))
@@ -95,13 +95,13 @@ struct PolicyEvidenceContent: View {
             if language == .japanese, let translationLabel = event.titleTranslationLabelJA {
                 Label(translationLabel, systemImage: "globe")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             } else if language == .original {
                 Label("公式資料の原文", systemImage: "doc.text")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             }
-            Text(document.documentNumber + "・" + document.publisherJA).font(.caption).foregroundStyle(.secondary)
+            Text(document.documentNumber + "・" + document.publisherJA).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
         }
     }
 
@@ -122,7 +122,7 @@ struct PolicyEvidenceContent: View {
             metadataRow("MD取得", AppFormatters.auditTime(document.ingestedAt))
             metadataRow("Replay根拠", availabilityLabel(document.availabilityBasis))
             Text("初回発見・MD取得は政策Replay時刻には使用しません。")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
         }
     }
 
@@ -130,7 +130,7 @@ struct PolicyEvidenceContent: View {
         CompactPolicySection(title: "完全性") {
             Button { copy(document.contentHash.value, message: "SHA-256をコピーしました") } label: {
                 HStack {
-                    Text(document.contentHash.scope == "official_metadata" ? "メタデータSHA-256" : "全文SHA-256").foregroundStyle(.secondary)
+                    Text(document.contentHash.scope == "official_metadata" ? "メタデータSHA-256" : "全文SHA-256").foregroundStyle(KabuyomiTheme.inkMuted)
                     Spacer()
                     Text(String(document.contentHash.value.prefix(18)) + "…").monospaced().lineLimit(1)
                     Image(systemName: "doc.on.doc")
@@ -164,10 +164,10 @@ struct PolicyEvidenceContent: View {
                 Text("取得来歴と完全性").font(.headline)
                 Text("取得時刻、Replay根拠、SHA-256")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             }
         }
-        .tint(.primary)
+        .tint(KabuyomiTheme.ink)
         .accessibilityIdentifier("evidence.provenance")
     }
 
@@ -177,7 +177,7 @@ struct PolicyEvidenceContent: View {
                 Label("\(document.documentNumber) が \(target.documentNumber) を訂正", systemImage: "arrow.triangle.branch")
                     .font(.subheadline)
                 Text("別々の公式Documentです。同一文書のVersion 2ではありません。")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
             }
         }
     }
@@ -192,7 +192,7 @@ struct PolicyEvidenceContent: View {
             if language == .japanese, event.translation != nil {
                 Text("原文の事実要約を日本語表示しています。公式文書の全文翻訳ではありません。")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             }
             StatusBadge(text: "公式資料・改訂 \(document.currentRevision)", systemImage: "doc.text.magnifyingglass", tint: AppColors.official)
         }
@@ -211,7 +211,7 @@ struct PolicyEvidenceContent: View {
                         Text("改訂 \(current.version)")
                         Spacer()
                         Text("\(AppFormatters.etMonthDay.string(from: current.publishedAt)) \(AppFormatters.et.string(from: current.publishedAt)) ET")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
                     .font(.caption.weight(.semibold).monospacedDigit())
                 }
@@ -236,7 +236,7 @@ struct PolicyEvidenceContent: View {
                 } else {
                     Text("改訂版は確認済みですが、表示できる行単位差分はありません。公式文書で変更箇所を確認してください。")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
             }
             .accessibilityIdentifier("evidence.versionComparison")
@@ -255,7 +255,7 @@ struct PolicyEvidenceContent: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(tint)
             if values.isEmpty {
-                Text("変更なし").font(.caption).foregroundStyle(.secondary)
+                Text("変更なし").font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
             } else {
                 ForEach(Array(values.prefix(6).enumerated()), id: \.offset) { _, value in
                     Text("\(prefix) \(value)")
@@ -265,7 +265,7 @@ struct PolicyEvidenceContent: View {
                 if values.count > 6 {
                     Text("ほか \(values.count - 6)件")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
             }
         }
@@ -277,46 +277,46 @@ struct PolicyEvidenceContent: View {
             DisclosureGroup(isExpanded: $historyExpanded) {
                 VStack(alignment: .leading, spacing: 9) {
                     documentChangeEvidence
-                    if event.correctionNotes.isEmpty { Text("追加の訂正履歴はありません").foregroundStyle(.secondary) }
+                    if event.correctionNotes.isEmpty { Text("追加の訂正履歴はありません").foregroundStyle(KabuyomiTheme.inkMuted) }
                     ForEach(event.correctionNotes) { note in
                         Text(note.detailJA).font(.subheadline)
                     }
                 }.padding(.top, 7)
             } label: { Text("変更履歴").font(.headline) }
-            .tint(.primary)
+            .tint(KabuyomiTheme.ink)
 
             DisclosureGroup("文書の関連候補") {
                 VStack(alignment: .leading, spacing: 12) {
                     if event.relationshipCandidates?.isEmpty != false {
-                        Text("関連候補はありません").foregroundStyle(.secondary)
+                        Text("関連候補はありません").foregroundStyle(KabuyomiTheme.inkMuted)
                     }
                     ForEach(event.relationshipCandidates ?? []) { candidate in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(candidate.relationshipLabelJA).font(.subheadline.weight(.semibold))
                             Text("\(candidate.fromDocumentNumber ?? "文書ID") → \(candidate.toDocumentNumber ?? "文書ID")")
-                                .font(.caption.monospaced()).foregroundStyle(.secondary)
+                                .font(.caption.monospaced()).foregroundStyle(KabuyomiTheme.inkMuted)
                             HStack(spacing: 6) {
                                 StatusBadge(text: candidate.reviewState == "approved" ? "検証済み" : candidate.reviewState == "rejected" ? "却下" : "自動生成・未検証", systemImage: candidate.reviewState == "approved" ? "checkmark.seal" : "questionmark.diamond", tint: candidate.reviewState == "approved" ? AppColors.official : .orange)
                             }
                             if candidate.reviewState == "candidate" {
                                 Text("自動抽出した候補です。文書関係は確定していません。")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
                             }
                         }
                     }
                 }.padding(.top, 7)
-            }.font(.headline).tint(.primary)
+            }.font(.headline).tint(KabuyomiTheme.ink)
 
             DisclosureGroup("関連企業の根拠") {
                 VStack(alignment: .leading, spacing: 12) {
                     if event.exposures.isEmpty && event.productAnalysis.companyRelations.isEmpty {
-                        Text(event.productAnalysis.noCompanyReasonJA?.nonEmpty ?? "関連候補はありません").foregroundStyle(.secondary)
+                        Text(event.productAnalysis.noCompanyReasonJA?.nonEmpty ?? "関連候補はありません").foregroundStyle(KabuyomiTheme.inkMuted)
                     }
                     ForEach(event.productAnalysis.companyRelations) { relation in
                         VStack(alignment: .leading, spacing: 4) {
                             Text((relation.ticker.map { $0 + "  " } ?? "") + relation.issuerName).font(.subheadline.weight(.semibold))
                             Text(relation.relationType.labelJA + "・" + (relation.reviewStatus == .approved ? "検証済み" : "自動生成・未検証"))
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
                             Text(relation.evidenceSummaryJA).font(.subheadline)
                             metadataRow("根拠", relation.evidenceReference)
                         }
@@ -324,42 +324,42 @@ struct PolicyEvidenceContent: View {
                     ForEach(event.exposures) { exposure in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(exposure.ticker + "  " + exposure.companyName).font(.subheadline.weight(.semibold))
-                            Text(exposure.relationship.label + "・" + exposure.verificationState.label).font(.caption).foregroundStyle(.secondary)
+                            Text(exposure.relationship.label + "・" + exposure.verificationState.label).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
                             Text(exposure.evidenceJA).font(.subheadline)
                             ForEach(exposure.references, id: \.self) { reference in metadataRow(reference.labelJA, reference.valueJA) }
                         }
                     }
                 }.padding(.top, 7)
-            }.font(.headline).tint(.primary)
+            }.font(.headline).tint(KabuyomiTheme.ink)
 
             DisclosureGroup("交絡要因台帳") {
                 VStack(alignment: .leading, spacing: 9) {
-                    if event.confounders.isEmpty { Text(event.confounderReviewState?.labelJA ?? "未確認").foregroundStyle(.secondary) }
+                    if event.confounders.isEmpty { Text(event.confounderReviewState?.labelJA ?? "未確認").foregroundStyle(KabuyomiTheme.inkMuted) }
                     ForEach(event.confounders) { item in
                         Text(item.titleJA).font(.subheadline.weight(.semibold))
-                        Text(item.detailJA).font(.caption).foregroundStyle(.secondary)
+                        Text(item.detailJA).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
                     }
                 }.padding(.top, 7)
-            }.font(.headline).tint(.primary)
+            }.font(.headline).tint(KabuyomiTheme.ink)
 
             if let clauses = event.importantClauses, !clauses.isEmpty {
                 DisclosureGroup("重要条項") {
                     VStack(alignment: .leading, spacing: 9) {
                         ForEach(clauses) { clause in
                             Text(clause.textJA).font(.subheadline)
-                            if let url = clause.sourceURL { Text(url.absoluteString).font(.caption.monospaced()).foregroundStyle(.secondary) }
+                            if let url = clause.sourceURL { Text(url.absoluteString).font(.caption.monospaced()).foregroundStyle(KabuyomiTheme.inkMuted) }
                         }
                     }.padding(.top, 7)
-                }.font(.headline).tint(.primary)
+                }.font(.headline).tint(KabuyomiTheme.ink)
             }
 
             DisclosureGroup("計算方法") {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("ベンチマーク対比 = 銘柄リターン − ベンチマークリターン")
                     Text("出来高比 = 当該時間帯の出来高 / 通常同時間帯平均")
-                    Text("市場変動は記述情報です。因果関係は未確定で、投資助言ではありません。").foregroundStyle(.secondary)
+                    Text("市場変動は記述情報です。因果関係は未確定で、投資助言ではありません。").foregroundStyle(KabuyomiTheme.inkMuted)
                 }.font(.subheadline).padding(.top, 7)
-            }.font(.headline).tint(.primary)
+            }.font(.headline).tint(KabuyomiTheme.ink)
         }
     }
 
@@ -368,9 +368,9 @@ struct PolicyEvidenceContent: View {
             Label(correction.documentNumber + " は原規則とは別の公式文書", systemImage: "doc.badge.gearshape")
         } else if let diff = event.documentDiff {
             Text("同一文書の版間差分 \(diff.deletedJA.count + diff.addedJA.count)件は、上部の「版の比較」に表示しています。")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
         } else {
-            Text("文書差分はありません").foregroundStyle(.secondary)
+            Text("文書差分はありません").foregroundStyle(KabuyomiTheme.inkMuted)
         }
     }
 
@@ -378,13 +378,13 @@ struct PolicyEvidenceContent: View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(label).font(.caption).foregroundStyle(.secondary)
+                    Text(label).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
                     Text(value).font(.subheadline.weight(.medium).monospacedDigit())
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(label).font(.caption).foregroundStyle(.secondary)
+                    Text(label).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
                     Spacer(minLength: 10)
                     Text(value).font(.subheadline.weight(.medium).monospacedDigit()).multilineTextAlignment(.trailing)
                 }

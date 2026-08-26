@@ -102,10 +102,15 @@ struct TimelineView: View {
                     List {
                         if loadError {
                             Label("最新データを取得できませんでした。前回取得したデータを表示しています。", systemImage: "wifi.exclamationmark")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
                                 .listRowSeparator(.hidden)
+                                .listRowBackground(KabuyomiTheme.canvas)
                         }
-                        header.listRowSeparator(.hidden).listRowInsets(.init(top: 4, leading: 16, bottom: 10, trailing: 16))
+                        header
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(.init(top: 4, leading: 16, bottom: 10, trailing: 16))
+                            // 行の地は既定だと白。見出し帯だけ浮くので地に合わせる。
+                            .listRowBackground(KabuyomiTheme.canvas)
                         if filtered.isEmpty {
                             ContentUnavailableView {
                                 Label(emptyStateTitle, systemImage: "line.3.horizontal.decrease.circle")
@@ -174,6 +179,10 @@ struct TimelineView: View {
                         }
                     }
                     .listStyle(.plain)
+                    // 地は Kabuyomi と同じ紙色。既定の白のままだと、
+                    // このタブだけ別のアプリを埋め込んだように見える(2026-08-26)。
+                    .scrollContentBackground(.hidden)
+                    .background(KabuyomiTheme.canvas)
                     .refreshable { await refresh() }
                     .accessibilityIdentifier("timeline.main")
                 }
@@ -283,14 +292,14 @@ struct TimelineView: View {
                 if eventStore.totalSummaryCount > 0 {
                     Text(headerCountLabel)
                         .font(.caption.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
                 sourceLabel
             }
             if let latest = events.map(\.lastActivityAt).max() {
                 Text(events.allSatisfy { $0.publishedAt == nil } ? "最終データ 掲載日単位" : "最終データ \(AppFormatters.displayTime(latest, preference: .both))")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             }
         }
     }
@@ -343,8 +352,8 @@ struct TimelineView: View {
                     Button(item.compactTitle) { filter = item }
                         .font(.subheadline.weight(filter == item ? .semibold : .regular))
                         .padding(.horizontal, 10).frame(minHeight: 44)
-                        .background(filter == item ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08), in: Capsule())
-                        .foregroundStyle(filter == item ? Color.accentColor : Color.primary)
+                        .background(filter == item ? KabuyomiTheme.accent.opacity(0.14) : KabuyomiTheme.inkMuted.opacity(0.08), in: Capsule())
+                        .foregroundStyle(filter == item ? KabuyomiTheme.accent : KabuyomiTheme.ink)
                         .accessibilityIdentifier("timeline.filter.\(item.id)")
                 }
             }
@@ -380,12 +389,12 @@ struct TimelineView: View {
 
     @ViewBuilder private var sourceLabel: some View {
         if eventStore.origin == .offlineCache {
-            Label("前回取得", systemImage: "wifi.slash").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Label("前回取得", systemImage: "wifi.slash").font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted)
         } else if eventStore.dataMode == .synthetic || eventStore.dataMode == .mixed {
             Label(eventStore.environment == .syntheticLocal ? "デモ・ローカル" : "プレビュー・デモ", systemImage: "testtube.2")
-                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                .font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted)
         } else {
-            Label("公式ソース", systemImage: "doc.badge.checkmark").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Label("公式ソース", systemImage: "doc.badge.checkmark").font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted)
         }
     }
 
@@ -431,12 +440,12 @@ private struct PolicyDeadlineRow: View {
             HStack(spacing: 7) {
                 Text(item.event.displayAgencyCode).font(.caption.weight(.bold))
                 if let number = item.legalDate.documentNumber?.nonEmpty {
-                    Text(number).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(number).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted).lineLimit(1)
                 }
             }
             Text(item.event.displayTitleJA)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(KabuyomiTheme.ink)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -448,18 +457,20 @@ private struct PolicyDeadlineRow: View {
     }
 }
 
+/// 行の地と、行のあいだの区切り。系統色は Kabuyomi のものを使う
+/// (`systemBackground` のままだと、この面だけ白くて浮く — 2026-08-26)。
 private struct TimelineRowBoundaryBackground: View {
     var body: some View {
         ZStack(alignment: .bottom) {
-            Color(.systemBackground)
+            KabuyomiTheme.paper
             VStack(spacing: 0) {
                 Rectangle()
-                    .fill(Color(.separator).opacity(0.5))
-                    .frame(height: 0.5)
-                Color(.secondarySystemBackground)
+                    .fill(KabuyomiTheme.separator)
+                    .frame(height: KabuyomiTheme.hairlineWidth)
+                KabuyomiTheme.canvas
                 Rectangle()
-                    .fill(Color(.separator).opacity(0.35))
-                    .frame(height: 0.5)
+                    .fill(KabuyomiTheme.separator)
+                    .frame(height: KabuyomiTheme.hairlineWidth)
             }
             .frame(height: 8)
         }

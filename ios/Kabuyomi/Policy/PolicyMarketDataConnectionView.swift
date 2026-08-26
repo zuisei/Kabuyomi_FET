@@ -50,7 +50,7 @@ struct MarketDataConnectionView: View {
                 } else {
                     Text(status)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
             }
 
@@ -60,7 +60,7 @@ struct MarketDataConnectionView: View {
                 Text("価格の値動きは記述情報です。政策との因果関係や投資判断を示しません。")
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(KabuyomiTheme.inkMuted)
         }
         .navigationTitle("市場データ")
         .navigationBarTitleDisplayMode(.inline)

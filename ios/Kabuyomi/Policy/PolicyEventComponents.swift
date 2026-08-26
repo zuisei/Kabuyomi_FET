@@ -103,7 +103,7 @@ private struct PolicyRowContent: View {
             if let provenanceState {
                 Label(provenanceState.text, systemImage: provenanceState.systemImage)
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
             }
             highlightedText(event.displayTitleJA)
                 .font(compact ? .subheadline.weight(.semibold) : .headline)
@@ -111,13 +111,13 @@ private struct PolicyRowContent: View {
                 .fixedSize(horizontal: false, vertical: true)
             highlightedText(event.displayChangeSummaryJA)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
                 .lineLimit(accessibilityLayout ? nil : compact ? 1 : 2)
             if !compact, let why = analysis.whyItMattersJA?.nonEmpty {
-                Text(why).font(.caption).foregroundStyle(.primary).lineLimit(accessibilityLayout ? nil : 2)
+                Text(why).font(.caption).foregroundStyle(KabuyomiTheme.ink).lineLimit(accessibilityLayout ? nil : 2)
             }
             if !targetText.isEmpty {
-                Text("対象  " + targetText).font(.caption2).foregroundStyle(.secondary).lineLimit(accessibilityLayout ? nil : 1)
+                Text("対象  " + targetText).font(.caption2).foregroundStyle(KabuyomiTheme.inkMuted).lineLimit(accessibilityLayout ? nil : 1)
             }
             footer
         }
@@ -155,13 +155,13 @@ private struct PolicyRowContent: View {
                 }
                 Text(event.domain?.labelJA ?? event.topics.first ?? "政策")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             }
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 7) {
                 Text(dateLabel).font(.caption.weight(.semibold).monospacedDigit())
                 Text(event.displayAgencyCode).font(.caption.weight(.bold))
-                Text(event.domain?.labelJA ?? event.topics.first ?? "政策").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(event.domain?.labelJA ?? event.topics.first ?? "政策").font(.caption).foregroundStyle(KabuyomiTheme.inkMuted).lineLimit(1)
                 Spacer(minLength: 4)
                 statusLabel
             }
@@ -184,7 +184,7 @@ private struct PolicyRowContent: View {
 
     private var documentState: some View {
         Text("資料 \(event.relatedDocumentCount)件・" + (event.publishedAt == nil ? "掲載日精度" : "時刻あり"))
-            .font(.caption2).foregroundStyle(.secondary)
+            .font(.caption2).foregroundStyle(KabuyomiTheme.inkMuted)
     }
 
     private var marketState: some View {
@@ -207,9 +207,9 @@ private struct PolicyRowContent: View {
     }
 
     @ViewBuilder private var localState: some View {
-        if store.unreadCount(for: event) > 0 { Image(systemName: "circle.fill").font(.system(size: 7)).foregroundStyle(.blue).accessibilityLabel("未読") }
-        if store.contains(event.id) { Image(systemName: "bookmark.fill").font(.caption2).foregroundStyle(.blue).accessibilityLabel("保存済み") }
-        if store.watches(event) { Image(systemName: "eye.fill").font(.caption2).foregroundStyle(.blue).accessibilityLabel("ウォッチ対象") }
+        if store.unreadCount(for: event) > 0 { Image(systemName: "circle.fill").font(.system(size: 7)).foregroundStyle(KabuyomiTheme.accent).accessibilityLabel("未読") }
+        if store.contains(event.id) { Image(systemName: "bookmark.fill").font(.caption2).foregroundStyle(KabuyomiTheme.accent).accessibilityLabel("保存済み") }
+        if store.watches(event) { Image(systemName: "eye.fill").font(.caption2).foregroundStyle(KabuyomiTheme.accent).accessibilityLabel("ウォッチ対象") }
     }
 
     private var dateLabel: String {
@@ -242,7 +242,7 @@ private struct PolicyRowContent: View {
             return Text(value)
         }
         return Text(String(value[..<range.lowerBound]))
-            + Text(String(value[range])).bold().foregroundColor(.accentColor)
+            + Text(String(value[range])).bold().foregroundColor(KabuyomiTheme.accent)
             + Text(String(value[range.upperBound...]))
     }
 }
@@ -267,16 +267,16 @@ struct DocumentRelationshipStrip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("文書の関係").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text("文書の関係").font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted)
             ForEach(Array(documents.enumerated()), id: \.element.id) { index, document in
                 HStack(alignment: .top, spacing: 9) {
                     VStack(spacing: 0) {
                         Circle().fill(document.documentType == .correctingAmendment ? AppColors.revision : AppColors.official).frame(width: 9, height: 9)
-                        if index < documents.count - 1 { Rectangle().fill(Color.secondary.opacity(0.3)).frame(width: 1, height: 22) }
+                        if index < documents.count - 1 { Rectangle().fill(KabuyomiTheme.inkMuted.opacity(0.3)).frame(width: 1, height: 22) }
                     }.padding(.top, 4)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(document.typeLabel + "  " + document.documentNumber).font(.subheadline.weight(.semibold))
-                        Text(documentSubtitle(document)).font(.caption).foregroundStyle(.secondary)
+                        Text(documentSubtitle(document)).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
                     }
                 }
             }
@@ -321,7 +321,7 @@ struct MarketDataStateMessage: View {
                 .font(.subheadline.weight(.semibold))
             Text(detail)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)

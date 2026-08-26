@@ -580,9 +580,9 @@ struct TimelinePublicationBatchRow: View {
             topLine
             HStack(spacing: 8) {
                 Label("\(batch.events.count)件をまとめて表示", systemImage: batch.kind.systemImage)
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(KabuyomiTheme.accent)
                 Label(translationCoverageLabel, systemImage: "globe")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             }
             .font(.caption2.weight(.semibold))
             Text(batch.titleJA)
@@ -591,11 +591,11 @@ struct TimelinePublicationBatchRow: View {
                 .fixedSize(horizontal: false, vertical: true)
             Text(batch.summaryJA)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
                 .lineLimit(accessibilityLayout ? nil : 2)
             Text("内訳  " + memberPreview)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
                 .lineLimit(accessibilityLayout ? nil : 2)
             footer
         }
@@ -622,7 +622,7 @@ struct TimelinePublicationBatchRow: View {
                 if let commonDomainLabel {
                     Text(commonDomainLabel)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
             }
         } else {
@@ -631,7 +631,7 @@ struct TimelinePublicationBatchRow: View {
                 if let commonDomainLabel {
                     Text(commonDomainLabel)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
@@ -652,7 +652,7 @@ struct TimelinePublicationBatchRow: View {
     private var kindLabel: some View {
         Text(batch.kind.labelJA)
             .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(KabuyomiTheme.inkMuted)
     }
 
     @ViewBuilder
@@ -663,7 +663,7 @@ struct TimelinePublicationBatchRow: View {
                 Label("市場評価は個別資料", systemImage: "chart.xyaxis.line")
             }
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(KabuyomiTheme.inkMuted)
         } else {
             HStack(spacing: 8) {
                 Text("資料 \(batch.events.count)件・個別記録")
@@ -671,7 +671,7 @@ struct TimelinePublicationBatchRow: View {
                 Spacer(minLength: 2)
             }
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(KabuyomiTheme.inkMuted)
         }
     }
 }
@@ -685,9 +685,9 @@ struct TimelinePublicationBatchView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Label("\(batch.events.count)件を自動でまとめています", systemImage: batch.kind.systemImage)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(KabuyomiTheme.accent)
                     Text(batch.titleJA).font(.title2.bold())
-                    Text(batch.summaryJA).font(.subheadline).foregroundStyle(.secondary)
+                    Text(batch.summaryJA).font(.subheadline).foregroundStyle(KabuyomiTheme.inkMuted)
                     LabeledContent("まとめた基準") {
                         Text(batch.groupingBasisJA)
                             .multilineTextAlignment(.trailing)
@@ -695,7 +695,7 @@ struct TimelinePublicationBatchView: View {
                     .font(.caption)
                     Text("法的には別々の資料です。内容を混ぜず、一覧だけをまとめています。")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
                 .padding(.vertical, 6)
             }

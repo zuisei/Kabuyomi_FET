@@ -63,13 +63,13 @@ struct PolicyOverviewContent: View {
                 DisclosureGroup("原題を見る", isExpanded: $originalTitleExpanded) {
                     Text(event.titleEN)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 4)
                 }
                 .font(.subheadline.weight(.semibold))
-                .tint(.primary)
+                .tint(KabuyomiTheme.ink)
             }
             briefStatuses
         }
@@ -79,15 +79,15 @@ struct PolicyOverviewContent: View {
         if accessibilityLayout {
             VStack(alignment: .leading, spacing: 3) {
                 Text(event.displayAgencyCode).font(.headline)
-                Text(event.policyDomain?.labelJA ?? event.category.displayNameJA).font(.caption).foregroundStyle(.secondary)
-                Text(analysis.presentationTier.labelJA).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(event.policyDomain?.labelJA ?? event.category.displayNameJA).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
+                Text(analysis.presentationTier.labelJA).font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted)
             }
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 7) {
                 Text(event.displayAgencyCode).font(.headline)
-                Text(event.policyDomain?.labelJA ?? event.category.displayNameJA).font(.caption).foregroundStyle(.secondary)
+                Text(event.policyDomain?.labelJA ?? event.category.displayNameJA).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
                 Spacer()
-                Text(analysis.presentationTier.labelJA).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(analysis.presentationTier.labelJA).font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted)
             }
         }
     }
@@ -107,17 +107,17 @@ struct PolicyOverviewContent: View {
            event.titleJA.trimmingCharacters(in: .whitespacesAndNewlines)
             .localizedCaseInsensitiveCompare(event.titleEN.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame {
             Label("原題・日本語未作成", systemImage: "doc.text")
-                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                .font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted)
         } else if let translation = event.titleTranslationLabelJA {
             Label(translation, systemImage: "globe")
-                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                .font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted)
         }
         Label(
             analysis.publicAnalysisLabelJA,
             systemImage: analysis.isAutomaticallySelectedSignal ? "line.3.horizontal.decrease.circle" : "pencil.and.list.clipboard"
         )
         .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(KabuyomiTheme.inkMuted)
         if event.status == .corrected {
             EventMetadataLabel(text: "訂正文書あり", systemImage: "doc.badge.gearshape", tint: AppColors.revision)
         }
@@ -129,7 +129,7 @@ struct PolicyOverviewContent: View {
                 if let translation = event.summaryTranslationLabelJA {
                     Label(translation, systemImage: "doc.text.magnifyingglass")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
                 Text(event.displayChangeSummaryJA).font(.body).fixedSize(horizontal: false, vertical: true)
             }
@@ -152,10 +152,10 @@ struct PolicyOverviewContent: View {
                 ForEach(analysis.companyRelations) { relation in
                     HStack(alignment: .firstTextBaseline) {
                         Text(relation.ticker ?? relation.issuerName).font(.subheadline.weight(.semibold))
-                        if relation.ticker != nil { Text(relation.issuerName).font(.caption).foregroundStyle(.secondary) }
+                        if relation.ticker != nil { Text(relation.issuerName).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted) }
                         Spacer()
                         Text(relation.reviewStatus == .approved ? relation.relationType.labelJA : "関連候補")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
                     }
                 }
                 ForEach(event.exposures) { exposure in
@@ -163,7 +163,7 @@ struct PolicyOverviewContent: View {
                         Text(exposure.ticker).font(.subheadline.bold().monospaced())
                         Text(exposure.companyName).font(.subheadline)
                         Spacer()
-                        Text(exposure.relationship.label).font(.caption).foregroundStyle(.secondary)
+                        Text(exposure.relationship.label).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
                     }
                 }
             }
@@ -204,7 +204,7 @@ struct PolicyOverviewContent: View {
                             factsRow("出来高", "通常比 \(String(format: "%.1f", summary.maxVolumeRatio))倍")
                         }
                     }
-                    Text("公式公開後の値動きを記述します。因果関係は未確定です。").font(.caption).foregroundStyle(.secondary)
+                    Text("公式公開後の値動きを記述します。因果関係は未確定です。").font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
                     if let goToReplay { Button("リプレイで確認", action: goToReplay).buttonStyle(.borderless) }
                 } else {
                     MarketDataStateMessage(
@@ -248,7 +248,7 @@ struct PolicyOverviewContent: View {
     private var timePrecision: some View {
         CompactPolicySection(title: "時刻精度") {
             Text(timePrecisionSummary).font(.subheadline)
-            Text("日付しか確認できない資料へ架空の時刻は付与しません。").font(.caption).foregroundStyle(.secondary)
+            Text("日付しか確認できない資料へ架空の時刻は付与しません。").font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
         }
     }
 
@@ -257,7 +257,7 @@ struct PolicyOverviewContent: View {
             Text(event.translation == nil
                  ? "原文タイトル、公式URL、改訂番号、取得時刻、SHA-256は証拠画面に保持しています。"
                  : "自動翻訳と原文を分けて保持しています。原文タイトル、公式URL、改訂番号、取得時刻、SHA-256は証拠画面で確認できます。")
-                .font(.subheadline).foregroundStyle(.secondary)
+                .font(.subheadline).foregroundStyle(KabuyomiTheme.inkMuted)
             if let goToEvidence { Button("原文と証拠を見る", action: goToEvidence).buttonStyle(.borderless) }
         }
     }
@@ -272,10 +272,10 @@ struct PolicyOverviewContent: View {
 
     private var confounders: some View {
         CompactPolicySection(title: "交絡要因  \(event.confounders.count)件") {
-            if event.confounders.isEmpty { Text(event.confounderReviewState?.labelJA ?? "未確認").foregroundStyle(.secondary) }
+            if event.confounders.isEmpty { Text(event.confounderReviewState?.labelJA ?? "未確認").foregroundStyle(KabuyomiTheme.inkMuted) }
             ForEach(event.confounders) { item in
                 Label(item.titleJA, systemImage: "exclamationmark.triangle").font(.subheadline.weight(.semibold))
-                Text(item.detailJA).font(.caption).foregroundStyle(.secondary)
+                Text(item.detailJA).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted)
             }
         }
     }
@@ -320,7 +320,7 @@ struct PolicyOverviewContent: View {
 
     private func factsRow(_ label: String, _ value: String) -> some View {
         GridRow {
-            Text(label).font(.caption).foregroundStyle(.secondary).gridColumnAlignment(.leading)
+            Text(label).font(.caption).foregroundStyle(KabuyomiTheme.inkMuted).gridColumnAlignment(.leading)
             Text(value).font(.subheadline.weight(.medium)).multilineTextAlignment(.trailing).gridColumnAlignment(.trailing)
         }
     }
@@ -329,12 +329,12 @@ struct PolicyOverviewContent: View {
         Group {
             if accessibilityLayout {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(label).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text(label).font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted)
                     Text(value).font(.subheadline).fixedSize(horizontal: false, vertical: true)
                 }
             } else {
                 HStack(alignment: .top, spacing: 12) {
-                    Text(label).font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(width: 54, alignment: .leading)
+                    Text(label).font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted).frame(width: 54, alignment: .leading)
                     Text(value).font(.subheadline).fixedSize(horizontal: false, vertical: true)
                 }
             }

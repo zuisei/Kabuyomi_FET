@@ -146,7 +146,7 @@ struct PolicyReplayContent: View {
                             .frame(width: 10, height: 10)
                         if position < snapshot.visibleTimelineItems.count - 1 {
                             Rectangle()
-                                .fill(Color.secondary.opacity(0.22))
+                                .fill(KabuyomiTheme.inkMuted.opacity(0.22))
                                 .frame(width: 1, height: 38)
                         }
                     }
@@ -154,7 +154,7 @@ struct PolicyReplayContent: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(storyTime(item) + "  " + item.kind.label)
                             .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(KabuyomiTheme.inkMuted)
                         Text(item.titleJA)
                             .font(.subheadline.weight(.semibold))
                             .fixedSize(horizontal: false, vertical: true)
@@ -172,7 +172,7 @@ struct PolicyReplayContent: View {
                     ForEach(futureItems) { item in
                         Text(storyTime(item) + "  " + item.titleJA)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(KabuyomiTheme.inkMuted)
                     }
                 }
                 .padding(.top, 8)
@@ -180,7 +180,7 @@ struct PolicyReplayContent: View {
                 Label("この時点では未公開  \(futureItems.count)件", systemImage: "lock")
                     .font(.subheadline.weight(.semibold))
             }
-            .tint(.primary)
+            .tint(KabuyomiTheme.ink)
         }
     }
 
@@ -417,7 +417,7 @@ private struct DayPrecisionChronologyView: View {
                         ForEach(futureDocuments) { document in
                             Text("\(document.publishedOn ?? "日付不明")  \(document.typeLabel)")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(KabuyomiTheme.inkMuted)
                         }
                     }
                     .padding(.top, 8)
@@ -525,10 +525,10 @@ private struct ReplayMomentControl: View {
                 Spacer(minLength: 8)
                 Text(precision)
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
                     .padding(.horizontal, 8)
                     .frame(minHeight: 24)
-                    .background(Color.secondary.opacity(0.1), in: Capsule())
+                    .background(KabuyomiTheme.inkMuted.opacity(0.1), in: Capsule())
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -537,7 +537,7 @@ private struct ReplayMomentControl: View {
                     .contentTransition(.numericText())
                 Text(date)
                     .font(.subheadline.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
                     .contentTransition(.numericText())
             }
             .accessibilityIdentifier("replay.currentTime")
@@ -553,16 +553,16 @@ private struct ReplayMomentControl: View {
 
             Label("選択中の地点までに公開された情報だけを表示", systemImage: "eye")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
         }
         .padding(16)
         .background(
-            Color.secondary.opacity(0.065),
+            KabuyomiTheme.inkMuted.opacity(0.065),
             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
         )
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.secondary.opacity(0.12), lineWidth: 0.5)
+                .stroke(KabuyomiTheme.inkMuted.opacity(0.12), lineWidth: 0.5)
         }
         .sensoryFeedback(.selection, trigger: selectedID)
     }
@@ -644,7 +644,7 @@ private struct ReplayStageButton: View {
     }
 
     private func connectorColor(reached: Bool) -> Color {
-        reached ? Color.accentColor.opacity(0.7) : Color.secondary.opacity(0.22)
+        reached ? KabuyomiTheme.accent.opacity(0.7) : KabuyomiTheme.inkMuted.opacity(0.22)
     }
 }
 
@@ -727,7 +727,7 @@ private struct ReplaySnapshotPanel<Content: View>: View {
                     .foregroundStyle(AppColors.official)
                     .accessibilityIdentifier("replay.available")
                 Label(unavailableText, systemImage: "lock")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
                     .accessibilityIdentifier("replay.unavailable")
             }
             .font(.caption.weight(.semibold))
@@ -737,12 +737,12 @@ private struct ReplaySnapshotPanel<Content: View>: View {
         }
         .padding(16)
         .background(
-            Color.secondary.opacity(0.045),
+            KabuyomiTheme.inkMuted.opacity(0.045),
             in: RoundedRectangle(cornerRadius: 16, style: .continuous)
         )
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.secondary.opacity(0.1), lineWidth: 0.5)
+                .stroke(KabuyomiTheme.inkMuted.opacity(0.1), lineWidth: 0.5)
         }
         .accessibilityElement(children: .contain)
     }
@@ -756,15 +756,15 @@ private struct ReplayEmptySnapshot: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "clock.badge.questionmark")
                 .font(.title3)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
                 .frame(width: 32, height: 32)
-                .background(Color.secondary.opacity(0.08), in: Circle())
+                .background(KabuyomiTheme.inkMuted.opacity(0.08), in: Circle())
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                 Text(detail)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -792,7 +792,7 @@ private struct ReplayDocumentRow: View {
                         .font(.subheadline.weight(.semibold))
                     Text(PolicyEvidenceDisplay.title(event: event, document: document, showsOriginal: false))
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -817,15 +817,15 @@ private struct ReplayMarketStatus: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: systemImage)
                     .font(.headline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
                     .frame(width: 34, height: 34)
-                    .background(Color.secondary.opacity(0.08), in: Circle())
+                    .background(KabuyomiTheme.inkMuted.opacity(0.08), in: Circle())
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
                         .font(.subheadline.weight(.semibold))
                     Text(detail)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -848,7 +848,7 @@ private struct ReplayDailyMarketSummary: View {
                     Spacer()
                     Label("日足評価", systemImage: "chart.line.uptrend.xyaxis")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
                 MetricRow(label: "対象", value: summary.ticker)
                 MetricRow(label: "掲載日後", value: AppFormatters.percent(summary.securityReturn))
@@ -858,7 +858,7 @@ private struct ReplayDailyMarketSummary: View {
                 )
                 Text("公式掲載後の値動きを記述しています。政策との因果関係は未確定です。")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             }
         } else {
             ReplayMarketStatus(

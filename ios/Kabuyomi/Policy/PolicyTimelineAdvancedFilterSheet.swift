@@ -186,10 +186,10 @@ private struct PolicyInstrumentSelectionView: View {
     private func optionRow(title: String, selected: Bool) -> some View {
         HStack(spacing: 12) {
             Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                .foregroundStyle(selected ? KabuyomiTheme.accent : KabuyomiTheme.inkMuted)
                 .font(.title3)
             Text(title)
-                .foregroundStyle(.primary)
+                .foregroundStyle(KabuyomiTheme.ink)
             Spacer()
         }
         .frame(minHeight: 44)

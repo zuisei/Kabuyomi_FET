@@ -1,13 +1,13 @@
 import SwiftUI
 
 enum AppColors {
-    static let official = Color.blue
+    static let official = KabuyomiTheme.accent
     static let detection = Color.teal
     static let report = Color.purple
     static let revision = Color.orange
-    static let market = Color.red
-    static let selected = Color.primary
-    static let unreached = Color.secondary.opacity(0.25)
+    static let market = KabuyomiTheme.negative
+    static let selected = KabuyomiTheme.ink
+    static let unreached = KabuyomiTheme.inkMuted.opacity(0.25)
     static func color(for kind: TimelineItemKind) -> Color {
         switch kind { case .officialPublication, .officialStatement: official; case .systemDetection: detection; case .mediaReport: report; case .documentRevision: revision; case .marketReaction: market; case .correction: .secondary }
     }
@@ -16,7 +16,7 @@ enum AppColors {
 struct DemoBadge: View {
     var body: some View {
         Label("デモ環境・ローカルデータ", systemImage: "testtube.2")
-            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            .font(.caption.weight(.semibold)).foregroundStyle(KabuyomiTheme.inkMuted)
             .accessibilityLabel("架空のデモ環境、ローカルデータ")
     }
 }
@@ -28,7 +28,7 @@ struct StatusBadge: View {
 struct MetricRow: View {
     let label, value: String
     var body: some View {
-        HStack(alignment: .firstTextBaseline) { Text(label).foregroundStyle(.secondary); Spacer(minLength: 12); Text(value).fontWeight(.medium).multilineTextAlignment(.trailing).monospacedDigit() }
+        HStack(alignment: .firstTextBaseline) { Text(label).foregroundStyle(KabuyomiTheme.inkMuted); Spacer(minLength: 12); Text(value).fontWeight(.medium).multilineTextAlignment(.trailing).monospacedDigit() }
             .font(.subheadline).accessibilityElement(children: .combine)
     }
 }

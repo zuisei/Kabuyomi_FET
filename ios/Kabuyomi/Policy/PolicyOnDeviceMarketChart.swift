@@ -57,7 +57,7 @@ struct OnDeviceMarketChart: View {
                 Spacer()
                 Label("端末から取得", systemImage: "iphone.and.arrow.forward")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             }
 
             if hasProviderKey {
@@ -73,7 +73,7 @@ struct OnDeviceMarketChart: View {
             if let errorMessage {
                 Label(errorMessage, systemImage: "exclamationmark.triangle")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("marketChart.onDevice.error")
             }
@@ -92,7 +92,7 @@ struct OnDeviceMarketChart: View {
                         systemImage: "clock.arrow.2.circlepath"
                     )
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
                 }
 
                 MinuteReactionChart(
@@ -136,7 +136,7 @@ struct OnDeviceMarketChart: View {
                 .font(.subheadline.weight(.semibold))
             Text("自分のTwelve Data APIキーを端末へ保存すると、この本番資料に対象銘柄と比較対象を指定してチャートを読み込めます。")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
             Button("市場データを接続") {
                 showsConnection = true
@@ -152,7 +152,7 @@ struct OnDeviceMarketChart: View {
             if suggestedTickers.isEmpty {
                 Text("この資料には関連銘柄が確定していません。表示したい銘柄を指定してください。")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             } else {
                 Picker("資料内の関連候補", selection: $ticker) {
                     ForEach(suggestedTickers, id: \.self) { value in
@@ -184,7 +184,7 @@ struct OnDeviceMarketChart: View {
                         : "\(selectedRelation.issuerName)は資料から抽出した関連候補・未検証です。"
                 )
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
             }
 
             Button {
@@ -200,7 +200,7 @@ struct OnDeviceMarketChart: View {
 
             Text("APIキーと価格データはMarket Docketのサーバーへ送信しません。データ提供元の表示条件に従い、政策との因果関係は示しません。")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KabuyomiTheme.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

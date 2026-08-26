@@ -117,10 +117,10 @@ struct DataSourceNotice: View {
     var body: some View {
         Label(text, systemImage: systemImage)
             .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(KabuyomiTheme.inkMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
-            .background(Color.secondary.opacity(0.08))
+            .background(KabuyomiTheme.inkMuted.opacity(0.08))
     }
 }

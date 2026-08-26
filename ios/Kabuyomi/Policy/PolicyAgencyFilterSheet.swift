@@ -182,7 +182,7 @@ struct AgencyFilterSheet: View {
         Section("選択済み") {
             if selectedAgencies.isEmpty {
                 Text("選択されていません")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             } else {
                 ForEach(selectedAgencies) { agencyRow($0, context: "selected") }
             }
@@ -193,7 +193,7 @@ struct AgencyFilterSheet: View {
         Section("検索結果") {
             if searchResults.isEmpty {
                 Text("該当する機関はありません")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KabuyomiTheme.inkMuted)
             } else {
                 ForEach(searchResults) { agencyRow($0, context: "search") }
             }
@@ -210,15 +210,15 @@ struct AgencyFilterSheet: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: draftSelection.contains(option.code) ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(draftSelection.contains(option.code) ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(draftSelection.contains(option.code) ? KabuyomiTheme.accent : KabuyomiTheme.inkMuted)
                     .font(.title3)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(option.code)
                         .font(.headline.monospaced())
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(KabuyomiTheme.ink)
                     Text(option.nameJA)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KabuyomiTheme.inkMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
