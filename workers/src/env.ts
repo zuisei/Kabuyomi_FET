@@ -104,6 +104,18 @@ export interface TickerRecord {
 /// (docs/quality/FOREIGN_ISSUER_SUPPORT_2026-08-24.md)。
 export type FilingFormType = "10-K" | "10-Q" | "20-F";
 
+/// 対応している書類の一覧。**判定を各所に直書きしない**ための1か所。
+///
+/// 20-F を足したとき `normalizeForm` は直したのに、保存経路の関所
+/// (`watchlist/usecase.ts`)が `!== "10-K" && !== "10-Q"` のままで、
+/// **検索は「最新 20-F」と出すのに追加すると「対応範囲外」と言う**状態だった
+/// (2026-08-26 実機)。書類を増やすときはここだけを見ればいいようにする。
+export const SUPPORTED_FILING_FORMS: readonly FilingFormType[] = ["10-K", "10-Q", "20-F"];
+
+export function isSupportedFilingForm(value: string | null | undefined): value is FilingFormType {
+  return typeof value === "string" && (SUPPORTED_FILING_FORMS as readonly string[]).includes(value);
+}
+
 /// その提出書類が扱う期間の長さ。20-F と 10-K は年次、10-Q は四半期。
 export type FilingPeriodKind = "annual" | "quarterly";
 
