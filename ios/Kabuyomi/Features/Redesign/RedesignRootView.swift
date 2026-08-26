@@ -2984,25 +2984,8 @@ private func formattedFilingDate(_ raw: String) -> String {
 
 /// 会社の会話画面。メッセージが上に積み、入力欄が下に固定される普通のチャットの形。
 /// 資料パネル(ワークスペース)には埋め込まない — 資料は読む場所、ここは話す場所。
-/// 空の会話画面だけ、内容をスクロール領域の下端へ寄せる。
-/// `containerRelativeFrame` は高さを**固定**するので、内容がビューポートより
-/// 高くなり得る場面(会話が入った後・特大文字)では掛けない。掛けると溢れた分が切れる。
-private struct RedesignEmptyChatAnchor: ViewModifier {
-    let isActive: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if isActive {
-            content.containerRelativeFrame(.vertical, alignment: .bottom)
-        } else {
-            content
-        }
-    }
-}
-
 private struct RedesignChatScreen: View {
     @Environment(AppModel.self) private var appModel
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let ticker: String
     let openCredits: (CreditInitialSheet?) -> Void
     let openSource: (LocalMessageSourceRef) -> Void
@@ -3040,15 +3023,6 @@ private struct RedesignChatScreen: View {
             }
         }
         return result
-    }
-
-    /// 会話がまだ無い状態。ここでだけ提案チップを下端へ寄せる。
-    /// 大きい文字サイズではチップだけで画面が埋まるため寄せない
-    /// (`containerRelativeFrame` は高さを固定するので、寄せると溢れた分が切れる)。
-    private var anchorsEmptyStateToComposer: Bool {
-        messages.isEmpty
-            && pendingChat == nil
-            && !dynamicTypeSize.isAccessibilitySize
     }
 
     private var navigationTitleText: String {
@@ -3095,9 +3069,6 @@ private struct RedesignChatScreen: View {
                         .padding(.horizontal, 18)
                         .frame(maxWidth: 760)
                         .frame(maxWidth: .infinity)
-                        // まだ会話が無いときは、中身を下端 = 入力欄のすぐ上へ寄せる。
-                        // 上に寄せると提案チップと入力欄の間に画面の半分が空く。
-                        .modifier(RedesignEmptyChatAnchor(isActive: anchorsEmptyStateToComposer))
                     }
                     .background(KabuyomiTheme.paper)
                     .scrollDismissesKeyboard(.interactively)
